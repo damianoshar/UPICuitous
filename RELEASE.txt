@@ -1,0 +1,7 @@
+﻿UPICuitous release
+Version: 1.27.0
+Commit: a95708f
+Date: 2026-10-26
+Selftest: 323/323
+Plugin smoke: 15/15
+Pluginval: SUCCESS
