@@ -1,0 +1,56 @@
+build/
+JUCE/
+out/
+*.user
+.vs/
+.idea/
+*.exe
+*.pdb
+python-upic/__pycache__/
+*.pyc
+python-upic/test_upic.wav
+*.upic.json.tmp
+
+# Android / Gradle build outputs (project files themselves ARE committed)
+Builds/Android/.gradle/
+Builds/Android/build/
+Builds/Android/app/build/
+Builds/Android/app/.cxx/
+Builds/Android/local.properties
+Builds/Android/.idea/
+
+# third-party validators (downloaded, not committed - see scripts/build.ps1)
+Tools/pluginval/
+
+# Local release signing (never commit)
+Builds/Android/app/keystore.properties
+Builds/Android/app/app-release.keystore
+Builds/Android/app/*.keystore
+Builds/Android/app/release_/
+Builds/Android/gradle/wrapper/LICENSE-for-gradlewrapper.txt
+
+# Generated exporters and build trees (the .jucer and Builds/Android are the source)
+Builds/App/
+Builds/Plugin/
+Builds/VisualStudio2022/
+Builds/VisualStudio2026/
+Builds/LinuxMakefile/
+Builds/MacOSX/
+"
+
+# Release artifacts (build outputs)
+release-artifacts/
+
+# Generated JUCE library code (recreated by Projucer/CMake)
+JuceLibraryCode/
+
+# Development documentation (kept locally, not part of the release repo)
+BUILDING.md
+FUTURE_IDEAS.md
+PROGRESS.md
+RELEASE.txt
+TOOLKITS.md
+known-issues.yaml
+docs/*.md
+docs/waves/
+.opencode/

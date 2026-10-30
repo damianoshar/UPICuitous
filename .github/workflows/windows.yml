@@ -1,0 +1,61 @@
+name: Windows Build
+
+# Reusable by release.yml. Manual runs only build and upload a workflow
+# artifact; they never create or update a GitHub release.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Fetch JUCE
+        run: python Tools/fetch_juce.py
+
+      - name: Configure app
+        run: cmake -S . -B Builds/App -G "Visual Studio 18 2026" -A x64
+
+      - name: Build app (Release)
+        run: cmake --build Builds/App --config Release --target UPICuitous --parallel
+
+      - name: Self-test
+        run: .\Builds\App\UPICuitous_artefacts\Release\UPICuitous.exe --selftest
+
+      - name: Configure VST3 plugin
+        run: cmake -S Plugin -B Builds/Plugin -G "Visual Studio 18 2026" -A x64
+
+      - name: Build VST3 plugin (Release)
+        run: cmake --build Builds/Plugin --config Release --parallel
+
+      - name: Build plugin smoke test
+        run: cmake --build Builds/Plugin --config Release --target UPICuitousPluginSmokeTest --parallel
+
+      - name: Run plugin smoke test
+        run: .\Builds\Plugin\UPICuitousPluginSmokeTest_artefacts\Release\UPICuitousPluginSmokeTest.exe
+
+      - name: Collect artifacts
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item .\Builds\App\UPICuitous_artefacts\Release\UPICuitous.exe dist\
+          Copy-Item -Recurse .\Builds\Plugin\UPICuitousPlugin_artefacts\Release\VST3\UPICuitous.vst3 dist\
+
+      - name: Package Windows artifacts
+        run: |
+          Compress-Archive -Path .\dist\UPICuitous.exe, .\dist\UPICuitous.vst3 -DestinationPath .\dist\UPICuitous-Windows.zip -Force
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: UPICuitous-Windows
+          path: dist/UPICuitous-Windows.zip
+          if-no-files-found: error
