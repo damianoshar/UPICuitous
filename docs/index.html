@@ -4,41 +4,121 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>UPICuitous</title>
-  <meta http-equiv="refresh" content="0; url=https://github.com/damianoshar/UPICuitous/releases/latest">
-  <link rel="canonical" href="https://github.com/damianoshar/UPICuitous/releases/latest">
   <style>
-    body {
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      margin: 40px auto;
-      max-width: 720px;
-      line-height: 1.5;
-      color: #1f2328;
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fa;
+      --card: #ffffff;
+      --text: #1f2328;
+      --muted: #57606a;
+      --border: #d0d7de;
+      --accent: #1f883d;
+      --link: #0969da;
     }
-    a { color: #0969da; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 48px 24px 64px;
+    }
+    h1 { margin: 0 0 8px; font-size: 2.25rem; }
+    h2 { margin-top: 32px; font-size: 1.25rem; }
+    p { margin: 8px 0; }
+    .muted { color: var(--muted); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 24px;
+    }
+    .downloads {
+      display: grid;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .download {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      text-decoration: none;
+      color: var(--text);
+      background: #ffffff;
+    }
+    .download:hover { border-color: var(--link); }
+    .download strong { display: block; }
+    .download span { color: var(--muted); font-size: 0.9rem; }
     .button {
       display: inline-block;
       margin-top: 16px;
       padding: 10px 16px;
-      background: #1f883d;
+      background: var(--accent);
       color: #ffffff;
       text-decoration: none;
       border-radius: 6px;
+      font-weight: 600;
     }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 0.9rem;
+    }
+    ul { padding-left: 20px; }
   </style>
 </head>
 <body>
-  <h1>UPICuitous</h1>
-  <p>This page redirects to the latest UPICuitous release.</p>
-  <p>
-    <a class="button" href="https://github.com/damianoshar/UPICuitous/releases/latest">
-      Open latest release
-    </a>
-  </p>
-  <p>
-    Direct links:
-    <a href="https://github.com/damianoshar/UPICuitous/releases/latest">Releases</a>
-    |
-    <a href="https://github.com/damianoshar/UPICuitous">Repository</a>
-  </p>
+  <main>
+    <h1>UPICuitous</h1>
+    <p class="muted">Version 0.28.0 release downloads and project links.</p>
+
+    <div class="card">
+      <h2>Downloads</h2>
+      <p>Direct links to the v0.28.0 release assets.</p>
+      <div class="downloads">
+        <a class="download" href="https://github.com/damianoshar/UPICuitous/releases/download/v0.28.0/UPICuitous-v0.28.0.apk">
+          <div>
+            <strong>Android APK</strong>
+            <span>UPICuitous-v0.28.0.apk</span>
+          </div>
+          <span>Download</span>
+        </a>
+        <a class="download" href="https://github.com/damianoshar/UPICuitous/releases/download/v0.28.0/UPICuitous-Windows.zip">
+          <div>
+            <strong>Windows bundle</strong>
+            <span>UPICuitous-Windows.zip (standalone app + VST3)</span>
+          </div>
+          <span>Download</span>
+        </a>
+        <a class="download" href="https://github.com/damianoshar/UPICuitous/archive/refs/tags/v0.28.0.tar.gz">
+          <div>
+            <strong>Source archive</strong>
+            <span>v0.28.0.tar.gz</span>
+          </div>
+          <span>Download</span>
+        </a>
+      </div>
+      <a class="button" href="https://github.com/damianoshar/UPICuitous/releases/latest">Open latest release</a>
+    </div>
+
+    <div class="card">
+      <h2>Project</h2>
+      <ul>
+        <li><a href="https://github.com/damianoshar/UPICuitous">Repository</a></li>
+        <li><a href="https://github.com/damianoshar/UPICuitous/releases">All releases</a></li>
+        <li><a href="https://github.com/damianoshar/UPICuitous/releases/tag/v0.28.0">v0.28.0 release notes</a></li>
+      </ul>
+      <p class="muted">Android install example: <code>adb install -r UPICuitous-v0.28.0.apk</code></p>
+    </div>
+  </main>
 </body>
 </html>
