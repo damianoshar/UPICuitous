@@ -458,6 +458,7 @@ private:
     void bumpPageEpoch();             // message: the audio adopts the page
     void requestEngineReset();        // message: drop voices on the next block
     double displayPlayhead() const;   // the playhead the UI shows
+    double materialPlayheadFraction(double t, bool scrub) const; // sample-view time bar
     void pushVoice();                 // UI -> ScoreEditor current voice
     bool prepareWaveEdit();           // v1.27: fork the wavetable for a selection
     void syncControlsToArc(int arcId); // load an arc into the toolbar

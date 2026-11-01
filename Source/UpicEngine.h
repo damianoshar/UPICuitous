@@ -60,6 +60,18 @@ public:
     {
         return pitchScaledPos(arc, t, ref, matDur);
     }
+
+    // Time scale for a sample voice. Mode 1 (granular stretch) uses the same
+    // arc-length mapping in normal playback and scrub; mode 2 (phase vocoder)
+    // only maps onto the arc in the scrub preview.
+    static double sampleArcTimeScale(int mode, bool scrub, double rate,
+                                     double matDur, double arcDur)
+    {
+        const double arcScale = std::abs(rate) * matDur / juce::jmax(1.0e-6, arcDur);
+        if (mode == 1) return arcScale;
+        if (mode == 2) return scrub ? arcScale : 1.0;
+        return 1.0;
+    }
     void setSampleGrainMs(int ms) { sampleGrainMs.store(juce::jlimit(5, 500, ms), std::memory_order_relaxed); }
     void setScrubGrainMs(int ms) { scrubGrainMs.store(juce::jlimit(5, 500, ms), std::memory_order_relaxed); }
 
@@ -502,9 +514,7 @@ private:
         // both playback and scrub. The vocoder keeps its original slot length
         // during playback and only maps onto the arc in the scrub preview.
         // Direction is handled by the mirrored read.
-        const double arcScale = std::abs(rate) * matDur / arcDur;
-        const double timeScale = (mode == 1) ? arcScale
-                               : (mode == 2 ? (scrubPreview ? arcScale : 1.0) : 1.0);
+        const double timeScale = sampleArcTimeScale(mode, scrubPreview, rate, matDur, arcDur);
         v.grain.setTimeScale(timeScale);
         const int grainMs = freeze ? scrubGrainMs.load(std::memory_order_relaxed)
                                    : sampleGrainMs.load(std::memory_order_relaxed);

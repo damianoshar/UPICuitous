@@ -1163,27 +1163,7 @@ MainComponent::MainComponent(bool pluginMode)
         if (drawMatMode == 1)
         {
             const juce::ScopedLock sl(dataLock);
-            for (auto& a : curPage().arcs)
-            {
-                if (a.mode != 1) continue;
-                if (t < a.startTime() || t > a.endTime()) continue;
-                int si = -1;
-                for (size_t i = 0; i < sampleSlots.size(); ++i)
-                    if (sampleSlots[i].id == a.sampleId && sampleSlots[i].loaded()) { si = (int) i; break; }
-                if (si < 0) break;
-                double sd = sampleSlots[(size_t) si].durationSec();
-                if (sd <= 0.0) break;
-                double ref = juce::jmax(1.0, a.refFreq);
-                const int tabMode = samplePitchBox.getSelectedId() - 1;
-                bool arcMapped = (a.pitchMode >= 0) ? (a.pitchMode == 1 || a.pitchMode == 2)
-                                                    : (tabMode == 1 || tabMode == 2);
-                double arcDur = juce::jmax(1.0e-6, a.endTime() - a.startTime());
-                double progress = juce::jlimit(0.0, 1.0, (t - a.startTime()) / arcDur);
-                double pos = arcMapped ? progress * sd
-                                       : UpicEngine::scrubMaterialPos(a, t, ref, sd);
-                frac = std::fmod(pos, sd) / sd;
-                break;
-            }
+            frac = materialPlayheadFraction(t, true);
         }
         waveEd.setPlayhead(frac);
     };
@@ -1717,6 +1697,45 @@ double MainComponent::displayPlayhead() const
     return isPlaying.load(std::memory_order_relaxed)
                ? playheadPublished.load(std::memory_order_relaxed)
                : playheadSec;
+}
+
+// Position of the sample-view time bar (0..1). The caller holds dataLock.
+// Granular (stretch) maps the slot to the arc in both playback and scrub;
+// the phase vocoder only maps it in the scrub preview.
+double MainComponent::materialPlayheadFraction(double t, bool scrub) const
+{
+    if (drawMatMode != 1) return -1.0;
+    for (const auto& a : curPage().arcs)
+    {
+        if (a.mode != 1) continue;
+        if (t < a.startTime() || t > a.endTime()) continue;
+        int si = -1;
+        for (size_t i = 0; i < sampleSlots.size(); ++i)
+            if (sampleSlots[i].id == a.sampleId && sampleSlots[i].loaded())
+            {
+                si = (int) i;
+                break;
+            }
+        if (si < 0) break;
+        const double sd = sampleSlots[(size_t) si].durationSec();
+        if (sd <= 0.0) break;
+        const double ref = juce::jmax(1.0, a.refFreq);
+        const int tabMode = samplePitchBox.getSelectedId() - 1;
+        const int mode = (a.pitchMode >= 0) ? a.pitchMode : tabMode;
+        const double arcDur = juce::jmax(1.0e-6, a.endTime() - a.startTime());
+        const double progress = juce::jlimit(0.0, 1.0, (t - a.startTime()) / arcDur);
+        double pos = 0.0;
+        if (mode == 1)
+            pos = progress * sd;
+        else if (mode == 2)
+            pos = scrub ? progress * sd : (t - a.startTime());
+        else
+            pos = UpicEngine::scrubMaterialPos(a, t, ref, sd);
+        double frac = std::fmod(pos, sd) / sd;
+        if (frac < 0.0) frac += 1.0;
+        return frac;
+    }
+    return -1.0;
 }
 
 void MainComponent::startPlayback()
@@ -3018,6 +3037,10 @@ void MainComponent::timerCallback()
     // path that could be forgotten.
     if (!(muteWhileDragging && arcEditing.load(std::memory_order_relaxed)))
         publishModelSnapshot();
+    // the sample-view time bar follows normal playback with the same mapping
+    // the scrub preview uses (granular stretch maps the slot to the arc)
+    if (drawMatMode == 1 && isPlaying.load(std::memory_order_relaxed))
+        waveEd.setPlayhead(materialPlayheadFraction(displayPlayhead(), false));
     const double dur = curPage().durationSec;
     const bool revNow = playRate.load(std::memory_order_relaxed) < 0.0;
     timeLab.setText((revNow ? juce::String("REV ") : juce::String()) + juce::String(displayPlayhead(), 1) + " / " + juce::String(dur, 1) + " s",

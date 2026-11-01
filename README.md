@@ -141,7 +141,7 @@ preview; releasing after a drag does not start playback.
 ![Scrub audition](docs/screenshots/upicuitous-scrub-audition.png)
 
 *Focused: scrub audition. The scrub row shapes the preview; the material
-view time bar follows the playhead while dragging.*
+view time bar follows the playhead during playback and while dragging.*
 
 ## VST3 plugin
 

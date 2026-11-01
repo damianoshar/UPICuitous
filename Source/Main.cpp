@@ -156,7 +156,7 @@ public:
 
             double peakMode = 0.0; // tracked by measurePitch for the v1.10 modes
             auto renderArc = [&](double arcFreq, double ref, juce::AudioBuffer<float>& buf,
-                                 int pitchMode = 0, int sampleId = 1) {
+                                 int pitchMode = 0, int sampleId = 1, bool scrub = false) {
                 upic::Page pg; pg.durationSec = 4.0;
                 upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = sampleId; a.refFreq = ref;
                 a.intensity = 1.0f;
@@ -171,6 +171,7 @@ public:
                 UpicEngine eng;
                 eng.prepare(44100.0, 8192);
                 eng.setSamplePitchMode(pitchMode);
+                eng.setScrubPreview(scrub);
                 eng.renderPageOffline(pg, waves, envs, slots, buf, 44100.0, 1.0f);
             };
             auto measurePitch = [&](double arcFreq, double ref, int pitchMode = 0,
@@ -267,6 +268,19 @@ public:
                   "granular stretch maps the slot onto the arc in playback",
                   "granular " + juce::String(granProbe, 3)
                       + " tape " + juce::String(tapeProbe, 3));
+
+            // the same mode-1 mapping must be used by the scrub preview: the
+            // two renders have to be sample-identical at the normal rate.
+            juce::AudioBuffer<float> stepGranPlay, stepGranScrub;
+            renderArc(100.0, 100.0, stepGranPlay, 1, 3, false);
+            renderArc(100.0, 100.0, stepGranScrub, 1, 3, true);
+            double playScrubDiff = 0.0;
+            for (int i = 44100 / 2; i < 44100 * 7 / 2; ++i)
+                playScrubDiff = juce::jmax(playScrubDiff, (double) std::abs(
+                    stepGranPlay.getSample(0, i) - stepGranScrub.getSample(0, i)));
+            check(playScrubDiff < 1e-6,
+                  "granular stretch playback matches scrub",
+                  "max diff " + juce::String(playScrubDiff, 6));
         }
 
         // 6. seamless loop preprocessing (reads may cross the seam)
