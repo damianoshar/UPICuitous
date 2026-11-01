@@ -63,7 +63,8 @@ public:
 
     // Time scale for a sample voice. Mode 1 (granular stretch) uses the same
     // arc-length mapping in normal playback and scrub; mode 2 (phase vocoder)
-    // only maps onto the arc in the scrub preview.
+    // only maps onto the arc in the scrub preview. Mode 3 (granular no
+    // stretch) keeps the slot's own timeline.
     static double sampleArcTimeScale(int mode, bool scrub, double rate,
                                      double matDur, double arcDur)
     {
@@ -109,10 +110,11 @@ public:
 
     // Sample pitch algorithm for mode-1 voices (safe from the message
     // thread): 0 = varispeed (default - the slot plays back faster/slower
-    // with the arc pitch, the original behaviour), 1 = granular (stretch),
-    // 2 = phase vocoder (both keep the slot's playback length intact,
-    // shifting the pitch only), 3 = granular with linked pitch/speed (no
-    // time stretch). A change drops the sample voices so each re-anchors.
+    // with the arc pitch, the original behaviour), 1 = granular (stretch -
+    // maps the slot onto the arc), 2 = phase vocoder (keeps the slot's
+    // playback length and shifts pitch only), 3 = granular (no stretch -
+    // keeps the slot's length and shifts pitch only). A change drops the
+    // sample voices so each re-anchors.
     void setSamplePitchMode(int mode) { samplePitchMode.store(juce::jlimit(0, 3, mode)); }
     int getSamplePitchMode() const { return samplePitchMode.load(std::memory_order_relaxed); }
 
@@ -448,12 +450,13 @@ private:
     }
 
     // Mode-1 voice: pitch follows the arc's frequency curve (ratio = arcFreq
-    // / refFreq). Varispeed (the original behaviour) and granular (no
-    // stretch) advance the material position at the pitch ratio, so the
-    // output pitch is ratio x material pitch EXACTLY for any curve.
-    // Granular (stretch) maps the whole slot onto the arc's x-axis in both
-    // playback and scrub; the phase vocoder keeps its slot length during
-    // playback and maps onto the arc only in the scrub preview.
+    // / refFreq). Varispeed (the original behaviour) advances the material
+    // position at the pitch ratio, so pitch and playback length change
+    // together. Granular (no stretch) keeps the slot's own playback length
+    // and only shifts its pitch; Granular (stretch) maps the whole slot onto
+    // the arc's x-axis in both playback and scrub. The phase vocoder keeps
+    // its slot length during playback and maps onto the arc only in the
+    // scrub preview.
     // Voices anchor on first contact (fresh after seek/reset) and wrap over
     // the slot's seamless loop.
     void renderSampleArc(const upic::Arc& arc, const upic::SampleSlot& smp,
@@ -475,21 +478,24 @@ private:
         if (it == sampleVoices.end())
         {
             // voice created on first contact (fresh after seek/reset): anchor
-            // at the arc's start - varispeed / granular (no stretch) at the
-            // integrated pitch-scaled position, granular (stretch) at the arc
-            // progress; the scrub preview maps the vocoder onto the arc too
+            // at the arc's start - varispeed at the integrated pitch-scaled
+            // position, granular (stretch) at the arc progress, granular
+            // (no stretch) and the vocoder at the slot's own elapsed time;
+            // the scrub preview maps the vocoder onto the arc too
             const double t0 = playhead + (double) i0 * step;
             const double elapsed = juce::jmax(0.0, t0 - arcStart);
             upic::SampleVoice v;
             v.prepare(sampleRate);
             const double progress = juce::jlimit(0.0, 1.0, elapsed / arcDur);
             double anchorPos;
-            if (mode == 0 || mode == 3)
+            if (mode == 0)
                 anchorPos = pitchScaledPos(arc, t0, ref, matDur);
             else if (mode == 1)
                 anchorPos = progress * matDur; // stretch granular maps the slot to the arc
-            else
+            else if (mode == 2)
                 anchorPos = scrubPreview ? progress * matDur : elapsed;
+            else
+                anchorPos = elapsed; // no-stretch granular keeps the slot's own timeline
             const double anchor = mirrored
                 ? std::fmod(matDur - anchorPos, matDur)
                 : std::fmod(anchorPos, matDur);
@@ -511,9 +517,10 @@ private:
         }
         auto& v = it->second;
         // Granular (stretch) maps the whole sample onto the arc's x-axis in
-        // both playback and scrub. The vocoder keeps its original slot length
-        // during playback and only maps onto the arc in the scrub preview.
-        // Direction is handled by the mirrored read.
+        // both playback and scrub. Granular (no stretch) and the vocoder keep
+        // the slot's original length during playback; the vocoder only maps
+        // onto the arc in the scrub preview. Direction is handled by the
+        // mirrored read.
         const double timeScale = sampleArcTimeScale(mode, scrubPreview, rate, matDur, arcDur);
         v.grain.setTimeScale(timeScale);
         const int grainMs = freeze ? scrubGrainMs.load(std::memory_order_relaxed)
@@ -554,14 +561,13 @@ private:
             }
             else if (mode == 3)
             {
-                // granular with linked pitch/speed (no time stretch): the
-                // grain-start timeline advances at the pitch ratio, so the
-                // slot speeds up/down with the arc like tape.
-                const double qScale = ratio * (scrubPreview ? std::abs(rate) : 1.0);
-                v.grain.setTimeScale(qScale);
+                // granular (no stretch): the grain-start timeline advances at
+                // the slot's own speed, while the reads inside the grains run
+                // at the pitch ratio - the slot keeps its length and only the
+                // pitch shifts. It never maps the slot onto the arc.
                 const float wA = v.grain.crossfadeWeight();
                 const double pa = v.grain.tapA(ratio);
-                const double pb = v.grain.tapBForScale(ratio, qScale);
+                const double pb = v.grain.tapBForScale(ratio, timeScale);
                 if (freeze) v.grain.advanceHold(); else v.grain.advance();
                 s = wA * readMaterial(smp, pa, mirrored)
                     + (1.0f - wA) * readMaterial(smp, pb, mirrored);

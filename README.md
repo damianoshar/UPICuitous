@@ -21,9 +21,10 @@ pitch arcs over time; each tab is a separate material on the same page.*
 *Focused: the Sample tab. Load a slot, draw arcs on the ratio grid, and
 choose the pitch mode. Arc x is time; arc y is the playback ratio
 (1x = Ref). Granular (stretch) fits the slot to the arc length;
-Varispeed and Granular (no stretch) change the slot's playback length
-with pitch; Phase vocoder shifts pitch only. The material view shows the
-waveform and a time bar; drag the centre line to scrub.*
+Varispeed changes the slot's playback length with pitch; Granular
+(no stretch) and Phase vocoder keep the slot's length and shift pitch
+only. The material view shows the waveform and a time bar; drag the
+centre line to scrub.*
 
 ## Builds in this repo
 
@@ -90,9 +91,9 @@ In/Mon/Capture, input gain. `Ref` is the material's base pitch; arc pitch
 sets the playback ratio. Pitch modes: **Varispeed** (default),
 **Granular (stretch)**, **Phase vocoder**, **Granular (no stretch)**. At 1x
 (the arc sits on Ref) the pitch is unchanged; draw above or below Ref to
-transpose. Varispeed and Granular (no stretch) change the slot's playback
-length with pitch; Granular (stretch) time-stretches the slot to the arc
-length; Phase vocoder keeps the slot's length and shifts pitch only.
+transpose. Varispeed changes the slot's playback length with pitch;
+Granular (no stretch) and Phase vocoder keep the slot's length and shift
+pitch only; Granular (stretch) time-stretches the slot to the arc length.
 Sample-speed grid labels Ref x 2^k.
 The **Rev** button plays the selected slot backwards - the material is
 mirrored, the pitch stays the same.
@@ -190,7 +191,7 @@ web-upic/            single-file browser sketch
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 323 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 335 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the arc list, the MIDI input, the

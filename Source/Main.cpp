@@ -244,18 +244,37 @@ public:
             check(std::abs(q05 - 110.0) < 8.0, "sample vocoder r=0.5 -> 110 Hz", juce::String(q05, 1) + " Hz");
             check(peakMode > 0.1, "sample pitch modes output signal", juce::String(peakMode, 3));
 
-            // mode 3: granular with linked pitch/speed is a continuous
-            // tape-speed read, so it must match varispeed at a fixed ratio.
-            juce::AudioBuffer<float> tape2, grainNoStretch;
-            renderArc(440.0, 220.0, tape2, 0);
-            renderArc(440.0, 220.0, grainNoStretch, 3);
+            // mode 3: granular with the slot's own timeline keeps the slot
+            // length (unlike tape) while still transposing with the arc.
+            const double n2 = measurePitch(200.0, 100.0, 3, 2);
+            check(close(n2, 200.0),
+                  "sample granular no-stretch r=2 -> 200 Hz",
+                  juce::String(n2, 1) + " Hz");
+
+            // at ratio 1 the grain and tape reads are identical.
+            juce::AudioBuffer<float> tape1, grainNoStretch1;
+            renderArc(220.0, 220.0, tape1, 0);
+            renderArc(220.0, 220.0, grainNoStretch1, 3);
             double noStretchDiff = 0.0;
             for (int i = 44100 / 2; i < 44100 * 7 / 2; ++i)
                 noStretchDiff = juce::jmax(noStretchDiff, (double) std::abs(
-                    tape2.getSample(0, i) - grainNoStretch.getSample(0, i)));
+                    tape1.getSample(0, i) - grainNoStretch1.getSample(0, i)));
             check(noStretchDiff < 1e-3,
-                  "granular no-stretch matches tape at ratio 2",
+                  "granular no-stretch matches tape at ratio 1",
                   "max diff " + juce::String(noStretchDiff, 6));
+
+            // at ratio 2 the no-stretch mode must stay on the slot's own
+            // timeline: at 0.25 s it is still in the first (negative) half,
+            // while tape has already read 0.5 s and crossed the step.
+            juce::AudioBuffer<float> stepNoStretch, stepTape2;
+            renderArc(200.0, 100.0, stepNoStretch, 3, 3);
+            renderArc(200.0, 100.0, stepTape2, 0, 3);
+            const float nsProbe = stepNoStretch.getSample(0, 44100 / 4);
+            const float tapeProbe2 = stepTape2.getSample(0, 44100 / 4);
+            check(nsProbe < -0.2f && tapeProbe2 > 0.2f,
+                  "granular no-stretch keeps the slot length at ratio 2",
+                  "no-stretch " + juce::String(nsProbe, 3)
+                      + " tape " + juce::String(tapeProbe2, 3));
 
             // v1.28: granular (stretch) maps the whole slot onto the arc in
             // normal playback; varispeed keeps the slot's own length.

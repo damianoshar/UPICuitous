@@ -1043,8 +1043,8 @@ MainComponent::MainComponent(bool pluginMode)
 
     // v1.10: the sample pitch mode mirrors the live pitch selector - the
     // original varispeed stays the default; granular (stretch) maps the slot
-    // onto the arc, granular (no stretch) changes the length with pitch, and
-    // the phase vocoder keeps the slot's playback length intact.
+    // onto the arc, granular (no stretch) and the phase vocoder keep the
+    // slot's playback length and shift pitch only.
     // Session-only, like the live pitch mode.
     samplePitchLab.setName("samplePitchLab");
     samplePitchBox.setName("samplePitchBox");
@@ -1057,10 +1057,10 @@ MainComponent::MainComponent(bool pluginMode)
     samplePitchBox.setTooltip("Sample-tab arcs: how the slot is transposed.\n"
                               "At 1x (the arc sits on Ref) the pitch is unchanged; "
                               "draw above/below Ref to transpose.\n"
-                              "Varispeed and Granular (no stretch) change the slot's "
-                              "playback length with pitch; Granular (stretch) fits "
-                              "the slot to the arc length; Phase vocoder keeps the "
-                              "slot's length and shifts pitch only.");
+                              "Varispeed changes the slot's playback length with "
+                              "pitch; Granular (no stretch) and Phase vocoder keep "
+                              "the slot's length and shift pitch only; Granular "
+                              "(stretch) fits the slot to the arc length.");
     samplePitchBox.onChange = [this]{
         const int pm = samplePitchBox.getSelectedId() - 1;
         engine.setSamplePitchMode(pm);
@@ -1701,7 +1701,8 @@ double MainComponent::displayPlayhead() const
 
 // Position of the sample-view time bar (0..1). The caller holds dataLock.
 // Granular (stretch) maps the slot to the arc in both playback and scrub;
-// the phase vocoder only maps it in the scrub preview.
+// the phase vocoder only maps it in the scrub preview; granular (no stretch)
+// keeps the slot's own timeline.
 double MainComponent::materialPlayheadFraction(double t, bool scrub) const
 {
     if (drawMatMode != 1) return -1.0;
@@ -1729,6 +1730,8 @@ double MainComponent::materialPlayheadFraction(double t, bool scrub) const
             pos = progress * sd;
         else if (mode == 2)
             pos = scrub ? progress * sd : (t - a.startTime());
+        else if (mode == 3)
+            pos = t - a.startTime(); // no-stretch granular keeps the slot timeline
         else
             pos = UpicEngine::scrubMaterialPos(a, t, ref, sd);
         double frac = std::fmod(pos, sd) / sd;

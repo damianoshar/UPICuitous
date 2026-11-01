@@ -42,12 +42,14 @@
 //
 // SAMPLE tab (mode-1 arcs, v1.10): SampleVoice holds one voice's material
 // state - the engine reads the slot itself and picks by its sample pitch mode
-// (UpicEngine::setSamplePitchMode): varispeed / granular (no stretch) = the
-// material position advances at the pitch ratio, so pitch and playback length
-// change together; granular (stretch) = the grain-start timeline maps the whole
-// slot onto the arc's x-axis while the grains shift the pitch, so the slot is
-// time-stretched to the arc in playback and scrub; phase vocoder = the slot's
-// playback length stays intact and only the scrub preview maps it onto the arc.
+// (UpicEngine::setSamplePitchMode): varispeed = the material position advances
+// at the pitch ratio, so pitch and playback length change together; granular
+// (no stretch) = the grain-start timeline advances at 1x while the reads run at
+// the pitch ratio, so the slot keeps its length and only the pitch shifts;
+// granular (stretch) = the grain-start timeline maps the whole slot onto the
+// arc's x-axis while the grains shift the pitch, so the slot is time-stretched
+// to the arc in playback and scrub; phase vocoder = the slot's playback length
+// stays intact and only the scrub preview maps it onto the arc.
 //==============================================================================
 namespace upic
 {
