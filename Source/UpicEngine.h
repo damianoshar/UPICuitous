@@ -474,6 +474,12 @@ private:
         if (freeze) mode = 1; // granular grain-hold for a stable freeze
         const bool mirrored = smp.reversed != (rate < 0.0);
         const double step = rate * invSr;
+        // Granular (stretch) maps the whole sample onto the arc's x-axis in
+        // both playback and scrub. Granular (no stretch) and the vocoder keep
+        // the slot's original length during playback; the vocoder only maps
+        // onto the arc in the scrub preview. Direction is handled by the
+        // mirrored read.
+        const double timeScale = sampleArcTimeScale(mode, scrubPreview, rate, matDur, arcDur);
         auto it = sampleVoices.find(arc.id);
         if (it == sampleVoices.end())
         {
@@ -501,6 +507,28 @@ private:
                 : std::fmod(anchorPos, matDur);
             v.reset(anchor);
             v.lastMode = mode;
+            if (scrubPreview && mode == 2)
+            {
+                // A fresh VocoderCore needs two analysis windows before it
+                // emits its first sample. Pre-roll the scrub voice so the
+                // first short preview block is audible instead of silent;
+                // the first read is one kPrime behind the write tail, so the
+                // output still starts close to the dragged anchor.
+                double pp = anchor;
+                const int primeSamples = 2 * upic::VocoderCore::kFftSize;
+                for (int k = 0; k < primeSamples; ++k)
+                {
+                    const double pt = t0 + (double) k * step;
+                    const double freq = juce::jlimit(10.0, 14000.0, arc.freqAt(pt));
+                    const double primeRatio = juce::jlimit(1.0 / 16.0, 16.0,
+                        freq / ref / juce::jmax(1.0e-6, timeScale));
+                    v.voc.next(readMaterial(smp, pp, mirrored), primeRatio);
+                    pp += invSr * timeScale;
+                    pp = std::fmod(pp, matDur);
+                    if (pp < 0.0) pp += matDur;
+                }
+                v.vocInPos = pp;
+            }
             it = sampleVoices.emplace(arc.id, std::move(v)).first;
         }
         else if (it->second.lastMode != mode)
@@ -516,12 +544,6 @@ private:
             it->second.reset(it->second.pos);
         }
         auto& v = it->second;
-        // Granular (stretch) maps the whole sample onto the arc's x-axis in
-        // both playback and scrub. Granular (no stretch) and the vocoder keep
-        // the slot's original length during playback; the vocoder only maps
-        // onto the arc in the scrub preview. Direction is handled by the
-        // mirrored read.
-        const double timeScale = sampleArcTimeScale(mode, scrubPreview, rate, matDur, arcDur);
         v.grain.setTimeScale(timeScale);
         const int grainMs = freeze ? scrubGrainMs.load(std::memory_order_relaxed)
                                    : sampleGrainMs.load(std::memory_order_relaxed);

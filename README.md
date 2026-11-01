@@ -191,13 +191,14 @@ web-upic/            single-file browser sketch
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 335 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 337 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the arc list, the MIDI input, the
 envelope points, the multi-selection / toolbar edits, the
-wavetable fork / Stop rewind / Clear warning checks and the
-granular-vs-varispeed regression) and writes the log to
+wavetable fork / Stop rewind / Clear warning checks, the
+granular-vs-varispeed regression and the phase-vocoder scrub preview)
+and writes the log to
 `%TEMP%\upic_selftest.txt`. The build script also runs the 15-check
 plugin smoke test and pluginval at strictness 5.
 

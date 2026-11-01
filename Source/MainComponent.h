@@ -98,10 +98,11 @@ private:
     std::atomic<bool> muteWhileDragging { true };        // skip model publishes while editing
     std::atomic<int> dragSmoothMs { 20 };              // fade time on release
     std::atomic<bool> scrubPreviewActive { false };
+    std::atomic<bool> scrubPreviewVocoder { false }; // preview arc uses the phase vocoder
     std::atomic<bool> scrubFreezeActive { false };
     std::atomic<double> scrubPreviewPlayhead { 0.0 };
     std::atomic<double> scrubRate { 1.0 }; // signed scrub speed (drag direction)
-    std::atomic<int> scrubPreviewSerial { 0 }; // resets the scrub voice on each drag event
+    std::atomic<int> scrubPreviewSerial { 0 }; // resets the scrub voice when a preview starts
     int seenScrubPreviewSerial = 0;
     std::atomic<double> scrubFreezePlayhead { 0.0 };
     std::atomic<double> scrubFreezeStopAtMs { 0.0 };
@@ -459,6 +460,7 @@ private:
     void requestEngineReset();        // message: drop voices on the next block
     double displayPlayhead() const;   // the playhead the UI shows
     double materialPlayheadFraction(double t, bool scrub) const; // sample-view time bar
+    bool activeSampleArcUsesVocoder(double t) const; // caller holds dataLock
     void pushVoice();                 // UI -> ScoreEditor current voice
     bool prepareWaveEdit();           // v1.27: fork the wavetable for a selection
     void syncControlsToArc(int arcId); // load an arc into the toolbar

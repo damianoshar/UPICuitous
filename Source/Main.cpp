@@ -175,10 +175,10 @@ public:
                 eng.renderPageOffline(pg, waves, envs, slots, buf, 44100.0, 1.0f);
             };
             auto measurePitch = [&](double arcFreq, double ref, int pitchMode = 0,
-                                    int sampleId = 1) -> double
+                                    int sampleId = 1, bool scrub = false) -> double
             {
                 juce::AudioBuffer<float> buf;
-                renderArc(arcFreq, ref, buf, pitchMode, sampleId);
+                renderArc(arcFreq, ref, buf, pitchMode, sampleId, scrub);
 
                 // Schmitt-trigger zero crossings over [1s, 2s] => Hz
                 const int s0 = 44100, s1 = 88200;
@@ -242,7 +242,39 @@ public:
             check(std::abs(q1 - 220.0) < 10.0, "sample vocoder r=1 -> 220 Hz", juce::String(q1, 1) + " Hz");
             check(std::abs(q2 - 440.0) < 20.0, "sample vocoder r=2 -> 440 Hz", juce::String(q2, 1) + " Hz");
             check(std::abs(q05 - 110.0) < 8.0, "sample vocoder r=0.5 -> 110 Hz", juce::String(q05, 1) + " Hz");
+            const double qs = measurePitch(220.0, 220.0, 2, 1, true);
+            check(std::abs(qs - 220.0) < 15.0, "sample vocoder scrub r=1 -> 220 Hz",
+                  juce::String(qs, 1) + " Hz");
             check(peakMode > 0.1, "sample pitch modes output signal", juce::String(peakMode, 3));
+
+            // A short scrub block must be audible immediately. A fresh
+            // phase-vocoder voice needs two analysis windows before its first
+            // output, longer than a scrub preview block; the engine pre-rolls
+            // scrub voices so dragging is not silent.
+            auto scrubBlockPeak = [&](double t) {
+                upic::Page pg; pg.durationSec = 4.0;
+                upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = 1; a.refFreq = 220.0;
+                a.intensity = 1.0f;
+                a.points = { { 0.0, 220.0 }, { 4.0, 220.0 } };
+                pg.arcs.push_back(a);
+                upic::Envelope flat; flat.presetFlat();
+                std::vector<upic::Envelope> envs { flat };
+                auto waves = upic::defaultWaveforms();
+                UpicEngine eng; eng.prepare(44100.0, 8192);
+                eng.setSamplePitchMode(2);
+                eng.setScrubPreview(true);
+                const int block = 512;
+                juce::AudioBuffer<float> b(2, block); b.clear();
+                eng.render(pg, t, waves, envs, slots, b.getWritePointer(0), b.getWritePointer(1),
+                           block, 1.0f, 1.0);
+                float pk = 0.0f;
+                for (int i = 0; i < block; ++i)
+                    pk = juce::jmax(pk, std::abs(b.getSample(0, i)));
+                return pk;
+            };
+            const float scrubPk = scrubBlockPeak(0.5);
+            check(scrubPk > 0.02f, "phase vocoder scrub block outputs signal",
+                  juce::String(scrubPk, 4));
 
             // mode 3: granular with the slot's own timeline keeps the slot
             // length (unlike tape) while still transposing with the arc.
@@ -2401,6 +2433,91 @@ public:
                 check(hz > 600.0 && hz < 1200.0,
                       "page switch: the new page is what is sounding",
                       juce::String(hz, 0) + " Hz (want ~880)");
+            }
+        }
+
+        // 20a. v1.28: the phase-vocoder scrub preview. A drag must be
+        //      audible on its first block and must stay continuous between
+        //      mouse moves; the engine pre-rolls the vocoder and MainComponent
+        //      keeps its stream alive while the drag continues.
+        {
+            MainComponent mc(true);
+            mc.setSize(1280, 800);
+            mc.prepareToPlay(512, 44100.0);
+
+            upic::SampleSlot slot;
+            slot.id = 1; slot.name = "scrub sine"; slot.sampleRate = 44100.0;
+            juce::AudioBuffer<float> sb(1, 44100);
+            for (int i = 0; i < sb.getNumSamples(); ++i)
+                sb.setSample(0, i, 0.8f * (float) std::sin(
+                    2.0 * juce::MathConstants<double>::pi * 220.0 * i / 44100.0));
+            slot.data = std::make_shared<const juce::AudioBuffer<float>>(std::move(sb));
+
+            auto* root = new juce::DynamicObject();
+            juce::Array<juce::var> samples;
+            samples.add(slot.toVar());
+            root->setProperty("samples", samples);
+
+            upic::Page pg; pg.durationSec = 4.0;
+            upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = 1; a.refFreq = 220.0;
+            a.intensity = 1.0f;
+            a.points = { { 0.0, 220.0 }, { 4.0, 220.0 } };
+            pg.arcs.push_back(a);
+            juce::Array<juce::var> pages;
+            pages.add(pg.toVar());
+            root->setProperty("pages", pages);
+            mc.loadFromVar(juce::var(root));
+
+            std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+                [&findByName](juce::Component& c, const juce::String& n) -> juce::Component* {
+                    if (c.getName() == n) return &c;
+                    for (int i = 0; i < c.getNumChildComponents(); ++i)
+                        if (auto* r = findByName(*c.getChildComponent(i), n)) return r;
+                    return nullptr;
+                };
+            auto* sp = dynamic_cast<juce::ComboBox*>(findByName(mc, "samplePitchBox"));
+            check(sp != nullptr, "scrub preview: sample pitch selector present");
+            if (sp != nullptr)
+                sp->setSelectedId(3, juce::sendNotification); // phase vocoder
+
+            std::function<ScoreEditor*(juce::Component&)> findScore =
+                [&findScore](juce::Component& c) -> ScoreEditor* {
+                    if (auto* s = dynamic_cast<ScoreEditor*>(&c)) return s;
+                    for (int i = 0; i < c.getNumChildComponents(); ++i)
+                        if (auto* r = findScore(*c.getChildComponent(i))) return r;
+                    return nullptr;
+                };
+            ScoreEditor* sc = findScore(mc);
+            check(sc != nullptr, "scrub preview: score editor present");
+            if (sc != nullptr)
+            {
+                juce::AudioBuffer<float> out(2, 512);
+                juce::AudioSourceChannelInfo info(&out, 0, out.getNumSamples());
+                auto blockPeak = [&]() {
+                    out.clear();
+                    mc.getNextAudioBlock(info);
+                    float p = 0.0f;
+                    for (int c = 0; c < out.getNumChannels(); ++c)
+                        for (int i = 0; i < out.getNumSamples(); ++i)
+                            p = juce::jmax(p, std::abs(out.getSample(c, i)));
+                    return p;
+                };
+
+                sc->scrubTo(sc->timeToX(0.5));
+                const float first = blockPeak();
+                check(first > 0.01f,
+                      "scrub preview: phase vocoder is audible on the first block",
+                      juce::String(first, 4));
+
+                float minDrag = 1.0f;
+                for (int step = 1; step <= 8; ++step)
+                {
+                    sc->scrubTo(sc->timeToX(0.5 + 0.04 * step));
+                    minDrag = juce::jmin(minDrag, blockPeak());
+                }
+                check(minDrag > 0.005f,
+                      "scrub preview: continuous vocoder drag stays audible",
+                      juce::String(minDrag, 4));
             }
         }
 

@@ -1151,20 +1151,30 @@ MainComponent::MainComponent(bool pluginMode)
         scrubRate.store(rate, std::memory_order_relaxed);
         lastScrubT = t;
         lastScrubMs = nowMs;
+        bool vocoderScrub = false;
+        double frac = -1.0;
+        {
+            const juce::ScopedLock sl(dataLock);
+            vocoderScrub = activeSampleArcUsesVocoder(t);
+            if (drawMatMode == 1)
+                frac = materialPlayheadFraction(t, true);
+        }
+        scrubPreviewVocoder.store(vocoderScrub, std::memory_order_relaxed);
         if (!isPlaying.load(std::memory_order_relaxed) && scrubAudition)
         {
+            const bool wasActive = scrubPreviewActive.load(std::memory_order_relaxed);
             scrubPreviewPlayhead.store(t, std::memory_order_relaxed);
             scrubPreviewRemaining.store(scrubPreviewLen, std::memory_order_relaxed);
             scrubPreviewActive.store(true, std::memory_order_relaxed);
-            scrubPreviewSerial.fetch_add(1, std::memory_order_relaxed);
+            // The vocoder cannot re-anchor on every mouse move: each reset
+            // restarts its priming window, which never completes during a
+            // normal drag (silence or a chopped preview). Keep that stream
+            // alive while the drag continues; the other modes still
+            // re-anchor for an immediate audition at the new playhead.
+            if (!vocoderScrub || !wasActive)
+                scrubPreviewSerial.fetch_add(1, std::memory_order_relaxed);
         }
         // reflect scrub position in the material view
-        double frac = -1.0;
-        if (drawMatMode == 1)
-        {
-            const juce::ScopedLock sl(dataLock);
-            frac = materialPlayheadFraction(t, true);
-        }
         waveEd.setPlayhead(frac);
     };
     score.onScrubFreezeStart = [this](double t){
@@ -1699,6 +1709,23 @@ double MainComponent::displayPlayhead() const
                : playheadSec;
 }
 
+// True when the sample arc under the scrub playhead uses the phase vocoder.
+// The scrub preview keeps that voice streaming between drag events: the
+// vocoder needs a long analysis window, so resetting it on every mouse move
+// would keep it permanently in its priming phase (silence or chopped sound).
+bool MainComponent::activeSampleArcUsesVocoder(double t) const
+{
+    const int tabMode = samplePitchBox.getSelectedId() - 1;
+    for (const auto& a : curPage().arcs)
+    {
+        if (a.mode != 1) continue;
+        if (t < a.startTime() || t > a.endTime()) continue;
+        const int mode = (a.pitchMode >= 0) ? a.pitchMode : tabMode;
+        if (mode == 2) return true;
+    }
+    return false;
+}
+
 // Position of the sample-view time bar (0..1). The caller holds dataLock.
 // Granular (stretch) maps the slot to the arc in both playback and scrub;
 // the phase vocoder only maps it in the scrub preview; granular (no stretch)
@@ -1973,21 +2000,30 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
                     double ph = scrubPreviewPlayhead.load(std::memory_order_relaxed);
                     const double rate = scrubRate.load(std::memory_order_relaxed);
                     const int sps = scrubPreviewSerial.load(std::memory_order_relaxed);
-                    if (sps != seenScrubPreviewSerial)
+                    const bool firstChunk = (sps != seenScrubPreviewSerial);
+                    if (firstChunk)
                     {
                         seenScrubPreviewSerial = sps;
                         scrubEngine.reset(); // re-anchor to the dragged playhead
                     }
+                    const bool vocoderScrub = scrubPreviewVocoder.load(std::memory_order_relaxed);
                     scrubEngine.render(pg, ph, snap->waveforms, snap->envelopes, snap->slots,
                                       SL, (SR != nullptr ? SR : SL), chunk, 1.0f, rate);
+                    const int left = remaining - chunk;
                     const int fade = juce::jmin(chunk / 4, (int) (audioSampleRate * 0.005));
+                    // A vocoder preview streams continuously between drag
+                    // events, so it must only fade at its first and last
+                    // chunks. The other modes re-anchor per event and keep the
+                    // per-block fade that prevents restart clicks.
+                    const bool fadeFirst = ! vocoderScrub || firstChunk;
+                    const bool fadeLast  = ! vocoderScrub || left <= 0;
                     for (int i = 0; i < chunk; ++i)
                     {
                         float g = 1.0f;
                         if (fade > 0)
                         {
-                            if (i < fade) g = (float) i / (float) fade;
-                            else if (i >= chunk - fade) g = (float) (chunk - 1 - i) / (float) fade;
+                            if (fadeFirst && i < fade) g = (float) i / (float) fade;
+                            else if (fadeLast && i >= chunk - fade) g = (float) (chunk - 1 - i) / (float) fade;
                         }
                         SL[i] *= g;
                         if (SR != nullptr) SR[i] *= g;
@@ -1999,7 +2035,6 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
                         if (R != nullptr) R[i] += (SR != nullptr ? SR[i] : SL[i]) * mg;
                     }
                     scrubPreviewPlayhead.store(ph + (double) chunk * rate / audioSampleRate, std::memory_order_relaxed);
-                    const int left = remaining - chunk;
                     scrubPreviewRemaining.store(left, std::memory_order_relaxed);
                     if (left <= 0) scrubPreviewActive.store(false, std::memory_order_relaxed);
                 }
