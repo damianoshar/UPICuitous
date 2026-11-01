@@ -54,3 +54,5 @@ known-issues.yaml
 docs/*.md
 docs/waves/
 .opencode/
+python-upic/
+web-upic/
