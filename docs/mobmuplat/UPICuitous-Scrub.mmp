@@ -1,0 +1,59 @@
+{
+  "pdFile": "UPICuitous-Scrub.pd",
+  "port": 54321,
+  "isOrientationLandscape": false,
+  "startPageIndex": 0,
+  "pageCount": 1,
+  "canvasType": "iPhone3p5Inch",
+  "isPageScrollShortEnd": false,
+  "version": 1.55,
+  "gui": [
+    {
+      "address": "/title",
+      "highlightColor": [1, 0, 0, 1],
+      "color": [0.92, 1, 0.95, 1],
+      "frame": [10, 10, 300, 40],
+      "textFontFamily": "Default",
+      "textFont": "",
+      "textSize": 22,
+      "text": "UPICuitous scrub",
+      "class": "MMPLabel",
+      "androidFont": "Roboto-Regular"
+    },
+    {
+      "address": "/help",
+      "highlightColor": [1, 0, 0, 1],
+      "color": [0.80, 0.86, 0.92, 1],
+      "frame": [10, 52, 300, 70],
+      "textFontFamily": "Default",
+      "textFont": "",
+      "textSize": 14,
+      "text": "Drag the slider to move the UPICuitous playhead. Set Network output to the computer IP, port 9000.",
+      "class": "MMPLabel",
+      "androidFont": "Roboto-Regular"
+    },
+    {
+      "address": "/upic/scrub",
+      "highlightColor": [0.43, 0.92, 1, 1],
+      "isHorizontal": true,
+      "frame": [15, 150, 290, 60],
+      "color": [0.92, 1, 0.95, 1],
+      "range": 2,
+      "class": "MMPSlider"
+    },
+    {
+      "address": "/footer",
+      "highlightColor": [1, 0, 0, 1],
+      "color": [0.70, 0.74, 0.80, 1],
+      "frame": [10, 240, 300, 90],
+      "textFontFamily": "Default",
+      "textFont": "",
+      "textSize": 13,
+      "text": "0 = page start, 1 = page end. The scrub preview ends 200 ms after the last value; releasing never starts playback.",
+      "class": "MMPLabel",
+      "androidFont": "Roboto-Regular"
+    }
+  ],
+  "wearGui": [],
+  "backgroundColor": [0.14, 0.12, 0.12, 1]
+}

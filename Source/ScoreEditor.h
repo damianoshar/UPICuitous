@@ -326,16 +326,51 @@ public:
     }
 
     // Time-strip scrub: set the playhead from a canvas x position.
-    void scrubTo(float x)
+    void scrubTo(float x) { scrubToTime(xToTime(x)); }
+
+    // v1.29: scrub to an absolute time. The external controller (phone/OSC)
+    // uses this too, so it goes through exactly the same seek + preview path.
+    void scrubToTime(double t)
     {
         if (!page || !playheadSec) return;
-        double t = juce::jlimit(0.0, page->durationSec, xToTime(x));
+        t = juce::jlimit(0.0, page->durationSec, t);
         {
             const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
             *playheadSec = t;
         }
         if (onSeek != nullptr) onSeek(t); // v1.18: the audio thread must move too
         if (onScrubPreview != nullptr) onScrubPreview(t);
+        repaint();
+    }
+
+    // v1.29: an external controller behaves like a scrub drag. Positions keep
+    // arriving while the phone slider moves; MainComponent ends the gesture
+    // after a short timeout, so releasing never starts playback.
+    void externalScrubStart(double t)
+    {
+        if (!page || !playheadSec) return;
+        scrubbing = true;
+        scrubDragged = true;
+        freezeAfterDrag = true;
+        lastDragMs = juce::Time::getMillisecondCounterHiRes();
+        startTimer(40);
+        scrubToTime(t);
+    }
+
+    void externalScrubTo(double t)
+    {
+        if (!scrubbing) { externalScrubStart(t); return; }
+        scrubToTime(t);
+    }
+
+    void externalScrubEnd()
+    {
+        if (!scrubbing) return;
+        stopTimer();
+        scrubbing = false;
+        scrubDragged = false;
+        freezeAfterDrag = false;
+        if (onScrubFreezeStop != nullptr) onScrubFreezeStop();
         repaint();
     }
 

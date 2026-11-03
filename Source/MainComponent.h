@@ -15,7 +15,8 @@
 // X=time, Y=pitch(log). Each arc = wavetable osc * envelope * intensity.
 //==============================================================================
 class MainComponent : public juce::AudioAppComponent,
-                      public juce::Timer
+                      public juce::Timer,
+                      private juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>
 {
 public:
     // pluginMode (v1.11): VST3 wrapper - the host drives prepareToPlay /
@@ -58,6 +59,15 @@ public:
 
     // v1.23 (wave 20): the MIDI foundation, for the selftest.
     MidiHub& midiHub() { return midi; }
+
+    // v1.29: the OSC scrub receiver (phone/MobMuPlat).
+    bool oscIsListening() const { return oscListening || multicastListening; }
+    double pageDurationForTest() const { return curPage().durationSec; }
+    double playheadForTest() const { return playheadSec; }
+    bool externalScrubActiveForTest() const { return externalScrubActive; }
+    bool isPlayingForTest() const { return isPlaying.load (std::memory_order_relaxed); }
+    void injectOscMessageForTest (const juce::OSCMessage& m) { handleOscMessage (m); }
+    void updateExternalScrubForTest (double nowMs) { updateExternalScrub (nowMs); }
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -428,6 +438,24 @@ private:
     juce::Label midiBindGainLab{ {}, "-" }, midiBindIntLab{ {}, "-" }, midiBindScrubLab{ {}, "-" }, midiBindTransportLab{ {}, "-" };
     juce::Label midiGainLab{ {}, "Master gain" }, midiIntLab{ {}, "Intensity" }, midiScrubLab{ {}, "Scrub" }, midiTransportLab{ {}, "Transport" };
 
+    // v1.29: the OSC scrub receiver. MobMuPlat (or any OSC sender) moves the
+    // playhead with /upic/scrub <0..1> on UDP 9000.
+    juce::OSCReceiver oscReceiver;
+    bool oscListening = false;
+    // v1.29: MobMuPlat's default output is multicast 224.0.0.1:54321, so this
+    // works even when the phone's network settings cannot be changed.
+    juce::DatagramSocket multicastSocket;
+    juce::OSCReceiver multicastReceiver;
+    bool multicastListening = false;
+    bool externalScrubActive = false;
+    bool externalScrubFrozen = false;
+    double externalScrubLastT = 0.0;
+    double lastExternalScrubMs = 0.0;
+    bool oscAnnounced = false;
+    static constexpr int kOscPort = 9000;
+    static constexpr int kMulticastPort = 54321;
+    static constexpr auto kMulticastGroup = "224.0.0.1";
+
     // --- UI: sieve quantizer (same row as material) ---
     juce::ToggleButton sieveBtn{ "Sieve" };
     juce::TextEditor sieveMEdit, sieveREdit;
@@ -466,6 +494,13 @@ private:
     void updateRevBuffers();      // v1.20: (re)allocate the live reverse buffers
     void rebuildArcList();        // v1.21: rebuild the panel's rows from the model
     void handleMidi();            // v1.23: the MIDI messages (message thread)
+
+    // v1.29: the phone/MobMuPlat OSC scrub (message-loop callbacks)
+    void oscMessageReceived (const juce::OSCMessage&) override;
+    void oscBundleReceived (const juce::OSCBundle&) override;
+    void handleOscMessage (const juce::OSCMessage&);
+    void handleOscScrub (double normalised);
+    void updateExternalScrub (double nowMs);
 
     void updateMidiLabels();      // v1.23: the learn buttons and the bindings
     void refreshMidiDevices();    // v1.23: rebuild the device list

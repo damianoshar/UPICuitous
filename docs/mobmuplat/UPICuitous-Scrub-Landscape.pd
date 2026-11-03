@@ -1,0 +1,13 @@
+#N canvas 0 0 450 300 10;
+#X obj 30 30 receive fromGUI;
+#X obj 30 60 list trim;
+#X obj 30 90 route /upic/scrub;
+#X msg 30 125 list /upic/scrub \$1;
+#X obj 30 160 send toNetwork;
+#X text 115 30 MobMuPlat scrub for UPICuitous (landscape);
+#X text 115 50 Set Network output to the computer LAN IP \, port 9000.;
+#X text 30 180 The slider sends 0..1 \; UPICuitous maps it to page time.;
+#X connect 0 0 1 0;
+#X connect 1 0 2 0;
+#X connect 2 0 3 0;
+#X connect 3 0 4 0;

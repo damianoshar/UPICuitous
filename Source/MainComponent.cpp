@@ -1309,6 +1309,27 @@ MainComponent::MainComponent(bool pluginMode)
     voiceLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     voiceLab.setColour(juce::Label::textColourId, juce::Colour(0xffc9c9d4));
 
+    // v1.29: listen for the phone/MobMuPlat scrub. Message-loop callbacks
+    // mean the playhead moves on the message thread exactly like a drag.
+    oscReceiver.addListener(this);
+    oscListening = oscReceiver.connect(kOscPort);
+    statusLab.setTooltip(oscListening || multicastListening
+        ? "OSC scrub: send /upic/scrub <0..1> to UDP port " + juce::String(kOscPort)
+          + " (or MobMuPlat default multicast " + juce::String(kMulticastGroup) + ":" + juce::String(kMulticastPort) + ")"
+        : "OSC scrub unavailable (UDP port " + juce::String(kOscPort) + " busy)");
+
+    // v1.29: MobMuPlat's default output is multicast 224.0.0.1:54321, so this
+    // works even when the phone's network settings cannot be changed.
+    multicastSocket.setEnablePortReuse(true);
+    if (multicastSocket.bindToPort(kMulticastPort))
+    {
+        if (multicastSocket.joinMulticast(kMulticastGroup))
+        {
+            multicastReceiver.addListener(this);
+            multicastListening = multicastReceiver.connectToSocket(multicastSocket);
+        }
+    }
+
     refreshBoxes();
     refreshScoreBinding();
     updateStatus();
@@ -1317,6 +1338,11 @@ MainComponent::MainComponent(bool pluginMode)
 
 MainComponent::~MainComponent()
 {
+    multicastReceiver.removeListener(this);
+    multicastReceiver.disconnect();
+    multicastSocket.leaveMulticast(kMulticastGroup);
+    oscReceiver.removeListener(this);
+    oscReceiver.disconnect();
     // v1.18: stop the audio thread first (no callback can be in flight), then
     // hand back the snapshots it owned so the handover can free them here.
     shutdownAudio();
@@ -2555,6 +2581,99 @@ void MainComponent::handleMidi()
     }
 }
 
+//==============================================================================
+// v1.29: OSC scrub. A phone running MobMuPlat sends /upic/scrub with a float
+// 0..1; the receiver calls back on the message thread, so the playhead moves
+// through the same seek + preview path as a canvas drag. When the messages
+// stop, timerCallback() ends the gesture (and never starts playback).
+void MainComponent::oscMessageReceived (const juce::OSCMessage& message)
+{
+    handleOscMessage (message);
+}
+
+void MainComponent::oscBundleReceived (const juce::OSCBundle& bundle)
+{
+    for (int i = 0; i < bundle.size(); ++i)
+    {
+        const auto& element = bundle[i];
+        if (element.isMessage())
+            handleOscMessage (element.getMessage());
+        else if (element.isBundle())
+            oscBundleReceived (element.getBundle());
+    }
+}
+
+void MainComponent::handleOscMessage (const juce::OSCMessage& message)
+{
+    const auto address = message.getAddressPattern().toString();
+    if (address != "/upic/scrub" && address != "/upic/scrub/pos")
+        return;
+    if (message.size() < 1)
+        return;
+
+    float value = 0.0f;
+    if (message[0].isFloat32())      value = message[0].getFloat32();
+    else if (message[0].isInt32())
+    {
+        // 0/1 for a binary position, otherwise a 7-bit fader
+        const int v = message[0].getInt32();
+        value = v <= 1 ? (float) v : (float) v / 127.0f;
+    }
+    else return;
+
+    handleOscScrub (juce::jlimit (0.0, 1.0, (double) value));
+}
+
+void MainComponent::handleOscScrub (double normalised)
+{
+    const double dur = juce::jmax (1.0e-6, curPage().durationSec);
+    const double t = juce::jlimit (0.0, dur, normalised * dur);
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+
+    if (! externalScrubActive)
+    {
+        externalScrubActive = true;
+        externalScrubFrozen = false;
+        score.externalScrubStart (t);
+        if (! oscAnnounced)
+        {
+            oscAnnounced = true;
+            flash ("OSC scrub on UDP " + juce::String (kOscPort));
+        }
+    }
+    else
+    {
+        if (externalScrubFrozen)
+        {
+            externalScrubFrozen = false;
+            if (score.onScrubFreezeCancel != nullptr)
+                score.onScrubFreezeCancel();
+        }
+        score.externalScrubTo (t);
+    }
+
+    externalScrubLastT = t;
+    lastExternalScrubMs = nowMs;
+}
+
+void MainComponent::updateExternalScrub (double nowMs)
+{
+    if (! externalScrubActive) return;
+    const double dt = nowMs - lastExternalScrubMs;
+    if (! externalScrubFrozen && dt > 100.0)
+    {
+        externalScrubFrozen = true;
+        if (score.onScrubFreezeStart != nullptr)
+            score.onScrubFreezeStart (externalScrubLastT);
+    }
+    if (dt > 2000.0)
+    {
+        externalScrubFrozen = false;
+        externalScrubActive = false;
+        score.externalScrubEnd();
+    }
+}
+
 void MainComponent::injectMidiMessage (const juce::MidiMessage& m)
 {
     int type = MidiHub::kTypeOther, number = 0, value = 0;
@@ -2982,6 +3101,8 @@ void MainComponent::timerCallback()
     }
     // v1.23: the MIDI input - the message thread picks up what arrived
     handleMidi();
+    // v1.29: the phone stopped sending scrub positions - end the gesture
+    updateExternalScrub (juce::Time::getMillisecondCounterHiRes());
     // v1.25 (wave 22): scrub smoothing. The jog target decays; the smoothed
     // velocity drives the playhead. Hysteresis keeps a resting jog at zero.
     {
@@ -3047,6 +3168,8 @@ void MainComponent::timerCallback()
         if (latSamples > 0)
             s += " | LAT " + juce::String((int) std::round(latSamples / audioSampleRate * 1000.0)) + "ms";
         if (monitoring.load()) s += " | MON";
+        if (oscListening) s += " | OSC " + juce::String (kOscPort);
+        if (multicastListening) s += " | MCAST";
         if (capturing.load())
             s += " | CAP " + juce::String((double) capPos.load() / juce::jmax(1.0, capRate), 1) + "s";
         if (sieveOn)

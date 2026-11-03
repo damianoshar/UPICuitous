@@ -3078,6 +3078,48 @@ public:
             }
         }
 
+        // 22b. v1.29: OSC scrub - a phone/MobMuPlat float moves the playhead
+        //      through the same path as a canvas drag, and ending the stream
+        //      never starts playback.
+        {
+            // heap: MainComponent is large, the selftest's stack is not
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize(1280, 800);
+
+            check(mc.oscIsListening(), "the OSC scrub receiver listens on UDP 9000");
+
+            const double dur = mc.pageDurationForTest();
+            mc.injectOscMessageForTest(juce::OSCMessage("/upic/scrub", 0.5f));
+            check(std::abs(mc.playheadForTest() - dur * 0.5) < 0.05,
+                  "an OSC float moves the playhead to the matching time",
+                  juce::String(mc.playheadForTest(), 2));
+
+            mc.injectOscMessageForTest(juce::OSCMessage("/upic/scrub/pos", 1.0f));
+            check(std::abs(mc.playheadForTest() - dur) < 0.05,
+                  "the /upic/scrub/pos alias moves the playhead again",
+                  juce::String(mc.playheadForTest(), 2));
+
+            mc.injectOscMessageForTest(juce::OSCMessage("/upic/scrub", (juce::int32) 64));
+            check(std::abs(mc.playheadForTest() - dur * 64.0 / 127.0) < 0.05,
+                  "a 7-bit OSC int maps to the matching time",
+                  juce::String(mc.playheadForTest(), 2));
+
+            const double beforeUnknown = mc.playheadForTest();
+            mc.injectOscMessageForTest(juce::OSCMessage("/upic/other", 0.25f));
+            check(std::abs(mc.playheadForTest() - beforeUnknown) < 1.0e-9,
+                  "an unknown OSC address is ignored");
+
+            check(mc.externalScrubActiveForTest(),
+                  "OSC scrub is active while values arrive");
+            check(!mc.isPlayingForTest(), "OSC scrub does not start playback");
+            mc.updateExternalScrubForTest(1.0e12);
+            check(!mc.externalScrubActiveForTest(),
+                  "the OSC scrub ends after the timeout");
+            check(!mc.isPlayingForTest(),
+                  "releasing the OSC scrub does not start playback");
+        }
+
         // 23. v1.24 (wave 21): the envelope points - + adds, - removes, the
         //     ends are free and the extra points survive the piece format
         {

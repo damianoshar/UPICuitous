@@ -144,6 +144,20 @@ preview; releasing after a drag does not start playback.
 *Focused: scrub audition. The scrub row shapes the preview; the material
 view time bar follows the playhead while dragging.*
 
+**Phone / MobMuPlat scrub (OSC)** - UPICuitous listens on UDP port 9000 and
+also joins MobMuPlat's default multicast output `224.0.0.1:54321`, so the
+controller works even when the phone cannot save a custom output IP.
+Send a float `/upic/scrub <0..1>` (alias `/upic/scrub/pos`) to move the
+playhead: 0 is the page start and 1 is the page end. The value feeds the
+same seek and scrub-preview path as a canvas drag. Values keep the
+preview alive; 2000 ms after the last message the gesture ends (holding
+freezes the preview), and releasing never starts playback. The status line shows `OSC 9000` (plus
+`MCAST` when the multicast listener is active). A ready-made MobMuPlat
+patch lives in `docs/mobmuplat/`: load `UPICuitous-Scrub.mmp`, then set
+MobMuPlat's Network output address to the computer's LAN IP and the output
+port to 9000 (or leave the defaults). The slider sends values while it is
+dragged.
+
 ## VST3 plugin
 
 `Plugin/` builds the same `MainComponent` as a VST3: host audio in/out,
