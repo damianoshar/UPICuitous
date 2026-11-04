@@ -34,6 +34,8 @@ MainComponent::MainComponent(bool pluginMode)
     addAndMakeVisible(saveBtn); addAndMakeVisible(loadBtn); addAndMakeVisible(exportBtn);
     addAndMakeVisible(stemsBtn);
     addAndMakeVisible(audioBtn); addAndMakeVisible(clearBtn);
+    addAndMakeVisible(settingsBtn);
+    settingsBtn.setName("settingsBtn");
     if (pluginMode_) audioBtn.setVisible(false);
     saveBtn.setVisible (false); loadBtn.setVisible (false); exportBtn.setVisible (false); stemsBtn.setVisible (false); audioBtn.setVisible (false);
     loopBtn.setToggleState(true, juce::dontSendNotification);
@@ -198,6 +200,81 @@ MainComponent::MainComponent(bool pluginMode)
     audioOkBtn.onClick = [this]{ closeAudioSettings(); };
     audioOverlay.addAndMakeVisible(audioOkBtn);
 
+    // v1.30 (UPIC-54/56): MIDI and OSC get their own settings overlay; the
+    // audio overlay is only the device selector now. Like the audio overlay,
+    // this is in-app because Android has no closable dialog windows.
+    settingsOverlay.title = "MIDI + OSC Settings";
+    settingsOverlay.setName("settingsOverlay");
+    settingsOverlay.setVisible(false);
+    settingsOverlay.onDismiss = [this]{ closeSettings(); };
+    addChildComponent(settingsOverlay);
+    settingsOkBtn.setName("settingsOkBtn");
+    settingsOkBtn.onClick = [this]{ closeSettings(); };
+    settingsOverlay.addAndMakeVisible(settingsOkBtn);
+    oscApplyBtn.setName("oscApplyBtn");
+    oscApplyBtn.onClick = [this]{ applyOscSettings(); };
+    settingsOverlay.addAndMakeVisible(oscApplyBtn);
+
+    midiSectionLab.setName("midiSectionLab");
+    midiSectionLab.setFont(juce::Font(juce::FontOptions(13.0f, juce::Font::bold)));
+    midiSectionLab.setColour(juce::Label::textColourId, juce::Colour(0xffe0a040));
+    oscSectionLab.setName("oscSectionLab");
+    oscSectionLab.setFont(juce::Font(juce::FontOptions(13.0f, juce::Font::bold)));
+    oscSectionLab.setColour(juce::Label::textColourId, juce::Colour(0xff64d2ff));
+    settingsOverlay.addAndMakeVisible(midiSectionLab);
+    settingsOverlay.addAndMakeVisible(oscSectionLab);
+
+    oscStatusLab.setName("oscStatusLab");
+    oscStatusLab.setFont(juce::Font(juce::FontOptions(12.0f)));
+    oscStatusLab.setColour(juce::Label::textColourId, juce::Colour(0xff9a9aa6));
+    oscStatusLab.setJustificationType(juce::Justification::centredLeft);
+    settingsOverlay.addAndMakeVisible(oscStatusLab);
+
+    oscPortLab.setName("oscPortLab");
+    oscPortLab.setJustificationType(juce::Justification::centredRight);
+    oscPortLab.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
+    oscPortLab.setColour(juce::Label::textColourId, juce::Colours::white);
+    oscPortSlider.setName("oscPortSlider");
+    oscPortSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    oscPortSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 64, 18);
+    oscPortSlider.setNumDecimalPlacesToDisplay(0);
+    oscPortSlider.setRange(1024.0, 65535.0, 1.0);
+    oscPortSlider.setValue((double) oscPort, juce::dontSendNotification);
+    oscPortSlider.setTooltip("UDP port for /upic/scrub messages (default 9000).");
+    settingsOverlay.addAndMakeVisible(oscPortLab);
+    settingsOverlay.addAndMakeVisible(oscPortSlider);
+
+    oscMcBtn.setName("oscMcBtn");
+    oscMcBtn.setTooltip("Also listen on MobMuPlat's default multicast address.");
+    oscMcBtn.setToggleState(oscMulticastEnabled, juce::dontSendNotification);
+    settingsOverlay.addAndMakeVisible(oscMcBtn);
+    oscOnBtn.setName("oscOnBtn");
+    oscOnBtn.setToggleState(oscEnabled, juce::dontSendNotification);
+    settingsOverlay.addAndMakeVisible(oscOnBtn);
+    oscGroupLab.setName("oscGroupLab");
+    oscGroupLab.setJustificationType(juce::Justification::centredRight);
+    oscGroupLab.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
+    oscGroupLab.setColour(juce::Label::textColourId, juce::Colours::white);
+    oscGroupEdit.setName("oscGroupEdit");
+    oscGroupEdit.setText(oscMulticastGroup, juce::dontSendNotification);
+    oscGroupEdit.setInputRestrictions(32);
+    oscGroupEdit.setTooltip("Multicast group (default 224.0.0.1).");
+    settingsOverlay.addAndMakeVisible(oscGroupLab);
+    settingsOverlay.addAndMakeVisible(oscGroupEdit);
+    oscMcPortLab.setName("oscMcPortLab");
+    oscMcPortLab.setJustificationType(juce::Justification::centredRight);
+    oscMcPortLab.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
+    oscMcPortLab.setColour(juce::Label::textColourId, juce::Colours::white);
+    oscMcPortSlider.setName("oscMcPortSlider");
+    oscMcPortSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    oscMcPortSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 64, 18);
+    oscMcPortSlider.setNumDecimalPlacesToDisplay(0);
+    oscMcPortSlider.setRange(1024.0, 65535.0, 1.0);
+    oscMcPortSlider.setValue((double) oscMulticastPort, juce::dontSendNotification);
+    oscMcPortSlider.setTooltip("Multicast port (default 54321).");
+    settingsOverlay.addAndMakeVisible(oscMcPortLab);
+    settingsOverlay.addAndMakeVisible(oscMcPortSlider);
+
     // v1.27: Clear is destructive, so it asks first (in-app, so it also works
     // on Android). The confirm button is red, like the Clear button itself.
     clearOverlay.setName("clearOverlay");
@@ -287,6 +364,8 @@ MainComponent::MainComponent(bool pluginMode)
             updateRevBuffers();
         }
         markModelChanged(); // the live voices re-anchor -> fade across it
+        engine.resetLiveVoices();
+        scrubEngine.resetLiveVoices();
         flash(on ? "Live reverse: " + juce::String (revBufSec, 1) + " s buffer"
                  : "Live reverse off");
     };
@@ -296,10 +375,40 @@ MainComponent::MainComponent(bool pluginMode)
     addAndMakeVisible(liveRevLenBox);
     addAndMakeVisible(liveRevBtn);
 
+    // v1.30: the live granular grain size. The SAMPLE tab has had one since
+    // v1.19 (grainSlider); the LIVE tab's granular shifter used a fixed
+    // 40 ms hop, so this control exposes the same 5-500 ms range.
+    liveGrainLab.setName("liveGrainLab");
+    liveGrainLab.setJustificationType(juce::Justification::centredRight);
+    liveGrainLab.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
+    liveGrainLab.setColour(juce::Label::textColourId, juce::Colours::white);
+    liveGrainLab.setColour(juce::Label::backgroundColourId, juce::Colour(0xff2a2a32));
+    liveGrainSlider.setName("liveGrainSlider");
+    liveGrainSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    liveGrainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 56, 18);
+    liveGrainSlider.setNumDecimalPlacesToDisplay(0);
+    liveGrainSlider.setTextValueSuffix(" ms");
+    liveGrainSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colours::white);
+    liveGrainSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    liveGrainSlider.setRange(5.0, 500.0, 1.0);
+    liveGrainSlider.setValue((double) liveGrainMs, juce::dontSendNotification);
+    liveGrainSlider.setTooltip("Granular grain size for the LIVE tab.\n"
+                               "Only affects the Granular live pitch mode.");
+    liveGrainSlider.onValueChange = [this]{
+        liveGrainMs = (int) liveGrainSlider.getValue();
+        engine.setLiveGrainMs(liveGrainMs);
+        scrubEngine.setLiveGrainMs(liveGrainMs);
+    };
+    addAndMakeVisible(liveGrainLab);
+    addAndMakeVisible(liveGrainSlider);
+    engine.setLiveGrainMs(liveGrainMs);
+    scrubEngine.setLiveGrainMs(liveGrainMs);
+
     saveBtn.onClick = [this]{ saveFile(); };
     loadBtn.onClick = [this]{ loadFile(); };
     exportBtn.onClick = [this]{ renderWav(); };
     audioBtn.onClick = [this]{ showAudioSettings(); };
+    settingsBtn.onClick = [this]{ showSettings(); };
     menuBtn.onClick = [this]{
         juce::PopupMenu m;
         m.addItem (1, "Save...");
@@ -309,7 +418,8 @@ MainComponent::MainComponent(bool pluginMode)
         m.addItem (4, "Render stems...");
         m.addSeparator();
         m.addItem (5, "Audio settings...");
-        m.addItem (6, "Clear page...");
+        m.addItem (6, "MIDI + OSC settings...");
+        m.addItem (7, "Clear page...");
         juce::Component::SafePointer<MainComponent> sp (this);
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&menuBtn),
             [sp] (int r) {
@@ -321,7 +431,8 @@ MainComponent::MainComponent(bool pluginMode)
                     case 3: sp->renderWav(); break;
                     case 4: sp->exportStems(); break;
                     case 5: sp->showAudioSettings(); break;
-                    case 6: sp->showClearWarning(); break;
+                    case 6: sp->showSettings(); break;
+                    case 7: sp->showClearWarning(); break;
                 }
             });
     };
@@ -696,8 +807,8 @@ MainComponent::MainComponent(bool pluginMode)
     };
 
     // v1.23 (wave 20): the MIDI input foundation. The device list, the
-    // activity monitor and the learn live in the audio settings overlay
-    // (it is where the device lives).
+    // activity monitor and the learn live in the MIDI + OSC settings overlay
+    // (v1.30: it is no longer part of the audio settings).
     masterSlider.setName("masterSlider");
     intenSlider.setName("intenSlider");
     midiActLab.setName("midiActLab");
@@ -736,21 +847,22 @@ MainComponent::MainComponent(bool pluginMode)
             midi.startLearn (MidiHub::Target::transport);
         updateMidiLabels();
     };
-    audioOverlay.addAndMakeVisible (midiDevBox);
-    audioOverlay.addAndMakeVisible (midiDevLab);
-    audioOverlay.addAndMakeVisible (midiGainLab);
-    audioOverlay.addAndMakeVisible (midiIntLab);
-    audioOverlay.addAndMakeVisible (midiActLab);
-    audioOverlay.addAndMakeVisible (midiLearnGain);
-    audioOverlay.addAndMakeVisible (midiLearnInt);
-    audioOverlay.addAndMakeVisible (midiBindGainLab);
-    audioOverlay.addAndMakeVisible (midiBindIntLab);
-    audioOverlay.addAndMakeVisible (midiScrubLab);
-    audioOverlay.addAndMakeVisible (midiLearnScrub);
-    audioOverlay.addAndMakeVisible (midiBindScrubLab);
-    audioOverlay.addAndMakeVisible (midiTransportLab);
-    audioOverlay.addAndMakeVisible (midiLearnTransport);
-    audioOverlay.addAndMakeVisible (midiBindTransportLab);
+    // v1.30: the MIDI section belongs to the MIDI + OSC settings overlay.
+    settingsOverlay.addAndMakeVisible (midiDevBox);
+    settingsOverlay.addAndMakeVisible (midiDevLab);
+    settingsOverlay.addAndMakeVisible (midiGainLab);
+    settingsOverlay.addAndMakeVisible (midiIntLab);
+    settingsOverlay.addAndMakeVisible (midiActLab);
+    settingsOverlay.addAndMakeVisible (midiLearnGain);
+    settingsOverlay.addAndMakeVisible (midiLearnInt);
+    settingsOverlay.addAndMakeVisible (midiBindGainLab);
+    settingsOverlay.addAndMakeVisible (midiBindIntLab);
+    settingsOverlay.addAndMakeVisible (midiScrubLab);
+    settingsOverlay.addAndMakeVisible (midiLearnScrub);
+    settingsOverlay.addAndMakeVisible (midiBindScrubLab);
+    settingsOverlay.addAndMakeVisible (midiTransportLab);
+    settingsOverlay.addAndMakeVisible (midiLearnTransport);
+    settingsOverlay.addAndMakeVisible (midiBindTransportLab);
     refreshMidiDevices();
     updateMidiLabels();
 
@@ -1043,8 +1155,8 @@ MainComponent::MainComponent(bool pluginMode)
 
     // v1.10: the sample pitch mode mirrors the live pitch selector - the
     // original varispeed stays the default; granular (stretch) maps the slot
-    // onto the arc, granular (no stretch) and the phase vocoder keep the
-    // slot's playback length and shift pitch only.
+    // onto the arc, granular (no stretch) changes the length with pitch, and
+    // the phase vocoder keeps the slot's playback length intact.
     // Session-only, like the live pitch mode.
     samplePitchLab.setName("samplePitchLab");
     samplePitchBox.setName("samplePitchBox");
@@ -1057,10 +1169,10 @@ MainComponent::MainComponent(bool pluginMode)
     samplePitchBox.setTooltip("Sample-tab arcs: how the slot is transposed.\n"
                               "At 1x (the arc sits on Ref) the pitch is unchanged; "
                               "draw above/below Ref to transpose.\n"
-                              "Varispeed changes the slot's playback length with "
-                              "pitch; Granular (no stretch) and Phase vocoder keep "
-                              "the slot's length and shift pitch only; Granular "
-                              "(stretch) fits the slot to the arc length.");
+                              "Varispeed and Granular (no stretch) change the slot's "
+                              "playback length with pitch; Granular (stretch) fits "
+                              "the slot to the arc length; Phase vocoder keeps the "
+                              "slot's length and shifts pitch only.");
     samplePitchBox.onChange = [this]{
         const int pm = samplePitchBox.getSelectedId() - 1;
         engine.setSamplePitchMode(pm);
@@ -1151,30 +1263,40 @@ MainComponent::MainComponent(bool pluginMode)
         scrubRate.store(rate, std::memory_order_relaxed);
         lastScrubT = t;
         lastScrubMs = nowMs;
-        bool vocoderScrub = false;
-        double frac = -1.0;
-        {
-            const juce::ScopedLock sl(dataLock);
-            vocoderScrub = activeSampleArcUsesVocoder(t);
-            if (drawMatMode == 1)
-                frac = materialPlayheadFraction(t, true);
-        }
-        scrubPreviewVocoder.store(vocoderScrub, std::memory_order_relaxed);
         if (!isPlaying.load(std::memory_order_relaxed) && scrubAudition)
         {
-            const bool wasActive = scrubPreviewActive.load(std::memory_order_relaxed);
             scrubPreviewPlayhead.store(t, std::memory_order_relaxed);
             scrubPreviewRemaining.store(scrubPreviewLen, std::memory_order_relaxed);
             scrubPreviewActive.store(true, std::memory_order_relaxed);
-            // The vocoder cannot re-anchor on every mouse move: each reset
-            // restarts its priming window, which never completes during a
-            // normal drag (silence or a chopped preview). Keep that stream
-            // alive while the drag continues; the other modes still
-            // re-anchor for an immediate audition at the new playhead.
-            if (!vocoderScrub || !wasActive)
-                scrubPreviewSerial.fetch_add(1, std::memory_order_relaxed);
+            scrubPreviewSerial.fetch_add(1, std::memory_order_relaxed);
         }
         // reflect scrub position in the material view
+        double frac = -1.0;
+        if (drawMatMode == 1)
+        {
+            const juce::ScopedLock sl(dataLock);
+            for (auto& a : curPage().arcs)
+            {
+                if (a.mode != 1) continue;
+                if (t < a.startTime() || t > a.endTime()) continue;
+                int si = -1;
+                for (size_t i = 0; i < sampleSlots.size(); ++i)
+                    if (sampleSlots[i].id == a.sampleId && sampleSlots[i].loaded()) { si = (int) i; break; }
+                if (si < 0) break;
+                double sd = sampleSlots[(size_t) si].durationSec();
+                if (sd <= 0.0) break;
+                double ref = juce::jmax(1.0, a.refFreq);
+                const int tabMode = samplePitchBox.getSelectedId() - 1;
+                bool arcMapped = (a.pitchMode >= 0) ? (a.pitchMode == 1 || a.pitchMode == 2)
+                                                    : (tabMode == 1 || tabMode == 2);
+                double arcDur = juce::jmax(1.0e-6, a.endTime() - a.startTime());
+                double progress = juce::jlimit(0.0, 1.0, (t - a.startTime()) / arcDur);
+                double pos = arcMapped ? progress * sd
+                                       : UpicEngine::scrubMaterialPos(a, t, ref, sd);
+                frac = std::fmod(pos, sd) / sd;
+                break;
+            }
+        }
         waveEd.setPlayhead(frac);
     };
     score.onScrubFreezeStart = [this](double t){
@@ -1299,6 +1421,14 @@ MainComponent::MainComponent(bool pluginMode)
     voiceLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     voiceLab.setColour(juce::Label::textColourId, juce::Colour(0xffc9c9d4));
 
+    // v1.29: listen for the phone/MobMuPlat scrub. Message-loop callbacks
+    // mean the playhead moves on the message thread exactly like a drag.
+    // v1.30: the listeners are permanent; startOscReceiver() connects (and
+    // reconnects after the settings overlay changes the endpoints).
+    oscReceiver.addListener(this);
+    multicastReceiver.addListener(this);
+    startOscReceiver();
+
     refreshBoxes();
     refreshScoreBinding();
     updateStatus();
@@ -1307,6 +1437,9 @@ MainComponent::MainComponent(bool pluginMode)
 
 MainComponent::~MainComponent()
 {
+    stopOscReceiver();
+    multicastReceiver.removeListener(this);
+    oscReceiver.removeListener(this);
     // v1.18: stop the audio thread first (no callback can be in flight), then
     // hand back the snapshots it owned so the handover can free them here.
     shutdownAudio();
@@ -1709,65 +1842,6 @@ double MainComponent::displayPlayhead() const
                : playheadSec;
 }
 
-// True when the sample arc under the scrub playhead uses the phase vocoder.
-// The scrub preview keeps that voice streaming between drag events: the
-// vocoder needs a long analysis window, so resetting it on every mouse move
-// would keep it permanently in its priming phase (silence or chopped sound).
-bool MainComponent::activeSampleArcUsesVocoder(double t) const
-{
-    const int tabMode = samplePitchBox.getSelectedId() - 1;
-    for (const auto& a : curPage().arcs)
-    {
-        if (a.mode != 1) continue;
-        if (t < a.startTime() || t > a.endTime()) continue;
-        const int mode = (a.pitchMode >= 0) ? a.pitchMode : tabMode;
-        if (mode == 2) return true;
-    }
-    return false;
-}
-
-// Position of the sample-view time bar (0..1). The caller holds dataLock.
-// Granular (stretch) maps the slot to the arc in both playback and scrub;
-// the phase vocoder only maps it in the scrub preview; granular (no stretch)
-// keeps the slot's own timeline.
-double MainComponent::materialPlayheadFraction(double t, bool scrub) const
-{
-    if (drawMatMode != 1) return -1.0;
-    for (const auto& a : curPage().arcs)
-    {
-        if (a.mode != 1) continue;
-        if (t < a.startTime() || t > a.endTime()) continue;
-        int si = -1;
-        for (size_t i = 0; i < sampleSlots.size(); ++i)
-            if (sampleSlots[i].id == a.sampleId && sampleSlots[i].loaded())
-            {
-                si = (int) i;
-                break;
-            }
-        if (si < 0) break;
-        const double sd = sampleSlots[(size_t) si].durationSec();
-        if (sd <= 0.0) break;
-        const double ref = juce::jmax(1.0, a.refFreq);
-        const int tabMode = samplePitchBox.getSelectedId() - 1;
-        const int mode = (a.pitchMode >= 0) ? a.pitchMode : tabMode;
-        const double arcDur = juce::jmax(1.0e-6, a.endTime() - a.startTime());
-        const double progress = juce::jlimit(0.0, 1.0, (t - a.startTime()) / arcDur);
-        double pos = 0.0;
-        if (mode == 1)
-            pos = progress * sd;
-        else if (mode == 2)
-            pos = scrub ? progress * sd : (t - a.startTime());
-        else if (mode == 3)
-            pos = t - a.startTime(); // no-stretch granular keeps the slot timeline
-        else
-            pos = UpicEngine::scrubMaterialPos(a, t, ref, sd);
-        double frac = std::fmod(pos, sd) / sd;
-        if (frac < 0.0) frac += 1.0;
-        return frac;
-    }
-    return -1.0;
-}
-
 void MainComponent::startPlayback()
 {
     // a Stop click after Play is a fresh single click, not a double-click
@@ -1957,6 +2031,10 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             seenDirChangeSerial = dcs;
             dirFadeOutRemaining = kDirCrossfadeSamples;
             audioPlayRate = prevPlayRate.load(std::memory_order_relaxed);
+            // v1.30: the live ring's read direction follows the transport
+            // when reverse is on, so the live voices must re-anchor on the
+            // other ring (forward <-> mirrored).
+            engine.resetLiveVoices();
         }
 
         if (snap != nullptr)
@@ -2000,30 +2078,21 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
                     double ph = scrubPreviewPlayhead.load(std::memory_order_relaxed);
                     const double rate = scrubRate.load(std::memory_order_relaxed);
                     const int sps = scrubPreviewSerial.load(std::memory_order_relaxed);
-                    const bool firstChunk = (sps != seenScrubPreviewSerial);
-                    if (firstChunk)
+                    if (sps != seenScrubPreviewSerial)
                     {
                         seenScrubPreviewSerial = sps;
                         scrubEngine.reset(); // re-anchor to the dragged playhead
                     }
-                    const bool vocoderScrub = scrubPreviewVocoder.load(std::memory_order_relaxed);
                     scrubEngine.render(pg, ph, snap->waveforms, snap->envelopes, snap->slots,
                                       SL, (SR != nullptr ? SR : SL), chunk, 1.0f, rate);
-                    const int left = remaining - chunk;
                     const int fade = juce::jmin(chunk / 4, (int) (audioSampleRate * 0.005));
-                    // A vocoder preview streams continuously between drag
-                    // events, so it must only fade at its first and last
-                    // chunks. The other modes re-anchor per event and keep the
-                    // per-block fade that prevents restart clicks.
-                    const bool fadeFirst = ! vocoderScrub || firstChunk;
-                    const bool fadeLast  = ! vocoderScrub || left <= 0;
                     for (int i = 0; i < chunk; ++i)
                     {
                         float g = 1.0f;
                         if (fade > 0)
                         {
-                            if (fadeFirst && i < fade) g = (float) i / (float) fade;
-                            else if (fadeLast && i >= chunk - fade) g = (float) (chunk - 1 - i) / (float) fade;
+                            if (i < fade) g = (float) i / (float) fade;
+                            else if (i >= chunk - fade) g = (float) (chunk - 1 - i) / (float) fade;
                         }
                         SL[i] *= g;
                         if (SR != nullptr) SR[i] *= g;
@@ -2035,6 +2104,7 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
                         if (R != nullptr) R[i] += (SR != nullptr ? SR[i] : SL[i]) * mg;
                     }
                     scrubPreviewPlayhead.store(ph + (double) chunk * rate / audioSampleRate, std::memory_order_relaxed);
+                    const int left = remaining - chunk;
                     scrubPreviewRemaining.store(left, std::memory_order_relaxed);
                     if (left <= 0) scrubPreviewActive.store(false, std::memory_order_relaxed);
                 }
@@ -2222,12 +2292,13 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
 
     // v1.5: publish the live input ring view for mode-2 (live input) arcs
     const int revFrames = revBufFrames.load(std::memory_order_relaxed);
-    if (revLiveOn.load(std::memory_order_relaxed) && revFrames > 0
-        && revBuf[revPlayIdx].getNumSamples() >= revFrames)
+    if (revFrames > 0 && revBuf[revPlayIdx].getNumSamples() >= revFrames)
     {
         // v1.20/1.21: the reverse - the shifter can read the frozen, mirrored
         // segment instead of the live ring. The arc decides which one (the
-        // arc list's Rev box).
+        // arc list's Rev box). v1.30: the capture runs continuously, so the
+        // global transport reverse can force the live input backwards even
+        // when the Live tab's Rev button is off.
         const auto& play = revBuf[revPlayIdx];
         engine.setLiveReverse(play.getReadPointer(0),
                               play.getNumChannels() > 1 ? play.getReadPointer(1) : nullptr,
@@ -2612,6 +2683,99 @@ void MainComponent::handleMidi()
     }
 }
 
+//==============================================================================
+// v1.29: OSC scrub. A phone running MobMuPlat sends /upic/scrub with a float
+// 0..1; the receiver calls back on the message thread, so the playhead moves
+// through the same seek + preview path as a canvas drag. When the messages
+// stop, timerCallback() ends the gesture (and never starts playback).
+void MainComponent::oscMessageReceived (const juce::OSCMessage& message)
+{
+    handleOscMessage (message);
+}
+
+void MainComponent::oscBundleReceived (const juce::OSCBundle& bundle)
+{
+    for (int i = 0; i < bundle.size(); ++i)
+    {
+        const auto& element = bundle[i];
+        if (element.isMessage())
+            handleOscMessage (element.getMessage());
+        else if (element.isBundle())
+            oscBundleReceived (element.getBundle());
+    }
+}
+
+void MainComponent::handleOscMessage (const juce::OSCMessage& message)
+{
+    const auto address = message.getAddressPattern().toString();
+    if (address != "/upic/scrub" && address != "/upic/scrub/pos")
+        return;
+    if (message.size() < 1)
+        return;
+
+    float value = 0.0f;
+    if (message[0].isFloat32())      value = message[0].getFloat32();
+    else if (message[0].isInt32())
+    {
+        // 0/1 for a binary position, otherwise a 7-bit fader
+        const int v = message[0].getInt32();
+        value = v <= 1 ? (float) v : (float) v / 127.0f;
+    }
+    else return;
+
+    handleOscScrub (juce::jlimit (0.0, 1.0, (double) value));
+}
+
+void MainComponent::handleOscScrub (double normalised)
+{
+    const double dur = juce::jmax (1.0e-6, curPage().durationSec);
+    const double t = juce::jlimit (0.0, dur, normalised * dur);
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+
+    if (! externalScrubActive)
+    {
+        externalScrubActive = true;
+        externalScrubFrozen = false;
+        score.externalScrubStart (t);
+        if (! oscAnnounced)
+        {
+            oscAnnounced = true;
+            flash ("OSC scrub on UDP " + juce::String (oscPort));
+        }
+    }
+    else
+    {
+        if (externalScrubFrozen)
+        {
+            externalScrubFrozen = false;
+            if (score.onScrubFreezeCancel != nullptr)
+                score.onScrubFreezeCancel();
+        }
+        score.externalScrubTo (t);
+    }
+
+    externalScrubLastT = t;
+    lastExternalScrubMs = nowMs;
+}
+
+void MainComponent::updateExternalScrub (double nowMs)
+{
+    if (! externalScrubActive) return;
+    const double dt = nowMs - lastExternalScrubMs;
+    if (! externalScrubFrozen && dt > 100.0)
+    {
+        externalScrubFrozen = true;
+        if (score.onScrubFreezeStart != nullptr)
+            score.onScrubFreezeStart (externalScrubLastT);
+    }
+    if (dt > 2000.0)
+    {
+        externalScrubFrozen = false;
+        externalScrubActive = false;
+        score.externalScrubEnd();
+    }
+}
+
 void MainComponent::injectMidiMessage (const juce::MidiMessage& m)
 {
     int type = MidiHub::kTypeOther, number = 0, value = 0;
@@ -2723,7 +2887,10 @@ bool MainComponent::tapLiveInput(const juce::AudioSourceChannelInfo& info)
     // BACKWARDS, so the buffer holds the last D seconds mirrored in time:
     // reading it forward plays the input backwards - the same trick as the
     // sample path, and the shifter needs no change at all.
-    if (revLiveOn.load(std::memory_order_relaxed))
+    // v1.30: capture continuously, so the global transport reverse can use
+    // the mirrored segment immediately (the Live tab's Rev button only sets
+    // the arcs' reverse flags; it no longer gates the capture).
+    if (revBufFrames.load(std::memory_order_relaxed) > 0)
     {
         const int D = revBufFrames.load(std::memory_order_relaxed);
         if (revRestart.exchange(false, std::memory_order_relaxed))
@@ -2765,7 +2932,11 @@ bool MainComponent::tapLiveInput(const juce::AudioSourceChannelInfo& info)
                     revCapIdx = 1 - revCapIdx;
                     revCapHead = D - 1;
                     revCapCount = 0;
-                    engine.resetLiveVoices(); // the live voices re-anchor
+                    // only re-anchor if something actually reads the reverse
+                    // ring; the capture itself now runs continuously.
+                    if (revLiveOn.load(std::memory_order_relaxed)
+                        || playRate.load(std::memory_order_relaxed) < 0.0)
+                        engine.resetLiveVoices(); // the live voices re-anchor
                 }
             }
             // the playback head runs at 1x and stops at the segment's end
@@ -3039,6 +3210,8 @@ void MainComponent::timerCallback()
     }
     // v1.23: the MIDI input - the message thread picks up what arrived
     handleMidi();
+    // v1.29: the phone stopped sending scrub positions - end the gesture
+    updateExternalScrub (juce::Time::getMillisecondCounterHiRes());
     // v1.25 (wave 22): scrub smoothing. The jog target decays; the smoothed
     // velocity drives the playhead. Hysteresis keeps a resting jog at zero.
     {
@@ -3075,10 +3248,6 @@ void MainComponent::timerCallback()
     // path that could be forgotten.
     if (!(muteWhileDragging && arcEditing.load(std::memory_order_relaxed)))
         publishModelSnapshot();
-    // the sample-view time bar follows normal playback with the same mapping
-    // the scrub preview uses (granular stretch maps the slot to the arc)
-    if (drawMatMode == 1 && isPlaying.load(std::memory_order_relaxed))
-        waveEd.setPlayhead(materialPlayheadFraction(displayPlayhead(), false));
     const double dur = curPage().durationSec;
     const bool revNow = playRate.load(std::memory_order_relaxed) < 0.0;
     timeLab.setText((revNow ? juce::String("REV ") : juce::String()) + juce::String(displayPlayhead(), 1) + " / " + juce::String(dur, 1) + " s",
@@ -3108,6 +3277,8 @@ void MainComponent::timerCallback()
         if (latSamples > 0)
             s += " | LAT " + juce::String((int) std::round(latSamples / audioSampleRate * 1000.0)) + "ms";
         if (monitoring.load()) s += " | MON";
+        if (oscListening) s += " | OSC " + juce::String (oscPort);
+        if (multicastListening) s += " | MCAST";
         if (capturing.load())
             s += " | CAP " + juce::String((double) capPos.load() / juce::jmax(1.0, capRate), 1) + "s";
         if (sieveOn)
@@ -3206,7 +3377,7 @@ void MainComponent::resized()
         { F(&playBtn, 90), F(&stopBtn, 70), F(&loopBtn, 64), F(&seqBtn, 60), F(&revPlayBtn, 64), F(&pressBtn, 96), F(&scrubBtn, 72),
           FL(&pageLab, 40, &pageBox, 150),
           F(&pageAddBtn, 30), F(&pageDupBtn, 46), F(&pageDelBtn, 30),
-          F(&menuBtn, 74), F(&clearBtn, 64), F(&timeLab, 0) },
+          F(&menuBtn, 74), F(&settingsBtn, 78), F(&clearBtn, 64), F(&timeLab, 0) },
         // voice / view (built below: the tab decides which controls apply)
         {},
         // material (filled in below: the tab decides which material)
@@ -3235,6 +3406,7 @@ void MainComponent::resized()
                                            &inGainLab, &inGainSlider, &monBtn, &capBtn };
     for (auto* c : sampleCtl) c->setVisible(showSampleCtl);
     juce::Component* const liveCtl[] = { &livePitchLab, &livePitchBox,
+                                         &liveGrainLab, &liveGrainSlider,
                                          &liveRevLab, &liveRevLenBox, &liveRevBtn };
     for (auto* c : liveCtl) c->setVisible(showLiveCtl);
     // Ref belongs to both pitched materials (Sample and Live); it is not a
@@ -3276,6 +3448,7 @@ void MainComponent::resized()
     else if (showLiveCtl)
         materialRow = { FL(&refLab, 34, &refSlider, 210),
                         FL(&livePitchLab, 42, &livePitchBox, 180),
+                        FL(&liveGrainLab, 40, &liveGrainSlider, 120),
                         FL(&liveRevLab, 52, &liveRevLenBox, 90),
                         F(&liveRevBtn, 64) };
     else if (showPmCtl)
@@ -3554,7 +3727,29 @@ void MainComponent::resized()
     {
         auto card = audioOverlay.cardRect().reduced(12);
         card.removeFromTop(AudioOverlay::titleH);
-        // v1.23: the MIDI section (the device, the monitor, the learn)
+        // v1.30: the MIDI section moved to the settings overlay. The audio
+        // card is the device selector plus OK.
+        card.removeFromTop(6);
+        auto btnRow = card.removeFromBottom(40);
+        card.removeFromBottom(6);
+        audioOkBtn.setBounds(btnRow.removeFromRight(120).reduced(2));
+        audioSelector->setBounds(card);
+    }
+
+    // v1.30 (UPIC-54): MIDI + OSC settings overlay.
+    settingsOverlay.setBounds(getLocalBounds());
+    if (settingsOverlay.isVisible())
+    {
+        auto card = settingsOverlay.cardRect().reduced(12);
+        card.removeFromTop(AudioOverlay::titleH);
+        auto btnRow = card.removeFromBottom(40);
+        card.removeFromBottom(6);
+        settingsOkBtn.setBounds(btnRow.removeFromRight(100).reduced(2));
+        btnRow.removeFromRight(8);
+        oscApplyBtn.setBounds(btnRow.removeFromRight(110).reduced(2));
+
+        // --- MIDI ---
+        midiSectionLab.setBounds(card.removeFromTop((int) std::lround(22.0f * s)).reduced(2));
         {
             auto devRow = card.removeFromTop((int) std::lround (28.0f * s));
             midiDevLab.setBounds (devRow.removeFromLeft ((int) std::lround (76.0f * s)).reduced (2));
@@ -3582,15 +3777,23 @@ void MainComponent::resized()
             midiTransportLab.setBounds (transportRow.removeFromLeft ((int) std::lround (76.0f * s)).reduced (2));
             midiLearnTransport.setBounds (transportRow.removeFromLeft ((int) std::lround (64.0f * s)).reduced (2));
             midiBindTransportLab.setBounds (transportRow.removeFromLeft ((int) std::lround (90.0f * s)).reduced (2));
-            card.removeFromTop (6);
         }
-        // v1.21: the live pitch algorithm and the live reverse moved to the
-        // material row - the overlay is for the device only now
-        card.removeFromTop(6);
-        auto btnRow = card.removeFromBottom(40);
-        card.removeFromBottom(6);
-        audioOkBtn.setBounds(btnRow.removeFromRight(120).reduced(2));
-        audioSelector->setBounds(card);
+
+        card.removeFromTop(8);
+        // --- OSC ---
+        oscSectionLab.setBounds(card.removeFromTop((int) std::lround(22.0f * s)).reduced(2));
+        oscStatusLab.setBounds(card.removeFromTop((int) std::lround(20.0f * s)).reduced(2));
+        auto onRow = card.removeFromTop((int) std::lround(28.0f * s));
+        oscOnBtn.setBounds(onRow.removeFromLeft((int) std::lround(100.0f * s)).reduced(2));
+        auto portRow = card.removeFromTop((int) std::lround(28.0f * s));
+        oscPortLab.setBounds(portRow.removeFromLeft((int) std::lround(76.0f * s)).reduced(2));
+        oscPortSlider.setBounds(portRow.removeFromLeft((int) std::lround(180.0f * s)).reduced(2));
+        auto mcRow = card.removeFromTop((int) std::lround(28.0f * s));
+        oscMcBtn.setBounds(mcRow.removeFromLeft((int) std::lround(100.0f * s)).reduced(2));
+        oscGroupLab.setBounds(mcRow.removeFromLeft((int) std::lround(46.0f * s)).reduced(2));
+        oscGroupEdit.setBounds(mcRow.removeFromLeft((int) std::lround(150.0f * s)).reduced(2));
+        oscMcPortLab.setBounds(mcRow.removeFromLeft((int) std::lround(50.0f * s)).reduced(2));
+        oscMcPortSlider.setBounds(mcRow.reduced(2));
     }
 
     // v1.27: the clear warning overlay (full-window backdrop + card)
@@ -3623,6 +3826,7 @@ juce::var MainComponent::pieceToVar() const
     o->setProperty("dragSmoothMs", dragSmoothMs.load());
     o->setProperty("scrubGrainMs", scrubGrainMs);
     o->setProperty("sampleGrainMs", sampleGrainMs);
+    o->setProperty("liveGrainMs", liveGrainMs);
     o->setProperty("sieveOn", sieveOn);
     o->setProperty("sieveM", sieveM);
     juce::Array<juce::var> srArr;
@@ -3689,6 +3893,7 @@ void MainComponent::loadFromVar(const juce::var& v)
     dragSmoothMs.store(juce::jlimit(0, 1000, (int) v.getProperty("dragSmoothMs", 20)), std::memory_order_relaxed);
     scrubGrainMs = juce::jlimit(5, 500, (int) v.getProperty("scrubGrainMs", 40));
     sampleGrainMs = juce::jlimit(5, 500, (int) v.getProperty("sampleGrainMs", 40));
+    liveGrainMs = juce::jlimit(5, 500, (int) v.getProperty("liveGrainMs", 40));
     sieveOn = (bool) v.getProperty("sieveOn", false);
     sieveM = juce::jlimit(2, 120, (int) v.getProperty("sieveM", 12));
     sieveR.clear();
@@ -3702,10 +3907,13 @@ void MainComponent::loadFromVar(const juce::var& v)
     dragSmoothSlider.setValue((double) dragSmoothMs.load(), juce::dontSendNotification);
     scrubGrainSlider.setValue((double) scrubGrainMs, juce::dontSendNotification);
     grainSlider.setValue((double) sampleGrainMs, juce::dontSendNotification);
+    liveGrainSlider.setValue((double) liveGrainMs, juce::dontSendNotification);
     engine.setScrubGrainMs(scrubGrainMs);
     engine.setSampleGrainMs(sampleGrainMs);
+    engine.setLiveGrainMs(liveGrainMs);
     scrubEngine.setScrubGrainMs(scrubGrainMs);
     scrubEngine.setSampleGrainMs(sampleGrainMs);
+    scrubEngine.setLiveGrainMs(liveGrainMs);
     sieveBtn.setToggleState(sieveOn, juce::dontSendNotification);
     sieveMEdit.setText(juce::String(sieveM), juce::dontSendNotification);
     {
@@ -3875,10 +4083,10 @@ void MainComponent::showAudioSettings()
     // button there and could never be dismissed.
     // Inputs are allowed: enabling them requests RECORD_AUDIO at runtime
     // (manifest) and falls back to output-only when denied or absent.
+    closeSettings();
     if (audioSelector == nullptr)
         audioSelector = std::make_unique<juce::AudioDeviceSelectorComponent>(
             deviceManager, 0, 2, 0, 2, false, false, true, false);
-    refreshMidiDevices();
     audioOverlay.addAndMakeVisible(*audioSelector);
     // v1.26: keep the OK button above the selector. On some layouts the
     // selector's viewport can otherwise sit over the button and eat its click.
@@ -3896,6 +4104,131 @@ void MainComponent::closeAudioSettings()
     audioOverlay.setVisible(false);
     if (audioSelector != nullptr && audioSelector->getParentComponent() == &audioOverlay)
         audioOverlay.removeChildComponent(audioSelector.get());
+}
+
+//==============================================================================
+// v1.30 (UPIC-54/56): MIDI + OSC settings. The audio overlay no longer owns
+// the MIDI section; this overlay is the one place for the controller setup.
+void MainComponent::showSettings()
+{
+    closeAudioSettings();
+    refreshMidiDevices();
+    // show the applied values, not abandoned edits from a previous visit
+    oscPortSlider.setValue((double) oscPort, juce::dontSendNotification);
+    oscMcPortSlider.setValue((double) oscMulticastPort, juce::dontSendNotification);
+    oscGroupEdit.setText(oscMulticastGroup, juce::dontSendNotification);
+    oscMcBtn.setToggleState(oscMulticastEnabled, juce::dontSendNotification);
+    oscOnBtn.setToggleState(oscEnabled, juce::dontSendNotification);
+    updateOscStatus();
+    settingsOverlay.setBounds(getLocalBounds());
+    settingsOverlay.setVisible(true);
+    settingsOverlay.toFront(false);
+    resized();
+}
+
+void MainComponent::closeSettings()
+{
+    settingsOverlay.setVisible(false);
+}
+
+void MainComponent::startOscReceiver()
+{
+    oscListening = false;
+    multicastListening = false;
+
+    if (! oscEnabled)
+    {
+        oscAnnounced = false;
+        updateOscStatus();
+        return;
+    }
+
+    // v1.29: the phone sends /upic/scrub to UDP 9000 ...
+    oscListening = oscReceiver.connect(oscPort);
+
+    // ... and MobMuPlat's default output is multicast 224.0.0.1:54321, which
+    // works even when the phone's network settings cannot be changed.
+    if (oscMulticastEnabled)
+    {
+        multicastSocket = std::make_unique<juce::DatagramSocket>(false);
+        multicastSocket->setEnablePortReuse(true);
+        if (multicastSocket->bindToPort(oscMulticastPort))
+        {
+            if (multicastSocket->joinMulticast(oscMulticastGroup))
+                multicastListening = multicastReceiver.connectToSocket(*multicastSocket);
+        }
+    }
+    oscAnnounced = false;
+    updateOscStatus();
+}
+
+void MainComponent::stopOscReceiver()
+{
+    if (multicastListening)
+    {
+        multicastReceiver.disconnect();
+        multicastListening = false;
+    }
+    if (multicastSocket != nullptr)
+    {
+        multicastSocket->leaveMulticast(oscMulticastGroup);
+        multicastSocket->shutdown();
+        multicastSocket.reset();
+    }
+    if (oscListening)
+    {
+        oscReceiver.disconnect();
+        oscListening = false;
+    }
+}
+
+void MainComponent::applyOscSettings()
+{
+    oscEnabled = oscOnBtn.getToggleState();
+    const int newPort = (int) oscPortSlider.getValue();
+    const int newMcPort = (int) oscMcPortSlider.getValue();
+    const auto group = oscGroupEdit.getText().trim();
+    oscPort = juce::jlimit(1024, 65535, newPort);
+    oscMulticastPort = juce::jlimit(1024, 65535, newMcPort);
+    if (group.isNotEmpty())
+        oscMulticastGroup = group;
+    oscMulticastEnabled = oscMcBtn.getToggleState();
+
+    stopOscReceiver();
+    startOscReceiver();
+
+    if (oscListening)
+        flash("OSC scrub on UDP " + juce::String(oscPort)
+              + (multicastListening ? " + multicast " + oscMulticastGroup + ":"
+                                        + juce::String(oscMulticastPort)
+                                    : juce::String()));
+    else
+        flash("OSC unavailable: UDP port " + juce::String(oscPort) + " busy");
+}
+
+void MainComponent::updateOscStatus()
+{
+    juce::String s;
+    if (! oscEnabled)
+    {
+        s = "OSC off";
+        oscStatusLab.setText(s, juce::dontSendNotification);
+        statusLab.setTooltip("OSC scrub disabled in MIDI + OSC settings");
+        return;
+    }
+    s << (oscListening ? "UDP " + juce::String(oscPort) + " listening"
+                       : "UDP " + juce::String(oscPort) + " unavailable");
+    if (oscMulticastEnabled)
+        s << "  |  " << (multicastListening
+                            ? "multicast " + oscMulticastGroup + ":" + juce::String(oscMulticastPort)
+                            : "multicast unavailable");
+    else
+        s << "  |  multicast off";
+    oscStatusLab.setText(s, juce::dontSendNotification);
+    statusLab.setTooltip("OSC scrub: send /upic/scrub <0..1> to UDP port "
+                         + juce::String(oscPort)
+                         + " (or multicast " + oscMulticastGroup + ":"
+                         + juce::String(oscMulticastPort) + ")");
 }
 
 void MainComponent::showClearWarning()

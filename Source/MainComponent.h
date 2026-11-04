@@ -15,7 +15,8 @@
 // X=time, Y=pitch(log). Each arc = wavetable osc * envelope * intensity.
 //==============================================================================
 class MainComponent : public juce::AudioAppComponent,
-                      public juce::Timer
+                      public juce::Timer,
+                      private juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>
 {
 public:
     // pluginMode (v1.11): VST3 wrapper - the host drives prepareToPlay /
@@ -59,6 +60,20 @@ public:
     // v1.23 (wave 20): the MIDI foundation, for the selftest.
     MidiHub& midiHub() { return midi; }
 
+    // v1.29: the OSC scrub receiver (phone/MobMuPlat).
+    bool oscIsListening() const { return oscListening || multicastListening; }
+    int oscPortForTest() const { return oscPort; }
+    int oscMulticastPortForTest() const { return oscMulticastPort; }
+    juce::String oscMulticastGroupForTest() const { return oscMulticastGroup; }
+    bool settingsVisibleForTest() const { return settingsOverlay.isVisible(); }
+    bool oscEnabledForTest() const { return oscEnabled; }
+    double pageDurationForTest() const { return curPage().durationSec; }
+    double playheadForTest() const { return playheadSec; }
+    bool externalScrubActiveForTest() const { return externalScrubActive; }
+    bool isPlayingForTest() const { return isPlaying.load (std::memory_order_relaxed); }
+    void injectOscMessageForTest (const juce::OSCMessage& m) { handleOscMessage (m); }
+    void updateExternalScrubForTest (double nowMs) { updateExternalScrub (nowMs); }
+
     void paint(juce::Graphics& g) override;
     void resized() override;
     void timerCallback() override;
@@ -98,11 +113,10 @@ private:
     std::atomic<bool> muteWhileDragging { true };        // skip model publishes while editing
     std::atomic<int> dragSmoothMs { 20 };              // fade time on release
     std::atomic<bool> scrubPreviewActive { false };
-    std::atomic<bool> scrubPreviewVocoder { false }; // preview arc uses the phase vocoder
     std::atomic<bool> scrubFreezeActive { false };
     std::atomic<double> scrubPreviewPlayhead { 0.0 };
     std::atomic<double> scrubRate { 1.0 }; // signed scrub speed (drag direction)
-    std::atomic<int> scrubPreviewSerial { 0 }; // resets the scrub voice when a preview starts
+    std::atomic<int> scrubPreviewSerial { 0 }; // resets the scrub voice on each drag event
     int seenScrubPreviewSerial = 0;
     std::atomic<double> scrubFreezePlayhead { 0.0 };
     std::atomic<double> scrubFreezeStopAtMs { 0.0 };
@@ -118,6 +132,7 @@ private:
     int scrubTailMs = 30;
     int scrubGrainMs = 40;                 // freeze-hold grain size
     int sampleGrainMs = 40;                // granular playback grain size
+    int liveGrainMs = 40;                  // v1.30: granular grain size for LIVE arcs
     bool loopPage = true;
     std::atomic<float> masterGain { 0.8f };
 
@@ -256,6 +271,7 @@ private:
     juce::TextButton clearBtn{ "Clear" };
     juce::TextButton menuBtn{ "File" };
     juce::TextButton audioBtn{ "Audio" };
+    juce::TextButton settingsBtn{ "Settings" };
     juce::ToggleButton loopBtn{ "Loop" }, seqBtn{ "Seq" }, revPlayBtn{ "Rev" }, pressBtn{ "Pressure" }, scrubBtn{ "Scrub" };
     // scrub audition controls
     juce::Label scrubLenLab{ {}, "Scrub len" }, scrubCrossLab{ {}, "Crossfade" }, scrubTailLab{ {}, "Release tail" };
@@ -291,6 +307,7 @@ private:
     {
         static constexpr int titleH = 28;
         std::function<void()> onDismiss;
+        juce::String title { "Audio Settings" };
 
         juce::Rectangle<int> cardRect() const
         {
@@ -308,7 +325,7 @@ private:
             g.drawRoundedRectangle(card.toFloat().reduced(0.5f), 6.0f, 1.0f);
             g.setFont(juce::Font(juce::FontOptions(14.0f, juce::Font::bold)));
             g.setColour(juce::Colour(0xffc8c8d0));
-            g.drawText("Audio Settings", card.reduced(12, 0).removeFromTop(titleH),
+            g.drawText(title, card.reduced(12, 0).removeFromTop(titleH),
                        juce::Justification::centredLeft);
         }
         void mouseDown(const juce::MouseEvent& e) override
@@ -330,6 +347,19 @@ private:
     AudioOverlay audioOverlay;
     std::unique_ptr<juce::AudioDeviceSelectorComponent> audioSelector;
     juce::TextButton audioOkBtn{ "OK" };
+
+    // v1.30: MIDI + OSC live in their own settings overlay. The audio overlay
+    // keeps only the device selector (UPIC-56), and the phone controller's
+    // endpoints are configurable here instead of being compile-time constants.
+    AudioOverlay settingsOverlay;
+    juce::TextButton settingsOkBtn{ "OK" }, oscApplyBtn{ "Apply" };
+    juce::Label midiSectionLab{ {}, "MIDI" }, oscSectionLab{ {}, "OSC" };
+    juce::Label oscStatusLab{ {}, "OSC starting..." };
+    juce::Label oscPortLab{ {}, "UDP port" }, oscGroupLab{ {}, "Group" }, oscMcPortLab{ {}, "M-port" };
+    juce::Slider oscPortSlider, oscMcPortSlider;
+    juce::TextEditor oscGroupEdit;
+    juce::ToggleButton oscMcBtn{ "Multicast" };
+    juce::ToggleButton oscOnBtn{ "OSC on" };
 
     // v1.27: Clear is destructive, so it asks first. An in-app overlay keeps
     // this working on Android, where floating dialogs cannot be dismissed.
@@ -391,6 +421,12 @@ private:
     juce::ComboBox liveRevLenBox;
     juce::TextButton liveRevBtn{ "Rev" };
 
+    // v1.30: the LIVE tab's granular grain size (the same 5-500 ms range as
+    // the SAMPLE tab's Granular control). It only affects the granular live
+    // pitch mode; Tape and Phase vocoder ignore it.
+    juce::Label liveGrainLab{ {}, "Grain" };
+    juce::Slider liveGrainSlider;
+
     // --- UI: material (sample pitch-shift) row ---
     juce::ComboBox sampleBox;
     juce::TextButton loadSampleBtn{ "Load sample..." };
@@ -429,6 +465,31 @@ private:
     juce::Label midiBindGainLab{ {}, "-" }, midiBindIntLab{ {}, "-" }, midiBindScrubLab{ {}, "-" }, midiBindTransportLab{ {}, "-" };
     juce::Label midiGainLab{ {}, "Master gain" }, midiIntLab{ {}, "Intensity" }, midiScrubLab{ {}, "Scrub" }, midiTransportLab{ {}, "Transport" };
 
+    // v1.29: the OSC scrub receiver. MobMuPlat (or any OSC sender) moves the
+    // playhead with /upic/scrub <0..1> on UDP 9000.
+    juce::OSCReceiver oscReceiver;
+    bool oscListening = false;
+    // v1.29: MobMuPlat's default output is multicast 224.0.0.1:54321, so this
+    // works even when the phone's network settings cannot be changed.
+    std::unique_ptr<juce::DatagramSocket> multicastSocket;
+    juce::OSCReceiver multicastReceiver;
+    bool multicastListening = false;
+    bool externalScrubActive = false;
+    bool externalScrubFrozen = false;
+    double externalScrubLastT = 0.0;
+    double lastExternalScrubMs = 0.0;
+    bool oscAnnounced = false;
+    static constexpr int kOscPort = 9000;
+    static constexpr int kMulticastPort = 54321;
+    static constexpr auto kMulticastGroup = "224.0.0.1";
+    // v1.30: the settings overlay edits these session-only values; Apply
+    // rebinds the receivers. The defaults are the old compile-time endpoints.
+    int oscPort = kOscPort;
+    int oscMulticastPort = kMulticastPort;
+    juce::String oscMulticastGroup { kMulticastGroup };
+    bool oscEnabled = true;
+    bool oscMulticastEnabled = true;
+
     // --- UI: sieve quantizer (same row as material) ---
     juce::ToggleButton sieveBtn{ "Sieve" };
     juce::TextEditor sieveMEdit, sieveREdit;
@@ -459,8 +520,6 @@ private:
     void bumpPageEpoch();             // message: the audio adopts the page
     void requestEngineReset();        // message: drop voices on the next block
     double displayPlayhead() const;   // the playhead the UI shows
-    double materialPlayheadFraction(double t, bool scrub) const; // sample-view time bar
-    bool activeSampleArcUsesVocoder(double t) const; // caller holds dataLock
     void pushVoice();                 // UI -> ScoreEditor current voice
     bool prepareWaveEdit();           // v1.27: fork the wavetable for a selection
     void syncControlsToArc(int arcId); // load an arc into the toolbar
@@ -469,6 +528,13 @@ private:
     void updateRevBuffers();      // v1.20: (re)allocate the live reverse buffers
     void rebuildArcList();        // v1.21: rebuild the panel's rows from the model
     void handleMidi();            // v1.23: the MIDI messages (message thread)
+
+    // v1.29: the phone/MobMuPlat OSC scrub (message-loop callbacks)
+    void oscMessageReceived (const juce::OSCMessage&) override;
+    void oscBundleReceived (const juce::OSCBundle&) override;
+    void handleOscMessage (const juce::OSCMessage&);
+    void handleOscScrub (double normalised);
+    void updateExternalScrub (double nowMs);
 
     void updateMidiLabels();      // v1.23: the learn buttons and the bindings
     void refreshMidiDevices();    // v1.23: rebuild the device list
@@ -509,6 +575,12 @@ public:
 private:
     void showAudioSettings();
     void closeAudioSettings();
+    void showSettings();
+    void closeSettings();
+    void startOscReceiver();
+    void stopOscReceiver();
+    void applyOscSettings();
+    void updateOscStatus();
     void showClearWarning();
     void closeClearWarning();
     void clearCurrentPage();

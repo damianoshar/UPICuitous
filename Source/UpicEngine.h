@@ -75,6 +75,8 @@ public:
     }
     void setSampleGrainMs(int ms) { sampleGrainMs.store(juce::jlimit(5, 500, ms), std::memory_order_relaxed); }
     void setScrubGrainMs(int ms) { scrubGrainMs.store(juce::jlimit(5, 500, ms), std::memory_order_relaxed); }
+    // v1.30: the LIVE tab's granular grain/hop length (5-500 ms).
+    void setLiveGrainMs(int ms) { liveGrainMs.store(juce::jlimit(5, 500, ms), std::memory_order_relaxed); }
 
     // Host publishes the live input ring each block (audio thread): frames up
     // to writeEnd are valid (absolute count), stereo ringA/ringB (B may be
@@ -363,6 +365,7 @@ private:
     bool scrubPreview = false;              // scrub engine: vocoder maps to the arc, tape speed follows the drag
     std::atomic<int> sampleGrainMs { 40 };  // granular grain size (normal playback)
     std::atomic<int> scrubGrainMs { 40 };   // granular grain size while freeze-holding
+    std::atomic<int> liveGrainMs { 40 };    // granular grain size for LIVE arcs
 
     static float edgeFade(double t, double arcStart, double arcEnd)
     {
@@ -622,8 +625,12 @@ private:
         const int mode = arc.pitchMode >= 0
                             ? arc.pitchMode
                             : livePitchMode.load(std::memory_order_relaxed);
-        // the arc reads the reversed ring when it asks for it
-        const bool useRev = (arc.reversed != (rate < 0.0)) && revActive && revRingA != nullptr && revRingSize >= 64;
+        // the arc reads the reversed ring when it asks for it - or when the
+        // global transport is reversing (v1.30: global reverse forces the
+        // live input backwards too, independent of the per-arc Rev box)
+        const bool globalReverse = rate < 0.0;
+        const bool useRev = (globalReverse || arc.reversed) && revActive
+                            && revRingA != nullptr && revRingSize >= 64;
         const float* ringA = useRev ? revRingA : liveRingA;
         const float* ringB = useRev ? revRingB : liveRingB;
         const int ringSize = useRev ? revRingSize : liveRingSize;
@@ -645,6 +652,7 @@ private:
         }
         auto& ls = it->second;
         ls.setMode((upic::LiveShifter::Mode) mode); // the arc's own mode wins
+        ls.setGrainMs((double) liveGrainMs.load(std::memory_order_relaxed));
 
         for (int n = i0; n <= i1; ++n)
         {

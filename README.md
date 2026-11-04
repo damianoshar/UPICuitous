@@ -21,10 +21,9 @@ pitch arcs over time; each tab is a separate material on the same page.*
 *Focused: the Sample tab. Load a slot, draw arcs on the ratio grid, and
 choose the pitch mode. Arc x is time; arc y is the playback ratio
 (1x = Ref). Granular (stretch) fits the slot to the arc length;
-Varispeed changes the slot's playback length with pitch; Granular
-(no stretch) and Phase vocoder keep the slot's length and shift pitch
-only. The material view shows the waveform and a time bar; drag the
-centre line to scrub.*
+Varispeed and Granular (no stretch) change the slot's playback length
+with pitch; Phase vocoder shifts pitch only. The material view shows the
+waveform and a time bar; drag the centre line to scrub.*
 
 ## Builds in this repo
 
@@ -48,7 +47,8 @@ centre line to scrub.*
 ```
 
 `scripts/build.ps1 -Version 0.28.0` bumps the app and plugin version
-together. `-SkipApp` or `-SkipPlugin` narrows the run.
+together. `-SkipApp` or `-SkipPlugin` narrows the run. See `BUILDING.md`
+for the manual CMake commands, the Android project and troubleshooting.
 
 First run of the standalone: press **Audio** and pick the output device.
 The microphone is opened on demand (Sample tab -> **Mon** / **Capture**, or
@@ -58,7 +58,7 @@ The microphone is opened on demand (Sample tab -> **Mon** / **Capture**, or
 
 **One tab strip - Osc | Sample | Live | PM.** Each tab is a material and its
 own canvas layer, on the same page and timeline. Switching tabs is
-instant and never touches the audio device.
+instant and never touches the audio device (v1.17).
 
 **Score page**
 
@@ -91,9 +91,9 @@ In/Mon/Capture, input gain. `Ref` is the material's base pitch; arc pitch
 sets the playback ratio. Pitch modes: **Varispeed** (default),
 **Granular (stretch)**, **Phase vocoder**, **Granular (no stretch)**. At 1x
 (the arc sits on Ref) the pitch is unchanged; draw above or below Ref to
-transpose. Varispeed changes the slot's playback length with pitch;
-Granular (no stretch) and Phase vocoder keep the slot's length and shift
-pitch only; Granular (stretch) time-stretches the slot to the arc length.
+transpose. Varispeed and Granular (no stretch) change the slot's playback
+length with pitch; Granular (stretch) time-stretches the slot to the arc
+length; Phase vocoder keeps the slot's length and shifts pitch only.
 Sample-speed grid labels Ref x 2^k.
 The **Rev** button plays the selected slot backwards - the material is
 mirrored, the pitch stays the same.
@@ -107,9 +107,12 @@ them with a selection updates the selected PM arcs.
 Pitch modes: **Granular** (default), **Tape**, **Phase vocoder**, with a
 range of 1/16x - 16x (four octaves each way). The grid is the multiply
 ratio grid: **1x** is the input as-is, **2x** an octave up. `Ref` is the
-1x input pitch and retunes the selected live arcs. The **Rev**
+1x input pitch and retunes the selected live arcs. **Grain** sets the
+granular grain size from 5 to 500 ms (default 40 ms). The **Rev**
 button in the material row plays the microphone's last 0.5 / 1 / 2 seconds
-**backwards** (the buffer duration is yours to pick).
+**backwards** (the buffer duration is yours to pick). When the global
+**Rev** toggle is on, every live arc reads the mirrored input ring
+regardless of that arc's Rev box.
 
 **Arcs panel** - the **Arcs** toggle (with the Wave / Env / Hints
 toggles) opens a list of the arcs on the right: grouped OSC / SAMPLE /
@@ -119,11 +122,12 @@ tab; Ctrl/Cmd/Shift-click adds it to a multi-selection. The sample and the
 live rows carry a **Rev** box (that arc's material backwards) and a
 **mode** dropdown (that arc's pitch-shift algorithm).
 
-**MIDI in** - the Audio Settings overlay lists the MIDI inputs (`None`
-when there is none), shows the last message (CC or note, value, channel,
-device) and has a **Learn** row for the master gain and the draw
-intensity: press Learn, move a control, and the parameter follows it.
-The bindings are a controller map - session state, not part of the piece.
+**MIDI in** - the **MIDI + OSC settings** overlay (the toolbar Settings
+button or the menu) lists the MIDI inputs (`None` when there is none),
+shows the last message (CC or note, value, channel, device) and has a
+**Learn** row for the master gain and the draw intensity: press Learn,
+move a control, and the parameter follows it. The bindings are a
+controller map - session state, not part of the piece.
 
 **Transport and IO** - Play/Stop with click-free fades, Loop, page
 sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
@@ -142,7 +146,23 @@ preview; releasing after a drag does not start playback.
 ![Scrub audition](docs/screenshots/upicuitous-scrub-audition.png)
 
 *Focused: scrub audition. The scrub row shapes the preview; the material
-view time bar follows the playhead during playback and while dragging.*
+view time bar follows the playhead while dragging.*
+
+**Phone / MobMuPlat scrub (OSC)** - UPICuitous listens on UDP port 9000 and
+also joins MobMuPlat's default multicast output `224.0.0.1:54321`, so the
+controller works even when the phone cannot save a custom output IP.
+Send a float `/upic/scrub <0..1>` (alias `/upic/scrub/pos`) to move the
+playhead: 0 is the page start and 1 is the page end. The value feeds the
+same seek and scrub-preview path as a canvas drag. Values keep the
+preview alive; 2000 ms after the last message the gesture ends (holding
+freezes the preview), and releasing never starts playback. The status line shows `OSC 9000` (plus
+`MCAST` when the multicast listener is active). A ready-made MobMuPlat
+patch lives in `docs/mobmuplat/`: load `UPICuitous-Scrub.mmp`, then set
+MobMuPlat's Network output address to the computer's LAN IP and the output
+port to 9000 (or leave the defaults). The slider sends values while it is
+dragged. The **MIDI + OSC settings** overlay can change the UDP port,
+turn multicast on or off, and change the multicast group and port; press
+**Apply** to rebind the receivers. These endpoint changes are session-only.
 
 ## VST3 plugin
 
@@ -176,8 +196,14 @@ scripts/             build.ps1, install_plugin.ps1, fix_android.ps1,
                      check_juce.ps1, fetch_pluginval.ps1
 Builds/Android/      Android Studio project (Gradle + CMake)
 Builds/VisualStudio2026/  generated Projucer solution (not committed)
+docs/waves/          design notes per wave (index: docs/waves/README.md)
+docs/android-build.md  what the .jucer owns and what the script owns
 python-upic/         tkinter + numpy prototype
 web-upic/            single-file browser sketch
+FUTURE_IDEAS.md      roadmap: MIDI scrub/reverse, FM/PM, FM8 bridge, DAW sync
+TOOLKITS.md          agent toolkits: what is used and why
+known-issues.yaml    the recurring failures: symptom, cause, fix, prevention
+PROGRESS.md          wave log, features, decisions, test inventory
 ```
 
 ## Requirements
@@ -187,18 +213,20 @@ web-upic/            single-file browser sketch
 - **JUCE 8.0.6** in `JUCE/` (the app CMakeLists also fetches it if
   missing; `python Tools/fetch_juce.py` downloads it without git).
 - MinGW is not supported by JUCE 8 - use MSVC.
-- Android: JDK 17, SDK 35, NDK 28.1.13356709, CMake 3.22.1.
+- Android: JDK 17, SDK 35, NDK 28.1.13356709, CMake 3.22.1 (see
+  `BUILDING.md`).
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 337 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 353 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
-reverse read, the live reverse, the arc list, the MIDI input, the
-envelope points, the multi-selection / toolbar edits, the
-wavetable fork / Stop rewind / Clear warning checks, the
-granular-vs-varispeed regression and the phase-vocoder scrub preview)
-and writes the log to
+reverse read, the live reverse, the live grain size, the forced live
+reverse under the global Rev toggle, the MIDI + OSC settings overlay,
+the arc list, the MIDI input, the envelope points, the v1.26
+multi-selection / toolbar edits, the v1.27
+wavetable fork / Stop rewind / Clear warning checks and the
+granular-vs-varispeed regression) and writes the log to
 `%TEMP%\upic_selftest.txt`. The build script also runs the 15-check
 plugin smoke test and pluginval at strictness 5.
 
@@ -209,4 +237,6 @@ log pitch, horizontal = time; waveform and envelope drawn separately and
 assigned to arcs. This clone keeps that triptych: **Page / Wavetable /
 Envelope**, and adds samples and live input as further materials.
 
-
+Next: see `FUTURE_IDEAS.md` and the Kanso board. The signed playhead,
+MIDI scrub, live reverse and PM voice shipped in v1.25; the FM8 bridge,
+the full FM engine and DAW sync are still flagged as future ideas.
