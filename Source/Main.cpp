@@ -156,7 +156,7 @@ public:
 
             double peakMode = 0.0; // tracked by measurePitch for the v1.10 modes
             auto renderArc = [&](double arcFreq, double ref, juce::AudioBuffer<float>& buf,
-                                 int pitchMode = 0, int sampleId = 1) {
+                                 int pitchMode = 0, int sampleId = 1, bool scrub = false) {
                 upic::Page pg; pg.durationSec = 4.0;
                 upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = sampleId; a.refFreq = ref;
                 a.intensity = 1.0f;
@@ -171,13 +171,14 @@ public:
                 UpicEngine eng;
                 eng.prepare(44100.0, 8192);
                 eng.setSamplePitchMode(pitchMode);
+                eng.setScrubPreview(scrub);
                 eng.renderPageOffline(pg, waves, envs, slots, buf, 44100.0, 1.0f);
             };
             auto measurePitch = [&](double arcFreq, double ref, int pitchMode = 0,
-                                    int sampleId = 1) -> double
+                                    int sampleId = 1, bool scrub = false) -> double
             {
                 juce::AudioBuffer<float> buf;
-                renderArc(arcFreq, ref, buf, pitchMode, sampleId);
+                renderArc(arcFreq, ref, buf, pitchMode, sampleId, scrub);
 
                 // Schmitt-trigger zero crossings over [1s, 2s] => Hz
                 const int s0 = 44100, s1 = 88200;
@@ -241,20 +242,71 @@ public:
             check(std::abs(q1 - 220.0) < 10.0, "sample vocoder r=1 -> 220 Hz", juce::String(q1, 1) + " Hz");
             check(std::abs(q2 - 440.0) < 20.0, "sample vocoder r=2 -> 440 Hz", juce::String(q2, 1) + " Hz");
             check(std::abs(q05 - 110.0) < 8.0, "sample vocoder r=0.5 -> 110 Hz", juce::String(q05, 1) + " Hz");
+            const double qs = measurePitch(220.0, 220.0, 2, 1, true);
+            check(std::abs(qs - 220.0) < 15.0, "sample vocoder scrub r=1 -> 220 Hz",
+                  juce::String(qs, 1) + " Hz");
             check(peakMode > 0.1, "sample pitch modes output signal", juce::String(peakMode, 3));
 
-            // mode 3: granular with linked pitch/speed is a continuous
-            // tape-speed read, so it must match varispeed at a fixed ratio.
-            juce::AudioBuffer<float> tape2, grainNoStretch;
-            renderArc(440.0, 220.0, tape2, 0);
-            renderArc(440.0, 220.0, grainNoStretch, 3);
+            // A short scrub block must be audible immediately. A fresh
+            // phase-vocoder voice needs two analysis windows before its first
+            // output, longer than a scrub preview block; the engine pre-rolls
+            // scrub voices so dragging is not silent.
+            auto scrubBlockPeak = [&](double t) {
+                upic::Page pg; pg.durationSec = 4.0;
+                upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = 1; a.refFreq = 220.0;
+                a.intensity = 1.0f;
+                a.points = { { 0.0, 220.0 }, { 4.0, 220.0 } };
+                pg.arcs.push_back(a);
+                upic::Envelope flat; flat.presetFlat();
+                std::vector<upic::Envelope> envs { flat };
+                auto waves = upic::defaultWaveforms();
+                UpicEngine eng; eng.prepare(44100.0, 8192);
+                eng.setSamplePitchMode(2);
+                eng.setScrubPreview(true);
+                const int block = 512;
+                juce::AudioBuffer<float> b(2, block); b.clear();
+                eng.render(pg, t, waves, envs, slots, b.getWritePointer(0), b.getWritePointer(1),
+                           block, 1.0f, 1.0);
+                float pk = 0.0f;
+                for (int i = 0; i < block; ++i)
+                    pk = juce::jmax(pk, std::abs(b.getSample(0, i)));
+                return pk;
+            };
+            const float scrubPk = scrubBlockPeak(0.5);
+            check(scrubPk > 0.02f, "phase vocoder scrub block outputs signal",
+                  juce::String(scrubPk, 4));
+
+            // mode 3: granular with the slot's own timeline keeps the slot
+            // length (unlike tape) while still transposing with the arc.
+            const double n2 = measurePitch(200.0, 100.0, 3, 2);
+            check(close(n2, 200.0),
+                  "sample granular no-stretch r=2 -> 200 Hz",
+                  juce::String(n2, 1) + " Hz");
+
+            // at ratio 1 the grain and tape reads are identical.
+            juce::AudioBuffer<float> tape1, grainNoStretch1;
+            renderArc(220.0, 220.0, tape1, 0);
+            renderArc(220.0, 220.0, grainNoStretch1, 3);
             double noStretchDiff = 0.0;
             for (int i = 44100 / 2; i < 44100 * 7 / 2; ++i)
                 noStretchDiff = juce::jmax(noStretchDiff, (double) std::abs(
-                    tape2.getSample(0, i) - grainNoStretch.getSample(0, i)));
+                    tape1.getSample(0, i) - grainNoStretch1.getSample(0, i)));
             check(noStretchDiff < 1e-3,
-                  "granular no-stretch matches tape at ratio 2",
+                  "granular no-stretch matches tape at ratio 1",
                   "max diff " + juce::String(noStretchDiff, 6));
+
+            // at ratio 2 the no-stretch mode must stay on the slot's own
+            // timeline: at 0.25 s it is still in the first (negative) half,
+            // while tape has already read 0.5 s and crossed the step.
+            juce::AudioBuffer<float> stepNoStretch, stepTape2;
+            renderArc(200.0, 100.0, stepNoStretch, 3, 3);
+            renderArc(200.0, 100.0, stepTape2, 0, 3);
+            const float nsProbe = stepNoStretch.getSample(0, 44100 / 4);
+            const float tapeProbe2 = stepTape2.getSample(0, 44100 / 4);
+            check(nsProbe < -0.2f && tapeProbe2 > 0.2f,
+                  "granular no-stretch keeps the slot length at ratio 2",
+                  "no-stretch " + juce::String(nsProbe, 3)
+                      + " tape " + juce::String(tapeProbe2, 3));
 
             // v1.28: granular (stretch) maps the whole slot onto the arc in
             // normal playback; varispeed keeps the slot's own length.
@@ -267,6 +319,19 @@ public:
                   "granular stretch maps the slot onto the arc in playback",
                   "granular " + juce::String(granProbe, 3)
                       + " tape " + juce::String(tapeProbe, 3));
+
+            // the same mode-1 mapping must be used by the scrub preview: the
+            // two renders have to be sample-identical at the normal rate.
+            juce::AudioBuffer<float> stepGranPlay, stepGranScrub;
+            renderArc(100.0, 100.0, stepGranPlay, 1, 3, false);
+            renderArc(100.0, 100.0, stepGranScrub, 1, 3, true);
+            double playScrubDiff = 0.0;
+            for (int i = 44100 / 2; i < 44100 * 7 / 2; ++i)
+                playScrubDiff = juce::jmax(playScrubDiff, (double) std::abs(
+                    stepGranPlay.getSample(0, i) - stepGranScrub.getSample(0, i)));
+            check(playScrubDiff < 1e-6,
+                  "granular stretch playback matches scrub",
+                  "max diff " + juce::String(playScrubDiff, 6));
         }
 
         // 6. seamless loop preprocessing (reads may cross the seam)
@@ -2368,6 +2433,91 @@ public:
                 check(hz > 600.0 && hz < 1200.0,
                       "page switch: the new page is what is sounding",
                       juce::String(hz, 0) + " Hz (want ~880)");
+            }
+        }
+
+        // 20a. v1.28: the phase-vocoder scrub preview. A drag must be
+        //      audible on its first block and must stay continuous between
+        //      mouse moves; the engine pre-rolls the vocoder and MainComponent
+        //      keeps its stream alive while the drag continues.
+        {
+            MainComponent mc(true);
+            mc.setSize(1280, 800);
+            mc.prepareToPlay(512, 44100.0);
+
+            upic::SampleSlot slot;
+            slot.id = 1; slot.name = "scrub sine"; slot.sampleRate = 44100.0;
+            juce::AudioBuffer<float> sb(1, 44100);
+            for (int i = 0; i < sb.getNumSamples(); ++i)
+                sb.setSample(0, i, 0.8f * (float) std::sin(
+                    2.0 * juce::MathConstants<double>::pi * 220.0 * i / 44100.0));
+            slot.data = std::make_shared<const juce::AudioBuffer<float>>(std::move(sb));
+
+            auto* root = new juce::DynamicObject();
+            juce::Array<juce::var> samples;
+            samples.add(slot.toVar());
+            root->setProperty("samples", samples);
+
+            upic::Page pg; pg.durationSec = 4.0;
+            upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = 1; a.refFreq = 220.0;
+            a.intensity = 1.0f;
+            a.points = { { 0.0, 220.0 }, { 4.0, 220.0 } };
+            pg.arcs.push_back(a);
+            juce::Array<juce::var> pages;
+            pages.add(pg.toVar());
+            root->setProperty("pages", pages);
+            mc.loadFromVar(juce::var(root));
+
+            std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+                [&findByName](juce::Component& c, const juce::String& n) -> juce::Component* {
+                    if (c.getName() == n) return &c;
+                    for (int i = 0; i < c.getNumChildComponents(); ++i)
+                        if (auto* r = findByName(*c.getChildComponent(i), n)) return r;
+                    return nullptr;
+                };
+            auto* sp = dynamic_cast<juce::ComboBox*>(findByName(mc, "samplePitchBox"));
+            check(sp != nullptr, "scrub preview: sample pitch selector present");
+            if (sp != nullptr)
+                sp->setSelectedId(3, juce::sendNotification); // phase vocoder
+
+            std::function<ScoreEditor*(juce::Component&)> findScore =
+                [&findScore](juce::Component& c) -> ScoreEditor* {
+                    if (auto* s = dynamic_cast<ScoreEditor*>(&c)) return s;
+                    for (int i = 0; i < c.getNumChildComponents(); ++i)
+                        if (auto* r = findScore(*c.getChildComponent(i))) return r;
+                    return nullptr;
+                };
+            ScoreEditor* sc = findScore(mc);
+            check(sc != nullptr, "scrub preview: score editor present");
+            if (sc != nullptr)
+            {
+                juce::AudioBuffer<float> out(2, 512);
+                juce::AudioSourceChannelInfo info(&out, 0, out.getNumSamples());
+                auto blockPeak = [&]() {
+                    out.clear();
+                    mc.getNextAudioBlock(info);
+                    float p = 0.0f;
+                    for (int c = 0; c < out.getNumChannels(); ++c)
+                        for (int i = 0; i < out.getNumSamples(); ++i)
+                            p = juce::jmax(p, std::abs(out.getSample(c, i)));
+                    return p;
+                };
+
+                sc->scrubTo(sc->timeToX(0.5));
+                const float first = blockPeak();
+                check(first > 0.01f,
+                      "scrub preview: phase vocoder is audible on the first block",
+                      juce::String(first, 4));
+
+                float minDrag = 1.0f;
+                for (int step = 1; step <= 8; ++step)
+                {
+                    sc->scrubTo(sc->timeToX(0.5 + 0.04 * step));
+                    minDrag = juce::jmin(minDrag, blockPeak());
+                }
+                check(minDrag > 0.005f,
+                      "scrub preview: continuous vocoder drag stays audible",
+                      juce::String(minDrag, 4));
             }
         }
 
