@@ -30,7 +30,7 @@ endif()
 juce_add_gui_app(UPICuitous
     VERSION ${PROJECT_VERSION}
     COMPANY_NAME "UPICuitous"
-    # NB: no hyphens — this doubles as the Android applicationId namespace
+    # NB: no hyphens ï¿½ this doubles as the Android applicationId namespace
     BUNDLE_ID "org.upicuitous"
     PRODUCT_NAME "UPICuitous"
     ICON_BIG ""
@@ -92,6 +92,7 @@ target_link_libraries(UPICuitous PRIVATE
     juce::juce_audio_devices
     juce::juce_audio_basics
     juce::juce_dsp
+    juce::juce_osc
     juce::juce_graphics
     juce::juce_data_structures
     juce::juce_events
