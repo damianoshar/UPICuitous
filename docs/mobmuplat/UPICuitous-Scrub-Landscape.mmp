@@ -1,0 +1,47 @@
+{
+  "pdFile": "UPICuitous-Scrub-Landscape.pd",
+  "port": 54321,
+  "isOrientationLandscape": true,
+  "startPageIndex": 0,
+  "pageCount": 1,
+  "canvasType": "iPhone3p5Inch",
+  "isPageScrollShortEnd": false,
+  "version": 1.55,
+  "gui": [
+    {
+      "address": "/title",
+      "highlightColor": [1, 0, 0, 1],
+      "color": [0.92, 1, 0.95, 1],
+      "frame": [10, 10, 460, 30],
+      "textFontFamily": "Default",
+      "textFont": "",
+      "textSize": 20,
+      "text": "UPICuitous scrub (landscape)",
+      "class": "MMPLabel",
+      "androidFont": "Roboto-Regular"
+    },
+    {
+      "address": "/upic/scrub",
+      "highlightColor": [0.43, 0.92, 1, 1],
+      "isHorizontal": true,
+      "frame": [20, 110, 440, 60],
+      "color": [0.92, 1, 0.95, 1],
+      "range": 2,
+      "class": "MMPSlider"
+    },
+    {
+      "address": "/footer",
+      "highlightColor": [1, 0, 0, 1],
+      "color": [0.70, 0.74, 0.80, 1],
+      "frame": [10, 210, 460, 60],
+      "textFontFamily": "Default",
+      "textFont": "",
+      "textSize": 12,
+      "text": "0 = page start, 1 = page end. Drag for finer steps on a small screen.",
+      "class": "MMPLabel",
+      "androidFont": "Roboto-Regular"
+    }
+  ],
+  "wearGui": [],
+  "backgroundColor": [0.14, 0.12, 0.12, 1]
+}

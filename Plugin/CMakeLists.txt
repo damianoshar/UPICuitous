@@ -55,6 +55,7 @@ target_link_libraries(UPICuitousPlugin
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp
+        juce::juce_osc
         juce::juce_gui_extra
     PUBLIC
         juce::juce_recommended_config_flags
@@ -88,6 +89,7 @@ target_link_libraries(UPICuitousPluginSmokeTest
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp
+        juce::juce_osc
         juce::juce_gui_extra
     PUBLIC
         juce::juce_recommended_config_flags

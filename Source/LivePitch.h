@@ -168,9 +168,15 @@ public:
     void prepare(double sampleRate_)
     {
         sampleRate = sampleRate_ > 0.0 ? sampleRate_ : 44100.0;
-        core.prepare(sampleRate * kHopSec, 1.0);
+        core.prepare(sampleRate * hopSec, 1.0);
         lag = sampleRate * kLagSec;
     }
+
+    // v1.30: the grain/hop length is a control (5-500 ms), matching the
+    // SAMPLE tab's Granular setting. GrainCore::setHop keeps the crossfade
+    // position, so moving the slider does not click.
+    void setGrainMs(double ms) { hopSec = juce::jlimit(0.005, 0.5, ms / 1000.0); }
+    double getGrainMs() const { return hopSec * 1000.0; }
 
     // Anchor the current grain kLagSec behind the write head (voice start).
     void reset(std::int64_t writeEnd) { core.reset((double) writeEnd - lag); }
@@ -193,8 +199,8 @@ public:
         // one grain of history, so the latency does not grow with the
         // shift. Up to 3.25x the old fixed grain is kept, so the sound of
         // the usual range is unchanged.
-        const double fixedHop = sampleRate * kHopSec;
-        const double srcHop   = sampleRate * kSrcSec;
+        const double fixedHop = sampleRate * hopSec;
+        const double srcHop   = sampleRate * hopSec;
         core.setHop(fixedHop * (2.0 * ratio - 1.0) > lag
                         ? srcHop / std::max(1.0, ratio) : fixedHop);
 
@@ -207,6 +213,7 @@ public:
 
 private:
     double sampleRate = 44100.0, lag = 9702.0;
+    double hopSec = kHopSec;
     GrainCore core;
 };
 
@@ -590,6 +597,7 @@ public:
     }
 
     void setMode(Mode m) { mode = m; }
+    void setGrainMs(double ms) { grain.setGrainMs(ms); }
 
     float next(const float* ringA, const float* ringB, int size,
                std::int64_t writeEnd, double ratio)

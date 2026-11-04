@@ -59,6 +59,31 @@ target_compile_definitions(UPICuitous PRIVATE
     JUCE_STRICT_REFCOUNTEDPOINTER=1
 )
 
+# UPIC-58: ASIO in the stand-alone app. JUCE needs Steinberg's ASIO SDK
+# headers (asio.h, iasiodrv.h, ...) at build time; they are not part of the
+# JUCE zip. Put them in the path below (or point UPIC_ASIO_SDK_PATH at an
+# existing SDK). If the headers are missing the app still builds - it simply
+# lists the other Windows device types. The plugin and Android builds never
+# enable ASIO.
+option(UPIC_ENABLE_ASIO "Build the Windows stand-alone with ASIO support" ON)
+set(UPIC_ASIO_SDK_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/JUCE/modules/juce_audio_devices/native/asio"
+    CACHE PATH "Directory containing the Steinberg ASIO SDK headers")
+
+if (WIN32 AND UPIC_ENABLE_ASIO)
+    if (EXISTS "${UPIC_ASIO_SDK_PATH}/asio.h"
+        AND EXISTS "${UPIC_ASIO_SDK_PATH}/iasiodrv.h")
+        target_compile_definitions(UPICuitous PRIVATE JUCE_ASIO=1)
+        target_include_directories(UPICuitous PRIVATE "${UPIC_ASIO_SDK_PATH}")
+        message(STATUS "UPICuitous: ASIO enabled (${UPIC_ASIO_SDK_PATH})")
+    else()
+        message(WARNING
+            "UPICuitous: ASIO SDK not found at ${UPIC_ASIO_SDK_PATH}. "
+            "ASIO is disabled for this build; set UPIC_ASIO_SDK_PATH to the "
+            "Steinberg ASIO SDK headers to enable it.")
+    endif()
+endif()
+
 target_link_libraries(UPICuitous PRIVATE
     juce::juce_gui_extra
     juce::juce_audio_utils
@@ -67,6 +92,7 @@ target_link_libraries(UPICuitous PRIVATE
     juce::juce_audio_devices
     juce::juce_audio_basics
     juce::juce_dsp
+    juce::juce_osc
     juce::juce_graphics
     juce::juce_data_structures
     juce::juce_events

@@ -31,12 +31,14 @@ upic_juce_wrapper(include_juce_graphics_Harfbuzz.cpp juce_graphics/juce_graphics
 upic_juce_wrapper(include_juce_graphics_Sheenbidi.c juce_graphics/juce_graphics_Sheenbidi.c)
 upic_juce_wrapper(include_juce_gui_basics.cpp juce_gui_basics/juce_gui_basics.cpp)
 upic_juce_wrapper(include_juce_gui_extra.cpp juce_gui_extra/juce_gui_extra.cpp)
+upic_juce_wrapper(include_juce_osc.cpp juce_osc/juce_osc.cpp)
 
 set(UPIC_JUCE_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/juce_include")
 file(MAKE_DIRECTORY "${UPIC_JUCE_INCLUDE_DIR}")
 file(WRITE "${UPIC_JUCE_INCLUDE_DIR}/JuceHeader.h" [=[
 #pragma once
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <juce_osc/juce_osc.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_graphics/juce_graphics.h>
 #include <juce_events/juce_events.h>
@@ -73,9 +75,9 @@ include_directories( AFTER
 enable_language(ASM)
 
 if(JUCE_BUILD_CONFIGURATION MATCHES "DEBUG")
-    add_definitions([[-DJUCE_PROJUCER_VERSION=0x8000c]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_devices=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_formats=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_utils=1]] [[-DJUCE_MODULE_AVAILABLE_juce_core=1]] [[-DJUCE_MODULE_AVAILABLE_juce_data_structures=1]] [[-DJUCE_MODULE_AVAILABLE_juce_dsp=1]] [[-DJUCE_MODULE_AVAILABLE_juce_events=1]] [[-DJUCE_MODULE_AVAILABLE_juce_graphics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_extra=1]] [[-DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1]] [[-DJUCE_STANDALONE_APPLICATION=1]] [[-DJUCE_WEB_BROWSER=0]] [[-DJUCE_USE_CURL=0]] [[-DJUCE_VST3_CAN_REPLACE_VST2=0]] [[-DJUCE_DISPLAY_SPLASH_SCREEN=0]] [[-DJUCE_REPORT_APP_USAGE=0]] [[-DJUCE_STRICT_REFCOUNTEDPOINTER=1]] [[-DJUCE_CORE_INCLUDE_JNI_HELPERS=1]] [[-DJUCER_ANDROIDSTUDIO_7F0E4A25=1]] [[-DJUCE_APP_VERSION=0.28.0]] [[-DJUCE_APP_VERSION_HEX=0x1C00]] [[-DDEBUG=1]] [[-D_DEBUG=1]])
+    add_definitions([[-DJUCE_PROJUCER_VERSION=0x8000c]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_devices=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_formats=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_utils=1]] [[-DJUCE_MODULE_AVAILABLE_juce_core=1]] [[-DJUCE_MODULE_AVAILABLE_juce_data_structures=1]] [[-DJUCE_MODULE_AVAILABLE_juce_dsp=1]] [[-DJUCE_MODULE_AVAILABLE_juce_events=1]] [[-DJUCE_MODULE_AVAILABLE_juce_graphics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_extra=1]] [[-DJUCE_MODULE_AVAILABLE_juce_osc=1]] [[-DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1]] [[-DJUCE_STANDALONE_APPLICATION=1]] [[-DJUCE_WEB_BROWSER=0]] [[-DJUCE_USE_CURL=0]] [[-DJUCE_VST3_CAN_REPLACE_VST2=0]] [[-DJUCE_DISPLAY_SPLASH_SCREEN=0]] [[-DJUCE_REPORT_APP_USAGE=0]] [[-DJUCE_STRICT_REFCOUNTEDPOINTER=1]] [[-DJUCE_CORE_INCLUDE_JNI_HELPERS=1]] [[-DJUCER_ANDROIDSTUDIO_7F0E4A25=1]] [[-DJUCE_APP_VERSION=0.28.0]] [[-DJUCE_APP_VERSION_HEX=0x1C00]] [[-DDEBUG=1]] [[-D_DEBUG=1]])
 elseif(JUCE_BUILD_CONFIGURATION MATCHES "RELEASE")
-    add_definitions([[-DJUCE_PROJUCER_VERSION=0x8000c]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_devices=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_formats=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_utils=1]] [[-DJUCE_MODULE_AVAILABLE_juce_core=1]] [[-DJUCE_MODULE_AVAILABLE_juce_data_structures=1]] [[-DJUCE_MODULE_AVAILABLE_juce_dsp=1]] [[-DJUCE_MODULE_AVAILABLE_juce_events=1]] [[-DJUCE_MODULE_AVAILABLE_juce_graphics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_extra=1]] [[-DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1]] [[-DJUCE_STANDALONE_APPLICATION=1]] [[-DJUCE_WEB_BROWSER=0]] [[-DJUCE_USE_CURL=0]] [[-DJUCE_VST3_CAN_REPLACE_VST2=0]] [[-DJUCE_DISPLAY_SPLASH_SCREEN=0]] [[-DJUCE_REPORT_APP_USAGE=0]] [[-DJUCE_STRICT_REFCOUNTEDPOINTER=1]] [[-DJUCE_CORE_INCLUDE_JNI_HELPERS=1]] [[-DJUCER_ANDROIDSTUDIO_7F0E4A25=1]] [[-DJUCE_APP_VERSION=0.28.0]] [[-DJUCE_APP_VERSION_HEX=0x1C00]] [[-DNDEBUG=1]])
+    add_definitions([[-DJUCE_PROJUCER_VERSION=0x8000c]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_devices=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_formats=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_utils=1]] [[-DJUCE_MODULE_AVAILABLE_juce_core=1]] [[-DJUCE_MODULE_AVAILABLE_juce_data_structures=1]] [[-DJUCE_MODULE_AVAILABLE_juce_dsp=1]] [[-DJUCE_MODULE_AVAILABLE_juce_events=1]] [[-DJUCE_MODULE_AVAILABLE_juce_graphics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_extra=1]] [[-DJUCE_MODULE_AVAILABLE_juce_osc=1]] [[-DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1]] [[-DJUCE_STANDALONE_APPLICATION=1]] [[-DJUCE_WEB_BROWSER=0]] [[-DJUCE_USE_CURL=0]] [[-DJUCE_VST3_CAN_REPLACE_VST2=0]] [[-DJUCE_DISPLAY_SPLASH_SCREEN=0]] [[-DJUCE_REPORT_APP_USAGE=0]] [[-DJUCE_STRICT_REFCOUNTEDPOINTER=1]] [[-DJUCE_CORE_INCLUDE_JNI_HELPERS=1]] [[-DJUCER_ANDROIDSTUDIO_7F0E4A25=1]] [[-DJUCE_APP_VERSION=0.28.0]] [[-DJUCE_APP_VERSION_HEX=0x1C00]] [[-DNDEBUG=1]])
 else()
     message( FATAL_ERROR "No matching build-configuration found." )
 endif()
@@ -2432,6 +2434,7 @@ add_library( ${BINARY_NAME}
     "${UPIC_JUCE_WRAPPER_DIR}/include_juce_graphics_Sheenbidi.c"
     "${UPIC_JUCE_WRAPPER_DIR}/include_juce_gui_basics.cpp"
     "${UPIC_JUCE_WRAPPER_DIR}/include_juce_gui_extra.cpp"
+    "${UPIC_JUCE_WRAPPER_DIR}/include_juce_osc.cpp"
     "${UPIC_JUCE_INCLUDE_DIR}/JuceHeader.h"
 )
 

@@ -23,6 +23,7 @@
       <FILE id="mSnp12" name="ModelSnapshot.h" compile="0" resource="0" file="Source/ModelSnapshot.h"/>
       <FILE id="aLsp13" name="ArcListPanel.h" compile="0" resource="0" file="Source/ArcListPanel.h"/>
     <FILE id="mHub22" name="MidiHub.h" compile="0" resource="0" file="Source/MidiHub.h"/>
+    <FILE id="aSio23" name="AsioConfig.h" compile="0" resource="0" file="Source/AsioConfig.h"/>
     </GROUP>
   </MAINGROUP>
   <MODULES>
@@ -38,12 +39,16 @@
     <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="1" useGlobalPath="0"/>
     <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="1" useGlobalPath="0"/>
     <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="1" useGlobalPath="0"/>
+    <MODULE id="juce_osc" showAllCode="1" useLocalCopy="1" useGlobalPath="0"/>
   </MODULES>
   <EXPORTFORMATS>
-    <VS2022 targetFolder="Builds/VisualStudio2022">
+    <VS2022 targetFolder="Builds/VisualStudio2022"
+             extraCompilerFlags="/FI&quot;$(ProjectDir)..\..\Source\AsioConfig.h&quot;">
       <CONFIGURATIONS>
-        <CONFIGURATION isDebug="1" name="Debug" targetName="UPICuitous"/>
-        <CONFIGURATION isDebug="0" name="Release" targetName="UPICuitous"/>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="UPICuitous"
+                       headerPath="..\..\JUCE\modules\juce_audio_devices\native\asio"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="UPICuitous"
+                       headerPath="..\..\JUCE\modules\juce_audio_devices\native\asio"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
         <MODULEPATH id="juce_audio_basics" path="JUCE/modules"/>
@@ -58,6 +63,7 @@
         <MODULEPATH id="juce_graphics" path="JUCE/modules"/>
         <MODULEPATH id="juce_gui_basics" path="JUCE/modules"/>
         <MODULEPATH id="juce_gui_extra" path="JUCE/modules"/>
+        <MODULEPATH id="juce_osc" path="JUCE/modules"/>
       </MODULEPATHS>
     </VS2022>
     <XCODE_MAC targetFolder="Builds/MacOSX" microphonePermissionNeeded="1">
@@ -78,6 +84,7 @@
         <MODULEPATH id="juce_graphics" path="JUCE/modules"/>
         <MODULEPATH id="juce_gui_basics" path="JUCE/modules"/>
         <MODULEPATH id="juce_gui_extra" path="JUCE/modules"/>
+        <MODULEPATH id="juce_osc" path="JUCE/modules"/>
       </MODULEPATHS>
     </XCODE_MAC>
     <LINUX_MAKE targetFolder="Builds/LinuxMakefile">
@@ -98,12 +105,16 @@
         <MODULEPATH id="juce_graphics" path="JUCE/modules"/>
         <MODULEPATH id="juce_gui_basics" path="JUCE/modules"/>
         <MODULEPATH id="juce_gui_extra" path="JUCE/modules"/>
+        <MODULEPATH id="juce_osc" path="JUCE/modules"/>
       </MODULEPATHS>
     </LINUX_MAKE>
-    <VS2026 targetFolder="Builds/VisualStudio2026">
+    <VS2026 targetFolder="Builds/VisualStudio2026"
+             extraCompilerFlags="/FI&quot;$(ProjectDir)..\..\Source\AsioConfig.h&quot;">
       <CONFIGURATIONS>
-        <CONFIGURATION isDebug="1" name="Debug"/>
-        <CONFIGURATION isDebug="0" name="Release"/>
+        <CONFIGURATION isDebug="1" name="Debug"
+                       headerPath="..\..\JUCE\modules\juce_audio_devices\native\asio"/>
+        <CONFIGURATION isDebug="0" name="Release"
+                       headerPath="..\..\JUCE\modules\juce_audio_devices\native\asio"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
         <MODULEPATH id="juce_audio_basics" path="JUCE/modules"/>
@@ -118,6 +129,7 @@
         <MODULEPATH id="juce_graphics" path="JUCE/modules"/>
         <MODULEPATH id="juce_gui_basics" path="JUCE/modules"/>
         <MODULEPATH id="juce_gui_extra" path="JUCE/modules"/>
+        <MODULEPATH id="juce_osc" path="JUCE/modules"/>
       </MODULEPATHS>
     </VS2026>
     <ANDROIDSTUDIO targetFolder="Builds/Android" androidTheme="@android:style/Theme.NoTitleBar"
@@ -144,6 +156,7 @@
         <MODULEPATH id="juce_graphics" path="JUCE/modules"/>
         <MODULEPATH id="juce_gui_basics" path="JUCE/modules"/>
         <MODULEPATH id="juce_gui_extra" path="JUCE/modules"/>
+        <MODULEPATH id="juce_osc" path="JUCE/modules"/>
       </MODULEPATHS>
     </ANDROIDSTUDIO>
   </EXPORTFORMATS>
