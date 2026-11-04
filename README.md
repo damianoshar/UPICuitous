@@ -107,9 +107,12 @@ them with a selection updates the selected PM arcs.
 Pitch modes: **Granular** (default), **Tape**, **Phase vocoder**, with a
 range of 1/16x - 16x (four octaves each way). The grid is the multiply
 ratio grid: **1x** is the input as-is, **2x** an octave up. `Ref` is the
-1x input pitch and retunes the selected live arcs. The **Rev**
+1x input pitch and retunes the selected live arcs. **Grain** sets the
+granular grain size from 5 to 500 ms (default 40 ms). The **Rev**
 button in the material row plays the microphone's last 0.5 / 1 / 2 seconds
-**backwards** (the buffer duration is yours to pick).
+**backwards** (the buffer duration is yours to pick). When the global
+**Rev** toggle is on, every live arc reads the mirrored input ring
+regardless of that arc's Rev box.
 
 **Arcs panel** - the **Arcs** toggle (with the Wave / Env / Hints
 toggles) opens a list of the arcs on the right: grouped OSC / SAMPLE /
@@ -119,11 +122,12 @@ tab; Ctrl/Cmd/Shift-click adds it to a multi-selection. The sample and the
 live rows carry a **Rev** box (that arc's material backwards) and a
 **mode** dropdown (that arc's pitch-shift algorithm).
 
-**MIDI in** - the Audio Settings overlay lists the MIDI inputs (`None`
-when there is none), shows the last message (CC or note, value, channel,
-device) and has a **Learn** row for the master gain and the draw
-intensity: press Learn, move a control, and the parameter follows it.
-The bindings are a controller map - session state, not part of the piece.
+**MIDI in** - the **MIDI + OSC settings** overlay (the toolbar Settings
+button or the menu) lists the MIDI inputs (`None` when there is none),
+shows the last message (CC or note, value, channel, device) and has a
+**Learn** row for the master gain and the draw intensity: press Learn,
+move a control, and the parameter follows it. The bindings are a
+controller map - session state, not part of the piece.
 
 **Transport and IO** - Play/Stop with click-free fades, Loop, page
 sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
@@ -156,7 +160,9 @@ freezes the preview), and releasing never starts playback. The status line shows
 patch lives in `docs/mobmuplat/`: load `UPICuitous-Scrub.mmp`, then set
 MobMuPlat's Network output address to the computer's LAN IP and the output
 port to 9000 (or leave the defaults). The slider sends values while it is
-dragged.
+dragged. The **MIDI + OSC settings** overlay can change the UDP port,
+turn multicast on or off, and change the multicast group and port; press
+**Apply** to rebind the receivers. These endpoint changes are session-only.
 
 ## VST3 plugin
 
@@ -212,11 +218,13 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 323 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 353 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
-reverse read, the live reverse, the arc list, the MIDI input, the
-envelope points, the v1.26 multi-selection / toolbar edits, the v1.27
+reverse read, the live reverse, the live grain size, the forced live
+reverse under the global Rev toggle, the MIDI + OSC settings overlay,
+the arc list, the MIDI input, the envelope points, the v1.26
+multi-selection / toolbar edits, the v1.27
 wavetable fork / Stop rewind / Clear warning checks and the
 granular-vs-varispeed regression) and writes the log to
 `%TEMP%\upic_selftest.txt`. The build script also runs the 15-check

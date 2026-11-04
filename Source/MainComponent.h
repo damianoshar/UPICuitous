@@ -62,6 +62,11 @@ public:
 
     // v1.29: the OSC scrub receiver (phone/MobMuPlat).
     bool oscIsListening() const { return oscListening || multicastListening; }
+    int oscPortForTest() const { return oscPort; }
+    int oscMulticastPortForTest() const { return oscMulticastPort; }
+    juce::String oscMulticastGroupForTest() const { return oscMulticastGroup; }
+    bool settingsVisibleForTest() const { return settingsOverlay.isVisible(); }
+    bool oscEnabledForTest() const { return oscEnabled; }
     double pageDurationForTest() const { return curPage().durationSec; }
     double playheadForTest() const { return playheadSec; }
     bool externalScrubActiveForTest() const { return externalScrubActive; }
@@ -127,6 +132,7 @@ private:
     int scrubTailMs = 30;
     int scrubGrainMs = 40;                 // freeze-hold grain size
     int sampleGrainMs = 40;                // granular playback grain size
+    int liveGrainMs = 40;                  // v1.30: granular grain size for LIVE arcs
     bool loopPage = true;
     std::atomic<float> masterGain { 0.8f };
 
@@ -265,6 +271,7 @@ private:
     juce::TextButton clearBtn{ "Clear" };
     juce::TextButton menuBtn{ "File" };
     juce::TextButton audioBtn{ "Audio" };
+    juce::TextButton settingsBtn{ "Settings" };
     juce::ToggleButton loopBtn{ "Loop" }, seqBtn{ "Seq" }, revPlayBtn{ "Rev" }, pressBtn{ "Pressure" }, scrubBtn{ "Scrub" };
     // scrub audition controls
     juce::Label scrubLenLab{ {}, "Scrub len" }, scrubCrossLab{ {}, "Crossfade" }, scrubTailLab{ {}, "Release tail" };
@@ -300,6 +307,7 @@ private:
     {
         static constexpr int titleH = 28;
         std::function<void()> onDismiss;
+        juce::String title { "Audio Settings" };
 
         juce::Rectangle<int> cardRect() const
         {
@@ -317,7 +325,7 @@ private:
             g.drawRoundedRectangle(card.toFloat().reduced(0.5f), 6.0f, 1.0f);
             g.setFont(juce::Font(juce::FontOptions(14.0f, juce::Font::bold)));
             g.setColour(juce::Colour(0xffc8c8d0));
-            g.drawText("Audio Settings", card.reduced(12, 0).removeFromTop(titleH),
+            g.drawText(title, card.reduced(12, 0).removeFromTop(titleH),
                        juce::Justification::centredLeft);
         }
         void mouseDown(const juce::MouseEvent& e) override
@@ -339,6 +347,19 @@ private:
     AudioOverlay audioOverlay;
     std::unique_ptr<juce::AudioDeviceSelectorComponent> audioSelector;
     juce::TextButton audioOkBtn{ "OK" };
+
+    // v1.30: MIDI + OSC live in their own settings overlay. The audio overlay
+    // keeps only the device selector (UPIC-56), and the phone controller's
+    // endpoints are configurable here instead of being compile-time constants.
+    AudioOverlay settingsOverlay;
+    juce::TextButton settingsOkBtn{ "OK" }, oscApplyBtn{ "Apply" };
+    juce::Label midiSectionLab{ {}, "MIDI" }, oscSectionLab{ {}, "OSC" };
+    juce::Label oscStatusLab{ {}, "OSC starting..." };
+    juce::Label oscPortLab{ {}, "UDP port" }, oscGroupLab{ {}, "Group" }, oscMcPortLab{ {}, "M-port" };
+    juce::Slider oscPortSlider, oscMcPortSlider;
+    juce::TextEditor oscGroupEdit;
+    juce::ToggleButton oscMcBtn{ "Multicast" };
+    juce::ToggleButton oscOnBtn{ "OSC on" };
 
     // v1.27: Clear is destructive, so it asks first. An in-app overlay keeps
     // this working on Android, where floating dialogs cannot be dismissed.
@@ -400,6 +421,12 @@ private:
     juce::ComboBox liveRevLenBox;
     juce::TextButton liveRevBtn{ "Rev" };
 
+    // v1.30: the LIVE tab's granular grain size (the same 5-500 ms range as
+    // the SAMPLE tab's Granular control). It only affects the granular live
+    // pitch mode; Tape and Phase vocoder ignore it.
+    juce::Label liveGrainLab{ {}, "Grain" };
+    juce::Slider liveGrainSlider;
+
     // --- UI: material (sample pitch-shift) row ---
     juce::ComboBox sampleBox;
     juce::TextButton loadSampleBtn{ "Load sample..." };
@@ -444,7 +471,7 @@ private:
     bool oscListening = false;
     // v1.29: MobMuPlat's default output is multicast 224.0.0.1:54321, so this
     // works even when the phone's network settings cannot be changed.
-    juce::DatagramSocket multicastSocket;
+    std::unique_ptr<juce::DatagramSocket> multicastSocket;
     juce::OSCReceiver multicastReceiver;
     bool multicastListening = false;
     bool externalScrubActive = false;
@@ -455,6 +482,13 @@ private:
     static constexpr int kOscPort = 9000;
     static constexpr int kMulticastPort = 54321;
     static constexpr auto kMulticastGroup = "224.0.0.1";
+    // v1.30: the settings overlay edits these session-only values; Apply
+    // rebinds the receivers. The defaults are the old compile-time endpoints.
+    int oscPort = kOscPort;
+    int oscMulticastPort = kMulticastPort;
+    juce::String oscMulticastGroup { kMulticastGroup };
+    bool oscEnabled = true;
+    bool oscMulticastEnabled = true;
 
     // --- UI: sieve quantizer (same row as material) ---
     juce::ToggleButton sieveBtn{ "Sieve" };
@@ -541,6 +575,12 @@ public:
 private:
     void showAudioSettings();
     void closeAudioSettings();
+    void showSettings();
+    void closeSettings();
+    void startOscReceiver();
+    void stopOscReceiver();
+    void applyOscSettings();
+    void updateOscStatus();
     void showClearWarning();
     void closeClearWarning();
     void clearCurrentPage();

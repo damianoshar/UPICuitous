@@ -28,6 +28,30 @@ JUCE 8 does not support MinGW.
   (gitignored).
 - Android: JDK 17, SDK 35, NDK 28.1.13356709, CMake 3.22.1.
 
+### ASIO (Windows stand-alone)
+
+The root CMake build enables ASIO by default when Steinberg's ASIO SDK
+headers are present. Put `asio.h`, `asiosys.h` and `iasiodrv.h` in
+`JUCE/modules/juce_audio_devices/native/asio`, or point CMake at another
+copy:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64 `
+  -DUPIC_ASIO_SDK_PATH="C:\path\to\asio"
+```
+
+The Projucer VS2022/VS2026 exporters use the same convention: they add
+`..\..\JUCE\modules\juce_audio_devices\native\asio` to the include path
+and force-include `Source/AsioConfig.h`. That header defines `JUCE_ASIO`
+only when `<asio.h>` is actually found, so a missing SDK leaves ASIO off
+instead of breaking the build. If the SDK lives elsewhere, change the
+header search path in the Projucer exporter.
+
+The SDK is not committed (its Steinberg license does not allow
+redistribution). Without it, configure prints a warning and the app simply
+lists the other Windows device types; `-DUPIC_ENABLE_ASIO=OFF` silences it.
+ASIO is never enabled for the VST3 or Android builds.
+
 ### Why not MinGW?
 
 JUCE 8 refuses to build with it:

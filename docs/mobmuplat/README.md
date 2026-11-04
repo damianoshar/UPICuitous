@@ -8,6 +8,8 @@
 
    (If the settings cannot be saved, leave the defaults: UPICuitous also
    listens on MobMuPlat's default multicast output `224.0.0.1:54321`.)
+   If you changed the app's OSC endpoint in **MIDI + OSC settings**, send
+   to that port or multicast group instead.
 4. Start UPICuitous. The status line shows `OSC 9000` while the receiver
    is listening.
 5. Drag the slider. `0` is the page start and `1` is the page end. The
@@ -20,6 +22,14 @@ The Pd patch forwards the slider's `/upic/scrub` value to MobMuPlat's
 `toNetwork` output. If the phone cannot reach the computer, check the
 Windows firewall for UDP port 9000 and make sure both devices are on the
 same WiFi network.
+
+## OSC endpoints
+
+Open **MIDI + OSC settings** (the toolbar Settings button or the menu) to
+change the UDP port, turn multicast on or off, or change the multicast
+group and port. **Apply** rebinds the receivers immediately; the settings
+last for the session only. After changing them, point MobMuPlat's network
+output at the new endpoint (or re-enable the default multicast).
 
 ## Tilt patch
 

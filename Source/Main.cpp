@@ -840,7 +840,8 @@ public:
         //     mirrored in time - reading it forward plays the input
         //     backwards, and the shifter needs no change at all.
         {
-            MainComponent mc(true);
+            auto mcHolder = std::make_unique<MainComponent>(true);
+            auto& mc = *mcHolder;
             mc.prepareToPlay(512, 44100.0);
             mc.setPluginInputChannelCount(2);
 
@@ -957,6 +958,60 @@ public:
                   juce::String(up, 4));
             check(down < -0.01, "a mirrored segment plays the input backwards",
                   juce::String(down, 4));
+        }
+
+        // 6h. v1.30 (UPIC-55): the global transport reverse forces LIVE arcs
+        //     onto the mirrored ring even when the per-arc Rev flag is off.
+        {
+            const int sr = 44100;
+            const int D = sr * 2;
+            const int total = sr / 2;
+            upic::Page pg; pg.durationSec = 4.0;
+            upic::Arc a; a.id = 1; a.mode = 2; a.intensity = 1.0f; a.refFreq = 220.0;
+            a.points = { { 0.0, 220.0 }, { 4.0, 220.0 } };
+            pg.arcs.push_back(a);
+            upic::Envelope flat; flat.presetFlat();
+            std::vector<upic::Envelope> envs { flat };
+            auto waves = upic::defaultWaveforms();
+
+            // two static ramps: the forward ring rises with the write index,
+            // the mirrored ring falls (the input captured backwards)
+            std::vector<float> fwd((size_t) D), rev((size_t) D);
+            for (int i = 0; i < D; ++i)
+            {
+                fwd[(size_t) i] = (float) i / (float) (D - 1);
+                rev[(size_t) i] = 1.0f - fwd[(size_t) i];
+            }
+
+            auto slope = [&](double rate) {
+                UpicEngine e; e.prepare((double) sr, 8192);
+                std::vector<float> L((size_t) total, 0.0f);
+                int head = (int) (0.25 * sr);
+                double ph = rate > 0.0 ? 0.0 : 0.5;
+                for (int pos = 0; pos < total; pos += 512)
+                {
+                    const int n = juce::jmin(512, total - pos);
+                    e.setLiveInput(fwd.data(), nullptr, D, head, true);
+                    e.setLiveReverse(rev.data(), nullptr, D, head, true);
+                    e.render(pg, ph, waves, envs, {}, L.data() + pos, nullptr,
+                             n, 1.0f, rate);
+                    head += n;
+                    ph += rate * (double) n / (double) sr;
+                }
+                double first = 0.0, last = 0.0;
+                const int q = total / 4;
+                for (int i = 0; i < q; ++i) first += L[(size_t) i];
+                for (int i = total - q; i < total; ++i) last += L[(size_t) i];
+                return (last - first) / (double) q;
+            };
+
+            const double forward = slope(1.0);
+            const double reverse = slope(-1.0);
+            check(forward > 0.01, "live forward playback uses the forward ring",
+                  juce::String(forward, 4));
+            check(reverse < -0.01,
+                  "global reverse forces LIVE playback onto the mirrored ring",
+                  juce::String(reverse, 4));
         }
 
         // 7. pen pressure -> per-point intensity curve
@@ -1412,7 +1467,8 @@ public:
             juce::Rectangle<int> scoreBounds;
             {
                 juce::Graphics g(img);
-                MainComponent mc;
+                auto mcHolder = std::make_unique<MainComponent>();
+                auto& mc = *mcHolder;
                 mc.setSize(1280, 800);
 
                 // --- responsive layout: the control grid reflows at small sizes ---
@@ -2237,7 +2293,8 @@ public:
         //     has a lot - so the latency is only reported when the page is
         //     made of delayed paths alone.
         {
-            MainComponent mc;
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
             mc.setSize(1280, 800);
 
             auto pieceWith = [&](const juce::String& arcsJson) {
@@ -2269,7 +2326,8 @@ public:
         //     with no audio device and no timer tick (the plugin-style manual
         //     processBlock calls that pluginval/hosts make).
         {
-            MainComponent mc(true);
+            auto mcHolder = std::make_unique<MainComponent>(true);
+            auto& mc = *mcHolder;
             mc.setSize(1280, 800);
             mc.prepareToPlay(512, 44100.0);
 
@@ -2490,7 +2548,8 @@ public:
         // 21. v1.21 (wave 19): the arc list - the inventory of the arcs, with
         //     the per-arc controls (the Rev box and the mode dropdown)
         {
-            MainComponent mc;
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
             mc.setSize(1280, 800);
             const juce::String json =
                 "{\"pages\":["
@@ -2995,7 +3054,8 @@ public:
         // 22. v1.23 (wave 20): the MIDI input foundation - the device list,
         //     the activity monitor and the learn
         {
-            MainComponent mc;
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
             mc.setSize(1280, 800);
             auto& hub = mc.midiHub();
 
@@ -3061,12 +3121,82 @@ public:
                       "a cleared binding leaves the parameter alone");
             }
 
-            // the overlay with the MIDI section (for eyeballing)
-            if (auto* ab = dynamic_cast<juce::Button*>(findByName(mc, "Audio")))
+            // v1.30 (UPIC-53): the LIVE tab has its own granular grain size
+            // (the Sample tab's grain control used to be the only one).
             {
-                ab->onClick();
+                auto* liveTab = dynamic_cast<juce::Button*>(findByName(mc, "Live"));
+                auto* lg = dynamic_cast<juce::Slider*>(findByName(mc, "liveGrainSlider"));
+                check(liveTab != nullptr && lg != nullptr
+                      && (int) lg->getMinimum() == 5 && (int) lg->getMaximum() == 500
+                      && (int) lg->getValue() == 40,
+                      "the LIVE tab has a 5-500 ms grain control",
+                      lg != nullptr ? juce::String(lg->getValue(), 1) : juce::String("missing"));
+                if (liveTab != nullptr && lg != nullptr)
+                {
+                    liveTab->onClick();
+                    check(lg->isVisible(), "the live grain control follows the Live tab");
+                    lg->setValue(200.0, juce::sendNotificationSync);
+                    const auto grainVar = mc.pieceToVar().getProperty("liveGrainMs", 0);
+                    check((int) grainVar == 200,
+                          "the live grain size round-trips in the piece",
+                          juce::String((int) grainVar) + " / "
+                          + juce::String(lg->getValue(), 1));
+                    lg->setValue(40.0, juce::sendNotificationSync);
+                }
+            }
+
+            // v1.30 (UPIC-54/56): MIDI and OSC live in their own settings
+            // overlay; the audio overlay is the device selector only. The
+            // overlay with the MIDI section (for eyeballing) is still captured.
+            auto* settings = dynamic_cast<juce::Button*>(findByName(mc, "settingsBtn"));
+            check(settings != nullptr, "the MIDI + OSC settings button is present");
+            if (settings != nullptr)
+            {
+                settings->onClick();
+                auto* ov = findByName(mc, "settingsOverlay");
+                auto* ok = dynamic_cast<juce::Button*>(findByName(mc, "settingsOkBtn"));
+                auto* midiInOverlay = ov != nullptr ? findByName(*ov, "midiDevBox") : nullptr;
+                check(ov != nullptr && ov->isVisible()
+                      && ok != nullptr && ok->isVisible() && ok->getWidth() >= 8
+                      && ov->getBounds().contains(ok->getBounds()),
+                      "the settings overlay opens with its OK button");
+                check(midiInOverlay == dev && dev != nullptr && dev->getParentComponent() == ov,
+                      "MIDI lives in the settings overlay, not the audio overlay");
+                check(mc.oscPortForTest() == 9000
+                      && mc.oscMulticastPortForTest() == 54321
+                      && mc.oscMulticastGroupForTest() == "224.0.0.1",
+                      "OSC settings keep the old defaults",
+                      juce::String(mc.oscPortForTest()) + " / "
+                      + juce::String(mc.oscMulticastPortForTest()) + " / "
+                      + mc.oscMulticastGroupForTest());
+                auto* port = dynamic_cast<juce::Slider*>(findByName(mc, "oscPortSlider"));
+                auto* apply = dynamic_cast<juce::Button*>(findByName(mc, "oscApplyBtn"));
+                check(port != nullptr && (int) port->getValue() == 9000
+                      && (int) port->getMinimum() == 1024
+                      && (int) port->getMaximum() == 65535,
+                      "the OSC UDP port is editable",
+                      port != nullptr ? juce::String(port->getValue(), 0) : juce::String("missing"));
+                if (apply != nullptr)
+                    apply->onClick(); // rebind with the same values
+                check(mc.oscIsListening(),
+                      "Apply rebinds the OSC receivers from the settings window");
+
+                auto* onBtn = dynamic_cast<juce::ToggleButton*>(findByName(mc, "oscOnBtn"));
+                check(onBtn != nullptr, "the OSC on/off button is present");
+                if (onBtn != nullptr && apply != nullptr)
+                {
+                    onBtn->setToggleState(false, juce::dontSendNotification);
+                    apply->onClick();
+                    check(!mc.oscIsListening() && !mc.oscEnabledForTest(),
+                          "OSC can be turned off from settings");
+                    onBtn->setToggleState(true, juce::dontSendNotification);
+                    apply->onClick();
+                    check(mc.oscIsListening(),
+                          "OSC can be turned back on from settings");
+                }
+
                 const juce::File png = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                                           .getChildFile("upic_snapshot_midi.png");
+                                           .getChildFile("upic_snapshot_settings.png");
                 juce::Image hi = mc.createComponentSnapshot(mc.getLocalBounds(), false);
                 if (hi.isValid())
                     if (auto os = png.createOutputStream())
@@ -3075,6 +3205,22 @@ public:
                         fmt.writeImageToStream(hi, *os);
                         os->flush();
                     }
+
+                if (ok != nullptr) ok->onClick();
+                check(ov != nullptr && ! ov->isVisible(),
+                      "the settings overlay OK closes it");
+
+                // the audio overlay must not contain the MIDI section any more
+                if (auto* ab = dynamic_cast<juce::Button*>(findByName(mc, "Audio")))
+                {
+                    ab->onClick();
+                    auto* aov = findByName(mc, "audioOverlay");
+                    auto* aok = dynamic_cast<juce::Button*>(findByName(mc, "OK"));
+                    check(aov != nullptr && aov->isVisible()
+                          && findByName(*aov, "midiDevBox") == nullptr,
+                          "the audio overlay no longer contains MIDI");
+                    if (aok != nullptr) aok->onClick();
+                }
             }
         }
 
@@ -3123,7 +3269,8 @@ public:
         // 23. v1.24 (wave 21): the envelope points - + adds, - removes, the
         //     ends are free and the extra points survive the piece format
         {
-            MainComponent mc;
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
             mc.setSize(1280, 800);
             mc.loadFromVar(juce::JSON::parse(
                 "{\"envelopes\":[{\"id\":1,\"name\":\"Test\",\"points\":["
@@ -3179,7 +3326,8 @@ public:
 
                 // the extra points survive a save/load round trip
                 {
-                    MainComponent mc2;
+                    auto mc2Holder = std::make_unique<MainComponent>();
+                    auto& mc2 = *mc2Holder;
                     mc2.setSize(1280, 800);
                     mc2.loadFromVar(mc.pieceToVar());
                     auto* ed2 = findEnvEd(mc2);
