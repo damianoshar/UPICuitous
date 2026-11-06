@@ -103,12 +103,14 @@ upic_juce_wrapper(include_juce_graphics_Harfbuzz.cpp juce_graphics/juce_graphics
 upic_juce_wrapper(include_juce_graphics_Sheenbidi.c juce_graphics/juce_graphics_Sheenbidi.c)
 upic_juce_wrapper(include_juce_gui_basics.cpp juce_gui_basics/juce_gui_basics.cpp)
 upic_juce_wrapper(include_juce_gui_extra.cpp juce_gui_extra/juce_gui_extra.cpp)
+upic_juce_wrapper(include_juce_osc.cpp juce_osc/juce_osc.cpp)
 
 set(UPIC_JUCE_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/juce_include")
 file(MAKE_DIRECTORY "${UPIC_JUCE_INCLUDE_DIR}")
 file(WRITE "${UPIC_JUCE_INCLUDE_DIR}/JuceHeader.h" [=[
 #pragma once
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <juce_osc/juce_osc.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_graphics/juce_graphics.h>
 #include <juce_events/juce_events.h>
@@ -132,7 +134,8 @@ using namespace juce;
         $text = $text.Replace($needle, $needle + $lineEnd + $lineEnd + $prelude)
     }
 
-    $text = $text.Replace('../../../JuceLibraryCode/modules/', '../../../JUCE/modules/')
+    $text = $text.Replace('JUCE_MODULE_AVAILABLE_juce_gui_extra=1]]', 'JUCE_MODULE_AVAILABLE_juce_gui_extra=1]] [[-DJUCE_MODULE_AVAILABLE_juce_osc=1]]')
+    $text = $text.Replace('"${UPIC_JUCE_WRAPPER_DIR}/include_juce_gui_extra.cpp"', '"${UPIC_JUCE_WRAPPER_DIR}/include_juce_gui_extra.cpp" "${UPIC_JUCE_WRAPPER_DIR}/include_juce_osc.cpp"')
     $text = $text.Replace('"../../../JuceLibraryCode/modules"', '"../../../JUCE/modules"')
     $text = $text.Replace('"../../../JuceLibraryCode"', '"${UPIC_JUCE_INCLUDE_DIR}"')
     $text = [regex]::Replace($text,
