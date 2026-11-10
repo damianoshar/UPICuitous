@@ -1,6 +1,6 @@
-# Building - UPIC Clone
+# Building - UPICuitous
 
-Current version: **1.27.0** (app + VST3). The build is Windows/MSVC;
+Current version: **0.28.0** (app + VST3). The build is Windows/MSVC;
 JUCE 8 does not support MinGW.
 
 ## TL;DR
@@ -10,10 +10,10 @@ JUCE 8 does not support MinGW.
 | Everything (app + selftest + VST3 + smoke + pluginval) | `.\scripts\build.ps1` |
 | Standalone only | `.\scripts\build.ps1 -SkipPlugin` |
 | VST3 only | `.\scripts\build.ps1 -SkipApp` |
-| Bump the version first | `.\scripts\build.ps1 -Version 1.27.0` |
-| Install the VST3 (asks for admin rights) | `.\scripts\install_plugin.ps1 -Version 1.27.0` |
+| Bump the version first | `.\scripts\build.ps1 -Version 0.28.0` |
+| Install the VST3 (asks for admin rights) | `.\scripts\install_plugin.ps1 -Version 0.28.0` |
 | Android APK | open `Builds/Android` in Android Studio, or `.\gradlew.bat assembleDebug` |
-| Prototypes | `python python-upic/upic_clone.py` / open `web-upic/index.html` |
+| Prototypes | `python python-upic/upicuitous.py` / open `web-upic/index.html` |
 
 ## Requirements
 
@@ -21,33 +21,22 @@ JUCE 8 does not support MinGW.
   (MSBuild + MSVC 14.51). The `Builds/VisualStudio2022` exporter also
   exists but the build script uses VS2026.
 - **CMake 3.22+** (4.x is fine; its deprecation warning is harmless).
-- **JUCE 8.0.6** in `JUCE/`. `python Tools/fetch_juce.py` downloads it
+- **JUCE 8.0.16-security** in `JUCE/`. `python Tools/fetch_juce.py` downloads it
   without git; the root CMakeLists can also fetch it.
 - Optional: **pluginval** for the validation gate -
   `.\scripts\fetch_pluginval.ps1` puts it in `Tools/pluginval/`
   (gitignored).
 - Android: JDK 17, SDK 35, NDK 28.1.13356709, CMake 3.22.1.
 
-### Why not MinGW?
-
-JUCE 8 refuses to build with it:
-
-```
-JUCE/modules/juce_core/system/juce_TargetPlatform.h:113:6:
-  #error "MinGW is not supported. Please use an alternative compiler."
-```
-
-Use MSVC. Do not spend time on MinGW flags.
-
 ## Option 1 - one-command build (recommended)
 
 `scripts/build.ps1` runs the full sequence and stops on the first
 failure:
 
-1. kills a running `UPICClone.exe` (a running exe locks the link),
+1. kills a running `UPICuitous.exe` (a running exe locks the link),
 2. builds the app `Debug|x64` from
-   `Builds/VisualStudio2026/UPICClone.sln` with MSBuild,
-3. runs `UPICClone.exe --selftest` and fails if any check fails,
+   `Builds/VisualStudio2026/UPICuitous.sln` with MSBuild,
+3. runs `UPICuitous.exe --selftest` and fails if any check fails,
 4. deletes a stale `*_resources.rc` (otherwise Explorer keeps showing an
    old VST3 version), builds the plugin `Release` with CMake,
 5. builds + runs the host-less plugin smoke test,
@@ -56,12 +45,12 @@ failure:
 Outputs:
 
 ```
-Builds\VisualStudio2026\x64\Debug\App\UPICClone.exe
-Builds\Plugin\UPICClonePlugin_artefacts\Release\VST3\UPIC Clone.vst3
+Builds\VisualStudio2026\x64\Debug\App\UPICuitous.exe
+Builds\Plugin\UPICuitousPlugin_artefacts\Release\VST3\UPICuitous.vst3
 ```
 
-`-Version 1.27.0` rewrites `Plugin/CMakeLists.txt`, the app's
-`getApplicationVersion()` and `UPICClone.jucer` together, so the app,
+`-Version 0.28.0` rewrites `Plugin/CMakeLists.txt`, the app's
+`getApplicationVersion()` and `UPICuitous.jucer` together, so the app,
 plugin and Android version cannot drift apart. After a bump run
 `.\scripts\fix_android.ps1` to sync the generated Android project.
 `-SkipApp`, `-SkipPlugin` and `-SkipSmoke` narrow the run.
@@ -74,7 +63,7 @@ With the Projucer solution (what the script does):
 $msbuild = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
   -latest -products * -requires Microsoft.Component.MSBuild `
   -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
-& $msbuild Builds\VisualStudio2026\UPICClone.sln /p:Configuration=Debug /p:Platform=x64 /m
+& $msbuild Builds\VisualStudio2026\UPICuitous.sln /p:Configuration=Debug /p:Platform=x64 /m
 ```
 
 Or from the root CMake project (app + Android CMake entry):
@@ -82,10 +71,10 @@ Or from the root CMake project (app + Android CMake entry):
 ```powershell
 cmake -S . -B build -G "Visual Studio 18 2026" -A x64
 cmake --build build --config Release --parallel 4
-.\build\UPICClone_artefacts\Release\UPIC Clone.exe
+.\build\UPICuitous_artefacts\Release\UPICuitous.exe
 ```
 
-The Projucer file `UPICClone.jucer` is the UI/file-list source for the
+The Projucer file `UPICuitous.jucer` is the UI/file-list source for the
 VS2026 and Android exporters. A resave adds new files (for example
 `Source/LivePitch.h`) and may reformat the exporter files.
 
@@ -97,12 +86,12 @@ cmake -S Plugin -B Builds/Plugin -G "Visual Studio 18 2026" -A x64
 cmake --build Builds/Plugin --config Release --parallel 4
 
 # smoke test (host-less: processor + editor + state)
-cmake --build Builds/Plugin --config Release --target UPICClonePluginSmokeTest
-.\Builds\Plugin\UPICClonePluginSmokeTest_artefacts\Release\UPICClonePluginSmokeTest.exe
+cmake --build Builds/Plugin --config Release --target UPICuitousPluginSmokeTest
+.\Builds\Plugin\UPICuitousPluginSmokeTest_artefacts\Release\UPICuitousPluginSmokeTest.exe
 
 # optional validation
 Tools\pluginval\pluginval.exe --validate `
-  "Builds\Plugin\UPICClonePlugin_artefacts\Release\VST3\UPIC Clone.vst3" --strictness-level 5
+  "Builds\Plugin\UPICuitousPlugin_artefacts\Release\VST3\UPICuitous.vst3" --strictness-level 5
 ```
 
 Install (an admin shell is needed for `Program Files`):
@@ -111,10 +100,10 @@ Install (an admin shell is needed for `Program Files`):
 # the script asks for admin rights (UAC prompt) and then verifies the result:
 # the installed binary's SHA-256 must match the build, and the version
 # resource + moduleinfo must read the expected version
-.\scripts\install_plugin.ps1 -Version 1.27.0
+.\scripts\install_plugin.ps1 -Version 0.28.0
 
 # or by hand, from an admin shell:
-Copy-Item "Builds\Plugin\UPICClonePlugin_artefacts\Release\VST3\UPIC Clone.vst3" `
+Copy-Item "Builds\Plugin\UPICuitousPlugin_artefacts\Release\VST3\UPICuitous.vst3" `
           "C:\Program Files\VstPlugIns\" -Recurse -Force
 ```
 
@@ -137,7 +126,7 @@ passes.
 
 `Builds/Android/` is the committed Android Studio project (Projucer
 export + hand tweaks). It compiles the root `CMakeLists.txt` with the
-NDK and packages `libUPICClone.so` into an APK.
+NDK and packages `libUPICuitous.so` into an APK.
 
 ### Prerequisites (one-time)
 
@@ -182,7 +171,7 @@ emulator (`debug_` also builds `x86`). Narrow them with `abiFilters` in
 ## Tests
 
 ```powershell
-.\Builds\VisualStudio2026\x64\Debug\App\UPICClone.exe --selftest
+.\Builds\VisualStudio2026\x64\Debug\App\UPICuitous.exe --selftest
 Get-Content "$env:TEMP\upic_selftest.txt"
 ```
 
@@ -233,14 +222,32 @@ that prevent them - are in **`known-issues.yaml`** at the repo root.
   `JUCE/modules/juce_audio_processors/format_types/VST3_SDK/base/source/fobject.h`
   on 2026-10-16 (an external sync overwrote it). Run
   `.\scripts\check_juce.ps1` to see whether the JUCE tree is damaged, and
-  restore a clean JUCE 8.0.6 copy if it is.
+  restore a clean JUCE 8.0.16-security copy if it is.
 - **Antivirus flags the exe**: allowlist the build folder.
 - **Python prototype silent**: it plays a temp WAV with `winsound`; check
   `python-upic/test_upic.wav` exists after `--test-render`.
 
+## ASIO Support (Windows Standalone)
+
+The root CMake build enables ASIO when Steinberg's ASIO SDK headers are
+present. Put `asio.h`, `asiosys.h`, `iasiodrv.h` in
+`JUCE/modules/juce_audio_devices/native/asio`, or point CMake at another
+copy:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64 `
+  -DUPIC_ASIO_SDK_PATH="C:\path\to\asio"
+```
+
+The Projucer VS2022/VS2026 exporters add the ASIO include path and
+force-include `Source/AsioConfig.h`, which defines `JUCE_ASIO` only when
+the SDK is actually found. Without the SDK the app builds normally and
+lists the other Windows device types; `-DUPIC_ENABLE_ASIO=OFF` silences
+the warning. ASIO is never enabled for the VST3 or Android builds.
+
 ## Repo housekeeping
 
-- Committed sources: `Source/`, `Plugin/`, `scripts/`, `UPICClone.jucer`,
+- Committed sources: `Source/`, `Plugin/`, `scripts/`, `UPICuitous.jucer`,
   `Builds/Android/`, docs.
 - Generated and gitignored: `JUCE/`, `JuceLibraryCode/`,
   `Builds/VisualStudio2022`, `Builds/VisualStudio2026`,
@@ -249,7 +256,7 @@ that prevent them - are in **`known-issues.yaml`** at the repo root.
 - The Android `build.gradle` / `CMakeLists.txt` are Projucer-generated.
   The settings that used to be hand tweaks (SDK 35, minSdk 24, the gradle
   plugin and wrapper versions, the debug keystore) live in the
-  `UPICClone.jucer` exporter now, so a resave reproduces them. The one
+  `UPICuitous.jucer` exporter now, so a resave reproduces them. The one
   value Projucer hardcodes - the NDK version - is put back by
   `.\scripts\fix_android.ps1`, which also verifies everything else
   (`docs/android-build.md`).
