@@ -1,20 +1,21 @@
-# UPIC Clone - Xenakis-style vector synthesis
+# UPICuitous - A JUCE-based UPIC clone: the classic oscillator graph becomes sound, and the same score 
+can drive sample and live audio graphs with pitch change. Supports Windows standalone, VST3 plugin, and Android app.
 
 A homage to Iannis Xenakis' UPIC (1977): draw pitch curves on a
-time-vs-pitch page, give each arc a single-cycle wavetable and an
+time-vs-pitch page, give each arc a wavetable and an
 amplitude envelope, and hear it. The same score can drive three
 materials: oscillators, loaded samples (pitch-shifted) and the live
 microphone input (pitch-shifted in realtime).
 
-Ships as a **desktop app**, an **Android tablet app**, and a **VST3
+Ships as a **Windows standalone app**, an **Android tablet app**, and a **VST3
 plugin** with the same UI and engine.
 
 ## Builds in this repo
 
 | Build | Where | State |
 |---|---|---|
-| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v1.27.0 |
-| Python + tkinter + numpy | `python-upic/` | Prototype, shares `.upic.json`. `python python-upic/upic_clone.py` |
+| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v0.28.0 |
+| Python + tkinter + numpy | `python-upic/` | Prototype, shares `.upic.json`. `python python-upic/upicuitous.py` |
 | Single-page WebAudio | `web-upic/` | Prototype, shares `.upic.json`. Open `web-upic/index.html` |
 
 ## Quick start
@@ -24,13 +25,13 @@ plugin** with the same UI and engine.
 .\scripts\build.ps1
 
 # Standalone
-.\Builds\VisualStudio2026\x64\Debug\App\UPICClone.exe
+.\Builds\VisualStudio2026\x64\Debug\App\UPICuitous.exe
 
 # VST3 (built by the script; the install asks for admin rights)
-.\scripts\install_plugin.ps1 -Version 1.27.0
+.\scripts\install_plugin.ps1 -Version 0.28.0
 ```
 
-`scripts/build.ps1 -Version 1.27.0` bumps the app and plugin version
+`scripts/build.ps1 -Version 0.28.0` bumps the app and plugin version
 together. `-SkipApp` or `-SkipPlugin` narrows the run. See `BUILDING.md`
 for the manual CMake commands, the Android project and troubleshooting.
 
@@ -88,9 +89,12 @@ them with a selection updates the selected PM arcs.
 Pitch modes: **Granular** (default), **Tape**, **Phase vocoder**, with a
 range of 1/16x - 16x (four octaves each way). The grid is the multiply
 ratio grid: **1x** is the input as-is, **2x** an octave up. `Ref` is the
-1x input pitch and retunes the selected live arcs. The **Rev**
+1x input pitch and retunes the selected live arcs. **Grain** sets the
+granular grain size from 5 to 500 ms (default 40 ms). The **Rev**
 button in the material row plays the microphone's last 0.5 / 1 / 2 seconds
-**backwards** (the buffer duration is yours to pick).
+**backwards** (the buffer duration is yours to pick). When the global
+**Rev** toggle is on, every live arc reads the mirrored input ring
+regardless of that arc's Rev box.
 
 **Arcs panel** - the **Arcs** toggle (with the Wave / Env / Hints
 toggles) opens a list of the arcs on the right: grouped OSC / SAMPLE /
@@ -100,17 +104,18 @@ tab; Ctrl/Cmd/Shift-click adds it to a multi-selection. The sample and the
 live rows carry a **Rev** box (that arc's material backwards) and a
 **mode** dropdown (that arc's pitch-shift algorithm).
 
-**MIDI in** - the Audio Settings overlay lists the MIDI inputs (`None`
-when there is none), shows the last message (CC or note, value, channel,
-device) and has a **Learn** row for the master gain and the draw
-intensity: press Learn, move a control, and the parameter follows it.
-The bindings are a controller map - session state, not part of the piece.
+**MIDI in** - the **MIDI + OSC settings** overlay (the toolbar Settings
+button or the menu) lists the MIDI inputs (`None` when there is none),
+shows the last message (CC or note, value, channel, device) and has a
+**Learn** row for the master gain and the draw intensity: press Learn,
+move a control, and the parameter follows it. The bindings are a
+controller map - session state, not part of the piece.
 
 **Transport and IO** - Play/Stop with click-free fades, Loop, page
 sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
 (shared with the Python and web builds). Double-click Stop rewinds to the
 start. Clear asks first in an in-app warning and uses a red confirm
-button. A Rev toggle runs the score backwards (a mirrored stroke sounds mirrored); a learned MIDI jog CC drives a signed, smoothed playhead (up to +/- 4x) in the app and the plugin.
+button. A global **Rev** toggle runs the score backwards (a mirrored stroke sounds mirrored); when on, it forces all live arcs onto the reversed input ring. A learned MIDI jog CC drives a signed, smoothed playhead (up to +/- 4x) in the app and the plugin.
 
 ## VST3 plugin
 
@@ -125,6 +130,40 @@ when every audible arc on the page is delayed (a live-only page); a page
 that mixes generator arcs with live arcs reports 0, because the score
 must stay sample-accurate. The status line shows the current value
 (`LAT 220ms`).
+
+## MIDI + OSC Settings
+
+The toolbar **Settings** button (or **File → MIDI + OSC settings**) opens a
+dedicated overlay with:
+
+- **MIDI** section: device list, activity monitor, Learn rows for master
+  gain, draw intensity, scrub, and transport.
+- **OSC** section: UDP port for `/upic/scrub` messages (default 9000),
+  multicast toggle, multicast group/port (MobMuPlat defaults:
+  `224.0.0.1:54321`), **OSC on/off** toggle, and **Apply** button to rebind
+  receivers. Endpoint changes are session-only.
+- Status line shows `OSC off` or `UDP <port> listening | multicast
+  <group>:<port>` (or `unavailable`).
+
+These settings are session-only and not saved in `.upic.json`.
+
+## ASIO Support (Windows Standalone)
+
+The CMake build enables ASIO when Steinberg's ASIO SDK headers are
+present. Put `asio.h`, `asiosys.h`, `iasiodrv.h` in
+`JUCE/modules/juce_audio_devices/native/asio`, or point CMake at another
+copy:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64 `
+  -DUPIC_ASIO_SDK_PATH="C:\path\to\asio"
+```
+
+The Projucer VS2022/VS2026 exporters add the ASIO include path and
+force-include `Source/AsioConfig.h`, which defines `JUCE_ASIO` only when
+the SDK is actually found. Without the SDK the app builds normally and
+lists the other Windows device types; `-DUPIC_ENABLE_ASIO=OFF` silences
+the warning. ASIO is never enabled for the VST3 or Android builds.
 
 ## Layout
 
@@ -158,7 +197,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 - Windows with **Visual Studio 2026** (Desktop development with C++),
   MSBuild and CMake 3.22+.
-- **JUCE 8.0.6** in `JUCE/` (the app CMakeLists also fetches it if
+- **JUCE 8.0.16-security** in `JUCE/` (the app CMakeLists also fetches it if
   missing; `python Tools/fetch_juce.py` downloads it without git).
 - MinGW is not supported by JUCE 8 - use MSVC.
 - Android: JDK 17, SDK 35, NDK 28.1.13356709, CMake 3.22.1 (see
@@ -166,11 +205,13 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICClone.exe --selftest` runs 323 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 353 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
-reverse read, the live reverse, the arc list, the MIDI input, the
-envelope points, the v1.26 multi-selection / toolbar edits, the v1.27
+reverse read, the live reverse, the live grain size, the forced live
+reverse under the global Rev toggle, the MIDI + OSC settings overlay,
+the arc list, the MIDI input, the envelope points, the v1.26
+multi-selection / toolbar edits, the v1.27
 wavetable fork / Stop rewind / Clear warning checks and the
 granular-vs-varispeed regression) and writes the log to
 `%TEMP%\upic_selftest.txt`. The build script also runs the 15-check
