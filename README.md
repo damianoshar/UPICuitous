@@ -1,21 +1,20 @@
-# UPICuitous - A JUCE-based UPIC clone: the classic oscillator graph becomes sound, and the same score 
-can drive sample and live audio graphs with pitch change. Supports Windows standalone, VST3 plugin, and Android app.
+# UPIC Clone - Xenakis-style vector synthesis
 
 A homage to Iannis Xenakis' UPIC (1977): draw pitch curves on a
-time-vs-pitch page, give each arc a wavetable and an
+time-vs-pitch page, give each arc a single-cycle wavetable and an
 amplitude envelope, and hear it. The same score can drive three
 materials: oscillators, loaded samples (pitch-shifted) and the live
 microphone input (pitch-shifted in realtime).
 
-Ships as a **Windows standalone app**, an **Android tablet app**, and a **VST3
+Ships as a **desktop app**, an **Android tablet app**, and a **VST3
 plugin** with the same UI and engine.
 
 ## Builds in this repo
 
 | Build | Where | State |
 |---|---|---|
-| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v0.28.0 |
-| Python + tkinter + numpy | `python-upic/` | Prototype, shares `.upic.json`. `python python-upic/upicuitous.py` |
+| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v1.27.0 |
+| Python + tkinter + numpy | `python-upic/` | Prototype, shares `.upic.json`. `python python-upic/upic_clone.py` |
 | Single-page WebAudio | `web-upic/` | Prototype, shares `.upic.json`. Open `web-upic/index.html` |
 
 ## Quick start
@@ -25,13 +24,13 @@ plugin** with the same UI and engine.
 .\scripts\build.ps1
 
 # Standalone
-.\Builds\VisualStudio2026\x64\Debug\App\UPICuitous.exe
+.\Builds\VisualStudio2026\x64\Debug\App\UPICClone.exe
 
 # VST3 (built by the script; the install asks for admin rights)
-.\scripts\install_plugin.ps1 -Version 0.28.0
+.\scripts\install_plugin.ps1 -Version 1.27.0
 ```
 
-`scripts/build.ps1 -Version 0.28.0` bumps the app and plugin version
+`scripts/build.ps1 -Version 1.27.0` bumps the app and plugin version
 together. `-SkipApp` or `-SkipPlugin` narrows the run. See `BUILDING.md`
 for the manual CMake commands, the Android project and troubleshooting.
 
@@ -104,8 +103,8 @@ tab; Ctrl/Cmd/Shift-click adds it to a multi-selection. The sample and the
 live rows carry a **Rev** box (that arc's material backwards) and a
 **mode** dropdown (that arc's pitch-shift algorithm).
 
-**MIDI in** - the **MIDI + OSC settings** overlay (the toolbar Settings
-button or the menu) lists the MIDI inputs (`None` when there is none),
+**MIDI in** - the **MIDI + OSC settings** overlay (toolbar Settings
+button or menu) lists the MIDI inputs (`None` when there is none),
 shows the last message (CC or note, value, channel, device) and has a
 **Learn** row for the master gain and the draw intensity: press Learn,
 move a control, and the parameter follows it. The bindings are a
@@ -115,7 +114,23 @@ controller map - session state, not part of the piece.
 sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
 (shared with the Python and web builds). Double-click Stop rewinds to the
 start. Clear asks first in an in-app warning and uses a red confirm
-button. A global **Rev** toggle runs the score backwards (a mirrored stroke sounds mirrored); when on, it forces all live arcs onto the reversed input ring. A learned MIDI jog CC drives a signed, smoothed playhead (up to +/- 4x) in the app and the plugin.
+button. A Rev toggle runs the score backwards (a mirrored stroke sounds mirrored); a learned MIDI jog CC drives a signed, smoothed playhead (up to +/- 4x) in the app and the plugin.
+
+**Phone / MobMuPlat scrub (OSC)** - UPICuitous listens on UDP port 9000 and
+also joins MobMuPlat's default multicast output `224.0.0.1:54321`, so the
+controller works even when the phone cannot save a custom output IP.
+Send a float `/upic/scrub <0..1>` (alias `/upic/scrub/pos`) to move the
+playhead: 0 is the page start and 1 is the page end. The value feeds the
+same seek and scrub-preview path as a canvas drag. Values keep the
+preview alive; 2000 ms after the last message the gesture ends (holding
+freezes the preview), and releasing never starts playback. The status line shows `OSC 9000` (plus
+`MCAST` when the multicast listener is active). Open **MIDI + OSC settings** (toolbar Settings
+button or menu) to change the UDP port, turn multicast on or off, or change the multicast
+group and port; press **Apply** to rebind the receivers. These endpoint changes are session-only.
+A ready-made MobMuPlat patch lives in `docs/mobmuplat/`: load `UPICuitous-Scrub.mmp`, then set
+MobMuPlat's Network output address to the computer's LAN IP and the output
+port to 9000 (or leave the defaults). The slider sends values while it is
+dragged. An **OSC on/off** toggle in the settings overlay disables the receivers entirely.
 
 ## VST3 plugin
 
@@ -130,40 +145,6 @@ when every audible arc on the page is delayed (a live-only page); a page
 that mixes generator arcs with live arcs reports 0, because the score
 must stay sample-accurate. The status line shows the current value
 (`LAT 220ms`).
-
-## MIDI + OSC Settings
-
-The toolbar **Settings** button (or **File → MIDI + OSC settings**) opens a
-dedicated overlay with:
-
-- **MIDI** section: device list, activity monitor, Learn rows for master
-  gain, draw intensity, scrub, and transport.
-- **OSC** section: UDP port for `/upic/scrub` messages (default 9000),
-  multicast toggle, multicast group/port (MobMuPlat defaults:
-  `224.0.0.1:54321`), **OSC on/off** toggle, and **Apply** button to rebind
-  receivers. Endpoint changes are session-only.
-- Status line shows `OSC off` or `UDP <port> listening | multicast
-  <group>:<port>` (or `unavailable`).
-
-These settings are session-only and not saved in `.upic.json`.
-
-## ASIO Support (Windows Standalone)
-
-The CMake build enables ASIO when Steinberg's ASIO SDK headers are
-present. Put `asio.h`, `asiosys.h`, `iasiodrv.h` in
-`JUCE/modules/juce_audio_devices/native/asio`, or point CMake at another
-copy:
-
-```powershell
-cmake -S . -B build -G "Visual Studio 18 2026" -A x64 `
-  -DUPIC_ASIO_SDK_PATH="C:\path\to\asio"
-```
-
-The Projucer VS2022/VS2026 exporters add the ASIO include path and
-force-include `Source/AsioConfig.h`, which defines `JUCE_ASIO` only when
-the SDK is actually found. Without the SDK the app builds normally and
-lists the other Windows device types; `-DUPIC_ENABLE_ASIO=OFF` silences
-the warning. ASIO is never enabled for the VST3 or Android builds.
 
 ## Layout
 

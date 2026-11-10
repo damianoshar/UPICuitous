@@ -28,6 +28,17 @@ JUCE 8 does not support MinGW.
   (gitignored).
 - Android: JDK 17, SDK 35, NDK 28.1.13356709, CMake 3.22.1.
 
+### Why not MinGW?
+
+JUCE 8 refuses to build with it:
+
+```
+JUCE/modules/juce_core/system/juce_TargetPlatform.h:113:6:
+  #error "MinGW is not supported. Please use an alternative compiler."
+```
+
+Use MSVC. Do not spend time on MinGW flags.
+
 ## Option 1 - one-command build (recommended)
 
 `scripts/build.ps1` runs the full sequence and stops on the first
@@ -112,7 +123,7 @@ A per-user install avoids UAC (many DAWs scan it):
 
 Then **restart the DAW or force a plugin rescan** - hosts cache the
 binary. Verify the installed copy: right-click
-`...\UPIC Clone.vst3\Contents\x86_64-win\UPIC Clone.vst3` ->
+`...\UPICuitous.vst3\Contents\x86_64-win\UPICuitous.vst3` ->
 Properties -> Details; FileVersion and ProductVersion should match
 `Plugin\CMakeLists.txt`, and `Contents\Resources\moduleinfo.json` should
 agree. If a DAW still shows an older version, it is loading a cached
@@ -126,7 +137,7 @@ passes.
 
 `Builds/Android/` is the committed Android Studio project (Projucer
 export + hand tweaks). It compiles the root `CMakeLists.txt` with the
-NDK and packages `libUPICuitous.so` into an APK.
+NDK and packages `libUPICClone.so` into an APK.
 
 ### Prerequisites (one-time)
 
@@ -168,6 +179,30 @@ emulator (`debug_` also builds `x86`). Narrow them with `abiFilters` in
 - Touch: 1 finger = mouse, pinch = zoom time+pitch, two-finger drag =
   pan, long-press = context menu.
 
+## ASIO (Windows stand-alone)
+
+The root CMake build enables ASIO by default when Steinberg's ASIO SDK
+headers are present. Put `asio.h`, `asiosys.h` and `iasiodrv.h` in
+`JUCE/modules/juce_audio_devices/native/asio`, or point CMake at another
+copy:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64 `
+  -DUPIC_ASIO_SDK_PATH="C:\path\to\asio"
+```
+
+The Projucer VS2022/VS2026 exporters use the same convention: they add
+`..\..\JUCE\modules\juce_audio_devices\native\asio` to the include path
+and force-include `Source/AsioConfig.h`. That header defines `JUCE_ASIO`
+only when `<asio.h>` is actually found, so a missing SDK leaves ASIO off
+instead of breaking the build. If the SDK lives elsewhere, change the
+header search path in the Projucer exporter.
+
+The SDK is not committed (its Steinberg license does not allow
+redistribution). Without it, configure prints a warning and the app simply
+lists the other Windows device types; `-DUPIC_ENABLE_ASIO=OFF` silences it.
+ASIO is never enabled for the VST3 or Android builds.
+
 ## Tests
 
 ```powershell
@@ -175,9 +210,9 @@ emulator (`debug_` also builds `x86`). Narrow them with `abiFilters` in
 Get-Content "$env:TEMP\upic_selftest.txt"
 ```
 
-243 checks, no window and no audio device. They cover: log-frequency
+353 checks, no window and no audio device. They cover: log-frequency
 interpolation, envelopes, the offline renderer, exact sample pitch
-shift, all seven pitch modes (osc, sample varispeed/granular/vocoder,
+shift, all seven pitch modes (osc, sample varispeed/granular/vocoder/no-stretch,
 live granular/tape/vocoder), the click guard (block-size independence
 plus a second-difference limit), latency rules, JSON round-trip
 (including Python-written files), layout at six window sizes with
@@ -222,28 +257,10 @@ that prevent them - are in **`known-issues.yaml`** at the repo root.
   `JUCE/modules/juce_audio_processors/format_types/VST3_SDK/base/source/fobject.h`
   on 2026-10-16 (an external sync overwrote it). Run
   `.\scripts\check_juce.ps1` to see whether the JUCE tree is damaged, and
-  restore a clean JUCE 8.0.16-security copy if it is.
+  restore a clean JUCE 8.0.6 copy if it is.
 - **Antivirus flags the exe**: allowlist the build folder.
 - **Python prototype silent**: it plays a temp WAV with `winsound`; check
   `python-upic/test_upic.wav` exists after `--test-render`.
-
-## ASIO Support (Windows Standalone)
-
-The root CMake build enables ASIO when Steinberg's ASIO SDK headers are
-present. Put `asio.h`, `asiosys.h`, `iasiodrv.h` in
-`JUCE/modules/juce_audio_devices/native/asio`, or point CMake at another
-copy:
-
-```powershell
-cmake -S . -B build -G "Visual Studio 18 2026" -A x64 `
-  -DUPIC_ASIO_SDK_PATH="C:\path\to\asio"
-```
-
-The Projucer VS2022/VS2026 exporters add the ASIO include path and
-force-include `Source/AsioConfig.h`, which defines `JUCE_ASIO` only when
-the SDK is actually found. Without the SDK the app builds normally and
-lists the other Windows device types; `-DUPIC_ENABLE_ASIO=OFF` silences
-the warning. ASIO is never enabled for the VST3 or Android builds.
 
 ## Repo housekeeping
 

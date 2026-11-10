@@ -47,7 +47,7 @@ found the missing latency report, and APC's `known-issues.yaml` case
 
 | Risk | What actually happened |
 |---|---|
-| The build script would touch the user's files | It never touches `UPICuitous.jucer` or `Builds/Android/*` (that changed in wave 16, when the `.jucer` became safe to touch) |
+| The build script would touch the user's files | It never touches `UPICClone.jucer` or `Builds/Android/*` (that changed in wave 16, when the `.jucer` became safe to touch) |
 | Reporting a latency would misalign the score | The delay is only reported when *every* audible path is delayed |
 | pluginval would be flaky in CI | It is a local gate, not a CI one - it is skipped (with a warning) when the binary is not installed |
 

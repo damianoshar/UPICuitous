@@ -59,7 +59,7 @@ verified with), so the script owns that one line.
 
 ## The version
 
-`.\scripts\build.ps1 -Version 1.18.0` writes the version into three places:
+`.\scripts\build.ps1 -Version 0.28.0` writes the version into three places:
 
 * `Plugin/CMakeLists.txt` (the VST3),
 * `Source/Main.cpp` (`getApplicationVersion()` - the desktop app),
@@ -98,10 +98,8 @@ flavour and the build type in step.
 `Source/` is the only group, and it is current: `Main.cpp`,
 `MainComponent.cpp/.h`, `ScoreEditor.h`, `WaveformEditor.h`,
 `EnvelopeEditor.h`, `UpicModel.h`, `UpicEngine.h`, `LivePitch.h`,
-`AndroidBars.h`. A new header in `Source/` has to be added there, or a
-resave will drop it from the generated project.
+`AndroidBars.h`, `ModelSnapshot.h`, `MidiHub.h`, `AsioConfig.h`. A new
+header in `Source/` has to be added there, or a resave will drop it from
+the generated project.
 
-`Source/ModelSnapshot.h` (v1.18) is the one file that is **not** in the
-`.jucer` - it is included by `MainComponent.h`, so it compiles either way,
-but it is missing from the generated IDE project listing. Add it the next
-time the `.jucer` is touched.
+All headers are now listed in the `.jucer`.
