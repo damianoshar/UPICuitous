@@ -45,14 +45,6 @@ release-artifacts/
 JuceLibraryCode/
 
 # Development documentation (kept locally, not part of the release repo)
-BUILDING.md
-FUTURE_IDEAS.md
-PROGRESS.md
-RELEASE.txt
-TOOLKITS.md
-known-issues.yaml
-docs/*.md
-docs/waves/
 .opencode/
 python-upic/
 web-upic/

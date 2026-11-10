@@ -1,0 +1,230 @@
+# known-issues.yaml - the failures that keep coming back in this repo.
+#
+# Every entry: what you see, how to recognise it, why it happens, how to get
+# out of it, and what stops it from coming back. The "prevention" entries
+# that are scripts are runnable: `.\scripts\<name>.ps1`.
+#
+# Status values:
+#   open      - not fixed yet
+#   accepted  - known, understood, and deliberately left alone
+#   fixed     - fixed in this repo (kept as a record, with the version)
+#   wontfix   - will not be fixed on purpose
+#
+# The file is the single place for this: PROGRESS.md links to it, the
+# troubleshooting section of BUILDING.md links to it, and the Kanso card
+# (265) points here.
+
+version: 1
+updated: "2026-10-25"
+
+issues:
+
+  - id: KI-001
+    title: "JUCE's VST3 SDK header fobject.h is corrupt"
+    category: toolchain
+    severity: high
+    status: accepted
+    since: "2026-10-16"
+    symptoms:
+      - "JUCE fails to compile with a syntax error in fobject.h (a stray character or a truncated line)"
+      - "the plugin build stops in juce_audio_processors with a parse error, not in our own code"
+    error_patterns:
+      - "error Cxxx: syntax error in fobject.h"
+      - "fobject.h: unexpected character"
+    root_cause: >
+      The file was already corrupt on 2026-10-16 02:38:30 - proven from the
+      Nextcloud sync log and the Oct 17 backup zip, so the local-model session
+      was exonerated. An external sync wrote a damaged copy into the JUCE
+      tree. The JUCE tree is gitignored, so git cannot repair it.
+    resolution: >
+      Restore a clean JUCE 8.0.6 copy (the SDK folder is
+      JUCE/modules/juce_audio_processors/format_types/VST3_SDK). Do not let
+      the Nextcloud copy overwrite the repo one. Then rebuild.
+    prevention: >
+      `.\scripts\check_juce.ps1` verifies the SDK headers against the
+      SHA-256 list in this file and says which file is wrong. Run it after
+      anything that writes into the JUCE tree (a sync, an unzip, a tool
+      run). The expected hash of the good fobject.h is
+      e548318c88285eb66bdb0f13637c91bc839b4356c8feb2c9e508cd5f8bedd43a
+      (20766 bytes, JUCE 8.0.6).
+
+  - id: KI-002
+    title: "The VST3 install is refused, or the DAW keeps the old plugin"
+    category: install
+    severity: medium
+    status: accepted
+    since: "2026-10-21"
+    symptoms:
+      - "'The operation was canceled by the user' during the install"
+      - "the copy into C:\\Program Files\\VstPlugIns fails with access denied"
+      - "the DAW still shows the previous version after the install"
+    error_patterns:
+      - "UnauthorizedAccessException / access to the path is denied"
+      - "the operation was canceled by the user"
+    root_cause: >
+      Program Files needs administrator rights, so the copy has to run
+      elevated. A declined UAC prompt leaves the old binary in place, and
+      the DAW caches the plugin list, so it keeps loading the old one even
+      when the file on disk is new. There is no per-user VST3 folder on this
+      machine by default.
+    resolution: >
+      `.\scripts\install_plugin.ps1 -Version <v>` does the whole thing: it
+      asks for admin rights (UAC), copies the bundle, and then verifies that
+      the installed binary's SHA-256 matches the build and that
+      FileVersion / ProductVersion / moduleinfo.json read the expected
+      version. Afterwards restart the DAW or force a plugin rescan. A
+      per-user install avoids UAC: %LOCALAPPDATA%\\Programs\\Common\\VST3.
+    prevention: >
+      Always install with the script (it fails loudly instead of leaving a
+      stale binary), and always check the version in the DAW after a
+      restart - not the version in the build folder.
+
+  - id: KI-003
+    title: "The sample tab ticks with the granular pitch mode"
+    category: audio
+    severity: low
+    status: accepted
+    since: "v1.10"
+    symptoms:
+      - "a soft tick (about -40 dB) at a varying rate while a sample arc plays"
+      - "it follows the arc's ratio, so it speeds up and slows down with the pitch"
+    error_patterns: []
+    root_cause: >
+      The granular shifter re-anchors its grains on the ratio change, and the
+      grain boundary is not perfectly phase-continuous with a moving ratio.
+      It is inherent to granular pitch shifting, not a bug in the app.
+    resolution: >
+      Use the varispeed mode (the default) for the sample tab, or the phase
+      vocoder. Both shift the pitch without the tick.
+    prevention: >
+      Nothing to prevent - the tick is audible only in the granular mode and
+      only in the sample tab.
+
+  - id: KI-004
+    title: "The C4456 warning in MainComponent.cpp"
+    category: build
+    severity: low
+    status: fixed
+    since: "fixed in v1.26"
+    symptoms:
+      - "MSVC warning C4456: declaration of 'b' hides a previous local declaration"
+    error_patterns:
+      - "warning C4456"
+    root_cause: >
+      A shadowed local in the layout code. It had been in the code for a
+      long time and did not change the behaviour (the inner one was the one
+      that was used).
+    resolution: >
+      Renamed the inner loop variable in v1.26; the MSVC C4456 warning is
+      gone from the app and plugin builds.
+    prevention: "The build script output is checked for warnings each wave."
+
+  - id: KI-005
+    title: "The score can be up to 33 ms stale while dragging an arc"
+    category: audio
+    severity: low
+    status: accepted
+    since: "v1.18"
+    symptoms:
+      - "a dragged arc is heard at most one timer tick (33 ms) after it is drawn"
+    error_patterns: []
+    root_cause: >
+      Since v1.18 the audio thread renders from an immutable model snapshot
+      that the message thread publishes. The 30 Hz status timer publishes it,
+      so an edit reaches the audio within 33 ms. Pages, loads, captures and
+      sample changes publish immediately - only the free-hand drawing waits
+      for the tick.
+    resolution: >
+      If it shows in a DAW, let the score editor publish on every change
+      instead of relying on the timer (the publish path already exists:
+      MainComponent::publishModelSnapshot).
+    prevention: "None needed - the delay is below the perceptual threshold."
+
+  - id: KI-006
+    title: "The app, the plugin and the Android app can drift apart in version"
+    category: build
+    severity: medium
+    status: fixed
+    since: "fixed in v1.18"
+    symptoms:
+      - "the standalone app reported 1.15.0 while the VST3 said 1.17.0"
+      - "the Android manifest said 1.2.0 (it came from the .jucer project version)"
+    error_patterns: []
+    root_cause: >
+      The version was written in three places by hand, and the build script's
+      regex for the app version had stopped matching (the comment after the
+      literal moved), so the bump silently did nothing.
+    resolution: >
+      `.\scripts\build.ps1 -Version 1.18.0` writes the version into
+      Plugin/CMakeLists.txt, Source/Main.cpp and UPICClone.jucer, and it
+      warns when it cannot. The bump also runs before the app build, so the
+      app is never built with the old version.
+    prevention: >
+      Always bump with the script, never by hand. `.\scripts\fix_android.ps1
+      -Verify` checks that the Android project still matches the .jucer.
+
+  - id: KI-007
+    title: "A Projucer resave undoes the Android hand edits"
+    category: android
+    severity: medium
+    status: fixed
+    since: "fixed in v1.18"
+    symptoms:
+      - "after a resave the Android build uses SDK 34 / NDK 26.2 / minSdk 21"
+      - "the gradle plugin and the gradle wrapper jump back to the Projucer defaults"
+    error_patterns: []
+    root_cause: >
+      Builds/Android is Projucer-generated. The settings that were not in the
+      .jucer (SDK 35, NDK 28.1, minSdk 24, the debug keystore, the gradle
+      versions) lived only in the generated files.
+    resolution: >
+      The .jucer carries them now (androidMinimumSDK, androidTargetSDK,
+      androidPluginVersion, gradleVersion, androidKeyStore*), so a resave
+      reproduces the same files. The one value Projucer hardcodes - the NDK
+      version - is put back by `.\scripts\fix_android.ps1`, which also
+      verifies everything else. docs/android-build.md has the table.
+    prevention: >
+      Run `.\scripts\fix_android.ps1` after every resave (it is a no-op when
+      nothing drifted) and `-Verify` in a check.
+
+  - id: KI-008
+    title: "The repo-root CMakeLists.txt still says version 1.2.0"
+    category: build
+    severity: low
+    status: accepted
+    since: "2026-10-22"
+    symptoms:
+      - "the alternative CMake app build stamps its version resource as 1.2.0"
+    error_patterns: []
+    root_cause: >
+      The repo-root CMakeLists.txt is the app/APK build and is deliberately
+      not touched by the build script or by the waves (it is the user's
+      file). Its version was never updated with the waves.
+    resolution: >
+      It only affects the version resource of the app built through the root
+      CMake path (not the Projucer/Visual Studio build, not the plugin and
+      not the APK - the APK uses the Projucer-generated CMakeLists).
+    prevention: >
+      Raise it as a deliberate change if the CMake app build is used for a
+      release.
+
+  - id: KI-009
+    title: "The Nextcloud copy of the repo can overwrite the good files"
+    category: tooling
+    severity: medium
+    status: accepted
+    since: "2026-10-16"
+    symptoms:
+      - "a file that was fine locally suddenly has an old or damaged version"
+    error_patterns: []
+    root_cause: >
+      The repo is synced with Nextcloud from another machine, and that copy
+      is not always the good one (see KI-001: it carried the damaged
+      fobject.h).
+    resolution: >
+      When a synced file looks wrong, compare it with the git version
+      (git diff) before accepting it. JUCE/ is gitignored, so git cannot
+      help there - use scripts/check_juce.ps1.
+    prevention: >
+      Never let a synced copy of the JUCE tree overwrite the local one; run
+      the checksum check after a sync.
