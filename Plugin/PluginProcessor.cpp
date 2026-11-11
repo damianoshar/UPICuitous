@@ -86,10 +86,69 @@ void UpicuitousAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 
 void UpicuitousAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
-    const auto text = juce::String::fromUTF8(static_cast<const char*>(data), sizeInBytes);
-    const auto v = juce::JSON::parse(text);
-    if (! v.isVoid())
-        main->loadFromVar(v);
+    // SECURITY (S-03): the host state blob is untrusted input. A null
+    // pointer, a negative size or a blob far bigger than any real piece is
+    // rejected before it is parsed.
+    if (data == nullptr || sizeInBytes <= 0)
+        return;
+    if ((size_t) sizeInBytes > upic::limits::kMaxPieceBytes)
+    {
+        juce::Logger::writeToLog ("UPICuitous: the host state is too large - ignored");
+        return;
+    }
+
+    // The piece is parsed here, on the thread the host called us on, so a
+    // malformed blob cannot take the plugin down with a bad_alloc or a
+    // JSON parse error. The component itself clamps every count it reads.
+    juce::var v;
+    try
+    {
+        const auto text = juce::String::fromUTF8 (static_cast<const char*> (data), sizeInBytes);
+        v = juce::JSON::parse (text);
+    }
+    catch (const std::exception& e)
+    {
+        juce::Logger::writeToLog (juce::String ("UPICuitous: the host state could not be parsed - ")
+                                  + e.what());
+        return;
+    }
+    catch (...)
+    {
+        juce::Logger::writeToLog ("UPICuitous: the host state could not be parsed - ignored");
+        return;
+    }
+
+    if (v.isVoid())
+        return;
+
+    // loadFromVar() touches the UI components, so it belongs on the message
+    // thread. JUCE calls setStateInformation there already; if some host
+    // calls it from elsewhere, the load is marshalled instead of touching
+    // the UI from a foreign thread.
+    auto* component = main.get();
+    if (juce::MessageManager::getInstance() != nullptr
+        && ! juce::MessageManager::getInstance()->isThisTheMessageThread())
+    {
+        juce::MessageManager::getInstance()->callAsync ([component, v]
+        {
+            component->loadFromVar (v);
+        });
+        return;
+    }
+
+    try
+    {
+        main->loadFromVar (v);
+    }
+    catch (const std::exception& e)
+    {
+        juce::Logger::writeToLog (juce::String ("UPICuitous: the host state was rejected - ")
+                                  + e.what());
+    }
+    catch (...)
+    {
+        juce::Logger::writeToLog ("UPICuitous: the host state was rejected - ignored");
+    }
 }
 
 //==============================================================================

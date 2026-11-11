@@ -983,7 +983,17 @@ MainComponent::MainComponent(bool pluginMode)
                 auto end = s.find ("\n", pos);
                 return s.substr (pos + key.size() + 1, (end == std::string::npos ? s.size() : end) - (pos + key.size() + 1));
             };
-            auto parseFloat = [&] (const std::string& k, double d) { try { return k.empty() ? d : std::stod (k); } catch (...) { return d; } };
+            // SECURITY (S-03): std::stod accepts "nan" and "inf", and the
+            // engine's jlimit() passes NaN through unchanged - so a crafted
+            // preset could put a NaN into the PM parameters and from there
+            // into the audio thread. The parsed value is checked here.
+            auto parseFloat = [&] (const std::string& k, double d) {
+                if (k.empty()) return d;
+                try {
+                    const double v = std::stod (k);
+                    return std::isfinite (v) ? v : d;
+                } catch (...) { return d; }
+            };
             std::string op1ratio, op1level, op1fb;
             {
                 auto pos = s.find ("[op1]");
@@ -1009,15 +1019,15 @@ MainComponent::MainComponent(bool pluginMode)
             {
                 if (! ids.empty() && std::find (ids.begin(), ids.end(), a.id) == ids.end()) continue;
                 if (a.mode != 3) continue;
-                a.pmRatio = r;
-                a.pmIndex = lvl * 5.0;
-                a.pmFeedback = juce::jlimit (0.0, 1.0, fb);
+                a.pmRatio = upic::limits::clampFinite (r, 0.25, 16.0);
+                a.pmIndex = upic::limits::clampFinite (lvl * 5.0, 0.0, 100.0);
+                a.pmFeedback = upic::limits::clampFinite (fb, -1.0, 1.0);
                 a.pmIndexEnv = envId;
             }
-            pmRatioSlider.setValue (r, juce::dontSendNotification);
-            pmIndexSlider.setValue (lvl * 5.0, juce::dontSendNotification);
+            pmRatioSlider.setValue (upic::limits::clampFinite (r, 0.25, 16.0), juce::dontSendNotification);
+            pmIndexSlider.setValue (upic::limits::clampFinite (lvl * 5.0, 0.0, 100.0), juce::dontSendNotification);
             { int ei = 1; for (size_t j = 0; j < envelopes.size(); ++j) if (envelopes[j].id == envId) { ei = (int) j + 2; break; } pmIndexEnvBox.setSelectedId (ei, juce::dontSendNotification); }
-            pmFeedbackSlider.setValue (juce::jlimit (0.0, 1.0, fb), juce::dontSendNotification);
+            pmFeedbackSlider.setValue (upic::limits::clampFinite (fb, -1.0, 1.0), juce::dontSendNotification);
             pushVoice();
             publishModelSnapshot();
             flash ("Imported PM preset");
@@ -3859,9 +3869,16 @@ void MainComponent::loadFromVar(const juce::var& v)
     for (auto& s : sampleSlots) { s.name = juce::String(); s.data.reset(); s.sampleRate = 44100.0; }
     if (auto* arr = v.getProperty("samples", juce::var()).getArray())
     {
+        // SECURITY (S-03): the decoded sample data of all the slots together
+        // is capped, so a piece with many huge slots cannot exhaust memory.
+        size_t totalSampleBytes = 0;
         for (auto& sv : *arr)
         {
             auto slot = upic::SampleSlot::fromVar(sv, 1);
+            if (slot.data != nullptr)
+                totalSampleBytes += (size_t) slot.data->getNumSamples()
+                                  * (size_t) slot.data->getNumChannels() * sizeof(float);
+            if (totalSampleBytes > upic::limits::kMaxTotalSampleBytes) break;
             for (auto& s : sampleSlots)
                 if (s.id == slot.id) { s = std::move(slot); break; }
         }
@@ -3869,21 +3886,35 @@ void MainComponent::loadFromVar(const juce::var& v)
     if (auto* arr = v.getProperty("waveforms", juce::var()).getArray())
     {
         int i = 0;
-        for (auto& wv : *arr) waveforms.push_back(upic::Waveform::fromVar(wv, i++));
+        for (auto& wv : *arr)
+        {
+            if ((int) waveforms.size() >= upic::limits::kMaxWaveforms) break;
+            waveforms.push_back(upic::Waveform::fromVar(wv, i++));
+        }
     }
     if (auto* arr = v.getProperty("envelopes", juce::var()).getArray())
     {
         int i = 0;
-        for (auto& ev : *arr) envelopes.push_back(upic::Envelope::fromVar(ev, i++));
+        for (auto& ev : *arr)
+        {
+            if ((int) envelopes.size() >= upic::limits::kMaxEnvelopes) break;
+            envelopes.push_back(upic::Envelope::fromVar(ev, i++));
+        }
     }
     if (auto* arr = v.getProperty("pages", juce::var()).getArray())
-        for (auto& pv : *arr) pages.push_back(upic::Page::fromVar(pv));
+        for (auto& pv : *arr)
+        {
+            if ((int) pages.size() >= upic::limits::kMaxPages) break;
+            pages.push_back(upic::Page::fromVar(pv));
+        }
     if (waveforms.empty()) waveforms = upic::defaultWaveforms();
     if (envelopes.empty()) envelopes = upic::defaultEnvelopes();
     if (pages.empty()) pages.push_back(upic::Page());
     // clamp ids
     currentPage = juce::jlimit(0, (int)pages.size() - 1, (int) v.getProperty("currentPage", 0));
-    masterGain.store((float)(double) v.getProperty("master", 0.8));
+    // SECURITY (S-03): the master gain is clamped to the slider's range, so a
+    // piece cannot push the mix into clipping or silence.
+    masterGain.store(upic::limits::clampGain((float)(double) v.getProperty("master", 0.8)));
     markModelChanged(); // v1.15: the whole piece was replaced -> fade across it
     // v1.1 state (defaults keep old / Python-written files working unchanged)
     seqPages = (bool) v.getProperty("seqPages", false);
@@ -3899,7 +3930,10 @@ void MainComponent::loadFromVar(const juce::var& v)
     sieveR.clear();
     if (auto* arr = v.getProperty("sieveR", juce::var()).getArray())
         for (auto& rv : *arr)
+        {
+            if ((int) sieveR.size() >= upic::limits::kMaxSieveRemainders) break;
             sieveR.push_back((((int) rv % sieveM) + sieveM) % sieveM);
+        }
     seqBtn.setToggleState(seqPages, juce::dontSendNotification);
     pressBtn.setToggleState(recordPressure, juce::dontSendNotification);
     scrubBtn.setToggleState(scrubAudition, juce::dontSendNotification);
@@ -3925,8 +3959,8 @@ void MainComponent::loadFromVar(const juce::var& v)
     score.setRecordPressure(recordPressure);
     score.setSieve(sieveOn, sieveM, sieveR);
     // v1.2 state (defaults: full stickiness, no time grid = v1.1 behaviour)
-    stickiness = juce::jlimit(0.0, 1.0, (double) v.getProperty("stickiness", 1.0));
-    timeGrid = juce::jlimit(0.0, 64.0, (double) v.getProperty("timeGrid", 0.0));
+    stickiness = upic::limits::clampFinite((double) v.getProperty("stickiness", 1.0), 0.0, 1.0);
+    timeGrid = upic::limits::clampFinite((double) v.getProperty("timeGrid", 0.0), 0.0, 64.0);
     stickSlider.setValue(stickiness, juce::dontSendNotification);
     score.setStickiness(stickiness);
     {
@@ -3976,7 +4010,16 @@ void MainComponent::loadFile()
         [this, fc](const juce::FileChooser& c){
             auto f = c.getResult();
             if (!f.existsAsFile()) return;
+            // SECURITY (S-03): a piece is untrusted input. Refuse to read a
+            // file that is far bigger than any real piece, so a huge or
+            // hostile file cannot exhaust memory before it is even parsed.
+            if (f.getSize() > (juce::int64) upic::limits::kMaxPieceBytes)
+            {
+                flash("Piece too large (max 10 MB)");
+                return;
+            }
             auto txt = f.loadFileAsString();
+            if (txt.getNumBytesAsUTF8() > upic::limits::kMaxPieceBytes) return;
             auto v = juce::JSON::parse(txt);
             if (v.isVoid()) return;
             loadFromVar(v);

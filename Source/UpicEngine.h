@@ -416,9 +416,19 @@ private:
         if (smp.data == nullptr) return 0.0f;
         const auto& buf = *smp.data;
         const int nFrames = buf.getNumSamples();
+        if (nFrames <= 0) return 0.0f;
         const double matDur = smp.durationSec();
         const double matSr = smp.sampleRate;
         const int nCh = juce::jmin(2, buf.getNumChannels());
+
+        // SECURITY (S-03): a zero or negative duration (a crafted sample rate
+        // or frame count) would make the wrap loops below spin forever, and a
+        // NaN position would fall straight through into the index maths.
+        // Both are rejected here - the audio thread must never block or index
+        // out of range.
+        if (! std::isfinite (pos)) return 0.0f;
+        if (! std::isfinite (matDur) || matDur <= 1.0e-6) return 0.0f;
+        if (! std::isfinite (matSr) || matSr <= 0.0) return 0.0f;
 
         while (pos >= matDur) pos -= matDur;
         while (pos < 0.0) pos += matDur;
@@ -468,7 +478,11 @@ private:
     {
         const int nFrames = smp.data != nullptr ? smp.data->getNumSamples() : 0;
         const double matDur = smp.durationSec();
-        if (nFrames < 2 || matDur <= 0.0) return;
+        // SECURITY (S-03): a non-finite or non-positive duration would make
+        // the fmod() wraps below produce NaN, and NaN would reach the shifter
+        // and from there the buffer index maths.
+        if (nFrames < 2 || ! std::isfinite (matDur) || matDur <= 0.0) return;
+        if (! std::isfinite (playhead) || ! std::isfinite (rate)) return;
         const double arcStart = arc.startTime(), arcEnd = arc.endTime();
         const double arcDur = juce::jmax(1.0e-6, arcEnd - arcStart);
         const double ref = juce::jmax(1.0, arc.refFreq);

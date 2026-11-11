@@ -1079,6 +1079,72 @@ public:
                   juce::String(reverse, 4));
         }
 
+        // 6i. v1.30 (S-03): a piece is untrusted input. The parsers clamp
+        //     the counts and reject non-finite numbers, so a crafted piece
+        //     cannot be used to freeze the UI or to push NaN into the audio
+        //     thread.
+        {
+            upic::Arc arc = upic::Arc::fromVar (juce::JSON::parse (
+                "{\"id\":1,\"mode\":0,\"intensity\":99,\"refFreq\":1e300,"
+                "\"points\":[{\"t\":0,\"f\":440,\"i\":5},{\"t\":1e300,\"f\":NaN}]}"));
+            check (arc.intensity >= 0.0f && arc.intensity <= 1.0f,
+                   "an out-of-range intensity is clamped",
+                   juce::String (arc.intensity, 3));
+            check (arc.refFreq >= 20.0 && arc.refFreq <= 4000.0,
+                   "an out-of-range refFreq is clamped",
+                   juce::String (arc.refFreq, 1));
+            bool allFinite = true;
+            for (auto& pt : arc.points)
+                if (! std::isfinite (pt.t) || ! std::isfinite (pt.freq))
+                    allFinite = false;
+            check (allFinite, "a non-finite arc point is clamped to a finite one");
+
+            // a huge point count is truncated, not accepted
+            {
+                juce::String json = "{\"id\":2,\"points\":[";
+                for (int i = 0; i < 5000; ++i)
+                {
+                    if (i > 0) json += ",";
+                    json += "{\"t\":" + juce::String (i) + ",\"f\":440}";
+                }
+                json += "]}";
+                const auto a2 = upic::Arc::fromVar (juce::JSON::parse (json));
+                check ((int) a2.points.size () <= upic::limits::kMaxPointsPerArc,
+                       "an oversized point list is truncated",
+                       juce::String ((int) a2.points.size ()) + " of 5000");
+            }
+
+            // a huge declared frame count is capped before anything is allocated
+            {
+                const auto slot = upic::SampleSlot::fromVar (juce::JSON::parse (
+                    "{\"id\":1,\"frames\":2000000000,\"channels\":2,\"sampleRate\":48000,"
+                    "\"data\":\"AAAA\"}"), 1);
+                check (slot.data == nullptr,
+                       "an oversized sample slot is refused (no allocation)");
+            }
+
+            // a page with too many arcs is truncated
+            {
+                juce::String json = "{\"duration\":30,\"arcs\":[";
+                for (int i = 0; i < 2000; ++i)
+                {
+                    if (i > 0) json += ",";
+                    json += "{\"id\":" + juce::String (i + 1) + ",\"points\":[]}";
+                }
+                json += "]}";
+                const auto pg = upic::Page::fromVar (juce::JSON::parse (json));
+                check ((int) pg.arcs.size () <= upic::limits::kMaxArcsPerPage,
+                       "an oversized arc list is truncated",
+                       juce::String ((int) pg.arcs.size ()) + " of 2000");
+            }
+
+            // the clamp helper itself never returns NaN
+            check (upic::limits::clampFinite (std::numeric_limits<double>::quiet_NaN (), 0.0, 1.0) == 0.0,
+                   "clampFinite turns NaN into the lower bound");
+            check (upic::limits::clampGain (99.0f) == upic::limits::kMaxMasterGain,
+                   "clampGain caps the master gain at the slider's top");
+        }
+
         // 7. pen pressure -> per-point intensity curve
         {
             upic::Arc a;

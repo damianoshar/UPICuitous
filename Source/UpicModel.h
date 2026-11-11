@@ -6,6 +6,7 @@
 #include <cmath>
 #include <algorithm>
 #include <memory>
+#include "PieceLimits.h"
 
 //==============================================================================
 // UPIC data model — mirrors Xenakis' UPIC concepts:
@@ -186,7 +187,11 @@ namespace upic
             e.points.clear();
             if (auto* arr = v.getProperty("points", juce::var()).getArray())
                 for (auto& pv : *arr)
-                    e.points.push_back({ (float)(double)pv.getProperty("x", 0), (float)(double)pv.getProperty("y", 1) });
+                {
+                    if ((int) e.points.size() >= limits::kMaxPointsPerEnvelope) break;
+                    e.points.push_back({ limits::clampFinite((float)(double)pv.getProperty("x", 0), 0.0f, 1.0f),
+                                         limits::clampFinite((float)(double)pv.getProperty("y", 1), 0.0f, 1.0f) });
+                }
             if (e.points.empty()) e.presetFlat();
             std::sort(e.points.begin(), e.points.end(), [](auto& a, auto& b){ return a.x < b.x; });
             return e;
@@ -306,26 +311,27 @@ namespace upic
             a.id = (int) v.getProperty("id", 0);
             a.waveformId = (int) v.getProperty("waveformId", 0);
             a.envelopeId = (int) v.getProperty("envelopeId", 0);
-            a.intensity = (float)(double) v.getProperty("intensity", 0.8);
+            a.intensity = limits::clampIntensity((float)(double) v.getProperty("intensity", 0.8));
             a.muted = (bool) v.getProperty("muted", false);
             // absent in old / Python-written files -> oscillator mode, as before
             a.mode = juce::jlimit(0, 3, (int) v.getProperty("mode", 0));
-            a.pmRatio    = (double) v.getProperty("pmRatio", 2.0);
-            a.pmIndex    = (double) v.getProperty("pmIndex", 1.5);
+            a.pmRatio    = limits::clampFinite((double) v.getProperty("pmRatio", 2.0), 0.25, 16.0);
+            a.pmIndex    = limits::clampFinite((double) v.getProperty("pmIndex", 1.5), 0.0, 100.0);
             a.pmIndexEnv = (int)    v.getProperty("pmIndexEnv", 0);
-            a.pmFeedback  = (double) v.getProperty("pmFeedback", 0.0);
+            a.pmFeedback  = limits::clampFinite((double) v.getProperty("pmFeedback", 0.0), -1.0, 1.0);
             a.pmOps = juce::jlimit (2, 4, (int) v.getProperty ("pmOps", 2));
-            a.pmR2  = (double) v.getProperty ("pmR2", 2.0);  a.pmR3 = (double) v.getProperty ("pmR3", 3.0);  a.pmR4 = (double) v.getProperty ("pmR4", 5.0);
-            a.pmI2  = (double) v.getProperty ("pmI2", 1.0);  a.pmI3 = (double) v.getProperty ("pmI3", 1.0);  a.pmI4 = (double) v.getProperty ("pmI4", 1.0);
+            a.pmR2  = limits::clampFinite((double) v.getProperty ("pmR2", 2.0), 0.25, 16.0);  a.pmR3 = limits::clampFinite((double) v.getProperty ("pmR3", 3.0), 0.25, 16.0);  a.pmR4 = limits::clampFinite((double) v.getProperty ("pmR4", 5.0), 0.25, 16.0);
+            a.pmI2  = limits::clampFinite((double) v.getProperty ("pmI2", 1.0), 0.0, 100.0);  a.pmI3 = limits::clampFinite((double) v.getProperty ("pmI3", 1.0), 0.0, 100.0);  a.pmI4 = limits::clampFinite((double) v.getProperty ("pmI4", 1.0), 0.0, 100.0);
             a.sampleId = juce::jlimit(1, kMaxSampleSlots, (int) v.getProperty("sampleId", 1));
-            a.refFreq = juce::jlimit(20.0, 4000.0, (double) v.getProperty("refFreq", 261.63));
+            a.refFreq = limits::clampFinite((double) v.getProperty("refFreq", 261.63), 20.0, 4000.0);
             if (auto* arr = v.getProperty("points", juce::var()).getArray())
                 for (auto& pv : *arr)
                 {
+                    if ((int) a.points.size() >= limits::kMaxPointsPerArc) break;
                     upic::ArcPoint pt;
-                    pt.t = (double) pv.getProperty("t", 0);
-                    pt.freq = (double) pv.getProperty("f", 440);
-                    pt.i = juce::jlimit(0.0f, 1.0f, (float)(double) pv.getProperty("i", 1.0));
+                    pt.t = limits::clampFinite((double) pv.getProperty("t", 0), 0.0, 600.0);
+                    pt.freq = limits::clampFinite((double) pv.getProperty("f", 440), kMinFreq, kMaxFreq);
+                    pt.i = limits::clampIntensity((float)(double) pv.getProperty("i", 1.0));
                     a.points.push_back(pt);
                 }
             std::sort(a.points.begin(), a.points.end(), [](auto& x, auto& y){ return x.t < y.t; });
@@ -433,15 +439,19 @@ namespace upic
         {
             SieveZone z;
             z.id = (int) v.getProperty("id", 1);
-            z.t0 = (double) v.getProperty("t0", 0.0);
-            z.t1 = (double) v.getProperty("t1", 0.0);
-            z.f0 = juce::jlimit(kMinFreq, kMaxFreq, (double) v.getProperty("f0", kMinFreq));
-            z.f1 = juce::jlimit(kMinFreq, kMaxFreq, (double) v.getProperty("f1", kMaxFreq));
+            z.t0 = limits::clampFinite((double) v.getProperty("t0", 0.0), 0.0, 600.0);
+            z.t1 = limits::clampFinite((double) v.getProperty("t1", 0.0), 0.0, 600.0);
+            z.f0 = limits::clampFinite((double) v.getProperty("f0", kMinFreq), kMinFreq, kMaxFreq);
+            z.f1 = limits::clampFinite((double) v.getProperty("f1", kMaxFreq), kMinFreq, kMaxFreq);
             z.m = juce::jlimit(2, 120, (int) v.getProperty("m", 12));
-            z.timeGrid = juce::jlimit(0.0, 64.0, (double) v.getProperty("timeGrid", 0.0));
+            z.timeGrid = limits::clampFinite((double) v.getProperty("timeGrid", 0.0), 0.0, 64.0);
             std::vector<int> rs;
             if (auto* arr = v.getProperty("r", juce::var()).getArray())
-                for (auto& rv : *arr) rs.push_back((((int) rv % z.m) + z.m) % z.m);
+                for (auto& rv : *arr)
+                {
+                    if ((int) rs.size() >= limits::kMaxSieveRemainders) break;
+                    rs.push_back((((int) rv % z.m) + z.m) % z.m);
+                }
             z.remainders = std::move(rs);
             return z;
         }
@@ -830,15 +840,24 @@ namespace upic
             SampleSlot s;
             s.id = juce::jlimit(1, kMaxSampleSlots, (int) v.getProperty("id", fallbackId));
             s.name = v.getProperty("name", "").toString();
-            s.sampleRate = juce::jlimit(1000.0, 384000.0, (double) v.getProperty("sampleRate", 44100.0));
+            s.sampleRate = limits::clampFinite((double) v.getProperty("sampleRate", 44100.0),
+                                               1000.0, limits::kMaxSampleRate);
             const int ch = juce::jlimit(1, 2, (int) v.getProperty("channels", 1));
-            const int n = juce::jmax(0, (int) v.getProperty("frames", 0));
+            // The declared frame count is clamped to the 60-second cap before
+            // anything is allocated: a crafted "frames" value must not be able
+            // to ask for a gigabyte of buffer.
+            const int n = juce::jlimit(0, limits::kMaxFramesPerSample, (int) v.getProperty("frames", 0));
             auto b64 = v.getProperty("data", "").toString();
-            if (n > 0 && ch > 0 && b64.isNotEmpty())
+            // ...and the base64 string is checked against the size it claims
+            // to carry BEFORE it is decoded, so an oversized payload is
+            // rejected without ever being expanded.
+            const size_t expectedBytes = (size_t) n * (size_t) ch * sizeof(short);
+            if (n > 0 && ch > 0 && b64.isNotEmpty()
+                && b64.getNumBytesAsUTF8() <= expectedBytes * limits::kBase64Overhead)
             {
                 juce::MemoryOutputStream mo;
                 if (juce::Base64::convertFromBase64(mo, b64)
-                    && mo.getDataSize() >= (size_t) n * (size_t) ch * sizeof(short))
+                    && mo.getDataSize() >= expectedBytes)
                 {
                     juce::AudioBuffer<float> buf(ch, n);
                     const auto* src = static_cast<const short*>(mo.getData());
@@ -939,11 +958,15 @@ namespace upic
         static Page fromVar(const juce::var& v)
         {
             Page p;
-            p.durationSec = juce::jlimit(1.0, 600.0, (double) v.getProperty("duration", 30.0));
-            p.tempoBpm    = juce::jlimit(20.0, 400.0, (double) v.getProperty("tempo", 120.0));
+            p.durationSec = limits::clampFinite((double) v.getProperty("duration", 30.0), 1.0, 600.0);
+            p.tempoBpm    = limits::clampFinite((double) v.getProperty("tempo", 120.0), 20.0, 400.0);
             p.nextArcId = (int) v.getProperty("nextArcId", 1);
             if (auto* arr = v.getProperty("arcs", juce::var()).getArray())
-                for (auto& av : *arr) p.arcs.push_back(Arc::fromVar(av));
+                for (auto& av : *arr)
+                {
+                    if ((int) p.arcs.size() >= limits::kMaxArcsPerPage) break;
+                    p.arcs.push_back(Arc::fromVar(av));
+                }
             // Files written by other tools may not carry nextArcId: make sure the
             // next generated id can never collide with an id already in use
             // (a collision would make select/delete hit the wrong arc).
@@ -952,7 +975,11 @@ namespace upic
             // zones absent in old / Python-written files -> no zones, as before
             p.nextZoneId = (int) v.getProperty("nextZoneId", 1);
             if (auto* zarr = v.getProperty("zones", juce::var()).getArray())
-                for (auto& zv : *zarr) p.zones.push_back(SieveZone::fromVar(zv));
+                for (auto& zv : *zarr)
+                {
+                    if ((int) p.zones.size() >= limits::kMaxSieveZones) break;
+                    p.zones.push_back(SieveZone::fromVar(zv));
+                }
             for (auto& z : p.zones)
                 p.nextZoneId = juce::jmax(p.nextZoneId, z.id + 1);
             return p;
