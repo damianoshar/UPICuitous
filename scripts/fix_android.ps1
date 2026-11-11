@@ -156,6 +156,11 @@ using namespace juce;
     $text = $text.Replace('include_juce_audio_processors_lv2_libs.cpp', 'include_juce_audio_processors_headless_lv2_libs.cpp')
     $text = $text.Replace('juce_audio_processors/juce_audio_processors_ara.cpp', 'juce_audio_processors_headless/juce_audio_processors_headless_ara.cpp')
     $text = $text.Replace('juce_audio_processors/juce_audio_processors_lv2_libs.cpp', 'juce_audio_processors_headless/juce_audio_processors_headless_lv2_libs.cpp')
+    # The module sources: the generated file lists every file of every module
+    # with the JuceLibraryCode/ prefix. They all point at the fetched JUCE/
+    # tree instead, so the prefix is rewritten (the prefix can end in
+    # /modules or continue into a module subfolder - both are covered).
+    $text = $text.Replace('../../../JuceLibraryCode/modules/', '../../../JUCE/modules/')
     $text = $text.Replace('"../../../JuceLibraryCode/modules"', '"../../../JUCE/modules"')
     $text = $text.Replace('"../../../JuceLibraryCode"', '"${UPIC_JUCE_INCLUDE_DIR}"')
     $text = [regex]::Replace($text,
@@ -331,7 +336,7 @@ if (Test-Path $appCMake) {
             $cmText = $repaired
         }
     }
-    elseif ($cmText -match 'JuceLibraryCode/(modules|include_juce|JuceHeader)') {
+    elseif ($cmText -match '\.\./\.\./\.\./JuceLibraryCode/(modules|include_juce|JuceHeader)') {
         $problems += "the generated CMakeLists still points at JuceLibraryCode (run this script without -Verify to fix it)"
     }
     $parts = $projectVersion.Split('.')
