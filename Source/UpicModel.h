@@ -58,6 +58,25 @@ namespace upic
         return cols[i % 16];
     }
 
+    //---------------- the point lookups ----------------
+    // The index of the first point whose key is >= the searched one, in a
+    // point list that is sorted by that key. A binary search, because these
+    // lookups run per sample on the audio thread: a piece with a thousand
+    // points per arc would otherwise cost a thousand comparisons for every
+    // single sample (and a crafted piece is exactly how that happens).
+    template <typename PointType, typename KeyType, typename KeyGetter>
+    inline size_t findSegment (const std::vector<PointType>& points, KeyType key, KeyGetter keyOf)
+    {
+        size_t lo = 0, hi = points.size();
+        while (lo < hi)
+        {
+            const size_t mid = lo + (hi - lo) / 2;
+            if (keyOf (points[mid]) < key) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
     //---------------- Waveform ----------------
     struct Waveform
     {
@@ -149,18 +168,16 @@ namespace upic
             if (points.empty()) return 1.0f;
             t = juce::jlimit(0.0f, 1.0f, t);
             if (t <= points.front().x) return points.front().y;
-            for (size_t i = 1; i < points.size(); ++i)
-            {
-                if (t <= points[i].x)
-                {
-                    float x0 = points[i-1].x, y0 = points[i-1].y;
-                    float x1 = points[i].x,   y1 = points[i].y;
-                    if (x1 <= x0) return y1;
-                    float f = (t - x0) / (x1 - x0);
-                    return y0 + (y1 - y0) * f;
-                }
-            }
-            return points.back().y;
+            if (t >= points.back().x)  return points.back().y;
+            // The points are sorted by x, so the segment is found with a
+            // binary search instead of a linear scan (this runs per sample).
+            const size_t i = findSegment (points, t, [] (const EnvPoint& p) { return p.x; });
+            const size_t i0 = i - 1, i1 = i;
+            float x0 = points[i0].x, y0 = points[i0].y;
+            float x1 = points[i1].x, y1 = points[i1].y;
+            if (x1 <= x0) return y1;
+            float f = (t - x0) / (x1 - x0);
+            return y0 + (y1 - y0) * f;
         }
         void presetFlat()      { points = { {0,1}, {1,1} }; }
         void presetPercussive(){ points = { {0,0}, {0.02f,1}, {0.25f,0.4f}, {0.7f,0.15f}, {1,0} }; }
@@ -242,17 +259,19 @@ namespace upic
             if (points.empty()) return 440.0;
             if (t <= points.front().t) return points.front().freq;
             if (t >= points.back().t)  return points.back().freq;
-            for (size_t i = 1; i < points.size(); ++i)
-                if (t <= points[i].t)
-                {
-                    double t0 = points[i-1].t, f0 = points[i-1].freq;
-                    double t1 = points[i].t,   f1 = points[i].freq;
-                    if (t1 <= t0) return f1;
-                    double f = (t - t0) / (t1 - t0);
-                    double l0 = std::log2(juce::jmax(1.0, f0)), l1 = std::log2(juce::jmax(1.0, f1));
-                    return std::pow(2.0, l0 + (l1 - l0) * f);
-                }
-            return points.back().freq;
+            // The points are sorted by t, so the segment is found with a
+            // binary search instead of a linear scan: this runs per sample
+            // on the audio thread, and a crafted piece with a thousand
+            // points per arc would otherwise cost a thousand comparisons
+            // for every sample.
+            const size_t i = findSegment (points, t, [] (const ArcPoint& p) { return p.t; });
+            const size_t i0 = i - 1, i1 = i;
+            double t0 = points[i0].t, f0 = points[i0].freq;
+            double t1 = points[i1].t, f1 = points[i1].freq;
+            if (t1 <= t0) return f1;
+            double f = (t - t0) / (t1 - t0);
+            double l0 = std::log2(juce::jmax(1.0, f0)), l1 = std::log2(juce::jmax(1.0, f1));
+            return std::pow(2.0, l0 + (l1 - l0) * f);
         }
         // 0..1 over arc lifetime
         float lifeAt(double t) const
@@ -267,16 +286,14 @@ namespace upic
             if (points.empty()) return 1.0f;
             if (t <= points.front().t) return points.front().i;
             if (t >= points.back().t)  return points.back().i;
-            for (size_t i = 1; i < points.size(); ++i)
-                if (t <= points[i].t)
-                {
-                    double t0 = points[i-1].t, t1 = points[i].t;
-                    if (t1 <= t0) return points[i].i;
-                    float a = points[i-1].i, b = points[i].i;
-                    float f = (float) ((t - t0) / (t1 - t0));
-                    return a + (b - a) * f;
-                }
-            return points.back().i;
+            // binary search, like freqAt() above
+            const size_t i = findSegment (points, t, [] (const ArcPoint& p) { return p.t; });
+            const size_t i0 = i - 1, i1 = i;
+            double t0 = points[i0].t, t1 = points[i1].t;
+            if (t1 <= t0) return points[i1].i;
+            float a = points[i0].i, b = points[i1].i;
+            float f = (float) ((t - t0) / (t1 - t0));
+            return a + (b - a) * f;
         }
 
         juce::var toVar() const

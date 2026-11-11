@@ -46,6 +46,72 @@ public:
                   "arc freqAt log-interp (midpoint)", juce::String(mid, 3) + " Hz (expect 155.563)");
         }
 
+        // 1b. the point lookups use a binary search now (they run per
+        //      sample): the result must be identical to the old linear
+        //      scan, on a curve with many points.
+        {
+            upic::Arc a;
+            for (int i = 0; i < 500; ++i)
+                a.points.push_back({ (double) i * 0.02, 110.0 + (double) i * 0.5 });
+
+            // the reference: the linear scan the binary search replaced
+            auto linearFreqAt = [&a] (double t) -> double
+            {
+                if (t <= a.points.front().t) return a.points.front().freq;
+                if (t >= a.points.back().t)  return a.points.back().freq;
+                for (size_t i = 1; i < a.points.size(); ++i)
+                    if (t <= a.points[i].t)
+                    {
+                        const double t0 = a.points[i-1].t, f0 = a.points[i-1].freq;
+                        const double t1 = a.points[i].t,   f1 = a.points[i].freq;
+                        if (t1 <= t0) return f1;
+                        const double f = (t - t0) / (t1 - t0);
+                        const double l0 = std::log2(juce::jmax(1.0, f0));
+                        const double l1 = std::log2(juce::jmax(1.0, f1));
+                        return std::pow(2.0, l0 + (l1 - l0) * f);
+                    }
+                return a.points.back().freq;
+            };
+
+            double maxDiff = 0.0;
+            for (int i = 0; i <= 2000; ++i)
+            {
+                const double t = (double) i / 2000.0 * 9.98;
+                maxDiff = juce::jmax(maxDiff, std::abs(a.freqAt(t) - linearFreqAt(t)));
+            }
+            check(maxDiff < 1e-9, "the binary-search freqAt matches the linear scan",
+                  "max diff " + juce::String(maxDiff, 12));
+
+            upic::Envelope e;
+            e.points.clear(); // the constructor pre-fills two points
+            for (int i = 0; i < 500; ++i)
+                e.points.push_back({ (float) i * 0.002f, (float) (i % 100) / 100.0f });
+
+            auto linearValueAt = [&e] (float t) -> float
+            {
+                if (t <= e.points.front().x) return e.points.front().y;
+                for (size_t i = 1; i < e.points.size(); ++i)
+                    if (t <= e.points[i].x)
+                    {
+                        const float x0 = e.points[i-1].x, y0 = e.points[i-1].y;
+                        const float x1 = e.points[i].x,   y1 = e.points[i].y;
+                        if (x1 <= x0) return y1;
+                        const float f = (t - x0) / (x1 - x0);
+                        return y0 + (y1 - y0) * f;
+                    }
+                return e.points.back().y;
+            };
+
+            float maxDiffE = 0.0f;
+            for (int i = 0; i <= 2000; ++i)
+            {
+                const float t = (float) i / 2000.0f * 0.998f;
+                maxDiffE = juce::jmax(maxDiffE, std::abs(e.valueAt(t) - linearValueAt(t)));
+            }
+            check(maxDiffE < 1e-6f, "the binary-search envelope valueAt matches the linear scan",
+                  "max diff " + juce::String(maxDiffE, 9));
+        }
+
         // 2. envelope shape
         {
             upic::Envelope perc; perc.presetPercussive();
