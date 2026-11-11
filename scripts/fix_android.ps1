@@ -157,6 +157,41 @@ if (-not $Verify) {
     }
     $appText = $patched
 }
+
+# ------------------------------- the release signing (Projucer adds a fallback)
+# SECURITY (S-02): Projucer writes the release build type with a fallback to
+# the PUBLIC debug keystore when keystore.properties is missing. That can ship
+# a debug-signed release APK, so the fallback is removed here and the build
+# fails closed instead. A resave would put it back - that is why the script
+# owns it.
+if (-not $Verify) {
+    $debugFallback = @"
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.releaseSigning
+            } else {
+                signingConfig signingConfigs.juceSigning
+            }
+"@
+    $failClosed = @"
+            // SECURITY (S-02): fail closed. The debug key is public, so a
+            // release APK must never be signed with it. If the release
+            // keystore is missing the build stops instead of shipping a
+            // debug-signed APK that a third party could impersonate.
+            if (!keystorePropertiesFile.exists()) {
+                throw new GradleException(
+                    "keystore.properties is missing - refusing to build a release APK.\n" +
+                    "Copy keystore.properties.template to keystore.properties and fill it in, " +
+                    "or build the debug flavour instead (./gradlew.bat assembleDebug).")
+            }
+            signingConfig signingConfigs.releaseSigning
+"@
+    $patched = $appText.Replace($debugFallback, $failClosed)
+    if ($patched -ne $appText) {
+        [IO.File]::WriteAllText($appGradle, $patched, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "  the release signing now fails closed (no debug-key fallback)" -ForegroundColor Cyan
+    }
+    $appText = $patched
+}
 $ndkFound = Get-Setting $appText 'def ndkVersionString = "([^"]+)"' "the NDK version"
 if ($ndkFound -ne $NdkVersion) {
     $problems += "the NDK is '$ndkFound' but this repo builds with '$NdkVersion' (run this script without -Verify to fix it)"
@@ -217,6 +252,11 @@ if ($versionCode -ne $want["androidVersionCode"]) {
 if ($appText -notmatch "juceSigning") { $problems += "the juceSigning config is missing" }
 if ($appText -notmatch "debug_") { $problems += "the debug_ product flavour is missing" }
 if ($appText -notmatch "release_") { $problems += "the release_ product flavour is missing" }
+# SECURITY (S-02): the release build type must not fall back to the public
+# debug key - a release APK signed with it can be impersonated.
+if ($appText -match "signingConfigs\.juceSigning[\s\S]{0,400}release[\s\S]{0,400}signingConfigs\.juceSigning") {
+    $problems += "the release build type falls back to the debug keystore - run this script without -Verify to make it fail closed"
+}
 
 # the generated CMakeLists carries the version too (JUCE_APP_VERSION and
 # its hex form: (major << 16) + (minor << 8) + patch)
