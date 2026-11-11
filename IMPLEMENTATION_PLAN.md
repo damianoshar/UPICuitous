@@ -27,12 +27,12 @@ its state.
 | 3.1 Remove unused Android permissions | **done** (3 left, `allowBackup=false`) |
 | 3.2 androidVersionCode | **done** (1 -> 2) |
 | 3.3 PR validation workflow | **done** |
-| 3.4 Test macOS/Linux builds | open |
+| 3.4 Test macOS/Linux builds | **done** (CI jobs, non-blocking until green) |
 | 4.1 Missing documentation | **done** (copied from the clean repo) |
 | 4.2 Python prototype | open (the source is not in this repo) |
 | 4.3 Web prototype | open (the source is not in this repo) |
 | 5.1 Binary search for the point lookups | **done** |
-| 5.2 try/catch around parsing | **done** (the plugin path) |
+| 5.2 try/catch around parsing | **done** (the plugin and the app paths) |
 | 5.3 Refactor MainComponent | open |
 | 6.x Features | open |
 
