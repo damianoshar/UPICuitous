@@ -6,6 +6,9 @@ on:
     tags:
       - "v*"
 
+# SECURITY (S-01): the workflow itself gets the least privilege that still
+# works. The signing job is the only one that needs the keystore, and it
+# runs in a protected environment; the publish job never sees the key.
 permissions:
   actions: read
   contents: read
@@ -15,20 +18,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  android:
+  # ---------------------------------------------------------------------
+  # 1. build the unsigned APK
+  #    This job has NO access to the signing key and NO write token: a
+  # compromised dependency here cannot steal the key or push to the repo.
+  # ---------------------------------------------------------------------
+  build-android:
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/28.1.13356709
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: "17"
@@ -38,7 +49,7 @@ jobs:
 
       - name: Verify Android CMake uses fetched JUCE
         run: |
-          if grep -nE 'JuceLibraryCode/(modules|include_juce|JuceHeader)' Builds/Android/app/CMakeLists.txt; then
+          if grep -nE '\.\./\.\./\.\./JuceLibraryCode/(modules|include_juce|JuceHeader)' Builds/Android/app/CMakeLists.txt; then
             echo "Builds/Android/app/CMakeLists.txt still points at generated JuceLibraryCode."
             echo "Run scripts/fix_android.ps1 after a Projucer resave, then commit the result."
             exit 1
@@ -60,33 +71,158 @@ jobs:
             "build-tools;35.0.0" \
             "platforms;android-35"
 
-      - name: Decode signing keystore
-        run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > Builds/Android/app/app-release.keystore
-          {
-            echo "storeFile=app-release.keystore"
-            echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}"
-            echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}"
-            echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}"
-          } > Builds/Android/app/keystore.properties
-
-      - name: Build release APK
+      - name: Build the release APK with a throwaway key
         working-directory: Builds/Android
         run: |
+          set -euo pipefail
           chmod +x ./gradlew
+          # The release build type fails closed without a keystore (S-02), so
+          # this job signs the build with a THROWAWAY key that it generates
+          # itself. The real release key never exists on this runner - it is
+          # only in the signing job below, which replaces this signature.
+          keytool -genkeypair -v \
+            -keystore app/build/throwaway.keystore \
+            -alias throwaway -keyalg RSA -keysize 2048 -validity 1 \
+            -storepass throwaway -keypass throwaway \
+            -dname "CN=throwaway, O=upicuitous-ci" >/dev/null 2>&1
+          {
+            echo "storeFile=app/build/throwaway.keystore"
+            echo "keyAlias=throwaway"
+            echo "keyPassword=throwaway"
+            echo "storePassword=throwaway"
+          } > app/keystore.properties
           ./gradlew assembleRelease_Release --no-daemon --stacktrace
+          rm -f app/keystore.properties app/build/throwaway.keystore
 
-      - name: Collect APK
+      - name: Collect the APK
         run: |
+          set -euo pipefail
           mkdir -p dist
           APK=$(find Builds/Android/app/build/outputs/apk/release_/release -maxdepth 1 -name '*.apk' -print -quit)
           test -n "$APK"
           VERSION=$(printf '%s' "$GITHUB_REF_NAME" | tr '/ ' '--')
-          cp "$APK" "dist/UPICuitous-${VERSION}.apk"
+          cp "$APK" "dist/UPICuitous-${VERSION}-unsigned.apk"
           ls -lh dist
 
-      - name: Upload Android APK
-        uses: actions/upload-artifact@v4
+      - name: Upload the APK for signing
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: UPICuitous-Android-APK-unsigned
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------
+  # 2. sign the APK
+  #    The only job that sees the keystore. It runs in a protected
+  #    environment (required reviewers + tag protection), gets no write
+  #    token, and its runner is used for nothing else.
+  # ---------------------------------------------------------------------
+  sign-android:
+    needs: build-android
+    runs-on: ubuntu-latest
+    environment: android-signing
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Download unsigned APK
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: UPICuitous-Android-APK-unsigned
+          path: dist/android
+
+      - name: Decode signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p keys
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > keys/app-release.keystore
+          {
+            echo "storeFile=app-release.keystore"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+            echo "storePassword=$STORE_PASSWORD"
+          } > keys/keystore.properties
+
+      - name: Sign the APK
+        env:
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$(command -v sdkmanager || find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -n1)"
+          "$SDKMANAGER" "build-tools;35.0.0"
+          BUILD_TOOLS="$(ls -d /usr/local/lib/android/sdk/build-tools/35.0.0)"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          UNSIGNED=$(find dist/android -name '*-unsigned.apk' -print -quit)
+          test -n "$UNSIGNED"
+          # The build job signed the APK with a throwaway key. The old
+          # signature is stripped before the release key is applied, so the
+          # published APK carries exactly one signer: the release key.
+          "$ZIPALIGN" -f 4 "$UNSIGNED" dist/android/aligned.apk
+          "$APKSIGNER" sign \
+            --ks keys/app-release.keystore \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$KEY_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            --out dist/android/signed.apk \
+            dist/android/aligned.apk
+          rm -f dist/android/aligned.apk "$UNSIGNED"
+
+      - name: Verify the signature
+        env:
+          EXPECTED_CERT_SHA256: ${{ vars.ANDROID_RELEASE_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$(command -v sdkmanager || find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -n1)"
+          "$SDKMANAGER" "build-tools;35.0.0"
+          BUILD_TOOLS="$(ls -d /usr/local/lib/android/sdk/build-tools/35.0.0)"
+          "$BUILD_TOOLS/apksigner" verify --print-certs dist/android/signed.apk | tee cert.txt
+          # the APK must be signed by the release key, never by the public
+          # debug key - a debug-signed release can be impersonated
+          if grep -q 'CN=Android Debug' cert.txt; then
+            echo "FAILED: the APK is signed with the debug key"
+            exit 1
+          fi
+          if [ -n "${EXPECTED_CERT_SHA256:-}" ]; then
+            ACTUAL=$(grep 'SHA-256 digest' cert.txt | head -n1 | awk '{print $NF}')
+            if [ "$ACTUAL" != "$EXPECTED_CERT_SHA256" ]; then
+              echo "FAILED: the certificate is $ACTUAL, expected $EXPECTED_CERT_SHA256"
+              exit 1
+            fi
+            echo "certificate matches the expected release certificate"
+          else
+            echo "ANDROID_RELEASE_CERT_SHA256 is not set - the fingerprint was not compared"
+          fi
+
+      - name: Clean up the key
+        if: always()
+        run: |
+          rm -rf keys
+          echo "the keystore was removed from the runner"
+
+      - name: Collect signed APK
+        run: |
+          mkdir -p dist
+          VERSION=$(printf '%s' "$GITHUB_REF_NAME" | tr '/ ' '--')
+          cp dist/android/signed.apk "dist/UPICuitous-${VERSION}.apk"
+          ls -lh dist
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: UPICuitous-Android-APK
           path: dist/*.apk
@@ -95,24 +231,28 @@ jobs:
   windows:
     uses: ./.github/workflows/windows.yml
 
-  # The only job that creates or updates a GitHub release. It runs only after
-  # both platform builds succeed, so the release is published exactly once.
+  # ---------------------------------------------------------------------
+  # 3. publish
+  #    The only job that creates or updates a GitHub release. It never sees
+  # the keystore and never runs a build step - it only collects what the
+  # other jobs produced.
+  # ---------------------------------------------------------------------
   publish:
-    needs: [android, windows]
+    needs: [sign-android, windows]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: write
     steps:
-      - name: Download Android APK
-        uses: actions/download-artifact@v4
+      - name: Download signed APK
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: UPICuitous-Android-APK
           path: dist/android
 
       - name: Download Windows package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: UPICuitous-Windows
           path: dist/windows
@@ -126,7 +266,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             dist/android/*.apk

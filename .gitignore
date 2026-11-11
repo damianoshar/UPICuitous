@@ -29,6 +29,16 @@ Builds/Android/app/*.keystore
 Builds/Android/app/release_/
 Builds/Android/gradle/wrapper/LICENSE-for-gradlewrapper.txt
 
+# Any other signing material or built package, wherever it lands
+*.jks
+*.p12
+*.pfx
+*.keystore
+*.apk
+dist/
+juce-*.zip
+_juce_tmp/
+
 # Generated exporters and build trees (the .jucer and Builds/Android are the source)
 Builds/App/
 Builds/Plugin/

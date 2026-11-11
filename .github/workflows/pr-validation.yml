@@ -1,0 +1,147 @@
+name: PR Validation
+
+# Runs on every pull request and on a push to main: the same builds the
+# release runs, so a broken build is caught before it reaches a tag.
+#
+# SECURITY (S-05): every action is pinned to a full commit SHA and the
+# Gradle wrapper is validated before it runs.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: pr-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    uses: ./.github/workflows/windows.yml
+
+  android:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/28.1.13356709
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validate the Gradle wrapper
+        uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Fetch JUCE
+        run: python Tools/fetch_juce.py
+
+      - name: Verify Android CMake uses fetched JUCE
+        run: |
+          if grep -nE '\.\./\.\./\.\./JuceLibraryCode/(modules|include_juce|JuceHeader)' Builds/Android/app/CMakeLists.txt; then
+            echo "Builds/Android/app/CMakeLists.txt still points at generated JuceLibraryCode."
+            echo "Run scripts/fix_android.ps1 after a Projucer resave, then commit the result."
+            exit 1
+          fi
+
+      - name: Verify the Android project matches the .jucer
+        shell: pwsh
+        run: ./scripts/fix_android.ps1 -Verify
+
+      - name: Accept Android SDK licenses
+        run: |
+          SDKMANAGER="$(command -v sdkmanager || find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -n1)"
+          echo "Using $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses || true
+
+      - name: Install NDK and CMake
+        run: |
+          SDKMANAGER="$(command -v sdkmanager || find /usr/local/lib/android/sdk/cmdline-tools -name sdkmanager -type f | head -n1)"
+          echo "Using $SDKMANAGER"
+          "$SDKMANAGER" \
+            "ndk;28.1.13356709" \
+            "cmake;3.22.1" \
+            "build-tools;35.0.0" \
+            "platforms;android-35"
+
+      - name: Build the debug APK
+        working-directory: Builds/Android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: UPICuitous-Android-APK-debug
+          path: Builds/Android/app/build/outputs/apk/debug_/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check the JUCE download hash
+        run: |
+          set -euo pipefail
+          python Tools/fetch_juce.py
+          python - <<'PY'
+          import pathlib, re, sys
+          cmake = pathlib.Path("CMakeLists.txt").read_text()
+          fetch = pathlib.Path("Tools/fetch_juce.py").read_text()
+          a = re.search(r"JUCE_ARCHIVE_SHA256\s+([0-9a-f]{64})", cmake)
+          b = re.search(r'SHA256\s*=\s*"([0-9a-f]{64})"', fetch)
+          if not a or not b:
+              print("could not read the pinned JUCE hash"); sys.exit(1)
+          if a.group(1) != b.group(1):
+              print(f"the two JUCE hashes differ: {a.group(1)} vs {b.group(1)}"); sys.exit(1)
+          print(f"the JUCE hash is pinned consistently: {a.group(1)}")
+          PY
+
+      - name: Check that the workflows are pinned to commit SHAs
+        run: |
+          set -euo pipefail
+          bad=0
+          for f in .github/workflows/*.yml; do
+            # every "uses:" line must carry a 40-character commit SHA
+            if grep -E '^\s*uses:\s*[^#]*@' "$f" | grep -vE '@[0-9a-f]{40}(\s*#.*)?$'; then
+              echo "$f uses an action that is not pinned to a commit SHA"
+              bad=1
+            fi
+          done
+          exit $bad
+
+      - name: Check that no secret is committed
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -iE '\.(jks|p12|pfx|keystore)$'; then
+            echo "a keystore is committed - remove it"
+            exit 1
+          fi
+          if git ls-files | grep -E 'keystore\.properties$'; then
+            echo "keystore.properties is committed - remove it"
+            exit 1
+          fi
+          echo "no keystore or signing properties are tracked"

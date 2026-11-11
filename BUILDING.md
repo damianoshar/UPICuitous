@@ -148,10 +148,15 @@ NDK and packages `libUPICClone.so` into an APK.
   `Builds/Android/app/build.gradle`).
 - Let Android Studio write `Builds/Android/local.properties`
   (`sdk.dir=...`), or create it yourself.
-- Both build types sign with the standard debug keystore
+- The **debug** build signs with the standard debug keystore
   (`%USERPROFILE%\.android\debug.keystore`, auto-created by Android
-  Studio), so debug and release APKs are sideloadable. For a store
-  build, replace `signingConfigs.juceSigning` with your own keystore.
+  Studio), so it is sideloadable out of the box.
+- The **release** build signs with your own keystore and **fails closed**
+  without it: it never falls back to the public debug key, because a
+  debug-signed release can be impersonated by anyone. Copy
+  `Builds/Android/app/keystore.properties.template` to
+  `Builds/Android/app/keystore.properties` and fill it in (both files are
+  gitignored).
 
 ### Build
 
@@ -280,3 +285,42 @@ that prevent them - are in **`known-issues.yaml`** at the repo root.
   (`docs/android-build.md`).
 - The known failures are collected in `known-issues.yaml`; the JUCE tree
   can be checked with `.\scripts\check_juce.ps1`.
+
+## The release workflow
+
+`.github/workflows/release.yml` runs on a `v*` tag and is split into four
+jobs so that no single job has both the signing key and a write token:
+
+| Job | Sees the keystore? | Can write to the repo? |
+|---|---|---|
+| `build-android` | no (it signs with a throwaway key it makes itself) | no |
+| `sign-android` | **yes** | no |
+| `windows` | no | no |
+| `publish` | no | **yes** |
+
+The signing job runs in the protected `android-signing` environment, so
+the keystore is only reachable after an environment reviewer approves it.
+It verifies the signature before publishing: a debug-signed APK fails the
+job, and - if the `ANDROID_RELEASE_CERT_SHA256` repository variable is set
+- the certificate fingerprint has to match the expected one.
+
+The repository needs these secrets:
+
+| Name | What it is |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | the release keystore, base64-encoded |
+| `ANDROID_KEY_ALIAS` | the key alias inside it |
+| `ANDROID_KEY_PASSWORD` | the key password |
+| `ANDROID_STORE_PASSWORD` | the store password |
+
+and this optional variable:
+
+| Name | What it is |
+|---|---|
+| `ANDROID_RELEASE_CERT_SHA256` | the SHA-256 of the release certificate, so a wrong key is caught |
+
+Every action is pinned to a full commit SHA, and the Gradle wrapper is
+verified against its `distributionSha256Sum` before it runs. The
+`pr-validation.yml` workflow runs the same builds on every pull request
+and also checks that no keystore is committed and that no workflow uses an
+unpinned action.
