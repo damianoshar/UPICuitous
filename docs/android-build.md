@@ -18,6 +18,34 @@ undo the work.
 | the theme, the mic permission, the JNI define | `.jucer`: the ANDROIDSTUDIO exporter | yes |
 | the two product flavours (`debug_`, `release_`) | Projucer generates them | yes |
 | **the NDK version 28.1.13356709** | **Projucer hardcodes 26.2 - `scripts/fix_android.ps1` puts it back** | **needs the script** |
+| **the release signing (fail closed)** | **`scripts/fix_android.ps1` - Projucer always signs with the debug key** | **needs the script** |
+| **the permission set** | **the `.jucer` sets it, the script removes POST_NOTIFICATIONS and sets `allowBackup=false`** | **needs the script** |
+
+## The permissions the app asks for
+
+Only three, and each one is used:
+
+| Permission | Why |
+|---|---|
+| `RECORD_AUDIO` | the microphone (Mon / Capture / the Live tab) |
+| `INTERNET` | the phone controller binds a UDP socket for the OSC scrub |
+| `CHANGE_WIFI_MULTICAST_STATE` | it joins MobMuPlat's multicast group |
+
+The media permissions (`READ_MEDIA_AUDIO`, `READ_MEDIA_IMAGES`,
+`READ_MEDIA_VIDEO`), the storage permissions and `POST_NOTIFICATIONS`
+are **not** asked for: the file chooser goes through the Storage Access
+Framework, the app reads no images or video, and it posts no
+notifications.
+
+`androidPushNotifications` stays **on** in the `.jucer` even so: in
+JUCE 8.0.16 it is what selects the `com.rmsl.juce.JuceActivity` activity
+class (and with it the `JuceActivity`/`Receiver` java sources). Turning it
+off would silently change the launcher activity to `android.app.Activity`
+and leave the manifest pointing at classes that are not in the APK. The
+*permission* is removed by `scripts/fix_android.ps1` instead.
+
+`android:allowBackup="false"` is set by the same script: the piece files
+and the recorded takes should not end up in a cloud backup.
 
 The exporter's settings are the attributes of the `<ANDROIDSTUDIO>` element
 in the `.jucer`. Watch the name of the Android Gradle plugin one: in

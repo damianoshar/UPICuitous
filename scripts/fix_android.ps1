@@ -287,6 +287,31 @@ if ($gradle -ne $want["gradleVersion"]) {
     $problems += "the gradle wrapper is '$gradle', the .jucer says gradleVersion=$($want['gradleVersion'])"
 }
 
+# SECURITY (S-05): the Gradle distribution is verified against its SHA-256
+# before it is unpacked and run. Projucer rewrites the wrapper properties
+# on a resave and drops the checksum, so the script puts it back.
+$gradleSha256 = "89d4e70e4e84e2d2dfbb63e4daa53e21b25017cc70c37e4eea31ee51fb15098a"
+if (-not $Verify) {
+    $patched = $wrapperText
+    if ($patched -match 'distributionSha256Sum=[0-9a-fA-F]{64}') {
+        $patched = [regex]::Replace($patched, 'distributionSha256Sum=[0-9a-fA-F]{64}',
+                                    "distributionSha256Sum=$gradleSha256")
+    }
+    elseif ($patched -match 'distributionUrl=') {
+        $patched = [regex]::Replace($patched, '(?m)^(distributionUrl=.*)$',
+                                    "`$1`ndistributionSha256Sum=$gradleSha256")
+    }
+    if ($patched -ne $wrapperText) {
+        [IO.File]::WriteAllText($wrapper, $patched, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "  the Gradle distribution checksum restored" -ForegroundColor Cyan
+    }
+    $wrapperText = $patched
+}
+$wrapperSha = Get-Setting $wrapperText 'distributionSha256Sum=([0-9a-fA-F]{64})' "the Gradle distribution checksum"
+if ($wrapperSha -ne $gradleSha256) {
+    $problems += "the Gradle distribution checksum is missing or wrong - run this script without -Verify to fix it"
+}
+
 $manifestText = [IO.File]::ReadAllText($manifest, [Text.Encoding]::UTF8)
 if (-not $Verify) {
     # Projucer writes both from the .jucer (the project version and
@@ -295,6 +320,23 @@ if (-not $Verify) {
                                 'android:versionCode="{0}"' -f $want["androidVersionCode"])
     $patched = [regex]::Replace($patched, 'android:versionName="[^"]+"',
                                 'android:versionName="{0}"' -f $projectVersion)
+    # SECURITY (S-06): the app posts no notifications, so it does not need
+    # POST_NOTIFICATIONS. The androidPushNotifications setting has to stay
+    # on though - in JUCE 8.0.16 it is what selects the com.rmsl.juce.JuceActivity
+    # activity class (and with it the JuceActivity/Receiver java sources).
+    # The permission is therefore removed here, after Projucer wrote it.
+    $patched = [regex]::Replace($patched,
+        '(?m)^\s*<uses-permission\s+android:name="android\.permission\.POST_NOTIFICATIONS"\s*/>\s*\r?\n',
+        '')
+    # SECURITY (S-06): the app has no backup agent, and the piece files and
+    # the recorded takes should not end up in a cloud backup. Projucer does
+    # not write these, so a resave would put them back.
+    if ($patched -notmatch 'android:allowBackup') {
+        $patched = [regex]::Replace($patched,
+            '(<application\b[^>]*?)(>)',
+            '$1 android:allowBackup="false" android:fullBackupContent="false"$2',
+            1)
+    }
     if ($patched -ne $manifestText) {
         [IO.File]::WriteAllText($manifest, $patched, (New-Object System.Text.UTF8Encoding($false)))
         Write-Host "  the manifest version set to $projectVersion (code $($want['androidVersionCode']))" -ForegroundColor Cyan
@@ -308,6 +350,32 @@ if ($versionName -ne $projectVersion) {
 $versionCode = Get-Setting $manifestText 'android:versionCode="([^"]+)"' "the manifest versionCode"
 if ($versionCode -ne $want["androidVersionCode"]) {
     $problems += "the manifest versionCode is '$versionCode', the .jucer says androidVersionCode=$($want['androidVersionCode'])"
+}
+
+# SECURITY (S-06): only the permissions the app actually uses. The phone
+# controller binds a UDP socket, so INTERNET and CHANGE_WIFI_MULTICAST_STATE
+# are needed; the microphone needs RECORD_AUDIO. The media and notification
+# permissions are not used (the file chooser goes through the Storage
+# Access Framework, and the app sends no notifications).
+$requiredPermissions = @("android.permission.INTERNET",
+                          "android.permission.CHANGE_WIFI_MULTICAST_STATE",
+                          "android.permission.RECORD_AUDIO")
+$manifestPermissions = [regex]::Matches($manifestText, 'android\.permission\.([A-Z_]+)') |
+                       ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+foreach ($p in $requiredPermissions) {
+    $short = $p -replace '^android\.permission\.', ''
+    if ($manifestPermissions -notcontains $short) {
+        $problems += "the manifest is missing the $p permission"
+    }
+}
+foreach ($p in $manifestPermissions) {
+    if ($requiredPermissions -notcontains "android.permission.$p") {
+        $problems += "the manifest asks for the $p permission, which the app does not use"
+    }
+}
+# SECURITY (S-06): no cloud backup of the piece files and the recorded takes
+if ($manifestText -notmatch 'android:allowBackup="false"') {
+    $problems += "the manifest does not set android:allowBackup=false (run this script without -Verify to fix it)"
 }
 
 # the debug keystore + the two flavours are what the tablet build needs
