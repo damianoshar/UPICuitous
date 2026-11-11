@@ -1211,6 +1211,52 @@ public:
                    "clampGain caps the master gain at the slider's top");
         }
 
+        // 6j. v1.30 (S-03): a hostile piece goes through the app's own load
+        //     path. It must survive: no crash, and the model must end up
+        //     in a usable state.
+        {
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize (1280, 800);
+
+            // a piece with a huge master gain, a NaN-ish duration and a
+            // sample slot that claims two billion frames
+            const auto hostile = juce::JSON::parse (
+                "{\"master\":1e30,\"duration\":1e300,\"tempo\":1e300,"
+                "\"samples\":[{\"id\":1,\"frames\":2000000000,\"channels\":2,"
+                "\"sampleRate\":1e9,\"data\":\"AAAA\"}],"
+                "\"pages\":[{\"duration\":1e300,\"arcs\":[{\"id\":1,\"mode\":0,"
+                "\"intensity\":99,\"refFreq\":1e300,\"points\":[{\"t\":0,\"f\":1e300}]}]}]}");
+            check (! hostile.isVoid (), "the hostile piece parses as JSON");
+
+            bool survived = true;
+            try
+            {
+                mc.loadFromVar (hostile);
+            }
+            catch (...)
+            {
+                survived = false;
+            }
+            check (survived, "a hostile piece does not take the app down");
+
+            // the master gain came back clamped, not at 1e30
+            const auto gain = (float)(double) mc.pieceToVar().getProperty ("master", -1.0);
+            check (gain >= 0.0f && gain <= upic::limits::kMaxMasterGain,
+                   "the master gain of a hostile piece is clamped",
+                   juce::String (gain, 3));
+
+            // and the app still renders afterwards
+            juce::AudioBuffer<float> buf (2, 4096);
+            buf.clear();
+            mc.getNextAudioBlock (juce::AudioSourceChannelInfo (&buf, 0, 4096));
+            bool finite = true;
+            for (int i = 0; i < 4096; ++i)
+                if (! std::isfinite (buf.getSample (0, i)) || ! std::isfinite (buf.getSample (1, i)))
+                    finite = false;
+            check (finite, "the audio after a hostile piece is finite");
+        }
+
         // 7. pen pressure -> per-point intensity curve
         {
             upic::Arc a;

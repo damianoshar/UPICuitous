@@ -4018,11 +4018,25 @@ void MainComponent::loadFile()
                 flash("Piece too large (max 10 MB)");
                 return;
             }
-            auto txt = f.loadFileAsString();
-            if (txt.getNumBytesAsUTF8() > upic::limits::kMaxPieceBytes) return;
-            auto v = juce::JSON::parse(txt);
-            if (v.isVoid()) return;
-            loadFromVar(v);
+            // SECURITY (S-03): the whole load is wrapped, so a piece that
+            // exhausts the memory or trips an assertion in the parser takes
+            // the app down with a message instead of taking the app down.
+            try
+            {
+                auto txt = f.loadFileAsString();
+                if (txt.getNumBytesAsUTF8() > upic::limits::kMaxPieceBytes) return;
+                auto v = juce::JSON::parse(txt);
+                if (v.isVoid()) return;
+                loadFromVar(v);
+            }
+            catch (const std::exception& e)
+            {
+                flash (std::string ("Could not load the piece: ") + e.what());
+            }
+            catch (...)
+            {
+                flash ("Could not load the piece");
+            }
         });
 }
 
@@ -4039,6 +4053,11 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
             auto f = c.getResult();
             if (! f.existsAsFile()) return;
 
+            // SECURITY (S-03): the decode and the allocation are wrapped, so
+            // a crafted file that exhausts the memory shows a message
+            // instead of taking the app down.
+            try
+            {
             juce::AudioFormatManager fm;
             fm.registerBasicFormats();
             std::unique_ptr<juce::AudioFormatReader> reader(fm.createReaderFor(f));
@@ -4048,11 +4067,21 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
                 return;
             }
 
-            // cap at 60s per slot to keep memory / .upic.json size sane
-            const double srIn = reader->sampleRate > 0.0 ? reader->sampleRate : 44100.0;
-            const int maxFrames = (int) juce::jmin((juce::int64) (60.0 * srIn), reader->lengthInSamples);
+            // SECURITY (S-03): the sample rate and the length come from the
+            // file header, so they are not trusted: a crafted header could
+            // ask for a huge allocation. The rate is clamped to the range
+            // the piece format accepts, and the length to 60 seconds of it.
+            const double srIn = upic::limits::clampFinite (reader->sampleRate, 1000.0, upic::limits::kMaxSampleRate);
+            const auto maxFrames64 = juce::jmin ((juce::int64) upic::limits::kMaxFramesPerSample,
+                                                 reader->lengthInSamples);
+            const int maxFrames = (int) juce::jmax ((juce::int64) 0, maxFrames64);
             const int ch = juce::jmax(1, juce::jmin(2, (int) reader->numChannels));
-            juce::AudioBuffer<float> tmp(ch, juce::jmax(1, maxFrames));
+            if (maxFrames <= 0)
+            {
+                flash("The audio file is empty");
+                return;
+            }
+            juce::AudioBuffer<float> tmp(ch, maxFrames);
             tmp.clear();
             reader->read(&tmp, 0, maxFrames, 0, true, ch > 1);
             reader.reset();
@@ -4082,6 +4111,15 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
             updateSampleView();
             pushVoice();
             repaint();
+            }
+            catch (const std::exception& e)
+            {
+                flash (std::string ("Could not load the audio file: ") + e.what());
+            }
+            catch (...)
+            {
+                flash ("Could not load the audio file");
+            }
         });
 }
 
