@@ -136,7 +136,7 @@
     </VS2026>
     <ANDROIDSTUDIO targetFolder="Builds/Android" androidTheme="@android:style/Theme.NoTitleBar"
                    microphonePermissionNeeded="1" extraDefs="JUCE_CORE_INCLUDE_JNI_HELPERS=1"
-                   androidMinimumSDK="24" androidTargetSDK="35" androidVersionCode="1"
+                   androidMinimumSDK="24" androidTargetSDK="35" androidVersionCode="2"
                    gradleWrapperVersion="8.10.0" gradleVersion="8.11.1"
                    androidKeyStore="${user.home}/.android/debug.keystore"
                    androidKeyStorePass="android" androidKeyAlias="androiddebugkey"

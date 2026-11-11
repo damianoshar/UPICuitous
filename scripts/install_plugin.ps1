@@ -38,10 +38,21 @@ $srcBin = Get-PluginBinary $src
 $srcHash = (Get-FileHash -Path $srcBin -Algorithm SHA256).Hash
 
 # The copy needs admin rights -> run it elevated and wait for it.
+#
+# SECURITY (S-08): the paths are NOT interpolated into the elevated script.
+# A repository path containing a quote could otherwise break out of the
+# string literal and run extra commands with administrator rights. Each path
+# is base64-encoded here and decoded inside the elevated script instead, so
+# the script text can never be influenced by the path.
+$srcB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($src))
+$dstB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($dst))
+
 $script = @"
 `$ErrorActionPreference = 'Stop'
-if (Test-Path '$dst') { Remove-Item -LiteralPath '$dst' -Recurse -Force }
-Copy-Item -LiteralPath '$src' -Destination '$dst' -Recurse -Force
+`$Src = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$srcB64'))
+`$Dst = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$dstB64'))
+if (Test-Path -LiteralPath `$Dst) { Remove-Item -LiteralPath `$Dst -Recurse -Force }
+Copy-Item -LiteralPath `$Src -Destination `$Dst -Recurse -Force
 "@
 
 $bytes = [Text.Encoding]::Unicode.GetBytes($script)
