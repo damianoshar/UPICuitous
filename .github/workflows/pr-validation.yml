@@ -92,6 +92,86 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  linux:
+    # The Linux and macOS builds are new: they run, but they do not block a
+    # pull request until they have been green for a while. Remove the
+    # continue-on-error once they are.
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install the build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config xvfb \
+            libasound2-dev libfreetype6-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxi-dev \
+            libgl1-mesa-dev libglu1-mesa-dev
+
+      - name: Fetch JUCE
+        run: python Tools/fetch_juce.py
+
+      - name: Configure
+        run: cmake -S . -B Builds/App -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build Builds/App --parallel
+
+      - name: Self-test
+        # the selftest never shows a window, but JUCE still wants a display
+        # on Linux - xvfb provides a virtual one
+        run: xvfb-run -a ./Builds/App/UPICuitous_artefacts/Release/UPICuitous --selftest
+
+      - name: Check the selftest result
+        run: |
+          set -euo pipefail
+          if grep -q '^FAIL' "$TMPDIR/upic_selftest.txt" 2>/dev/null \
+             || grep -q '^FAIL' /tmp/upic_selftest.txt 2>/dev/null; then
+            cat /tmp/upic_selftest.txt
+            exit 1
+          fi
+
+  macos:
+    continue-on-error: true
+    runs-on: macos-14
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Fetch JUCE
+        run: python Tools/fetch_juce.py
+
+      - name: Configure
+        run: cmake -S . -B Builds/App -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build Builds/App --parallel
+
+      - name: Self-test
+        run: ./Builds/App/UPICuitous_artefacts/Release/UPICuitous --selftest
+
+      - name: Check the selftest result
+        run: |
+          set -euo pipefail
+          if grep -q '^FAIL' "$TMPDIR/upic_selftest.txt" 2>/dev/null; then
+            cat "$TMPDIR/upic_selftest.txt"
+            exit 1
+          fi
+
   security:
     runs-on: ubuntu-latest
     permissions:
