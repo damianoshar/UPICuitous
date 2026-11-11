@@ -22,7 +22,8 @@ JUCE 8 does not support MinGW.
   exists but the build script uses VS2026.
 - **CMake 3.22+** (4.x is fine; its deprecation warning is harmless).
 - **JUCE 8.0.16-security** in `JUCE/`. `python Tools/fetch_juce.py` downloads it
-  without git; the root CMakeLists can also fetch it.
+  without git and verifies its SHA-256 before extracting it; the root
+  CMakeLists can also fetch it (with the same hash check).
 - Optional: **pluginval** for the validation gate -
   `.\scripts\fetch_pluginval.ps1` puts it in `Tools/pluginval/`
   (gitignored).
@@ -257,7 +258,7 @@ that prevent them - are in **`known-issues.yaml`** at the repo root.
   `JUCE/modules/juce_audio_processors/format_types/VST3_SDK/base/source/fobject.h`
   on 2026-10-16 (an external sync overwrote it). Run
   `.\scripts\check_juce.ps1` to see whether the JUCE tree is damaged, and
-  restore a clean JUCE 8.0.6 copy if it is.
+  restore a clean JUCE 8.0.16-security copy if it is.
 - **Antivirus flags the exe**: allowlist the build folder.
 - **Python prototype silent**: it plays a temp WAV with `winsound`; check
   `python-upic/test_upic.wav` exists after `--test-render`.

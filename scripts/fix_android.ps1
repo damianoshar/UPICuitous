@@ -90,8 +90,9 @@ upic_juce_wrapper(include_juce_audio_basics.cpp juce_audio_basics/juce_audio_bas
 upic_juce_wrapper(include_juce_audio_devices.cpp juce_audio_devices/juce_audio_devices.cpp)
 upic_juce_wrapper(include_juce_audio_formats.cpp juce_audio_formats/juce_audio_formats.cpp)
 upic_juce_wrapper(include_juce_audio_processors.cpp juce_audio_processors/juce_audio_processors.cpp)
-upic_juce_wrapper(include_juce_audio_processors_ara.cpp juce_audio_processors/juce_audio_processors_ara.cpp)
-upic_juce_wrapper(include_juce_audio_processors_lv2_libs.cpp juce_audio_processors/juce_audio_processors_lv2_libs.cpp)
+upic_juce_wrapper(include_juce_audio_processors_headless.cpp juce_audio_processors_headless/juce_audio_processors_headless.cpp)
+upic_juce_wrapper(include_juce_audio_processors_headless_ara.cpp juce_audio_processors_headless/juce_audio_processors_headless_ara.cpp)
+upic_juce_wrapper(include_juce_audio_processors_headless_lv2_libs.cpp juce_audio_processors_headless/juce_audio_processors_headless_lv2_libs.cpp)
 upic_juce_wrapper(include_juce_audio_utils.cpp juce_audio_utils/juce_audio_utils.cpp)
 upic_juce_wrapper(include_juce_core.cpp juce_core/juce_core.cpp)
 upic_juce_wrapper(include_juce_core_CompilationTime.cpp juce_core/juce_core_CompilationTime.cpp)
@@ -102,6 +103,10 @@ upic_juce_wrapper(include_juce_graphics.cpp juce_graphics/juce_graphics.cpp)
 upic_juce_wrapper(include_juce_graphics_Harfbuzz.cpp juce_graphics/juce_graphics_Harfbuzz.cpp)
 upic_juce_wrapper(include_juce_graphics_Sheenbidi.c juce_graphics/juce_graphics_Sheenbidi.c)
 upic_juce_wrapper(include_juce_gui_basics.cpp juce_gui_basics/juce_gui_basics.cpp)
+upic_juce_wrapper(include_juce_gui_basics_2.cpp juce_gui_basics/juce_gui_basics_2.cpp)
+upic_juce_wrapper(include_juce_gui_basics_3.cpp juce_gui_basics/juce_gui_basics_3.cpp)
+upic_juce_wrapper(include_juce_gui_basics_4.cpp juce_gui_basics/juce_gui_basics_4.cpp)
+upic_juce_wrapper(include_juce_gui_basics_5.cpp juce_gui_basics/juce_gui_basics_5.cpp)
 upic_juce_wrapper(include_juce_gui_extra.cpp juce_gui_extra/juce_gui_extra.cpp)
 upic_juce_wrapper(include_juce_osc.cpp juce_osc/juce_osc.cpp)
 
@@ -118,6 +123,7 @@ file(WRITE "${UPIC_JUCE_INCLUDE_DIR}/JuceHeader.h" [=[
 #include <juce_data_structures/juce_data_structures.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_audio_processors_headless/juce_audio_processors_headless.h>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -134,8 +140,22 @@ using namespace juce;
         $text = $text.Replace($needle, $needle + $lineEnd + $lineEnd + $prelude)
     }
 
-    $text = $text.Replace('JUCE_MODULE_AVAILABLE_juce_gui_extra=1]]', 'JUCE_MODULE_AVAILABLE_juce_gui_extra=1]] [[-DJUCE_MODULE_AVAILABLE_juce_osc=1]]')
-    $text = $text.Replace('"${UPIC_JUCE_WRAPPER_DIR}/include_juce_gui_extra.cpp"', '"${UPIC_JUCE_WRAPPER_DIR}/include_juce_gui_extra.cpp" "${UPIC_JUCE_WRAPPER_DIR}/include_juce_osc.cpp"')
+    # The osc module is not in the Projucer module list by default, so it is
+    # added here. Both replacements are guarded: the script must be safe to
+    # run twice (a second run must not stack a second copy of the define).
+    if ($text -notmatch 'JUCE_MODULE_AVAILABLE_juce_osc=1') {
+        $text = $text.Replace('JUCE_MODULE_AVAILABLE_juce_gui_extra=1]]', 'JUCE_MODULE_AVAILABLE_juce_gui_extra=1]] [[-DJUCE_MODULE_AVAILABLE_juce_osc=1]]')
+    }
+    if ($text -notmatch 'include_juce_osc\.cpp"') {
+        $text = $text.Replace('"${UPIC_JUCE_WRAPPER_DIR}/include_juce_gui_extra.cpp"', '"${UPIC_JUCE_WRAPPER_DIR}/include_juce_gui_extra.cpp" "${UPIC_JUCE_WRAPPER_DIR}/include_juce_osc.cpp"')
+    }
+    # JUCE 8.0.16 moved the ARA / LV2 helpers into juce_audio_processors_headless
+    # (the module juce_audio_processors now depends on). The generated file
+    # still points at the old paths, so the names are corrected here.
+    $text = $text.Replace('include_juce_audio_processors_ara.cpp', 'include_juce_audio_processors_headless_ara.cpp')
+    $text = $text.Replace('include_juce_audio_processors_lv2_libs.cpp', 'include_juce_audio_processors_headless_lv2_libs.cpp')
+    $text = $text.Replace('juce_audio_processors/juce_audio_processors_ara.cpp', 'juce_audio_processors_headless/juce_audio_processors_headless_ara.cpp')
+    $text = $text.Replace('juce_audio_processors/juce_audio_processors_lv2_libs.cpp', 'juce_audio_processors_headless/juce_audio_processors_headless_lv2_libs.cpp')
     $text = $text.Replace('"../../../JuceLibraryCode/modules"', '"../../../JUCE/modules"')
     $text = $text.Replace('"../../../JuceLibraryCode"', '"${UPIC_JUCE_INCLUDE_DIR}"')
     $text = [regex]::Replace($text,
@@ -158,34 +178,69 @@ if (-not $Verify) {
     $appText = $patched
 }
 
-# ------------------------------- the release signing (Projucer adds a fallback)
-# SECURITY (S-02): Projucer writes the release build type with a fallback to
-# the PUBLIC debug keystore when keystore.properties is missing. That can ship
-# a debug-signed release APK, so the fallback is removed here and the build
-# fails closed instead. A resave would put it back - that is why the script
-# owns it.
+# ------------------------------- the release signing (Projucer writes the debug key)
+# SECURITY (S-02): Projucer always signs the release build type with the
+# PUBLIC debug keystore. That can ship a debug-signed release APK, and anyone
+# can sign an APK with the same package name and a higher version code - so a
+# user of a debug-signed build would accept a malicious "update".
+#
+# The script therefore owns the release signing completely: it reads the
+# keystore from keystore.properties (never committed) and FAILS CLOSED when
+# that file is missing. A Projucer resave rewrites build.gradle, so without
+# this the release build would silently fall back to the debug key again.
 if (-not $Verify) {
-    $debugFallback = @"
-            if (keystorePropertiesFile.exists()) {
-                signingConfig signingConfigs.releaseSigning
-            } else {
-                signingConfig signingConfigs.juceSigning
-            }
+    # 1. the keystore.properties reader (after the namespace line)
+    if ($appText -notmatch 'keystorePropertiesFile') {
+        $reader = @"
+    def keystoreProperties = new Properties()
+    def keystorePropertiesFile = file("keystore.properties")
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+    }
+
 "@
+        $patched = [regex]::Replace($appText, '(?m)^(\s*namespace\s*=?\s*"[^"]+"\s*)$', '$1' + "`n" + $reader.TrimEnd())
+    }
+    else {
+        $patched = $appText
+    }
+
+    # 2. the releaseSigning config (inside signingConfigs, after juceSigning)
+    if ($patched -notmatch 'releaseSigning') {
+        $releaseConfig = @"
+
+        if (keystorePropertiesFile.exists()) {
+            releaseSigning {
+                storeFile     file(keystoreProperties.getProperty("storeFile"))
+                storePassword keystoreProperties.getProperty("storePassword")
+                keyAlias      keystoreProperties.getProperty("keyAlias")
+                keyPassword   keystoreProperties.getProperty("keyPassword")
+            }
+        }
+"@
+        $patched = [regex]::Replace($patched,
+            '(?s)(signingConfigs\s*\{.*?juceSigning\s*\{.*?\n        \}\n)',
+            '$1' + $releaseConfig, 1)
+    }
+
+    # 3. the release build type signs with releaseSigning - or fails the build
     $failClosed = @"
-            // SECURITY (S-02): fail closed. The debug key is public, so a
-            // release APK must never be signed with it. If the release
-            // keystore is missing the build stops instead of shipping a
-            // debug-signed APK that a third party could impersonate.
-            if (!keystorePropertiesFile.exists()) {
-                throw new GradleException(
-                    "keystore.properties is missing - refusing to build a release APK.\n" +
-                    "Copy keystore.properties.template to keystore.properties and fill it in, " +
-                    "or build the debug flavour instead (./gradlew.bat assembleDebug).")
-            }
-            signingConfig signingConfigs.releaseSigning
+             // SECURITY (S-02): fail closed. The debug key is public, so a
+             // release APK must never be signed with it. If the release
+             // keystore is missing the build stops instead of shipping a
+             // debug-signed APK that a third party could impersonate.
+             if (!keystorePropertiesFile.exists()) {
+                 throw new GradleException(
+                     "keystore.properties is missing - refusing to build a release APK.\n" +
+                     "Copy keystore.properties.template to keystore.properties and fill it in, " +
+                     "or build the debug flavour instead (./gradlew.bat assembleDebug).")
+             }
+             signingConfig = signingConfigs.releaseSigning
 "@
-    $patched = $appText.Replace($debugFallback, $failClosed)
+    $patched = [regex]::Replace($patched,
+        '(?s)(release\s*\{.*?jniDebuggable\s*\(?\s*false\s*\)?\s*\r?\n)(\s*)(signingConfig\s*=?\s*signingConfigs\.\w+)',
+        '$1' + $failClosed + '$2')
+
     if ($patched -ne $appText) {
         [IO.File]::WriteAllText($appGradle, $patched, (New-Object System.Text.UTF8Encoding($false)))
         Write-Host "  the release signing now fails closed (no debug-key fallback)" -ForegroundColor Cyan
@@ -198,17 +253,19 @@ if ($ndkFound -ne $NdkVersion) {
 }
 
 # --------------------------------------------------------------- the checks
-$compileSdk = Get-Setting $appText 'compileSdk\s+(\d+)' "compileSdk"
+# The Gradle syntax changed over the Projucer versions: `compileSdk 35` in the
+# old one, `compileSdk(35)` in the new one - both are accepted here.
+$compileSdk = Get-Setting $appText 'compileSdk\s*\(?\s*(\d+)' "compileSdk"
 if ($compileSdk -ne $want["androidTargetSDK"]) {
     $problems += "compileSdk is '$compileSdk', the .jucer says androidTargetSDK=$($want['androidTargetSDK'])"
 }
 
-$minSdk = Get-Setting $appText 'minSdkVersion\s+(\d+)' "minSdkVersion"
+$minSdk = Get-Setting $appText 'minSdkVersion\s*\(?\s*(\d+)' "minSdkVersion"
 if ($minSdk -ne $want["androidMinimumSDK"]) {
     $problems += "minSdkVersion is '$minSdk', the .jucer says androidMinimumSDK=$($want['androidMinimumSDK'])"
 }
 
-$targetSdk = Get-Setting $appText 'targetSdkVersion\s+(\d+)' "targetSdkVersion"
+$targetSdk = Get-Setting $appText 'targetSdkVersion\s*\(?\s*(\d+)' "targetSdkVersion"
 if ($targetSdk -ne $want["androidTargetSDK"]) {
     $problems += "targetSdkVersion is '$targetSdk', the .jucer says androidTargetSDK=$($want['androidTargetSDK'])"
 }
@@ -252,9 +309,13 @@ if ($versionCode -ne $want["androidVersionCode"]) {
 if ($appText -notmatch "juceSigning") { $problems += "the juceSigning config is missing" }
 if ($appText -notmatch "debug_") { $problems += "the debug_ product flavour is missing" }
 if ($appText -notmatch "release_") { $problems += "the release_ product flavour is missing" }
-# SECURITY (S-02): the release build type must not fall back to the public
-# debug key - a release APK signed with it can be impersonated.
-if ($appText -match "signingConfigs\.juceSigning[\s\S]{0,400}release[\s\S]{0,400}signingConfigs\.juceSigning") {
+# SECURITY (S-02): the release build type must sign with the release key (or
+# fail the build) - never with the public debug key, which can be imitated.
+$releaseBlock = [regex]::Match($appText, '(?s)release\s*\{(.*?)\n\s{9}\}').Groups[1].Value
+if ($releaseBlock -notmatch 'releaseSigning') {
+    $problems += "the release build type does not use the release keystore - run this script without -Verify to fix it"
+}
+if ($releaseBlock -match 'signingConfigs\.juceSigning') {
     $problems += "the release build type falls back to the debug keystore - run this script without -Verify to make it fail closed"
 }
 

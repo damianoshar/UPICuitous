@@ -179,7 +179,8 @@ PROGRESS.md          wave log, features, decisions, test inventory
 - Windows with **Visual Studio 2026** (Desktop development with C++),
   MSBuild and CMake 3.22+.
 - **JUCE 8.0.16-security** in `JUCE/` (the app CMakeLists also fetches it if
-  missing; `python Tools/fetch_juce.py` downloads it without git).
+  missing; `python Tools/fetch_juce.py` downloads it without git and checks
+  its SHA-256).
 - MinGW is not supported by JUCE 8 - use MSVC.
 - Android: JDK 17, SDK 35, NDK 28.1.13356709, CMake 3.22.1 (see
   `BUILDING.md`).

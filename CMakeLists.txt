@@ -9,7 +9,13 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STR
 # --- JUCE ---------------------------------------------------------------
 # If you have JUCE checked out locally at ./JUCE it will be used,
 # otherwise it is downloaded as a zip (no git required).
-set(JUCE_VERSION 8.0.6)
+#
+# SECURITY (S-04/S-05): the version is pinned to the 8.0.16-security
+# release (the one that carries the malformed-input fixes) and the
+# download is verified against a SHA-256, so a tampered archive cannot
+# enter the build. The same hash is checked by Tools/fetch_juce.py.
+set(JUCE_VERSION 8.0.16-security)
+set(JUCE_ARCHIVE_SHA256 7f75cee28ea4dd216fc49ba6fb57f4baa14729ef97529040d3a99dd04910f166)
 
 include(FetchContent)
 
@@ -21,6 +27,7 @@ else()
     FetchContent_Declare(
         JUCE
         URL https://github.com/juce-framework/JUCE/archive/refs/tags/${JUCE_VERSION}.zip
+        URL_HASH SHA256=${JUCE_ARCHIVE_SHA256}
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(JUCE)
