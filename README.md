@@ -168,6 +168,19 @@ a selection and to every arc of the page otherwise:
 macro-time). The Dur slider's travel is skewed so 30 s sits in the
 middle, and the value box takes an exact number.
 
+**The discrete frequency space** - the UPIC's frequency space could be the
+continuum, where a diagonal line is a glissando, or *discrete*, with equal
+temperaments of 1 to 99 divisions per octave: *"the same diagonal arc
+would then sound like discrete steps in a defined temperament"*. The
+voice row's **Stepped** box and its **÷oct** slider do this: the arc's
+sounding pitch is moved through the temperament, so a glissando is heard
+as a staircase of discrete steps while the line on the canvas stays a
+smooth curve. It is not the sieve - the sieve snaps the *drawn points*,
+this snaps the *pitch that plays*. 12 divisions is the chromatic scale,
+19 and 31 the tempered ones, 7 the diatonic one; the scale is anchored
+at middle C. The setting belongs to the selected arc (and to the next
+one drawn) and travels with the piece.
+
 **Scrub audition** - with Scrub on, dragging the centre line or the
 playhead triangle plays a short preview while the transport is stopped.
 The toolbar sets **Scrub len**, **Crossfade**, **Release tail** and
@@ -250,7 +263,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 393 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 404 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -259,7 +272,8 @@ the arc list, the MIDI input, the envelope points, the v1.26
 multi-selection / toolbar edits, the v1.27
 wavetable fork / Stop rewind / Clear warning checks, the granular-vs-varispeed
 regression and the UPIC's transformations (transpose, invert, retrograde,
-augment), the digitised wave page and the micro-time page) and writes the log to
+augment), the discrete frequency space, the digitised wave page and the
+micro-time page) and writes the log to
 `%TEMP%\upic_selftest.txt`. The build script also runs the 15-check
 plugin smoke test and pluginval at strictness 5.
 
@@ -269,6 +283,12 @@ Original UPIC: electromagnetic pen + tablet -> VAX -> DAC. Vertical =
 log pitch, horizontal = time; waveform and envelope drawn separately and
 assigned to arcs. This clone keeps that triptych: **Page / Wavetable /
 Envelope**, and adds samples and live input as further materials.
+
+The UPIC's details here are checked against **"From Xenakis's UPIC to
+Graphic Notation Today"** (Hatje Cantz / ZKM, 2024, open access) -
+François-Bernard Mâche's "The UPIC Upside Down" and Brigitte Robindoré's
+"Beyond the Continuum" - and against the official Xenakis dictionary
+entry (Di Scipio, 2023).
 
 Next: see `FUTURE_IDEAS.md` and the Kanso board. The signed playhead,
 MIDI scrub, live reverse and PM voice shipped in v1.25; the FM8 bridge,

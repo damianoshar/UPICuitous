@@ -91,6 +91,10 @@ public:
       curMatMode = matMode; curSampleId = sampleId; curRef = refFreq;
       // the Sample and Live grids are both Ref-relative ratio grids
       if (refChanged && (layer == 1 || layer == 2)) repaint(); }
+    // v1.32: the discrete frequency space. Like the PM controls it is
+    // per-arc, but a new arc must be born with the value currently shown in
+    // the toolbar (the same "what you see is what gets drawn" rule).
+    void setCurrentStep(int divisions) { curStep = juce::jlimit(0, 99, divisions); }
     // The PM controls are per-arc, but a new PM arc must be born with the
     // values currently shown in the toolbar (the same "what you see is what
     // gets drawn" rule as wave / env / intensity / Ref).
@@ -1120,6 +1124,7 @@ private:
     double curRef = upic::kDefaultRefFreq;
     double curPmRatio = 2.0, curPmIndex = 1.5, curPmFeedback = 0.0;
     int curPmIndexEnv = 0, curPmOps = 2;
+    int curStep = 0;             // v1.32: the discrete frequency space (0 = continuum)
     std::vector<int> selArcs;   // multi-selection (sorted by insertion)
     int selectedZone = -1;
     bool snap = true, showGrid = true, isPlaying = false;
@@ -1527,6 +1532,7 @@ private:
         a.id = page->nextArcId++;
         a.waveformId = curWave; a.envelopeId = curEnv; a.intensity = curInten;
         a.mode = curMode(); a.sampleId = curSampleId; a.refFreq = curRef;
+        a.stepDivisions = curStep;   // v1.32: the discrete frequency space
         if (a.mode == 3)
         {
             a.pmRatio = curPmRatio; a.pmIndex = curPmIndex;
@@ -1587,6 +1593,7 @@ private:
         upic::Arc a; a.id = page->nextArcId++;
         a.waveformId = curWave; a.envelopeId = curEnv; a.intensity = curInten;
         a.mode = curMode(); a.sampleId = curSampleId; a.refFreq = curRef;
+        a.stepDivisions = curStep;   // v1.32: the discrete frequency space
         if (a.mode == 3)
         {
             a.pmRatio = curPmRatio; a.pmIndex = curPmIndex;

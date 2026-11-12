@@ -45,6 +45,7 @@ MainComponent::MainComponent(bool pluginMode)
     buildToolbarControls();
     buildMaterialControls();
     buildSieveControls();
+    buildStepControls();
     buildArcListPanel();
     buildMidiControls();
     buildMaterialTabs();
@@ -868,6 +869,68 @@ void MainComponent::buildSieveControls()
     kbdHintLab.setFont(juce::Font(juce::FontOptions(12.5f, juce::Font::bold)));
     kbdHintLab.setJustificationType(juce::Justification::centredRight);
     kbdHintLab.setColour(juce::Label::textColourId, juce::Colour(0xff7a7a86));
+}
+
+// v1.32: the discrete frequency space - the UPIC's "discrete/non-discrete"
+// function. The frequency space could be the continuum (a diagonal line is
+// a glissando) or discrete, with equal temperaments of 1..99 divisions per
+// octave: "the same diagonal arc would then sound like discrete steps in a
+// defined temperament" (Robindoré, in "From Xenakis's UPIC to Graphic
+// Notation Today", Hatje Cantz 2024).
+//
+// The sieve (the row below) snaps the DRAWN points; this steps the SOUND:
+// the curve on the canvas stays smooth, but the pitch that plays moves
+// through the temperament, so the glissando is heard as a staircase.
+void MainComponent::buildStepControls()
+{
+    addAndMakeVisible(stepBtn); addAndMakeVisible(stepDivSlider);
+    addAndMakeVisible(stepDivLab);
+    stepBtn.setName("stepBtn");
+    stepDivSlider.setName("stepDivSlider");
+    stepBtn.setTooltip ("The UPIC's discrete frequency space: the arc's pitch\n"
+                        "is moved through a temperament of equal divisions\n"
+                        "per octave, so a glissando is heard as a staircase\n"
+                        "of discrete steps. Off = the continuum.");
+    stepDivSlider.setRange (1.0, 99.0, 1.0);
+    stepDivSlider.setValue (12.0, juce::dontSendNotification);
+    stepDivSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 40, 18);
+    stepDivSlider.setTooltip ("Equal divisions per octave: 12 is the\n"
+                              "chromatic scale, 19 and 31 the tempered\n"
+                              "ones, 7 the diatonic one.");
+    stepDivLab.setTooltip ("Equal divisions per octave.");
+    stepBtn.onClick = [this]{
+        applyStepToSelection();
+        flash (stepBtn.getToggleState()
+                 ? juce::String ("Stepped: ") + juce::String ((int) stepDivSlider.getValue())
+                   + " divisions per octave"
+                 : juce::String ("The continuum: the pitch glides again"));
+    };
+    stepDivSlider.onValueChange = [this]{ applyStepToSelection(); };
+}
+
+// The controls edit the selected arcs, like the other live editors.
+void MainComponent::applyStepToSelection()
+{
+    const int divs = stepBtn.getToggleState()
+                       ? juce::jlimit (1, 99, (int) stepDivSlider.getValue()) : 0;
+    const auto ids = score.getSelectedArcs();
+    if (! ids.empty())
+    {
+        {
+            const juce::ScopedLock l(dataLock);
+            for (auto& a : curPage().arcs)
+                if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
+                    a.stepDivisions = divs;
+        }
+        publishModelSnapshot();
+        markModelChanged();
+        score.repaint();
+    }
+    // a new arc is born with the frequency space on show, even when there
+    // was no selection to edit
+    score.setCurrentStep (divs);
+    // the divisions only mean something when the arc is stepped
+    stepDivSlider.setEnabled (divs > 0);
 }
 
 void MainComponent::buildArcListPanel()
@@ -1787,6 +1850,9 @@ void MainComponent::pushVoice()
                         ? sampleSlots[(size_t) selSlot].id : 1;
     drawSampleId = sid; // remembered for procedural generation
     score.setCurrentVoice(selWave, selEnv, drawIntensity, drawMatMode, sid, drawRef);
+    // v1.32: a new arc is born with the frequency space on show
+    score.setCurrentStep (stepBtn.getToggleState()
+                            ? juce::jlimit (1, 99, (int) stepDivSlider.getValue()) : 0);
     int pmEnvId = 0;
     const int pmIdx = pmIndexEnvBox.getSelectedId();
     if (pmIdx >= 2 && pmIdx - 2 < (int) envelopes.size())
@@ -1840,6 +1906,12 @@ void MainComponent::syncControlsToArc(int arcId)
             modUseBox.setSelectedId (juce::jlimit (0, 2, a.waveUse) + 1, juce::dontSendNotification);
             modRateSlider.setValue (a.modRate, juce::dontSendNotification);
             modDepthSlider.setValue (a.modDepth, juce::dontSendNotification);
+            // v1.32: the discrete frequency space follows the selected arc
+            stepBtn.setToggleState (a.stepDivisions > 0, juce::dontSendNotification);
+            stepDivSlider.setValue ((double) juce::jlimit (1, 99,
+                                       a.stepDivisions > 0 ? a.stepDivisions : 12),
+                                    juce::dontSendNotification);
+            stepDivSlider.setEnabled (a.stepDivisions > 0);
             // reflect material in the tabs (the arc is in this tab's layer)
             drawMatMode = juce::jlimit(0, 3, a.mode);
             syncMaterialTabs();
@@ -3641,6 +3713,11 @@ void MainComponent::resized()
     voiceRow.push_back (FL(&durLab, 30, &durSlider, 160));
     voiceRow.push_back (FL(&masterLab, 52, &masterSlider, 180));
     voiceRow.push_back (F(&snapBtn, 68));
+    // v1.32: the discrete frequency space - the arc's pitch moves through a
+    // temperament. It sits on the voice row because it belongs to the arc's
+    // voice, not to one material, so it shows in every tab.
+    voiceRow.push_back (F(&stepBtn, 76));
+    voiceRow.push_back (FL(&stepDivLab, 52, &stepDivSlider, 110));
     voiceRow.push_back (F(&statusLab, 0));
 
     std::vector<FlowItem> materialRow;
@@ -3708,20 +3785,33 @@ void MainComponent::resized()
 
     auto rowsUsed = [&](const std::vector<FlowItem>& items, int availW, float s)
     {
+        // v1.32: this must count the lines EXACTLY the way placeFlow lays
+        // them out, or a row lands on top of the next one. The two used to
+        // differ by a couple of pixels (the old estimate ignored the
+        // border gap and counted the row's width one pixel too wide), which
+        // only showed up when a row's items ended within a few pixels of
+        // the edge - the "Stepped" controls pushed the voice row into that
+        // window and the time display landed on the material row.
+        //
+        // The geometry is the placer's: x is row-local, the right edge is
+        // one pixel before the row's end, and the flex item wraps when it
+        // cannot keep its minimum slice.
+        const int g2 = juce::jmax (1, (int) std::lround (2.0f * s));
+        const int right = availW - 1;
         int n = 1, x = 0;
         for (auto& it : items)
         {
-            const int w = (it.label != nullptr ? (int) std::lround(it.labelW * s) : 0)
-                        + (int) std::lround(it.w * s);
-            if (it.label == nullptr && it.w == 0)
+            const int lw = it.label != nullptr ? (int) std::lround (it.labelW * s) : 0;
+            const int cw = it.w > 0 ? (int) std::lround (it.w * s) : 0;
+            if (x > 0 && x + lw + cw > right) { ++n; x = 0; }
+            if (it.label == nullptr && cw == 0)
             {
                 // trailing flex label: it wraps unless it can keep at least
                 // its minimum slice of this row (must agree with placeFlow)
-                if (availW - x < it.minSlice) ++n;
+                if (right - x - g2 < it.minSlice) ++n;
                 continue;
             }
-            if (x > 0 && x + w > availW) { ++n; x = 0; }
-            x += w;
+            x += lw + cw;
         }
         return n;
     };

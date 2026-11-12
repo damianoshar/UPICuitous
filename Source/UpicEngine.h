@@ -61,6 +61,19 @@ public:
         return pitchScaledPos(arc, t, ref, matDur);
     }
 
+    // v1.32: the arc's SOUNDING pitch. The drawn pitch goes through the
+    // arc's frequency space: with a discrete temperament (the UPIC's
+    // "discrete/non-discrete" function) the continuum becomes a staircase
+    // of steps, so a glissando is heard as discrete pitches. With no
+    // temperament this is the drawn pitch, unchanged.
+    static inline double arcPitch (const upic::Arc& arc, double t)
+    {
+        const double f = arc.freqAt (t);
+        return arc.stepDivisions > 0
+             ? upic::applyTemperament (f, arc.stepDivisions, upic::kDefaultRefFreq)
+             : f;
+    }
+
     // Time scale for a sample voice. Mode 1 (granular stretch) uses the same
     // arc-length mapping in normal playback and scrub; mode 2 (phase vocoder)
     // only maps onto the arc in the scrub preview. Mode 3 (granular no
@@ -223,7 +236,7 @@ public:
                 for (int n = i0; n <= i1; ++n)
                 {
                     const double t = playhead + (double) n * step;
-                    const double cFreq = juce::jlimit (10.0, 14000.0, arc.freqAt (t));
+                    const double cFreq = juce::jlimit (10.0, 14000.0, arcPitch (arc, t));
                     const float env = e != nullptr ? e->valueAt (arc.lifeAt (t)) : 1.0f;
                     const float idxE = (idxEnv != nullptr ? idxEnv->valueAt (arc.lifeAt (t)) : 1.0f);
                     const float edge = edgeFade (t, arcStart, arcEnd);
@@ -273,7 +286,7 @@ public:
                 float env = e != nullptr ? e->valueAt(arc.lifeAt(t)) : 1.0f;
                 const float edge = edgeFade(t, arcStart, arcEnd);
 
-                float freq = (float) juce::jlimit(10.0, 14000.0, arc.freqAt(t));
+                float freq = (float) juce::jlimit(10.0, 14000.0, arcPitch (arc, t));
 
                 // v1.31 (U1): the polyagogy - the arc's own wave can also
                 // be a control signal. The curve is read at its own rate
@@ -418,8 +431,8 @@ private:
             {
                 const double t0 = a + dt * (double) k;
                 const double t1 = t0 + dt;
-                const double f0 = juce::jlimit(10.0, 14000.0, arc.freqAt(t0));
-                const double f1 = juce::jlimit(10.0, 14000.0, arc.freqAt(t1));
+                const double f0 = juce::jlimit(10.0, 14000.0, arcPitch (arc, t0));
+                const double f1 = juce::jlimit(10.0, 14000.0, arcPitch (arc, t1));
                 const double r0 = juce::jlimit(1.0 / 16.0, 16.0, f0 / ref);
                 const double r1 = juce::jlimit(1.0 / 16.0, 16.0, f1 / ref);
                 pos += 0.5 * (r0 + r1) * dt;
@@ -559,7 +572,7 @@ private:
                 for (int k = 0; k < primeSamples; ++k)
                 {
                     const double pt = t0 + (double) k * step;
-                    const double freq = juce::jlimit(10.0, 14000.0, arc.freqAt(pt));
+                    const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, pt));
                     const double primeRatio = juce::jlimit(1.0 / 16.0, 16.0,
                         freq / ref / juce::jmax(1.0e-6, timeScale));
                     v.voc.next(readMaterial(smp, pp, mirrored), primeRatio);
@@ -593,7 +606,7 @@ private:
         {
             const double t = playhead + (double) n * step;
 
-            const double freq = juce::jlimit(10.0, 14000.0, arc.freqAt(t));
+            const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, t));
             const double ratio = juce::jlimit(1.0 / 16.0, 16.0, freq / ref);
 
             const float env = e != nullptr ? e->valueAt(arc.lifeAt(t)) : 1.0f;
@@ -695,7 +708,7 @@ private:
         {
             const double t = playhead + (double) n * (rate * invSr);
 
-            const double freq = juce::jlimit(10.0, 14000.0, arc.freqAt(t));
+            const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, t));
             const double ratio = juce::jlimit(upic::kLiveMinRatio,
                                               upic::kLiveMaxRatio, freq / ref);
 

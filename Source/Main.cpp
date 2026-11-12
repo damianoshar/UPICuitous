@@ -1237,6 +1237,86 @@ public:
                    juce::String (d.points[2].t - d.points[0].t, 3) + " s");
         }
 
+        // 6i-f. v1.32: the discrete frequency space - the UPIC's
+        //      "discrete/non-discrete" function. The pitch that plays is
+        //      moved through a temperament of n equal divisions per octave,
+        //      so a glissando is heard as a staircase of discrete steps.
+        {
+            const double ref = upic::kDefaultRefFreq; // C4
+
+            // the continuum leaves the pitch alone
+            check (std::abs (upic::applyTemperament (445.0, 0, ref) - 445.0) < 1e-9,
+                   "no temperament leaves the pitch alone");
+
+            // a pitch on the chromatic scale stays where it is
+            const double a4 = upic::applyTemperament (440.0, 12, ref);
+            check (std::abs (a4 - 440.0) < 0.02,
+                   "the chromatic scale leaves A4 where it is",
+                   juce::String (a4, 3) + " Hz");
+
+            // a pitch between two steps snaps to the nearest one
+            const double snapped = upic::applyTemperament (445.0, 12, ref);
+            check (std::abs (snapped - a4) < 0.02,
+                   "a pitch between two steps snaps to the nearer one",
+                   juce::String (snapped, 2) + " Hz");
+
+            // a different temperament is a different scale: the diatonic
+            // one (7 divisions) puts A4 between two of its steps
+            const double seven = upic::applyTemperament (440.0, 7, ref);
+            check (std::abs (seven - a4) > 1.0,
+                   "the diatonic scale moves A4 to another step",
+                   juce::String (seven, 2) + " Hz");
+            check (std::abs (std::log2 (seven / ref) * 7.0
+                             - std::round (std::log2 (seven / ref) * 7.0)) < 1e-9,
+                   "the diatonic scale lands exactly on one of its steps");
+
+            // the glissando becomes a staircase: every step of the sweep
+            // lands on the scale, and the sweep visits several steps
+            upic::Arc g;
+            g.points = { { 0.0, 400.0 }, { 1.0, 800.0 } };
+            g.stepDivisions = 12;
+            bool allOnScale = true;
+            std::set<double> visited;
+            for (int i = 0; i <= 100; ++i)
+            {
+                const double f = UpicEngine::arcPitch (g, (double) i / 100.0);
+                const double l = std::log2 (f / ref) * 12.0;
+                if (std::abs (l - std::round (l)) > 1e-9) allOnScale = false;
+                visited.insert (std::round (l));
+            }
+            check (allOnScale, "the stepped glissando stays on the scale");
+            check (visited.size() > 3,
+                   "the stepped glissando is heard as several discrete steps",
+                   juce::String ((int) visited.size()) + " steps");
+
+            // and the continuum version of the same arc is not a staircase
+            upic::Arc c = g;
+            c.stepDivisions = 0;
+            bool anyOffScale = false;
+            for (int i = 0; i <= 100; ++i)
+            {
+                const double f = UpicEngine::arcPitch (c, (double) i / 100.0);
+                const double l = std::log2 (f / ref) * 12.0;
+                if (std::abs (l - std::round (l)) > 1e-9) anyOffScale = true;
+            }
+            check (anyOffScale, "the continuum glissando is not stepped");
+
+            // the drawing is untouched: the stepping is a property of the
+            // sound, not of the drawn curve
+            check (std::abs (g.points[0].freq - 400.0) < 1e-9
+                && std::abs (g.points[1].freq - 800.0) < 1e-9,
+                   "the stepping leaves the drawn curve alone");
+
+            // it travels with the piece
+            upic::Arc saved = upic::Arc::fromVar (g.toVar());
+            check (saved.stepDivisions == 12,
+                   "the discrete frequency space travels with the piece",
+                   juce::String (saved.stepDivisions) + " divisions");
+            upic::Arc plain = upic::Arc::fromVar (upic::Arc().toVar());
+            check (plain.stepDivisions == 0,
+                   "a piece without it is the continuum");
+        }
+
         // 6i-b. v1.31 (U4): the digitised wave page - a take becomes one
         //      loop of the oscillator.
         {
@@ -2051,7 +2131,12 @@ public:
                     for (auto z : sizes)
                     {
                         juce::String detail;
-                        check(layoutOk(z.w, z.h, detail),
+                        // the layout check must run BEFORE the detail is read:
+                        // the order of evaluation of the arguments is not
+                        // specified, so reading detail.trim() in the same call
+                        // would report an empty string.
+                        const bool ok = layoutOk(z.w, z.h, detail);
+                        check(ok,
                               juce::String("responsive layout ") + juce::String(z.w)
                               + "x" + juce::String(z.h), detail.trim());
                     }

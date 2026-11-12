@@ -279,6 +279,23 @@ namespace upic
         double pmR2 = 2.0, pmR3 = 3.0, pmR4 = 5.0;  // PM: modulator ratios (4-op)
         double pmI2 = 1.0, pmI3 = 1.0, pmI4 = 1.0;  // PM: stage indices (4-op)
 
+        //---------------- the discrete frequency space (v1.32) ----------------
+        // The UPIC's frequency space could be "non-discrete" - the
+        // continuum, where a diagonal line is a glissando - or "discrete",
+        // with equal temperaments of 1..99 divisions per octave: "the same
+        // diagonal arc would then sound like discrete steps in a defined
+        // temperament" (Brigitte Robindoré, in "From Xenakis's UPIC to
+        // Graphic Notation Today", Hatje Cantz 2024).
+        //
+        // The sieve (above) snaps the DRAWN points; this steps the SOUND.
+        // The line on the canvas stays a smooth curve, but the pitch that
+        // plays moves through a temperament, so a glissando becomes a
+        // staircase of discrete steps - the "tempered discontinuum".
+        //
+        // 0 = the continuum (continuous, the default); 1..99 = the number
+        // of equal divisions per octave the pitch is moved through.
+        int stepDivisions = 0;
+
         double startTime() const { return points.empty() ? 0 : points.front().t; }
         double endTime()   const { return points.empty() ? 0 : points.back().t; }
 
@@ -408,6 +425,8 @@ namespace upic
             o->setProperty("waveUse", waveUse);
             o->setProperty("modRate", modRate);
             o->setProperty("modDepth", modDepth);
+            // v1.32: the discrete frequency space travels with the piece
+            if (stepDivisions > 0) o->setProperty("sd", stepDivisions);
             juce::Array<juce::var> arr;
             for (auto& p : points)
             {
@@ -443,6 +462,9 @@ namespace upic
             a.waveUse = juce::jlimit (0, 2, (int) v.getProperty ("waveUse", 0));
             a.modRate  = limits::clampFinite ((double) v.getProperty ("modRate", 1.0), 0.01, 100.0);
             a.modDepth = limits::clampFinite ((double) v.getProperty ("modDepth", 0.0), 0.0, 1.0);
+            // v1.32: the discrete frequency space (absent in older pieces ->
+            // the continuum)
+            a.stepDivisions = juce::jlimit (0, 99, (int) v.getProperty ("sd", 0));
             if (auto* arr = v.getProperty("points", juce::var()).getArray())
                 for (auto& pv : *arr)
                 {
@@ -475,6 +497,28 @@ namespace upic
             if (d < bestDist) { bestDist = d; best = cand; }
         }
         return juce::jlimit(kMinFreq, kMaxFreq, midiToFreq(best));
+    }
+
+    //---------------- the discrete frequency space (v1.32) ----------------
+    // Move a pitch through a temperament of `divisions` equal steps per
+    // octave, anchored at `refFreq` (C4 by default): the continuum becomes
+    // a staircase. 0 divisions leaves the pitch alone.
+    //
+    // This is the UPIC's "discrete/non-discrete" function. It is not the
+    // sieve: the sieve snaps the drawn points, this snaps the pitch that
+    // plays, so a glissando - a straight diagonal line - is heard as a
+    // staircase of discrete steps.
+    inline double applyTemperament (double hz, int divisions, double refFreq)
+    {
+        if (divisions <= 0 || ! (hz > 0.0) || ! std::isfinite (hz)) return hz;
+        if (! (refFreq > 0.0) || ! std::isfinite (refFreq)) refFreq = kDefaultRefFreq;
+        const double l = std::log2 (hz / refFreq);
+        const double stepped = std::round (l * (double) divisions) / (double) divisions;
+        // exp2, not pow(2, x): this runs per sample on the audio thread
+        const double out = refFreq * std::exp2 (stepped);
+        // a temperament must never move the pitch out of the world: a NaN or
+        // a zero here would silence the arc.
+        return (std::isfinite (out) && out > 0.0) ? out : hz;
     }
 
     //---------------- Magnetic snap: stickiness + time grid (UPISketch-style) ----

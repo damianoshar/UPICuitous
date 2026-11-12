@@ -119,6 +119,7 @@ private:
     void buildToolbarControls();
     void buildMaterialControls();
     void buildSieveControls();
+    void buildStepControls();
     void buildArcListPanel();
     void buildMidiControls();
     void buildMaterialTabs();
@@ -388,6 +389,19 @@ private:
     juce::Label modUseLab{ {}, "Wave as" }, modRateLab{ {}, "Rate" },
               modDepthLab{ {}, "Depth" };
 
+    // v1.32: the discrete frequency space - the UPIC's "discrete/non-
+    // discrete" function. The arc's sounding pitch is moved through a
+    // temperament of n equal divisions per octave, so a glissando is heard
+    // as a staircase of discrete steps. The sieve snaps the DRAWN points;
+    // this snaps the pitch that PLAYS.
+    //
+    // It lives on the voice row (visible in every tab) because it belongs
+    // to the arc's pitch, not to one material, and it applies to the
+    // selected arcs.
+    juce::ToggleButton stepBtn{ "Stepped" };
+    juce::Slider stepDivSlider;
+    juce::Label stepDivLab{ {}, "Div/oct" };
+
     // v1.27: Clear is destructive, so it asks first. An in-app overlay keeps
     // this working on Android, where floating dialogs cannot be dismissed.
     // v1.30 (5.3 refactor): the overlay type lives in OverlayPanels.h.
@@ -512,6 +526,7 @@ private:
     void syncMaterialTabs();          // tab toggles follow drawMatMode
     void loadSampleIntoSlot(int slotIndex);
     void pushSieve();                 // sieve UI -> state + ScoreEditor
+    void applyStepToSelection();      // v1.32: the discrete frequency space
     void runGenerator(int kind);      // procedural arc generation (nUPIC-style)
     void exportStems();               // one WAV per voice into a folder
     void flash(const juce::String& m); // transient status message (4s)
