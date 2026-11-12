@@ -55,6 +55,7 @@ release-artifacts/
 JuceLibraryCode/
 
 # Development documentation (kept locally, not part of the release repo)
+BACKLOG.md
 BUILDING.md
 FUTURE_IDEAS.md
 PROGRESS.md
