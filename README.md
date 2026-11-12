@@ -67,7 +67,9 @@ longer needs a row of its own - the next group continues on the same line
 when there is room. A group wider than the line wraps inside itself, and
 its card follows it line by line, so no control is left on the bare
 background. The **level sliders** (intensity, duration, master) are
-one group, so they always sit together. On a large screen the long
+one group, so they always sit together. The whole toolbar sits on a dark
+base panel, so the gaps between the cards and the unused end of a line
+are panel, not black holes. On a large screen the long
 explanations (the material's hint and the keyboard/shortcut list) move into
 their own **sidebar** on the right, where the spare space is; the **Hints**
 toggle in the strip above the canvas shows and hides it. No button cuts its
@@ -349,7 +351,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 480 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 481 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live

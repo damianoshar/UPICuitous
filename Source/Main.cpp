@@ -3331,6 +3331,12 @@ public:
                 check(stripPx.getRed() >= 42 && stripPx.getRed() <= 56
                       && stripPx.getBlue() >= 76 && stripPx.getBlue() <= 92,
                       "centre scrub line painted", stripPx.toString());
+                // the unused part of a toolbar line sits on the toolbar's
+                // base panel, not on the window background - the cards must
+                // not leave black holes between and after them
+                const auto panelPx = img.getPixelAt (900, 100);
+                check(panelPx == juce::Colour (0xff131720),
+                      "v1.33.3 the toolbar has a base panel", panelPx.toString());
             }
         }
 
