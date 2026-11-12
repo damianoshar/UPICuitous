@@ -26,6 +26,8 @@
     <FILE id="aSio23" name="AsioConfig.h" compile="0" resource="0" file="Source/AsioConfig.h"/>
     <FILE id="pLim24" name="PieceLimits.h" compile="0" resource="0" file="Source/PieceLimits.h"/>
     <FILE id="oVly25" name="OverlayPanels.h" compile="0" resource="0" file="Source/OverlayPanels.h"/>
+    <FILE id="oScr26" name="OscScrubReceiver.cpp" compile="1" resource="0" file="Source/OscScrubReceiver.cpp"/>
+    <FILE id="oScH27" name="OscScrubReceiver.h" compile="0" resource="0" file="Source/OscScrubReceiver.h"/>
     </GROUP>
   </MAINGROUP>
   <MODULES>

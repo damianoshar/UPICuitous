@@ -1,4 +1,4 @@
-﻿#include "MainComponent.h"
+#include "MainComponent.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -8,6 +8,9 @@
 //==============================================================================
 MainComponent::MainComponent(bool pluginMode)
     : pluginMode_(pluginMode)
+    // v1.30 (5.3 refactor): the OSC receiver needs this component as its
+    // listener, so it is constructed here rather than in place.
+    , osc (*this)
 {
     waveforms = upic::defaultWaveforms();
     envelopes = upic::defaultEnvelopes();
@@ -47,10 +50,8 @@ MainComponent::MainComponent(bool pluginMode)
     buildEditors();
     // v1.29: listen for the phone/MobMuPlat scrub. Message-loop callbacks
     // mean the playhead moves on the message thread exactly like a drag.
-    // v1.30: the listeners are permanent; startOscReceiver() connects (and
-    // reconnects after the settings overlay changes the endpoints).
-    oscReceiver.addListener(this);
-    multicastReceiver.addListener(this);
+    // v1.30 (5.3 refactor): the receiver owns its own listeners; starting it
+    // binds the endpoints (and rebinds them after the settings changed).
     startOscReceiver();
 
     refreshBoxes();
@@ -281,24 +282,24 @@ void MainComponent::buildSettingsOverlay()
     oscPortSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 64, 18);
     oscPortSlider.setNumDecimalPlacesToDisplay(0);
     oscPortSlider.setRange(1024.0, 65535.0, 1.0);
-    oscPortSlider.setValue((double) oscPort, juce::dontSendNotification);
+    oscPortSlider.setValue((double) osc.getPort(), juce::dontSendNotification);
     oscPortSlider.setTooltip("UDP port for /upic/scrub messages (default 9000).");
     settingsOverlay.addAndMakeVisible(oscPortLab);
     settingsOverlay.addAndMakeVisible(oscPortSlider);
 
     oscMcBtn.setName("oscMcBtn");
     oscMcBtn.setTooltip("Also listen on MobMuPlat's default multicast address.");
-    oscMcBtn.setToggleState(oscMulticastEnabled, juce::dontSendNotification);
+    oscMcBtn.setToggleState(osc.isMulticastEnabled(), juce::dontSendNotification);
     settingsOverlay.addAndMakeVisible(oscMcBtn);
     oscOnBtn.setName("oscOnBtn");
-    oscOnBtn.setToggleState(oscEnabled, juce::dontSendNotification);
+    oscOnBtn.setToggleState(osc.isEnabled(), juce::dontSendNotification);
     settingsOverlay.addAndMakeVisible(oscOnBtn);
     oscGroupLab.setName("oscGroupLab");
     oscGroupLab.setJustificationType(juce::Justification::centredRight);
     oscGroupLab.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
     oscGroupLab.setColour(juce::Label::textColourId, juce::Colours::white);
     oscGroupEdit.setName("oscGroupEdit");
-    oscGroupEdit.setText(oscMulticastGroup, juce::dontSendNotification);
+    oscGroupEdit.setText(osc.getMulticastGroup(), juce::dontSendNotification);
     oscGroupEdit.setInputRestrictions(32);
     oscGroupEdit.setTooltip("Multicast group (default 224.0.0.1).");
     settingsOverlay.addAndMakeVisible(oscGroupLab);
@@ -312,7 +313,7 @@ void MainComponent::buildSettingsOverlay()
     oscMcPortSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 64, 18);
     oscMcPortSlider.setNumDecimalPlacesToDisplay(0);
     oscMcPortSlider.setRange(1024.0, 65535.0, 1.0);
-    oscMcPortSlider.setValue((double) oscMulticastPort, juce::dontSendNotification);
+    oscMcPortSlider.setValue((double) osc.getMulticastPort(), juce::dontSendNotification);
     oscMcPortSlider.setTooltip("Multicast port (default 54321).");
     settingsOverlay.addAndMakeVisible(oscMcPortLab);
     settingsOverlay.addAndMakeVisible(oscMcPortSlider);
@@ -1505,8 +1506,6 @@ void MainComponent::buildEditors()
 MainComponent::~MainComponent()
 {
     stopOscReceiver();
-    multicastReceiver.removeListener(this);
-    oscReceiver.removeListener(this);
     // v1.18: stop the audio thread first (no callback can be in flight), then
     // hand back the snapshots it owned so the handover can free them here.
     shutdownAudio();
@@ -2755,42 +2754,9 @@ void MainComponent::handleMidi()
 // 0..1; the receiver calls back on the message thread, so the playhead moves
 // through the same seek + preview path as a canvas drag. When the messages
 // stop, timerCallback() ends the gesture (and never starts playback).
-void MainComponent::oscMessageReceived (const juce::OSCMessage& message)
+void MainComponent::oscScrubReceived (double normalised)
 {
-    handleOscMessage (message);
-}
-
-void MainComponent::oscBundleReceived (const juce::OSCBundle& bundle)
-{
-    for (int i = 0; i < bundle.size(); ++i)
-    {
-        const auto& element = bundle[i];
-        if (element.isMessage())
-            handleOscMessage (element.getMessage());
-        else if (element.isBundle())
-            oscBundleReceived (element.getBundle());
-    }
-}
-
-void MainComponent::handleOscMessage (const juce::OSCMessage& message)
-{
-    const auto address = message.getAddressPattern().toString();
-    if (address != "/upic/scrub" && address != "/upic/scrub/pos")
-        return;
-    if (message.size() < 1)
-        return;
-
-    float value = 0.0f;
-    if (message[0].isFloat32())      value = message[0].getFloat32();
-    else if (message[0].isInt32())
-    {
-        // 0/1 for a binary position, otherwise a 7-bit fader
-        const int v = message[0].getInt32();
-        value = v <= 1 ? (float) v : (float) v / 127.0f;
-    }
-    else return;
-
-    handleOscScrub (juce::jlimit (0.0, 1.0, (double) value));
+    handleOscScrub (normalised);
 }
 
 void MainComponent::handleOscScrub (double normalised)
@@ -2807,7 +2773,7 @@ void MainComponent::handleOscScrub (double normalised)
         if (! oscAnnounced)
         {
             oscAnnounced = true;
-            flash ("OSC scrub on UDP " + juce::String (oscPort));
+            flash ("OSC scrub on UDP " + juce::String (osc.getPort()));
         }
     }
     else
@@ -3344,8 +3310,8 @@ void MainComponent::timerCallback()
         if (latSamples > 0)
             s += " | LAT " + juce::String((int) std::round(latSamples / audioSampleRate * 1000.0)) + "ms";
         if (monitoring.load()) s += " | MON";
-        if (oscListening) s += " | OSC " + juce::String (oscPort);
-        if (multicastListening) s += " | MCAST";
+        if (osc.isListening()) s += " | OSC " + juce::String (osc.getPort());
+        if (osc.isMulticastListening()) s += " | MCAST";
         if (capturing.load())
             s += " | CAP " + juce::String((double) capPos.load() / juce::jmax(1.0, capRate), 1) + "s";
         if (sieveOn)
@@ -4252,11 +4218,11 @@ void MainComponent::showSettings()
     closeAudioSettings();
     refreshMidiDevices();
     // show the applied values, not abandoned edits from a previous visit
-    oscPortSlider.setValue((double) oscPort, juce::dontSendNotification);
-    oscMcPortSlider.setValue((double) oscMulticastPort, juce::dontSendNotification);
-    oscGroupEdit.setText(oscMulticastGroup, juce::dontSendNotification);
-    oscMcBtn.setToggleState(oscMulticastEnabled, juce::dontSendNotification);
-    oscOnBtn.setToggleState(oscEnabled, juce::dontSendNotification);
+    oscPortSlider.setValue((double) osc.getPort(), juce::dontSendNotification);
+    oscMcPortSlider.setValue((double) osc.getMulticastPort(), juce::dontSendNotification);
+    oscGroupEdit.setText(osc.getMulticastGroup(), juce::dontSendNotification);
+    oscMcBtn.setToggleState(osc.isMulticastEnabled(), juce::dontSendNotification);
+    oscOnBtn.setToggleState(osc.isEnabled(), juce::dontSendNotification);
     updateOscStatus();
     settingsOverlay.setBounds(getLocalBounds());
     settingsOverlay.setVisible(true);
@@ -4271,102 +4237,59 @@ void MainComponent::closeSettings()
 
 void MainComponent::startOscReceiver()
 {
-    oscListening = false;
-    multicastListening = false;
-
-    if (! oscEnabled)
-    {
-        oscAnnounced = false;
-        updateOscStatus();
-        return;
-    }
-
-    // v1.29: the phone sends /upic/scrub to UDP 9000 ...
-    oscListening = oscReceiver.connect(oscPort);
-
-    // ... and MobMuPlat's default output is multicast 224.0.0.1:54321, which
-    // works even when the phone's network settings cannot be changed.
-    if (oscMulticastEnabled)
-    {
-        multicastSocket = std::make_unique<juce::DatagramSocket>(false);
-        multicastSocket->setEnablePortReuse(true);
-        if (multicastSocket->bindToPort(oscMulticastPort))
-        {
-            if (multicastSocket->joinMulticast(oscMulticastGroup))
-                multicastListening = multicastReceiver.connectToSocket(*multicastSocket);
-        }
-    }
+    osc.start();
     oscAnnounced = false;
     updateOscStatus();
 }
 
 void MainComponent::stopOscReceiver()
 {
-    if (multicastListening)
-    {
-        multicastReceiver.disconnect();
-        multicastListening = false;
-    }
-    if (multicastSocket != nullptr)
-    {
-        multicastSocket->leaveMulticast(oscMulticastGroup);
-        multicastSocket->shutdown();
-        multicastSocket.reset();
-    }
-    if (oscListening)
-    {
-        oscReceiver.disconnect();
-        oscListening = false;
-    }
+    osc.stop();
+}
+
+void MainComponent::rebindOscReceiver()
+{
+    osc.start();
+    oscAnnounced = false;
+    updateOscStatus();
 }
 
 void MainComponent::applyOscSettings()
 {
-    oscEnabled = oscOnBtn.getToggleState();
-    const int newPort = (int) oscPortSlider.getValue();
-    const int newMcPort = (int) oscMcPortSlider.getValue();
+    osc.setEnabled (oscOnBtn.getToggleState());
+    osc.setPort (juce::jlimit (1024, 65535, (int) oscPortSlider.getValue()));
+    osc.setMulticastPort (juce::jlimit (1024, 65535, (int) oscMcPortSlider.getValue()));
     const auto group = oscGroupEdit.getText().trim();
-    oscPort = juce::jlimit(1024, 65535, newPort);
-    oscMulticastPort = juce::jlimit(1024, 65535, newMcPort);
     if (group.isNotEmpty())
-        oscMulticastGroup = group;
-    oscMulticastEnabled = oscMcBtn.getToggleState();
+        osc.setMulticastGroup (group);
+    osc.setMulticastEnabled (oscMcBtn.getToggleState());
 
-    stopOscReceiver();
-    startOscReceiver();
+    rebindOscReceiver();
 
-    if (oscListening)
-        flash("OSC scrub on UDP " + juce::String(oscPort)
-              + (multicastListening ? " + multicast " + oscMulticastGroup + ":"
-                                        + juce::String(oscMulticastPort)
-                                    : juce::String()));
+    if (osc.isListening())
+        flash("OSC scrub on UDP " + juce::String (osc.getPort())
+              + (osc.isMulticastListening() ? " + multicast " + osc.getMulticastGroup() + ":"
+                                                   + juce::String (osc.getMulticastPort())
+                                             : juce::String()));
     else
-        flash("OSC unavailable: UDP port " + juce::String(oscPort) + " busy");
+        flash("OSC unavailable: UDP port " + juce::String (osc.getPort()) + " busy");
 }
+
 
 void MainComponent::updateOscStatus()
 {
-    juce::String s;
-    if (! oscEnabled)
+    oscStatusLab.setText (osc.statusText(), juce::dontSendNotification);
+
+    if (! osc.isEnabled())
     {
-        s = "OSC off";
-        oscStatusLab.setText(s, juce::dontSendNotification);
-        statusLab.setTooltip("OSC scrub disabled in MIDI + OSC settings");
+        statusLab.setTooltip ("OSC scrub disabled in MIDI + OSC settings");
         return;
     }
-    s << (oscListening ? "UDP " + juce::String(oscPort) + " listening"
-                       : "UDP " + juce::String(oscPort) + " unavailable");
-    if (oscMulticastEnabled)
-        s << "  |  " << (multicastListening
-                            ? "multicast " + oscMulticastGroup + ":" + juce::String(oscMulticastPort)
-                            : "multicast unavailable");
-    else
-        s << "  |  multicast off";
-    oscStatusLab.setText(s, juce::dontSendNotification);
-    statusLab.setTooltip("OSC scrub: send /upic/scrub <0..1> to UDP port "
-                         + juce::String(oscPort)
-                         + " (or multicast " + oscMulticastGroup + ":"
-                         + juce::String(oscMulticastPort) + ")");
+
+    statusLab.setTooltip ("OSC scrub: send /upic/scrub <0..1> to UDP port "
+                          + juce::String (osc.getPort())
+                          + " (or multicast " + osc.getMulticastGroup() + ":"
+                          + juce::String (osc.getMulticastPort()) + ")");
 }
 
 void MainComponent::showClearWarning()

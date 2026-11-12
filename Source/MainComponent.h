@@ -10,6 +10,7 @@
 #include "WaveformEditor.h"
 #include "EnvelopeEditor.h"
 #include "OverlayPanels.h"
+#include "OscScrubReceiver.h"
 
 //==============================================================================
 // Main UPIC window: transport + score page + wavetable/envelope editors.
@@ -17,7 +18,7 @@
 //==============================================================================
 class MainComponent : public juce::AudioAppComponent,
                       public juce::Timer,
-                      private juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>
+                      private OscScrubReceiver::Listener
 {
 public:
     // pluginMode (v1.11): VST3 wrapper - the host drives prepareToPlay /
@@ -62,17 +63,17 @@ public:
     MidiHub& midiHub() { return midi; }
 
     // v1.29: the OSC scrub receiver (phone/MobMuPlat).
-    bool oscIsListening() const { return oscListening || multicastListening; }
-    int oscPortForTest() const { return oscPort; }
-    int oscMulticastPortForTest() const { return oscMulticastPort; }
-    juce::String oscMulticastGroupForTest() const { return oscMulticastGroup; }
+    bool oscIsListening() const { return osc.isListening(); }
+    int oscPortForTest() const { return osc.getPort(); }
+    int oscMulticastPortForTest() const { return osc.getMulticastPort(); }
+    juce::String oscMulticastGroupForTest() const { return osc.getMulticastGroup(); }
     bool settingsVisibleForTest() const { return settingsOverlay.isVisible(); }
-    bool oscEnabledForTest() const { return oscEnabled; }
+    bool oscEnabledForTest() const { return osc.isEnabled(); }
     double pageDurationForTest() const { return curPage().durationSec; }
     double playheadForTest() const { return playheadSec; }
     bool externalScrubActiveForTest() const { return externalScrubActive; }
     bool isPlayingForTest() const { return isPlaying.load (std::memory_order_relaxed); }
-    void injectOscMessageForTest (const juce::OSCMessage& m) { handleOscMessage (m); }
+    void injectOscMessageForTest (const juce::OSCMessage& m) { osc.handleMessageForTest (m); }
     void updateExternalScrubForTest (double nowMs) { updateExternalScrub (nowMs); }
 
     void paint(juce::Graphics& g) override;
@@ -401,28 +402,16 @@ private:
 
     // v1.29: the OSC scrub receiver. MobMuPlat (or any OSC sender) moves the
     // playhead with /upic/scrub <0..1> on UDP 9000.
-    juce::OSCReceiver oscReceiver;
-    bool oscListening = false;
-    // v1.29: MobMuPlat's default output is multicast 224.0.0.1:54321, so this
-    // works even when the phone's network settings cannot be changed.
-    std::unique_ptr<juce::DatagramSocket> multicastSocket;
-    juce::OSCReceiver multicastReceiver;
-    bool multicastListening = false;
+    // v1.30 (5.3 refactor): the receiver and its endpoints live in
+    // OscScrubReceiver; this class keeps the scrub gesture itself.
+    // The receiver is constructed with *this as its listener (see the
+    // constructor's initialiser list).
+    OscScrubReceiver osc;
     bool externalScrubActive = false;
     bool externalScrubFrozen = false;
     double externalScrubLastT = 0.0;
     double lastExternalScrubMs = 0.0;
     bool oscAnnounced = false;
-    static constexpr int kOscPort = 9000;
-    static constexpr int kMulticastPort = 54321;
-    static constexpr auto kMulticastGroup = "224.0.0.1";
-    // v1.30: the settings overlay edits these session-only values; Apply
-    // rebinds the receivers. The defaults are the old compile-time endpoints.
-    int oscPort = kOscPort;
-    int oscMulticastPort = kMulticastPort;
-    juce::String oscMulticastGroup { kMulticastGroup };
-    bool oscEnabled = true;
-    bool oscMulticastEnabled = true;
 
     // --- UI: sieve quantizer (same row as material) ---
     juce::ToggleButton sieveBtn{ "Sieve" };
@@ -463,10 +452,10 @@ private:
     void rebuildArcList();        // v1.21: rebuild the panel's rows from the model
     void handleMidi();            // v1.23: the MIDI messages (message thread)
 
-    // v1.29: the phone/MobMuPlat OSC scrub (message-loop callbacks)
-    void oscMessageReceived (const juce::OSCMessage&) override;
-    void oscBundleReceived (const juce::OSCBundle&) override;
-    void handleOscMessage (const juce::OSCMessage&);
+    // v1.29: the phone/MobMuPlat OSC scrub. The receiver parses the
+    // messages and hands the scrub value over; the gesture itself (the
+    // preview, the freeze, the timeout) belongs to the app.
+    void oscScrubReceived (double normalised) override;
     void handleOscScrub (double normalised);
     void updateExternalScrub (double nowMs);
 
@@ -515,6 +504,7 @@ private:
     void stopOscReceiver();
     void applyOscSettings();
     void updateOscStatus();
+    void rebindOscReceiver();
     void showClearWarning();
     void closeClearWarning();
     void clearCurrentPage();

@@ -38,7 +38,8 @@ juce_add_plugin(UPICuitousPlugin
 target_sources(UPICuitousPlugin PRIVATE
     PluginProcessor.cpp
     PluginEditor.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponent.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/OscScrubReceiver.cpp)
 
 target_include_directories(UPICuitousPlugin PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../Source)
 
@@ -73,7 +74,8 @@ target_sources(UPICuitousPluginSmokeTest PRIVATE
     PluginProcessor.cpp
     PluginEditor.cpp
     PluginSmokeTest.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponent.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/OscScrubReceiver.cpp)
 
 target_include_directories(UPICuitousPluginSmokeTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../Source)
 
