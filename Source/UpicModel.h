@@ -550,7 +550,9 @@ namespace upic
                     pt.i = limits::clampIntensity((float)(double) pv.getProperty("i", 1.0));
                     a.points.push_back(pt);
                 }
-            std::sort(a.points.begin(), a.points.end(), [](auto& x, auto& y){ return x.t < y.t; });
+            // stable: a staircase's corners share a time, and their order is
+            // the direction of the jump
+            std::stable_sort(a.points.begin(), a.points.end(), [](auto& x, auto& y){ return x.t < y.t; });
             return a;
         }
     };

@@ -755,11 +755,15 @@ void MainComponent::buildSieveControls()
                              "magnet: the sieve (the pitches), a zone's own\n"
                              "sieve, and the time grid (the times). 1 is a\n"
                              "hard snap, 0 leaves the drawing free.\n"
-                             "It is GLOBAL - the sieve zones follow it too.");
+                             "GLOBAL: every page and every sieve zone uses\n"
+                             "this one value. A zone has its own m/R and\n"
+                             "time grid, but not its own stick.");
     gridBox.setTooltip ("Quantises the drawing's TIMES (the sieve quantises\n"
                         "the pitches). The points are pulled toward the grid\n"
-                        "by the Stickiness, so the curve takes the grid's\n"
-                        "shape. Off leaves the times free.");
+                        "by Stick, so the curve takes the grid's shape.\n"
+                        "Off leaves the times free.\n"
+                        "GLOBAL: a sieve zone can set its own time grid,\n"
+                        "which applies inside the zone.");
     genBox.setTooltip ("Procedural arc generators.");
 
     // --- v1.31 (U1): the polyagogy. The UPIC's wave page had no fixed
@@ -823,6 +827,8 @@ void MainComponent::buildSieveControls()
     addAndMakeVisible(sievePresetBox); addAndMakeVisible(stickSlider);
     addAndMakeVisible(gridBox); addAndMakeVisible(genBox);
     addAndMakeVisible(stickLab); addAndMakeVisible(gridLab); addAndMakeVisible(genLab);
+    addAndMakeVisible(sieveMLab); addAndMakeVisible(sieveRLab);
+    sieveMLab.setName("sieveMLab"); sieveRLab.setName("sieveRLab");
     addAndMakeVisible(kbdHintLab);
     sievePresetBox.setName("sievePresetBox");
     stickSlider.setName("stickSlider");
@@ -1158,7 +1164,7 @@ void MainComponent::buildArcListPanel()
     // visibility is session state), like the Wave / Env / Hints toggles.
     arcListBtn.setName("arcListBtn");
     arcListBtn.setClickingTogglesState(true);
-    arcListBtn.setTooltip("Show the list of arcs (page, pitch range, time span)");
+    arcListBtn.setTooltip("Show the list of arcs (id, pitch range, time span, page, space)");
     arcListBtn.onClick = [this]{
         showArcList = arcListBtn.getToggleState();
         arcListDirty = true;
@@ -3132,9 +3138,10 @@ void MainComponent::rebuildArcList()
                     hi = juce::jmax (hi, pt.freq);
                 }
             }
-            r.info = juce::String ((int) std::lround (lo)) + "-" + juce::String ((int) std::lround (hi)) + " Hz   "
-                   + juce::String (a.startTime(), 1) + "-" + juce::String (a.endTime(), 1) + "s   p"
-                   + juce::String (f.first + 1);
+            r.hz = juce::String ((int) std::lround (lo)) + "-" + juce::String ((int) std::lround (hi));
+            r.time = juce::String (a.startTime(), 1) + "-" + juce::String (a.endTime(), 1);
+            r.pageText = "p" + juce::String (f.first + 1);
+            r.spaceText = "S" + juce::String (a.space + 1);
             rows.push_back (r);
         }
     }
@@ -3896,30 +3903,35 @@ void MainComponent::resized()
     auto FH = [](juce::Component* c, int minSlice)        { return FlowItem{ nullptr, 0, c, 0, minSlice }; };
 
     const std::vector<std::vector<FlowItem>> rowsInit {
-        // transport / pages / files
+        // transport / pages / files / tempo
         { F(&playBtn, 90), F(&stopBtn, 70), F(&loopBtn, 64), F(&seqBtn, 60), F(&revPlayBtn, 64), F(&pressBtn, 96), F(&scrubBtn, 72),
           FL(&pageLab, 40, &pageBox, 150),
           F(&pageAddBtn, 30), F(&pageDupBtn, 46), F(&pageDelBtn, 30),
-          F(&menuBtn, 74), F(&settingsBtn, 78), F(&clearBtn, 64), F(&timeLab, 0) },
+          F(&menuBtn, 74), F(&settingsBtn, 78), F(&clearBtn, 64),
+          FL(&tempoLab, 40, &tempoSlider, 140),
+          F(&timeLab, 0) },
         // voice / view (built below: the tab decides which controls apply)
         {},
         // material (filled in below: the tab decides which material)
         {},
-        // presets / sieve / stickiness / time grid / generators / hints
-        { FL(&tempoLab, 40, &tempoSlider, 140),
-          F(&sieveBtn, 64), F(&sievePresetBox, 150), F(&sieveMEdit, 52), F(&sieveREdit, 84),
-          FL(&stickLab, 38, &stickSlider, 160),
-          FL(&gridLab, 44, &gridBox, 84),
-          FL(&genLab, 36, &genBox, 220),
-          // v1.33: the page's ambitus, its acceleration and its four
-          // frequency spaces (the UPIC's four tables)
-          FL(&ambitusLab, 58, &ambitusBox, 170),
+        // v1.33: the sieve is its own section. It quantises the pitch; it
+        // is not a tool and it is not a page setting.
+        { F(&sieveBtn, 64), F(&sievePresetBox, 150),
+          FL(&sieveMLab, 18, &sieveMEdit, 52), FL(&sieveRLab, 18, &sieveREdit, 84) },
+        // v1.33: the GLOBAL magnets - the stick and the time grid. Every
+        // page and every sieve zone follows these two (a zone can set its
+        // own m/R and its own time grid, but not its own stick).
+        { FL(&stickLab, 84, &stickSlider, 160), FL(&gridLab, 86, &gridBox, 84) },
+        // v1.33: the page's frequency settings - its ambitus, its
+        // acceleration and its four frequency spaces (the UPIC's tables)
+        { FL(&ambitusLab, 58, &ambitusBox, 170),
           FL(&warpLab, 40, &warpSlider, 120),
           FL(&spaceDefLab[0], 46, &spaceDefBox[0], 120),
           FL(&spaceDefLab[1], 46, &spaceDefBox[1], 120),
           FL(&spaceDefLab[2], 46, &spaceDefBox[2], 120),
-          FL(&spaceDefLab[3], 46, &spaceDefBox[3], 120),
-          FH(&kbdHintLab, 220) },
+          FL(&spaceDefLab[3], 46, &spaceDefBox[3], 120) },
+        // v1.33: the tools (procedural generators) and the hints
+        { FL(&genLab, 36, &genBox, 220), FH(&kbdHintLab, 220) },
     };
 
     // v1.21: the material row shows the CURRENT tab's material - the tab IS
@@ -4019,11 +4031,15 @@ void MainComponent::resized()
     rows[2] = materialRow;
     rows.push_back({ FL(&scrubLenLab, 60, &scrubLenSlider, 130), FL(&scrubCrossLab, 70, &scrubCrossSlider, 130), FL(&scrubTailLab, 60, &scrubTailSlider, 130), FL(&scrubGrainLab, 70, &scrubGrainSlider, 110) });
     rows.push_back({ F(&muteDragBtn, 90), FL(&dragSmoothLab, 70, &dragSmoothSlider, 130) });
-    // the Hints view toggle drops the explanation labels (last of their rows)
+    // the Hints view toggle drops the explanation labels (from wherever
+    // they sit in the flow)
     if (! showHints)
     {
-        rows[2].pop_back();
-        rows[3].pop_back();
+        for (auto& r : rows)
+            r.erase (std::remove_if (r.begin(), r.end(),
+                                     [this] (const FlowItem& it)
+                                     { return it.comp == &matHintLab || it.comp == &kbdHintLab; }),
+                     r.end());
     }
     if (pluginMode_) // host audio: no device selector button in the flow
         rows[0].erase(std::remove_if(rows[0].begin(), rows[0].end(),

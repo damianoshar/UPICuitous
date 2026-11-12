@@ -509,7 +509,7 @@ private:
     //     procedural arc generators) + shortcut/wheel hint line ---
     juce::ComboBox sievePresetBox, gridBox, genBox;
     juce::Slider stickSlider;
-    juce::Label pmRatioLab{ {}, "Ratio" }, pmIndexLab{ {}, "Index" }, pmIndexEnvLab{ {}, "IdxEnv" }, pmFeedbackLab{ {}, "Fdbk" }, pmPresetLab{ {}, "Preset" }, pmOpsLab{ {}, "Ops" }, tempoLab{ {}, "Tempo" }, stickLab{ {}, "Stick" }, gridLab{ {}, "T-grid" }, genLab{ {}, "Gen" };
+    juce::Label pmRatioLab{ {}, "Ratio" }, pmIndexLab{ {}, "Index" }, pmIndexEnvLab{ {}, "IdxEnv" }, pmFeedbackLab{ {}, "Fdbk" }, pmPresetLab{ {}, "Preset" }, pmOpsLab{ {}, "Ops" }, tempoLab{ {}, "Tempo" }, stickLab{ {}, "Stick (global)" }, gridLab{ {}, "T-grid (global)" }, genLab{ {}, "Gen" }, sieveMLab{ {}, "m" }, sieveRLab{ {}, "R" };
     juce::Label kbdHintLab;
 
     // --- UI: editors ---

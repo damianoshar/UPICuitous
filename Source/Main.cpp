@@ -1482,6 +1482,26 @@ public:
                    juce::String (midX.first) + " crossings in a second");
         }
 
+        // 6i-f7. v1.33: the staircase. The sieve's points are the step
+        //      corners - the pitch holds until the next step and then
+        //      jumps - so the sound is a staircase too.
+        {
+            upic::Arc a;
+            // (0, 261) - (1, 277) - (1, 294) - (2, 294): a step at t = 1
+            a.points = { { 0.0, 261.0 }, { 1.0, 277.0 }, { 1.0, 294.0 }, { 2.0, 294.0 } };
+            check (std::abs (a.freqAt (0.5) - std::sqrt (261.0 * 277.0)) < 1.0,
+                   "the staircase holds the pitch between the corners",
+                   juce::String (a.freqAt (0.5), 1) + " Hz");
+            check (std::abs (a.freqAt (1.0) - 277.0) < 1e-6,
+                   "the staircase is at the old step on the corner",
+                   juce::String (a.freqAt (1.0), 1) + " Hz");
+            check (std::abs (a.freqAt (1.0001) - 294.0) < 1e-6,
+                   "the staircase jumps to the new step right after it",
+                   juce::String (a.freqAt (1.0001), 1) + " Hz");
+            check (std::abs (a.freqAt (1.5) - 294.0) < 1e-6,
+                   "the staircase holds the new step");
+        }
+
         // 6i-f6. v1.33: the page's acceleration. The UPIC's page could be
         //      expanded and contracted in time "with the additional option
         //      of acceleration and deceleration" (Robindoré): the page's
@@ -2450,6 +2470,13 @@ public:
                         sc->commitLineForTest ({ 60.0f, 60.0f }, { 340.0f, 300.0f });
                         check (sc->lastArcPointsSortedForTest(),
                                "a quantised line keeps its points in order");
+                        check (sc->lastArcHasStaircaseForTest(),
+                               "a magnetised line is a staircase, not a ramp");
+                        sc->setStickiness (0.5);
+                        sc->commitLineForTest ({ 60.0f, 60.0f }, { 340.0f, 300.0f });
+                        check (! sc->lastArcHasStaircaseForTest(),
+                               "a soft stick leaves the line smooth (no fake steps)");
+                        sc->setStickiness (1.0);
                         sc->setSieve (false, 12, { 0 });
                         sc->setTimeGrid (0.0);
                     }

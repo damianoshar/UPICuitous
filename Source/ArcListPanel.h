@@ -25,7 +25,12 @@ public:
         enum Kind { group, arc };
         Kind kind = group;
         juce::String title;      // the group name, or the arc's id
-        juce::String info;       // the position info (pitch, time, page)
+        // v1.33: the columns, each in its own field, so the header can
+        // line up with them and so the space can be shown.
+        juce::String hz;         // the pitch range, in Hz
+        juce::String time;       // the time span, in seconds
+        juce::String pageText;   // "p1"
+        juce::String spaceText;  // "S2" - the frequency space the arc is in
         int arcId = -1;
         int page = -1;
         int mode = -1;           // the arc's pitch mode (-1 = inherit)
@@ -99,8 +104,29 @@ public:
         juce::Font body (juce::FontOptions (12.0f));
         juce::Font bold (juce::FontOptions (12.0f, juce::Font::bold));
         juce::Font small (juce::FontOptions (11.0f));
+        juce::Font tiny (juce::FontOptions (9.5f, juce::Font::bold));
 
-        int y = pad;
+        // v1.33: the column header. The columns are: the arc's id, its
+        // pitch range in Hz, its time span in seconds, the page it is on
+        // and the frequency space it is played in.
+        const auto cols = columns();
+        const int headerH = (int) std::lround (14.0f * s);
+
+        g.setFont (tiny);
+        g.setColour (juce::Colour (0xff6a6a76));
+        {
+            int cx = pad;
+            const char* titles[] = { "id", "Hz", "time s", "page", "space" };
+            const int widths[] = { cols.id, cols.hz, cols.time, cols.page, cols.space };
+            for (int i = 0; i < 5; ++i)
+            {
+                g.drawText (titles[i], cx, pad - (int) std::lround (2.0f * s),
+                            widths[i] - 2, headerH, juce::Justification::centredLeft);
+                cx += widths[i];
+            }
+        }
+
+        int y = pad + headerH;
         for (const auto& r : rows)
         {
             if (y + rowH > getHeight() - pad) break;
@@ -124,13 +150,21 @@ public:
 
             g.setFont (body);
             g.setColour (selected ? juce::Colours::white : juce::Colour (0xffd6d6e0));
-            g.drawText (r.title, pad, y, (int) std::lround (34.0f * s), rowH, juce::Justification::centredLeft);
+            g.drawText (r.title, pad, y, cols.id - 2, rowH, juce::Justification::centredLeft);
 
+            // v1.33: the columns, lined up with the header
             g.setFont (small);
-            g.setColour (juce::Colour (0xff9a9aa8));
-            g.drawText (r.info, pad + (int) std::lround (34.0f * s), y,
-                        getWidth() - 2 * pad - (int) std::lround (34.0f * s) - controlWidth (s),
-                        rowH, juce::Justification::centredLeft);
+            g.setColour (selected ? juce::Colour (0xffe8e8f0) : juce::Colour (0xff9a9aa8));
+            {
+                int cx = pad + cols.id;
+                const juce::String texts[] = { r.hz, r.time, r.pageText, r.spaceText };
+                const int widths[] = { cols.hz, cols.time, cols.page, cols.space };
+                for (int i = 0; i < 4; ++i)
+                {
+                    g.drawText (texts[i], cx, y, widths[i] - 2, rowH, juce::Justification::centredLeft);
+                    cx += widths[i];
+                }
+            }
 
             // the per-arc controls (right aligned)
             int x = getWidth() - pad;
@@ -160,8 +194,9 @@ public:
         const int rowH = (int) std::lround (20.0f * s);
         const int headH = (int) std::lround (22.0f * s);
         const int pad   = (int) std::lround (6.0f * s);
+        const int top   = pad + (int) std::lround (14.0f * s); // below the column header
 
-        int y = pad;
+        int y = top;
         for (const auto& r : rows)
         {
             if (r.kind == Row::group) { y += headH; continue; }
@@ -205,7 +240,8 @@ public:
         const int rowH = (int) std::lround (20.0f * s);
         const int headH = (int) std::lround (22.0f * s);
         const int pad   = (int) std::lround (6.0f * s);
-        int y = pad;
+        const int top   = pad + (int) std::lround (14.0f * s); // below the column header
+        int y = top;
         for (const auto& r : rows)
         {
             if (r.kind == Row::group) { y += headH; continue; }
@@ -243,7 +279,9 @@ private:
     float uiScale() const
     {
         const auto r = getLocalBounds();
-        return juce::jlimit (0.6f, 2.0f, r.getHeight() / 620.0f);
+        // v1.33: the floor is 0.8 - the list lives beside the canvas, which is
+        // short in landscape, and a smaller scale clipped the column text
+        return juce::jlimit (0.8f, 2.0f, r.getHeight() / 620.0f);
     }
 
     int controlWidth (float s) const
@@ -257,6 +295,24 @@ private:
             w = juce::jmax (w, rw);
         }
         return w;
+    }
+
+    // v1.33: the shared column layout - the header and the rows must agree.
+    // The widths are in design units (fonts are not scaled either); the Hz
+    // column takes whatever the fixed columns and the per-arc controls
+    // leave, so the table still fits when the list is narrow.
+    struct Columns { int id, hz, time, page, space; };
+    Columns columns() const
+    {
+        const float s = uiScale();
+        const int pad = (int) std::lround (6.0f * s);
+        const int avail = juce::jmax (120, getWidth() - 2 * pad - controlWidth (s));
+        const int id    = 30;
+        const int pageC = 24;
+        const int spc   = 30;
+        const int tim   = 52;
+        const int hz    = juce::jmax (44, avail - id - pageC - spc - tim);
+        return { id, hz, tim, pageC, spc };
     }
 
     void revBox (juce::Graphics& g, const Row& r, juce::Rectangle<int> bounds)

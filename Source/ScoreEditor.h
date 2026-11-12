@@ -156,15 +156,28 @@ public:
     void beginZoneDragForTest (juce::Point<float> pos) { beginZoneDrag (pos); }
     void dragZoneToForTest (juce::Point<float> pos) { dragZoneTo (pos); }
     // v1.33: the Line tool's points must stay sorted after the quantisers
-    // have moved them (the engine's segment search assumes it).
+    // have moved them (the engine's segment search assumes it). The
+    // staircase's corners share a time, so the order is non-decreasing.
     void commitLineForTest (juce::Point<float> p0, juce::Point<float> p1) { commitLine (p0, p1); }
     bool lastArcPointsSortedForTest() const
     {
         if (page == nullptr || page->arcs.empty()) return false;
         const auto& pts = page->arcs.back().points;
         for (size_t i = 1; i < pts.size(); ++i)
-            if (pts[i].t <= pts[i - 1].t) return false;
+            if (pts[i].t < pts[i - 1].t) return false;
         return true;
+    }
+    // A staircase has a corner: two points at the same time, one on the
+    // old step and one on the new.
+    bool lastArcHasStaircaseForTest() const
+    {
+        if (page == nullptr || page->arcs.empty()) return false;
+        const auto& pts = page->arcs.back().points;
+        for (size_t i = 1; i < pts.size(); ++i)
+            if (std::abs (pts[i].t - pts[i - 1].t) < 1e-9
+                && std::abs (pts[i].freq - pts[i - 1].freq) > 1e-9)
+                return true;
+        return false;
     }
 
     void setSnap(bool s) { snap = s; }
@@ -322,8 +335,8 @@ public:
         {
             if (std::find(selArcs.begin(), selArcs.end(), a.id) == selArcs.end()) continue;
             for (auto& pt : a.points) quantizeXY(pt.t, pt.freq);
-            std::sort(a.points.begin(), a.points.end(),
-                      [](auto& x, auto& y){ return x.t < y.t; });
+            std::stable_sort(a.points.begin(), a.points.end(),
+                             [](auto& x, auto& y){ return x.t < y.t; });
         }
         notify();
     }
@@ -342,8 +355,8 @@ public:
                 pt.t = juce::jlimit(0.0, page->durationSec, pt.t + dt);
                 if (dSemi != 0) pt.freq = nudgePitch(pt.t, pt.freq, dSemi);
             }
-            std::sort(a.points.begin(), a.points.end(),
-                      [](auto& x, auto& y){ return x.t < y.t; });
+            std::stable_sort(a.points.begin(), a.points.end(),
+                             [](auto& x, auto& y){ return x.t < y.t; });
         }
         notify();
     }
@@ -971,7 +984,7 @@ public:
                     p.t = juce::jlimit(0.0, page->durationSec, p.t + dt);
                     p.freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, p.freq * ratio);
                 }
-                std::sort(a.points.begin(), a.points.end(), [](auto& x, auto& y){ return x.t < y.t; });
+                std::stable_sort(a.points.begin(), a.points.end(), [](auto& x, auto& y){ return x.t < y.t; });
             }
             repaint();
             return;
@@ -1711,6 +1724,86 @@ private:
         return juce::jlimit(ambitusLo(), ambitusHi(), upic::sieveQuantizeHz(raw, m, R));
     }
 
+    // v1.33: the quantisers, applied to a finished stroke or a finished line.
+    //
+    // The sieve (and the chromatic snap, and a zone's own sieve) quantise
+    // the drawn curve into STEPS. The UPIC's pen stayed at the grid pitch
+    // and jumped at the corner, so the drawing - and the sound - were a
+    // staircase. Here the points became the snapped pitches joined by
+    // straight ramps, which is "just lines connected to each other", not
+    // stairs. The points are now the step corners: the pitch HOLDS until
+    // the next step, and the jump is two points at the same time (the
+    // engine's segment search reads a zero-width segment as the jump).
+    //
+    // The time grid quantises the times, and it can pull a later point in
+    // front of an earlier one: the points have to be re-sorted, and the
+    // ones that landed on the same time merged, or the engine's segment
+    // search (which assumes they are sorted) reads the wrong segment and
+    // the curve comes out distorted.
+    void quantiseArcPoints (upic::Arc& a, const std::vector<bool>& magnetised)
+    {
+        for (auto& p : a.points) quantizeXY (p.t, p.freq);
+
+        // re-sort: the grid can move a point's time
+        std::vector<std::pair<double, size_t>> order;
+        order.reserve (a.points.size());
+        for (size_t i = 0; i < a.points.size(); ++i) order.emplace_back (a.points[i].t, i);
+        std::stable_sort (order.begin(), order.end());
+        std::vector<upic::ArcPoint> sorted;
+        std::vector<bool> sortedMag;
+        sorted.reserve (a.points.size());
+        for (auto& o : order)
+        {
+            sorted.push_back (a.points[o.second]);
+            sortedMag.push_back (magnetised[o.second]);
+        }
+
+        // merge the points that landed on the same time
+        std::vector<upic::ArcPoint> merged;
+        std::vector<bool> mergedMag;
+        double lastT = -1.0e9;
+        for (size_t i = 0; i < sorted.size(); ++i)
+        {
+            if (sorted[i].t <= lastT + 0.015) continue;
+            merged.push_back (sorted[i]);
+            mergedMag.push_back (sortedMag[i]);
+            lastT = sorted[i].t;
+        }
+
+        // the staircase: a hold and a jump at every magnetised step. Only a
+        // HARD snap makes real stairs - with a soft stick the drawing keeps
+        // its intermediate pitches, and freezing them into steps would just
+        // be a jagged copy of the same curve.
+        const bool hard = stickiness > 0.999;
+        std::vector<upic::ArcPoint> out;
+        out.reserve (merged.size() * 2);
+        for (size_t i = 0; i < merged.size(); ++i)
+        {
+            if (hard && i > 0 && mergedMag[i]
+                && std::abs (merged[i].freq - merged[i - 1].freq) > 1e-9)
+            {
+                // the corner: the previous pitch holds until this moment
+                out.push_back ({ merged[i].t, merged[i - 1].freq, merged[i - 1].i });
+                // then the jump: the same time, the new pitch
+                out.push_back (merged[i]);
+            }
+            else
+            {
+                out.push_back (merged[i]);
+            }
+        }
+        a.points = std::move (out);
+    }
+
+    // Was the pitch at (t, f) pulled toward a magnet? (The sieve, a zone's
+    // sieve, or the chromatic snap.) Asked BEFORE the quantisation, at the
+    // drawn position.
+    bool pitchMagnetAt (double t, double f) const
+    {
+        int m = 12; std::vector<int> R;
+        return pitchMagnet (m, R, t, f);
+    }
+
     void commitStroke()
     {
         if (!page || strokePts.size() < 2) return;
@@ -1755,19 +1848,13 @@ private:
             }
         }
         // magnets: zone > sieve > chromatic snap, softened by stickiness;
-        // the time grid (global or zone) snaps t in the same call
-        for (auto& p : a.points) quantizeXY(p.t, p.freq);
-        // re-drop points collapsed onto each other by grid snapping
+        // the time grid (global or zone) snaps t in the same call. The
+        // pitch is stepped into a staircase where a magnet was active.
         {
-            std::vector<upic::ArcPoint> dedup;
-            lastT = -1;
-            for (auto& p : a.points)
-            {
-                if (p.t <= lastT + 0.015) continue;
-                dedup.push_back(p);
-                lastT = p.t;
-            }
-            a.points = std::move(dedup);
+            std::vector<bool> magnetised;
+            magnetised.reserve (a.points.size());
+            for (auto& p : a.points) magnetised.push_back (pitchMagnetAt (p.t, p.freq));
+            quantiseArcPoints (a, magnetised);
         }
         if (a.points.size() >= 2) { page->arcs.push_back(a); selArcs = { a.id }; notify(); }
     }
@@ -1801,24 +1888,13 @@ private:
             double f = yToFreq(y);
             a.points.push_back({ t, f, press });
         }
-        for (auto& p : a.points) quantizeXY(p.t, p.freq);
-        // v1.33: the quantisers can move a point's time. The grid snapping
-        // can pull a later point in front of an earlier one, and two points
-        // can land on the same time. The arc's points must stay sorted and
-        // unique: the engine's segment search assumes it, and a line that
-        // came out "distorted" was a line whose points were out of order.
-        std::sort (a.points.begin(), a.points.end(),
-                   [] (auto& x, auto& y) { return x.t < y.t; });
+        // v1.33: the quantisers, and the staircase they make of the curve
+        // (see quantiseArcPoints).
         {
-            std::vector<upic::ArcPoint> dedup;
-            double lastT = -1.0e9;
-            for (auto& p : a.points)
-            {
-                if (p.t <= lastT + 0.015) continue;
-                dedup.push_back (p);
-                lastT = p.t;
-            }
-            a.points = std::move (dedup);
+            std::vector<bool> magnetised;
+            magnetised.reserve (a.points.size());
+            for (auto& p : a.points) magnetised.push_back (pitchMagnetAt (p.t, p.freq));
+            quantiseArcPoints (a, magnetised);
         }
         if (a.points.size() >= 2) { page->arcs.push_back(a); selArcs = { a.id }; notify(); }
     }

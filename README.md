@@ -66,20 +66,30 @@ instant and never touches the audio device (v1.17).
 - Tools: Draw (snap), Line, Sine, Erase, Select/Move, Zone.
 - Magnetic sieve zones with their own sieve + time grid; global sieve
   (Xenakis `n mod m` remainders), stickiness, time grid, presets.
-- **The sieve row** - the quantisers, and what each one does:
-  - **Sieve** + **m** + **R** quantise the drawing's **pitches**: only the
-    pitches whose MIDI number is `n mod m` in the remainder list are
-    allowed, so the curve becomes a staircase of steps.
-  - **Stick** is the one global knob: how strongly the drawing is pulled
-    toward whatever magnet is active - the sieve (the pitches), a zone's
-    own sieve, and the time grid (the times). 1 is a hard snap, 0 leaves
-    the drawing free. **The sieve zones follow it too**: a zone has its
-    own `m`/`R` and its own time grid, but there is one stickiness.
-  - **T-grid** quantises the drawing's **times**. The points are pulled
-    toward the grid by the stickiness, so the curve takes the grid's
-    shape; Off leaves the times free.
-  - **Ambitus**, **Accel** and **S1-S4** are the page's own settings (see
-    below); the S labels show how many arcs are in each space.
+- **The sieve row** - the sieve on its own, because it only quantises the
+  drawing's **pitches**: **Sieve** + **m** + **R** allow only the pitches
+  whose MIDI number is `n mod m` in the remainder list. With a hard snap
+  (**Stick = 1**) the curve becomes a real **staircase**: the pitch holds
+  until it crosses the next allowed step, then jumps. The step corners are
+  two points at the same time, so the drawing shows the stairs and the
+  sound holds and jumps with them. (The freehand and the Line tool both
+  produce this; the time grid can still move the corner in time.) Below 1
+  the drawing keeps its intermediate pitches and stays a smooth magnetised
+  curve.
+- **Global magnets row** - **Stick** and **T-grid**. **Stick** is the one
+  global knob: how strongly the drawing is pulled toward whatever magnet
+  is active - the sieve (the pitches), a zone's own sieve, and the time
+  grid (the times). 1 is a hard snap, 0 leaves the drawing free. **The
+  sieve zones follow it too**: a zone has its own `m`/`R` and its own time
+  grid, but there is one stickiness. **T-grid** quantises the drawing's
+  **times**; its points are pulled toward the grid by the stickiness, so
+  the curve takes the grid's shape; Off leaves the times free. A sieve
+  zone can set its own time grid, which applies inside the zone.
+- **Page frequency row** - **Ambitus**, **Accel** and **S1-S4** are the
+  page's own settings (see below); the S labels show how many arcs are in
+  each space. They are not sieve controls.
+- **Tools row** - the procedural generators (see below) and the keyboard
+  hints.
 - **Sieve zones** - the Zone tool draws a magnetic region: inside it the
   points snap to *that zone's* sieve and time grid. A zone can be
   **dragged to a new place** (inside it) or **resized by an edge or a
@@ -147,11 +157,13 @@ regardless of that arc's Rev box.
 
 **Arcs panel** - the **Arcs** toggle (with the Wave / Env / Hints
 toggles) opens a list of the arcs on the right: grouped OSC / SAMPLE /
-LIVE / PM, each row with the arc's pitch range, its time span and its
-page. Clicking a row selects the arc on the canvas and switches to its
-tab; Ctrl/Cmd/Shift-click adds it to a multi-selection. The sample and the
-live rows carry a **Rev** box (that arc's material backwards) and a
-**mode** dropdown (that arc's pitch-shift algorithm).
+LIVE / PM. A column header names the fields, and every row shows the
+arc's id, its pitch range in **Hz**, its **time** span in seconds, its
+**page** and its frequency **space** (S1-S4). Clicking a row selects the
+arc on the canvas and switches to its tab; Ctrl/Cmd/Shift-click adds it to
+a multi-selection. The sample and the live rows carry a **Rev** box (that
+arc's material backwards) and a **mode** dropdown (that arc's pitch-shift
+algorithm).
 
 **MIDI in** - the **MIDI + OSC settings** overlay (the toolbar Settings
 button or the menu) lists the MIDI inputs (`None` when there is none),
@@ -194,11 +206,12 @@ would then sound like discrete steps in a defined temperament"*. The
 voice row's **Stepped** box and its **Div/oct** slider do this: the arc's
 sounding pitch is moved through the temperament, so a glissando is heard
 as a staircase of discrete steps while the line on the canvas stays a
-smooth curve. It is not the sieve - the sieve snaps the *drawn points*,
-this snaps the *pitch that plays*. 12 divisions is the chromatic scale,
-19 and 31 the tempered ones, 7 the diatonic one; the scale is anchored
-at middle C. The setting belongs to the selected arc (and to the next
-one drawn) and travels with the piece.
+smooth curve. It is not the sieve - the sieve quantises where the drawing
+sits and holds the drawn pitch between steps, while this snaps the pitch
+that plays under a curve that stays smooth. 12 divisions is the chromatic
+scale, 19 and 31 the tempered ones, 7 the diatonic one; the scale is
+anchored at middle C. The setting belongs to the selected arc (and to the
+next one drawn) and travels with the piece.
 
 **The four frequency spaces** - the UPIC's real-time versions had a
 *Frequency Table*: *"a composer could choose to operate within up to four
@@ -207,11 +220,11 @@ page. These grids were invisible to the eye, however, and accessed by
 assigning one of four tables to whatever arc was being drawn, the same
 way as one would assign the waveform or envelope to it."*
 
-So a page carries **four frequency spaces** (the sieve row's **S1-S4**)
-and an arc names the one it is played in (the voice row's **Space**), the
-way it names its wave or its envelope. A space is a range of the
-frequency axis: the position of the drawing on the page's vertical axis
-is mapped into it, so the same curve can be heard in another register
+So a page carries **four frequency spaces** (the page frequency row's
+**S1-S4**) and an arc names the one it is played in (the voice row's
+**Space**), the way it names its wave or its envelope. A space is a range
+of the frequency axis: the position of the drawing on the page's vertical
+axis is mapped into it, so the same curve can be heard in another register
 (**An octave up**, **An octave down**) or with its intervals scaled
 (**Half the range**, **Double the range**). Two arcs can sit in two
 spaces at once, and the drawing itself never moves. The S labels show
@@ -315,7 +328,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 444 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 450 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
