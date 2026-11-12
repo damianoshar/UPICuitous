@@ -95,6 +95,9 @@ private:
     void buildToolbarControls();
     void buildMaterialControls();
     void buildSieveControls();
+    void buildArcListPanel();
+    void buildMidiControls();
+    void buildMaterialTabs();
     void buildLiveInputControls();
     void buildScoreArea();
     void buildEditors();

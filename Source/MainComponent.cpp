@@ -45,6 +45,9 @@ MainComponent::MainComponent(bool pluginMode)
     buildToolbarControls();
     buildMaterialControls();
     buildSieveControls();
+    buildArcListPanel();
+    buildMidiControls();
+    buildMaterialTabs();
     buildLiveInputControls();
     buildScoreArea();
     buildEditors();
@@ -779,7 +782,10 @@ void MainComponent::buildSieveControls()
     kbdHintLab.setFont(juce::Font(juce::FontOptions(12.5f, juce::Font::bold)));
     kbdHintLab.setJustificationType(juce::Justification::centredRight);
     kbdHintLab.setColour(juce::Label::textColourId, juce::Colour(0xff7a7a86));
+}
 
+void MainComponent::buildArcListPanel()
+{
     // v1.21 (wave 19): the arc list panel - the score's inventory on the
     // right of the display, with the per-arc controls. It is a view (the
     // visibility is session state), like the Wave / Env / Hints toggles.
@@ -866,7 +872,10 @@ void MainComponent::buildSieveControls()
             refreshScoreBinding();
         }
     };
+}
 
+void MainComponent::buildMidiControls()
+{
     // v1.23 (wave 20): the MIDI input foundation. The device list, the
     // activity monitor and the learn live in the MIDI + OSC settings overlay
     // (v1.30: it is no longer part of the audio settings).
@@ -926,7 +935,10 @@ void MainComponent::buildSieveControls()
     settingsOverlay.addAndMakeVisible (midiBindTransportLab);
     refreshMidiDevices();
     updateMidiLabels();
+}
 
+void MainComponent::buildMaterialTabs()
+{
     // v1.8 the one tab strip above the canvas: each material is its own tab
     // and canvas layer. The tab is the tab of the page too - the tabs share
     // the timeline (zoom/scroll/playhead); Live labels the grid in Hz.
