@@ -647,7 +647,9 @@ public:
                                         float x0, float x1, juce::Colour col)
             {
                 if (m < 2 || R.empty() || x1 <= x0 + 1.0f) return;
-                g.setColour (col);
+                // collect first: a dense sieve (e.g. all twelve semitones
+                // across nine octaves) would be a solid hatch, not a guide
+                std::vector<float> ys;
                 for (int midi = 12; midi <= 120; ++midi)
                 {
                     const int rr = ((midi % m) + m) % m;
@@ -656,8 +658,12 @@ public:
                     if (f < fLo || f > fHi) continue;
                     const float y = freqToY (f);
                     if (y < r.getY() || y > r.getBottom()) continue;
-                    g.drawHorizontalLine ((int) y, x0, x1);
+                    if ((int) ys.size() >= 96) return;
+                    ys.push_back (y);
                 }
+                g.setColour (col);
+                for (float y : ys)
+                    g.drawHorizontalLine ((int) y, x0, x1);
             };
 
             if (pitchGuides && sieveOn)
