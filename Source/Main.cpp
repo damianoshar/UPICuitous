@@ -4160,6 +4160,69 @@ public:
                   juce::String(earlyN, 3) + " -> " + juce::String(lateN, 3));
         }
 
+        // The worst case the piece limits allow: the maximum number of arcs
+        // on a page, every one of them sounding at the same time (a
+        // crafted piece can do that; a legitimate cluster can too). The
+        // audio thread must not be handed more than a few times the block
+        // budget, or the app stutters.
+        //
+        // Measured on the release build (48 kHz, 512-sample blocks):
+        //   500 arcs x  20 points -> 16.4 ms/block  (154% of the budget)
+        //   500 arcs x 1000 points -> 26.1 ms/block  (244%)
+        //  2024 arcs x  20 points -> 65.8 ms/block  (616%)
+        //  2024 arcs x 1000 points -> 104.3 ms/block (978%)
+        // The arc COUNT is the dominant term (the per-arc work), not the
+        // point count. The threshold is deliberately loose: it catches a
+        // real slowdown of the render path, not a slow machine.
+        {
+            const int sr = 48000, blk = 512;
+            const int arcs = upic::limits::kMaxArcsPerPage;
+            const int pts = 20;
+            upic::Page pg;
+            pg.durationSec = 10.0;
+            for (int i = 0; i < arcs; ++i)
+            {
+                upic::Arc a;
+                a.id = i + 1;
+                for (int k = 0; k < pts; ++k)
+                    a.points.push_back ({ (double) k / (double) pts * pg.durationSec,
+                                         100.0 * std::pow (2.0, (double) (k % 40) / 12.0) });
+                pg.arcs.push_back (a);
+            }
+            auto waves = upic::defaultWaveforms();
+            auto envs  = upic::defaultEnvelopes();
+            std::vector<upic::SampleSlot> noSlots;
+            UpicEngine e; e.prepare (sr, blk);
+            juce::AudioBuffer<float> buf (2, blk);
+            e.render (pg, 0.0, waves, envs, noSlots, buf.getWritePointer(0),
+                      buf.getWritePointer(1), blk, 0.8f, 1.0, false);
+            const auto t0 = juce::Time::getHighResolutionTicks();
+            const int blocks = 20;
+            for (int b = 0; b < blocks; ++b)
+                e.render (pg, (double) b * blk / sr, waves, envs, noSlots,
+                          buf.getWritePointer(0), buf.getWritePointer(1), blk, 0.8f, 1.0, false);
+            const double secs = (double) (juce::Time::getHighResolutionTicks() - t0)
+                                 / (double) juce::Time::getHighResolutionTicksPerSecond();
+            const double usPerBlock = secs * 1e6 / blocks;
+            const double budgetUs = blk * 1e6 / sr;
+            log << "BENCH  " << arcs << " simultaneous arcs: "
+                << juce::String (usPerBlock / 1000.0, 2) << " ms/block ("
+                << juce::String (usPerBlock / budgetUs * 100.0, 0) << "% of the "
+                << juce::String (budgetUs / 1000.0, 2) << " ms budget)\n";
+            // the debug build is ~3x slower, so it gets a looser threshold;
+            // both are far above the measured baseline, which is what the
+            // check is for: catching a real slowdown of the render path.
+            #if JUCE_DEBUG
+                const double allowed = 12.0;
+            #else
+                const double allowed = 5.0;
+            #endif
+            check (usPerBlock < budgetUs * allowed,
+                   "the worst-case page stays within the realtime budget",
+                   juce::String (usPerBlock / budgetUs, 2) + "x (allowed "
+                   + juce::String (allowed, 0) + "x)");
+        }
+
         log << "\n" << (failures == 0 ? "ALL CHECKS PASSED" : juce::String(failures) + " CHECK(S) FAILED") << "\n";
         juce::File::getSpecialLocation(juce::File::tempDirectory)
             .getChildFile("upic_selftest.txt").replaceWithText(log);
