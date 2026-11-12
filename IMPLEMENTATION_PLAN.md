@@ -58,20 +58,25 @@ its state.
 - **5.3 (MainComponent refactor) is in progress** on
   `feature/refactor-maincomponent`. So far:
   1. the overlay panel types moved to `Source/OverlayPanels.h`,
-  2. the 1400-line constructor split into 16 named `build*()` methods,
+  2. the 1400-line constructor split into 19 named `build*()` methods,
   3. the OSC receiver and its endpoints moved to `Source/OscScrubReceiver`,
   4. the sieve row, the arc list, the MIDI controls and the material tabs
      split into their own `build*()` methods,
-  5. the overlay card layout moved out of `resized()`.
+  5. the overlay card layout moved out of `resized()`,
+  6. the audio block split into named helpers (the monitor mix, the score
+     fade, the master mix, the stop fade, the scrub preview and the freeze),
+  7. the material tabs split into the tab strip, the PM controls and the
+     sample controls.
 
-  Every step was verified mechanically (the code lines and their brace
-  depths are unchanged - only the boundaries moved) and by the 367-check
-  selftest, the VST3 smoke test and the Android build.
+  Every step was verified mechanically (a script compares the old and the
+  new file and confirms every code line sits at the same brace depth - only
+  the boundaries moved) and by the 368-check selftest, the VST3 smoke test
+  and the Android build.
 
-  Still to do: the MIDI section and the sieve section could become their
-  own classes (they are still widget-building code inside MainComponent),
-  and `getNextAudioBlock()` (the audio thread) and `renderScoreBlock()`
-  could move into the engine.
+  The largest method left is `resized()` (the flow layout - it is one
+  algorithm, so it stays together). The next candidates are the MIDI and
+  the sieve sections, which could become their own classes, and
+  `renderScoreBlock()`, which could move into the engine.
 
 
 ---
