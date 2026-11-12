@@ -1,4 +1,4 @@
-# UPIC Clone - Xenakis-style vector synthesis
+﻿# UPICuitous - A JUCE-based UPIC clone: the classic oscillator graph becomes sound, and the same score can drive sample and live audio graphs with pitch change. Supports Windows standalone, VST3 plugin, and Android app.
 
 A homage to Iannis Xenakis' UPIC (1977): draw pitch curves on a
 time-vs-pitch page, give each arc a single-cycle wavetable and an
@@ -9,12 +9,28 @@ microphone input (pitch-shifted in realtime).
 Ships as a **desktop app**, an **Android tablet app**, and a **VST3
 plugin** with the same UI and engine.
 
+## Screenshots
+
+![UPICuitous desktop app](docs/screenshots/upicuitous-overview.png)
+
+*Overview: the score page with the Osc material layer selected. Draw
+pitch arcs over time; each tab is a separate material on the same page.*
+
+![Sample arcs and pitch modes](docs/screenshots/upicuitous-sample-arcs.png)
+
+*Focused: the Sample tab. Load a slot, draw arcs on the ratio grid, and
+choose the pitch mode. Arc x is time; arc y is the playback ratio
+(1x = Ref). Granular (stretch) fits the slot to the arc length;
+Varispeed and Granular (no stretch) change the slot's playback length
+with pitch; Phase vocoder shifts pitch only. The material view shows the
+waveform and a time bar; drag the centre line to scrub.*
+
 ## Builds in this repo
 
 | Build | Where | State |
 |---|---|---|
-| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v1.27.0 |
-| Python + tkinter + numpy | `python-upic/` | Prototype, shares `.upic.json`. `python python-upic/upic_clone.py` |
+| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v0.28.0 |
+| Python + tkinter + numpy | `python-upic/` | Prototype, shares `.upic.json`. `python python-upic/upicuitous.py` |
 | Single-page WebAudio | `web-upic/` | Prototype, shares `.upic.json`. Open `web-upic/index.html` |
 
 ## Quick start
@@ -24,13 +40,13 @@ plugin** with the same UI and engine.
 .\scripts\build.ps1
 
 # Standalone
-.\Builds\VisualStudio2026\x64\Debug\App\UPICClone.exe
+.\Builds\VisualStudio2026\x64\Debug\App\UPICuitous.exe
 
 # VST3 (built by the script; the install asks for admin rights)
-.\scripts\install_plugin.ps1 -Version 1.27.0
+.\scripts\install_plugin.ps1 -Version 0.28.0
 ```
 
-`scripts/build.ps1 -Version 1.27.0` bumps the app and plugin version
+`scripts/build.ps1 -Version 0.28.0` bumps the app and plugin version
 together. `-SkipApp` or `-SkipPlugin` narrows the run. See `BUILDING.md`
 for the manual CMake commands, the Android project and troubleshooting.
 
@@ -73,9 +89,12 @@ Double-click adds and right-click deletes as before.
 **Sample tab** - four slots: load wav/flac/ogg/aiff, record from the mic,
 In/Mon/Capture, input gain. `Ref` is the material's base pitch; arc pitch
 sets the playback ratio. Pitch modes: **Varispeed** (default),
-**Granular**, **Phase vocoder**. At 1x (the arc sits on Ref) all three
-modes pass the material through unchanged; draw above or below Ref to
-hear the difference. Sample-speed grid labels Ref x 2^k.
+**Granular (stretch)**, **Phase vocoder**, **Granular (no stretch)**. At 1x
+(the arc sits on Ref) the pitch is unchanged; draw above or below Ref to
+transpose. Varispeed and Granular (no stretch) change the slot's playback
+length with pitch; Granular (stretch) time-stretches the slot to the arc
+length; Phase vocoder keeps the slot's length and shifts pitch only.
+Sample-speed grid labels Ref x 2^k.
 The **Rev** button plays the selected slot backwards - the material is
 mirrored, the pitch stays the same.
 
@@ -103,8 +122,8 @@ tab; Ctrl/Cmd/Shift-click adds it to a multi-selection. The sample and the
 live rows carry a **Rev** box (that arc's material backwards) and a
 **mode** dropdown (that arc's pitch-shift algorithm).
 
-**MIDI in** - the **MIDI + OSC settings** overlay (toolbar Settings
-button or menu) lists the MIDI inputs (`None` when there is none),
+**MIDI in** - the **MIDI + OSC settings** overlay (the toolbar Settings
+button or the menu) lists the MIDI inputs (`None` when there is none),
 shows the last message (CC or note, value, channel, device) and has a
 **Learn** row for the master gain and the draw intensity: press Learn,
 move a control, and the parameter follows it. The bindings are a
@@ -114,7 +133,20 @@ controller map - session state, not part of the piece.
 sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
 (shared with the Python and web builds). Double-click Stop rewinds to the
 start. Clear asks first in an in-app warning and uses a red confirm
-button. A Rev toggle runs the score backwards (a mirrored stroke sounds mirrored); a learned MIDI jog CC drives a signed, smoothed playhead (up to +/- 4x) in the app and the plugin.
+button. Dragging the playhead while stopped now plays a short scrub
+preview. A Rev toggle runs the score backwards (a mirrored stroke sounds mirrored); a learned MIDI jog CC drives a signed, smoothed playhead (up to +/- 4x) in the app and the plugin.
+
+**Scrub audition** - with Scrub on, dragging the centre line or the
+playhead triangle plays a short preview while the transport is stopped.
+The toolbar sets **Scrub len**, **Crossfade**, **Release tail** and
+**Hold grain**; **Mute drag** mutes the material while editing, and
+**Smooth** sets the drag smoothing. A click without a drag holds the
+preview; releasing after a drag does not start playback.
+
+![Scrub audition](docs/screenshots/upicuitous-scrub-audition.png)
+
+*Focused: scrub audition. The scrub row shapes the preview; the material
+view time bar follows the playhead while dragging.*
 
 **Phone / MobMuPlat scrub (OSC)** - UPICuitous listens on UDP port 9000 and
 also joins MobMuPlat's default multicast output `224.0.0.1:54321`, so the
@@ -124,13 +156,13 @@ playhead: 0 is the page start and 1 is the page end. The value feeds the
 same seek and scrub-preview path as a canvas drag. Values keep the
 preview alive; 2000 ms after the last message the gesture ends (holding
 freezes the preview), and releasing never starts playback. The status line shows `OSC 9000` (plus
-`MCAST` when the multicast listener is active). Open **MIDI + OSC settings** (toolbar Settings
-button or menu) to change the UDP port, turn multicast on or off, or change the multicast
-group and port; press **Apply** to rebind the receivers. These endpoint changes are session-only.
-A ready-made MobMuPlat patch lives in `docs/mobmuplat/`: load `UPICuitous-Scrub.mmp`, then set
+`MCAST` when the multicast listener is active). A ready-made MobMuPlat
+patch lives in `docs/mobmuplat/`: load `UPICuitous-Scrub.mmp`, then set
 MobMuPlat's Network output address to the computer's LAN IP and the output
 port to 9000 (or leave the defaults). The slider sends values while it is
-dragged. An **OSC on/off** toggle in the settings overlay disables the receivers entirely.
+dragged. The **MIDI + OSC settings** overlay can change the UDP port,
+turn multicast on or off, and change the multicast group and port; press
+**Apply** to rebind the receivers. These endpoint changes are session-only.
 
 ## VST3 plugin
 
@@ -178,16 +210,15 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 - Windows with **Visual Studio 2026** (Desktop development with C++),
   MSBuild and CMake 3.22+.
-- **JUCE 8.0.16-security** in `JUCE/` (the app CMakeLists also fetches it if
-  missing; `python Tools/fetch_juce.py` downloads it without git and checks
-  its SHA-256).
+- **JUCE 8.0.6** in `JUCE/` (the app CMakeLists also fetches it if
+  missing; `python Tools/fetch_juce.py` downloads it without git).
 - MinGW is not supported by JUCE 8 - use MSVC.
 - Android: JDK 17, SDK 35, NDK 28.1.13356709, CMake 3.22.1 (see
   `BUILDING.md`).
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 361 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 353 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
