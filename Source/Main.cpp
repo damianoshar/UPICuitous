@@ -2363,6 +2363,98 @@ public:
                     }
                 }
 
+                // v1.33: the four frequency spaces - each dropdown has to
+                // reach the model, not just the first one.
+                {
+                    auto* s1 = dynamic_cast<juce::ComboBox*> (find ("spaceDefBox0"));
+                    auto* s2 = dynamic_cast<juce::ComboBox*> (find ("spaceDefBox1"));
+                    auto* s3 = dynamic_cast<juce::ComboBox*> (find ("spaceDefBox2"));
+                    auto* s4 = dynamic_cast<juce::ComboBox*> (find ("spaceDefBox3"));
+                    check (s1 != nullptr && s2 != nullptr && s3 != nullptr && s4 != nullptr,
+                           "the four space controls exist");
+                    if (s2 != nullptr && s3 != nullptr && s4 != nullptr)
+                    {
+                        // "An octave up" is the fourth preset (id 4)
+                        s2->setSelectedId (4, juce::dontSendNotification); s2->onChange();
+                        s3->setSelectedId (5, juce::dontSendNotification); s3->onChange();
+                        s4->setSelectedId (2, juce::dontSendNotification); s4->onChange();
+                        check (mc.pageSpaceForTest (0) == 0
+                            && mc.pageSpaceForTest (1) == 3
+                            && mc.pageSpaceForTest (2) == 4
+                            && mc.pageSpaceForTest (3) == 1,
+                               "every space dropdown reaches the model",
+                               juce::String (mc.pageSpaceForTest (0)) + ", "
+                               + juce::String (mc.pageSpaceForTest (1)) + ", "
+                               + juce::String (mc.pageSpaceForTest (2)) + ", "
+                               + juce::String (mc.pageSpaceForTest (3)));
+                        // back to the defaults
+                        s2->setSelectedId (1, juce::dontSendNotification); s2->onChange();
+                        s3->setSelectedId (1, juce::dontSendNotification); s3->onChange();
+                        s4->setSelectedId (1, juce::dontSendNotification); s4->onChange();
+                    }
+                }
+
+                // v1.33: a sieve zone can be moved and resized. The zone
+                // tool used to let you draw one and delete it, but not
+                // touch it afterwards.
+                {
+                    auto* sc = dynamic_cast<ScoreEditor*> (find ("score"));
+                    check (sc != nullptr, "the canvas exists");
+                    if (sc != nullptr)
+                    {
+                        const int zid = sc->addZone (2.0, 4.0, 200.0, 800.0);
+                        check (zid > 0, "a zone can be drawn");
+                        // its rectangle on screen
+                        const auto zr = sc->zoneRectForTest (zid);
+                        check (zr.getWidth() > 1.0f && zr.getHeight() > 1.0f,
+                               "the zone has a rectangle");
+
+                        // drag it by the middle: it moves
+                        const juce::Point<float> mid (zr.getCentreX(), zr.getCentreY());
+                        sc->beginZoneDragForTest (mid);
+                        const double tBefore = sc->zoneTimeForTest (zid, 0);
+                        sc->dragZoneToForTest ({ mid.x + 40.0f, mid.y });
+                        const double tAfter = sc->zoneTimeForTest (zid, 0);
+                        check (std::abs (tAfter - tBefore) > 0.05,
+                               "a zone can be dragged to a new place",
+                               juce::String (tBefore, 2) + " s -> "
+                               + juce::String (tAfter, 2) + " s");
+
+                        // drag its right edge: it resizes
+                        const auto zr2 = sc->zoneRectForTest (zid);
+                        const double wBefore = zr2.getWidth();
+                        sc->beginZoneDragForTest ({ zr2.getRight(), zr2.getCentreY() });
+                        sc->dragZoneToForTest ({ zr2.getRight() + 60.0f, zr2.getCentreY() });
+                        const double wAfter = sc->zoneRectForTest (zid).getWidth();
+                        check (wAfter > wBefore + 10.0f,
+                               "a zone can be resized by its edge",
+                               juce::String (wBefore, 0) + " -> "
+                               + juce::String (wAfter, 0) + " px");
+                        sc->deleteZone (zid);
+                    }
+                }
+
+                // v1.33: a quantised line must keep its points in order.
+                // The grid snapping can pull a later point in front of an
+                // earlier one; the engine's segment search assumes the
+                // points are sorted, and a line whose points were not came
+                // out distorted.
+                {
+                    auto* sc = dynamic_cast<ScoreEditor*> (find ("score"));
+                    check (sc != nullptr, "the canvas exists for the line test");
+                    if (sc != nullptr)
+                    {
+                        sc->setSieve (true, 12, { 0 });
+                        sc->setTimeGrid (2.0);
+                        sc->setStickiness (1.0);
+                        sc->commitLineForTest ({ 60.0f, 60.0f }, { 340.0f, 300.0f });
+                        check (sc->lastArcPointsSortedForTest(),
+                               "a quantised line keeps its points in order");
+                        sc->setSieve (false, 12, { 0 });
+                        sc->setTimeGrid (0.0);
+                    }
+                }
+
                 // v1.33: the ambitus reaches the canvas - the page's own
                 // interval, not the whole world.
                 {

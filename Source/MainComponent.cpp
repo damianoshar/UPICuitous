@@ -736,6 +736,32 @@ void MainComponent::buildSieveControls()
     sieveREdit.onTextChange = [this]{ pushSieve(); };
     sieveBtn.onClick = [this]{ pushSieve(); };
 
+    // v1.33: the sieve row says what each control does. The stickiness in
+    // particular was a mystery: it is the ONE global knob that says how
+    // strongly the drawing is pulled toward whatever magnet is active, and
+    // the sieve zones follow it (a zone has its own m/R and its own time
+    // grid, but not its own stickiness).
+    sieveBtn.setTooltip ("The sieve quantises the drawing's PITCHES: only the\n"
+                         "pitches n mod m in the remainder list are allowed,\n"
+                         "so the curve becomes a staircase of steps.");
+    sieveMEdit.setTooltip ("The sieve's modulus: how many equal divisions of\n"
+                           "the octave. 12 is the chromatic scale.");
+    sieveREdit.setTooltip ("The sieve's remainders: which of the m divisions\n"
+                           "are allowed. 0 alone is the chromatic scale,\n"
+                           "0,7 is the diatonic one.");
+    sievePresetBox.setTooltip ("Sieve presets: they set the m/R and switch the\n"
+                               "sieve on.");
+    stickSlider.setTooltip ("How strongly the drawing is pulled toward the\n"
+                             "magnet: the sieve (the pitches), a zone's own\n"
+                             "sieve, and the time grid (the times). 1 is a\n"
+                             "hard snap, 0 leaves the drawing free.\n"
+                             "It is GLOBAL - the sieve zones follow it too.");
+    gridBox.setTooltip ("Quantises the drawing's TIMES (the sieve quantises\n"
+                        "the pitches). The points are pulled toward the grid\n"
+                        "by the Stickiness, so the curve takes the grid's\n"
+                        "shape. Off leaves the times free.");
+    genBox.setTooltip ("Procedural arc generators.");
+
     // --- v1.31 (U1): the polyagogy. The UPIC's wave page had no fixed
     //     meaning: the same drawn curve could be the carrier's timbre AND a
     //     control signal. Here the arc's own wave can also be an amplitude
@@ -1022,6 +1048,20 @@ void MainComponent::pushSpaceDefs()
     markModelChanged();
     refreshSpaceBox();
     score.repaint();
+    // say what changed, and whether anything is in that space - a space
+    // with no arcs in it changes nothing you can hear
+    int which = -1;
+    for (int i = 0; i < 4; ++i)
+        if (spaceDefBox[i].getSelectedId() != 1) { which = i; break; }
+    if (which >= 0)
+    {
+        int n = 0;
+        for (auto& a : curPage().arcs) if (a.space == which) ++n;
+        flash ("Space " + juce::String (which + 1) + ": "
+               + upic::freqSpacePresets()[(size_t) curPage().spaces[(size_t) which]].name
+               + (n > 0 ? " - " + juce::String (n) + " arcs in it"
+                        : " - no arcs in it yet (put one there with Space)"));
+    }
 }
 
 // The arc's space: the assignment, the way a wave or an envelope is
@@ -1068,6 +1108,18 @@ void MainComponent::refreshSpaceBox()
                           i + 1);
     }
     spaceBox.setSelectedId (cur + 1, juce::dontSendNotification);
+
+    // v1.33: the space labels carry the number of arcs in each space, so
+    // it is visible which spaces are in use - changing a space that no arc
+    // is in sounds like nothing happened, because nothing did.
+    for (int i = 0; i < 4; ++i)
+    {
+        int n = 0;
+        for (auto& a : curPage().arcs) if (a.space == i) ++n;
+        spaceDefLab[i].setText ("S" + juce::String (i + 1)
+                                + (n > 0 ? " (" + juce::String (n) + ")" : ""),
+                                juce::dontSendNotification);
+    }
 }
 
 // The page's ambitus -> the model.
@@ -3863,10 +3915,10 @@ void MainComponent::resized()
           // frequency spaces (the UPIC's four tables)
           FL(&ambitusLab, 58, &ambitusBox, 170),
           FL(&warpLab, 40, &warpSlider, 120),
-          FL(&spaceDefLab[0], 26, &spaceDefBox[0], 130),
-          FL(&spaceDefLab[1], 26, &spaceDefBox[1], 130),
-          FL(&spaceDefLab[2], 26, &spaceDefBox[2], 130),
-          FL(&spaceDefLab[3], 26, &spaceDefBox[3], 130),
+          FL(&spaceDefLab[0], 46, &spaceDefBox[0], 120),
+          FL(&spaceDefLab[1], 46, &spaceDefBox[1], 120),
+          FL(&spaceDefLab[2], 46, &spaceDefBox[2], 120),
+          FL(&spaceDefLab[3], 46, &spaceDefBox[3], 120),
           FH(&kbdHintLab, 220) },
     };
 

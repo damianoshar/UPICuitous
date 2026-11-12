@@ -94,6 +94,15 @@ public:
     bool settingsVisibleForTest() const { return settingsOverlay.isVisible(); }
     bool oscEnabledForTest() const { return osc.isEnabled(); }
     double pageDurationForTest() const { return curPage().durationSec; }
+    // v1.33: the page's four spaces and an arc's space, so the selftest can
+    // check that the controls really reach the model.
+    int pageSpaceForTest (int i) const { return curPage().spaces[(size_t) juce::jlimit (0, 3, i)]; }
+    int arcSpaceForTest (int arcId) const
+    {
+        for (auto& a : curPage().arcs) if (a.id == arcId) return a.space;
+        return -1;
+    }
+    double pageWarpForTest() const { return curPage().warp; }
     double playheadForTest() const { return playheadSec; }
     bool externalScrubActiveForTest() const { return externalScrubActive; }
     bool isPlayingForTest() const { return isPlaying.load (std::memory_order_relaxed); }

@@ -66,6 +66,25 @@ instant and never touches the audio device (v1.17).
 - Tools: Draw (snap), Line, Sine, Erase, Select/Move, Zone.
 - Magnetic sieve zones with their own sieve + time grid; global sieve
   (Xenakis `n mod m` remainders), stickiness, time grid, presets.
+- **The sieve row** - the quantisers, and what each one does:
+  - **Sieve** + **m** + **R** quantise the drawing's **pitches**: only the
+    pitches whose MIDI number is `n mod m` in the remainder list are
+    allowed, so the curve becomes a staircase of steps.
+  - **Stick** is the one global knob: how strongly the drawing is pulled
+    toward whatever magnet is active - the sieve (the pitches), a zone's
+    own sieve, and the time grid (the times). 1 is a hard snap, 0 leaves
+    the drawing free. **The sieve zones follow it too**: a zone has its
+    own `m`/`R` and its own time grid, but there is one stickiness.
+  - **T-grid** quantises the drawing's **times**. The points are pulled
+    toward the grid by the stickiness, so the curve takes the grid's
+    shape; Off leaves the times free.
+  - **Ambitus**, **Accel** and **S1-S4** are the page's own settings (see
+    below); the S labels show how many arcs are in each space.
+- **Sieve zones** - the Zone tool draws a magnetic region: inside it the
+  points snap to *that zone's* sieve and time grid. A zone can be
+  **dragged to a new place** (inside it) or **resized by an edge or a
+  corner**; right-click a zone to delete it or to give it the sieve or the
+  time grid the toolbar is showing now.
 - Procedural generators: stochastic / convergent arborescence, echelon,
   ordinal spine.
 - Multi-select: Ctrl+A, Ctrl+C (count), Ctrl+D, Del, arrow nudge,
@@ -195,7 +214,9 @@ frequency axis: the position of the drawing on the page's vertical axis
 is mapped into it, so the same curve can be heard in another register
 (**An octave up**, **An octave down**) or with its intervals scaled
 (**Half the range**, **Double the range**). Two arcs can sit in two
-spaces at once, and the drawing itself never moves.
+spaces at once, and the drawing itself never moves. The S labels show
+how many arcs are in each space - changing a space that holds no arc
+changes nothing you can hear until you put one there.
 
 **The page's interval and its acceleration** - *"the scale of the
 millimetric surface could be selected, so that the vertical axis could
@@ -294,7 +315,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 435 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 444 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -305,7 +326,8 @@ wavetable fork / Stop rewind / Clear warning checks, the granular-vs-varispeed
 regression and the UPIC's transformations (transpose, invert, retrograde,
 augment), the discrete frequency space, the four frequency spaces, the
 ambitus, the infrasonic-to-ultrasound range, the page's acceleration, the
-digitised wave page and the micro-time page) and writes the log to
+movable sieve zones, the quantised line, the digitised wave page and the
+micro-time page) and writes the log to
 `%TEMP%\upic_selftest.txt`. The build script also runs the 15-check
 plugin smoke test and pluginval at strictness 5.
 

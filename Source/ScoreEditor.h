@@ -37,6 +37,16 @@ public:
         setWantsKeyboardFocus(true);
     }
 
+    // v1.33: dragging a zone - moving it, or resizing it by an edge or a
+    // corner. The Zone tool used to let you draw a zone and delete it, but
+    // not move it or change it - a zone you drew in the wrong place had to
+    // be deleted and drawn again.
+    bool draggingZone = false;
+    int  zoneHandle = 0;          // 0 = move, 1..4 = an edge, 5..8 = a corner
+    int  zoneDragId = -1;
+    juce::Point<float> zoneDragStart;
+    double zoneDragT0 = 0.0, zoneDragT1 = 0.0, zoneDragF0 = 0.0, zoneDragF1 = 0.0;
+
     // non-owning bindings (set by MainComponent)
     void bind(upic::Page* p, std::vector<upic::Waveform>* w, double* playhead,
               std::function<void()> changed = nullptr)
@@ -47,6 +57,7 @@ public:
         selectedZone = -1;
         selArcs.clear();
         drawingZone = false; movingArc = false; scrubbing = false;
+        draggingZone = false; zoneHandle = 0; zoneDragId = -1;
         repaint();
     }
     // v1.18: while the transport plays, the audio thread owns the playhead
@@ -126,6 +137,35 @@ public:
         repaint();
     }
     int getSelectedZone() const { return selectedZone; }
+
+    // v1.33: the selftest drives the zone drag directly (a synthesised
+    // mouse event needs a real MouseInputSource).
+    juce::Rectangle<float> zoneRectForTest (int id) const
+    {
+        if (page == nullptr) return {};
+        for (auto& z : page->zones) if (z.id == id) return zoneRect (z);
+        return {};
+    }
+    double zoneTimeForTest (int id, int which) const
+    {
+        if (page == nullptr) return -1.0;
+        for (auto& z : page->zones)
+            if (z.id == id) return which == 0 ? z.t0 : z.t1;
+        return -1.0;
+    }
+    void beginZoneDragForTest (juce::Point<float> pos) { beginZoneDrag (pos); }
+    void dragZoneToForTest (juce::Point<float> pos) { dragZoneTo (pos); }
+    // v1.33: the Line tool's points must stay sorted after the quantisers
+    // have moved them (the engine's segment search assumes it).
+    void commitLineForTest (juce::Point<float> p0, juce::Point<float> p1) { commitLine (p0, p1); }
+    bool lastArcPointsSortedForTest() const
+    {
+        if (page == nullptr || page->arcs.empty()) return false;
+        const auto& pts = page->arcs.back().points;
+        for (size_t i = 1; i < pts.size(); ++i)
+            if (pts[i].t <= pts[i - 1].t) return false;
+        return true;
+    }
 
     void setSnap(bool s) { snap = s; }
     void setShowGrid(bool s) { showGrid = s; repaint(); }
@@ -650,7 +690,7 @@ public:
             : (layer == 1)
                 ? juce::String("SAMPLE tab: drawn arcs play the slot; Pitch sets how they transpose it  |  Del: delete  |  Tool=") + toolName()
                 : juce::String("Draw: drag  |  R-click: menu  |  Shift-click: cycle  |  Ctrl+A: all  |  Ctrl+D: dup  |  Del: delete  |  Tool=") + toolName();
-        if (tool == Zone) hint = "Zone: drag a magnetic region (inherits sieve + grid)  |  click: select  |  Del: remove  |  Tool=Zone";
+        if (tool == Zone) hint = "Zone: drag a magnetic region (inherits sieve + grid)  |  drag inside a zone to move it, an edge to resize  |  R-click: edit  |  Del: remove  |  Tool=Zone";
         if (sieveOn)
         {
             hint += "  |  SIEVE m" + juce::String(sieveM) + " {";
@@ -740,10 +780,11 @@ public:
                 return;
             }
             const int zid = pickZone(e.position);
-            if (zid >= 0) // select existing zone (topmost under cursor)
+            if (zid >= 0) // an existing zone: select it, and let it be moved
             {
                 selectedZone = zid;
                 selArcs.clear();
+                beginZoneDrag (e.position);
                 repaint();
                 return;
             }
@@ -873,6 +914,16 @@ public:
             return;
         }
 
+        // v1.33: dragging a zone - moving it, or resizing it by an edge or
+        // a corner. The zone keeps its shape in pitch (the move is a ratio,
+        // like an arc's move) and its sieve and time grid.
+        if (draggingZone)
+        {
+            dragZoneTo (e.position);
+            repaint();
+            return;
+        }
+
         if (selectingMarquee)
         {
             marqueeCur = e.position;
@@ -987,6 +1038,16 @@ public:
             if (rect.getWidth() >= 8.0f && rect.getHeight() >= 8.0f)
                 addZone(xToTime(zoneStart.x), xToTime(zoneCur.x),
                         yToFreq(zoneStart.y), yToFreq(zoneCur.y));
+            repaint();
+            return;
+        }
+
+        // v1.33: the zone drag is over - the model changed, so publish it
+        if (draggingZone)
+        {
+            draggingZone = false;
+            zoneHandle = 0;
+            notify();
             repaint();
             return;
         }
@@ -1440,6 +1501,98 @@ private:
         return -1;
     }
 
+    // v1.33: the zone by id.
+    upic::SieveZone* findZone (int id)
+    {
+        if (! page) return nullptr;
+        for (auto& z : page->zones) if (z.id == id) return &z;
+        return nullptr;
+    }
+
+    // v1.33: which edge or corner of the zone is under the cursor?
+    // 0 = none (move the whole zone), 1 = left, 2 = right, 3 = top,
+    // 4 = bottom, 5..8 = the corners (top-left, top-right, bottom-left,
+    // bottom-right).
+    int zoneHandleAt (const upic::SieveZone& z, juce::Point<float> pos) const
+    {
+        const auto r = zoneRect (z);
+        const float h = 7.0f;
+        const bool onL = std::abs (pos.x - r.getX())      <= h;
+        const bool onR = std::abs (pos.x - r.getRight())  <= h;
+        const bool onT = std::abs (pos.y - r.getY())      <= h;
+        const bool onB = std::abs (pos.y - r.getBottom()) <= h;
+        if (onL && onT) return 5;
+        if (onR && onT) return 6;
+        if (onL && onB) return 7;
+        if (onR && onB) return 8;
+        if (onL) return 1;
+        if (onR) return 2;
+        if (onT) return 3;
+        if (onB) return 4;
+        return 0;
+    }
+
+    // v1.33: start a zone drag - the zone under the pointer is moved (or
+    // resized by the edge or corner under the pointer).
+    void beginZoneDrag (juce::Point<float> pos)
+    {
+        const int zid = pickZone (pos);
+        if (zid < 0) return;
+        auto* z = findZone (zid);
+        if (z == nullptr) return;
+        zoneHandle = zoneHandleAt (*z, pos);
+        draggingZone = true;
+        zoneDragId = zid;
+        zoneDragStart = pos;
+        zoneDragT0 = z->t0; zoneDragT1 = z->t1;
+        zoneDragF0 = z->f0; zoneDragF1 = z->f1;
+    }
+
+    // v1.33: the drag itself.
+    void dragZoneTo (juce::Point<float> pos)
+    {
+        const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+        if (auto* z = findZone (zoneDragId))
+        {
+            const double t = xToTime (pos.x);
+            const double f = yToFreq (pos.y);
+            double t0 = zoneDragT0, t1 = zoneDragT1;
+            double f0 = zoneDragF0, f1 = zoneDragF1;
+            switch (zoneHandle)
+            {
+                case 1: t0 = t; break;
+                case 2: t1 = t; break;
+                case 3: f0 = f; break;
+                case 4: f1 = f; break;
+                case 5: t0 = t; f0 = f; break;
+                case 6: t1 = t; f0 = f; break;
+                case 7: t0 = t; f1 = f; break;
+                case 8: t1 = t; f1 = f; break;
+                default:
+                {
+                    // move: the whole zone follows the pointer
+                    const double dt = t - xToTime (zoneDragStart.x);
+                    const double f0p = juce::jmax (1.0, yToFreq (zoneDragStart.y));
+                    const double f1p = juce::jmax (1.0, yToFreq (pos.y));
+                    const double ratio = f1p / f0p;
+                    t0 = zoneDragT0 + dt; t1 = zoneDragT1 + dt;
+                    f0 = zoneDragF0 * ratio; f1 = zoneDragF1 * ratio;
+                    break;
+                }
+            }
+            // keep the zone inside the page and inside its interval
+            const double lo = juce::jmin (t0, t1), hi = juce::jmax (t0, t1);
+            const double flo = juce::jmin (f0, f1), fhi = juce::jmax (f0, f1);
+            if (hi - lo > 0.02 && fhi > flo * 1.0001)
+            {
+                z->t0 = juce::jlimit (0.0, page->durationSec, lo);
+                z->t1 = juce::jlimit (0.0, page->durationSec, hi);
+                z->f0 = juce::jlimit (ambitusLo(), ambitusHi(), flo);
+                z->f1 = juce::jlimit (ambitusLo(), ambitusHi(), fhi);
+            }
+        }
+    }
+
     void showArcMenu(int id)
     {
         juce::PopupMenu m;
@@ -1476,6 +1629,12 @@ private:
         juce::PopupMenu m;
         m.addItem(1, "Delete zone");
         m.addItem(2, "Delete all zones");
+        m.addSeparator();
+        // v1.33: a zone carries its own sieve and its own time grid. They
+        // used to be fixed at the moment the zone was drawn - now they can
+        // be re-set from the toolbar's current values.
+        m.addItem(3, "Use the sieve as it is now (m/R)");
+        m.addItem(4, "Use the time grid as it is now");
         juce::Component::SafePointer<ScoreEditor> sp(this);
         m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
                         [sp, id](int result)
@@ -1487,6 +1646,18 @@ private:
                 std::vector<int> ids;
                 for (auto& z : sp->page->zones) ids.push_back(z.id);
                 for (int zid : ids) sp->deleteZone(zid);
+                return;
+            }
+            if (result == 3 || result == 4)
+            {
+                const juce::ScopedLock modelSl (sp->modelLock != nullptr ? *sp->modelLock : sp->dummyLock);
+                if (auto* z = sp->findZone (id))
+                {
+                    if (result == 3) { z->m = sp->sieveM; z->remainders = sp->sieveR; }
+                    else             { z->timeGrid = sp->timeGrid; }
+                    sp->notify();
+                    sp->repaint();
+                }
             }
         });
     }
@@ -1631,7 +1802,25 @@ private:
             a.points.push_back({ t, f, press });
         }
         for (auto& p : a.points) quantizeXY(p.t, p.freq);
-        page->arcs.push_back(a); selArcs = { a.id }; notify();
+        // v1.33: the quantisers can move a point's time. The grid snapping
+        // can pull a later point in front of an earlier one, and two points
+        // can land on the same time. The arc's points must stay sorted and
+        // unique: the engine's segment search assumes it, and a line that
+        // came out "distorted" was a line whose points were out of order.
+        std::sort (a.points.begin(), a.points.end(),
+                   [] (auto& x, auto& y) { return x.t < y.t; });
+        {
+            std::vector<upic::ArcPoint> dedup;
+            double lastT = -1.0e9;
+            for (auto& p : a.points)
+            {
+                if (p.t <= lastT + 0.015) continue;
+                dedup.push_back (p);
+                lastT = p.t;
+            }
+            a.points = std::move (dedup);
+        }
+        if (a.points.size() >= 2) { page->arcs.push_back(a); selArcs = { a.id }; notify(); }
     }
 
     void notify() { repaint(); if (onChange) onChange(); }
