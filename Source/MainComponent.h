@@ -80,6 +80,24 @@ public:
     void timerCallback() override;
 
 private:
+    // --- construction ---
+    // v1.30 (5.3 refactor): the constructor used to be 1400 lines long. It
+    // is now one call per group of controls, and each group lives in its
+    // own method, in the order the groups appear in the window.
+    void buildTransportControls();
+    void buildViewToggles();
+    void buildAudioOverlay();
+    void buildSettingsOverlay();
+    void buildClearOverlay();
+    void buildLiveControls();
+    void buildCombos();
+    void buildToolbarControls();
+    void buildMaterialControls();
+    void buildSieveControls();
+    void buildLiveInputControls();
+    void buildScoreArea();
+    void buildEditors();
+
     // --- data ---
     std::vector<upic::Waveform> waveforms;
     std::vector<upic::Envelope> envelopes;

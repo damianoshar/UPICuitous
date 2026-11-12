@@ -28,6 +28,39 @@ MainComponent::MainComponent(bool pluginMode)
         setAudioChannels(0, 2); // the VST3 wrapper gets its audio from the host
     startTimerHz(30);
 
+
+    // v1.30 (5.3 refactor): the constructor is split into one method per
+    //     group of controls, so each group can be read (and changed)
+    //     on its own. The order is the order they appear in the window.
+    buildTransportControls();
+    buildViewToggles();
+    buildAudioOverlay();
+    buildSettingsOverlay();
+    buildClearOverlay();
+    buildLiveControls();
+    buildCombos();
+    buildToolbarControls();
+    buildMaterialControls();
+    buildSieveControls();
+    buildLiveInputControls();
+    buildScoreArea();
+    buildEditors();
+    // v1.29: listen for the phone/MobMuPlat scrub. Message-loop callbacks
+    // mean the playhead moves on the message thread exactly like a drag.
+    // v1.30: the listeners are permanent; startOscReceiver() connects (and
+    // reconnects after the settings overlay changes the endpoints).
+    oscReceiver.addListener(this);
+    multicastReceiver.addListener(this);
+    startOscReceiver();
+
+    refreshBoxes();
+    refreshScoreBinding();
+    updateStatus();
+    setSize(1280, 800);
+}
+
+void MainComponent::buildTransportControls()
+{
     // --- transport buttons ---
     addAndMakeVisible(playBtn); addAndMakeVisible(stopBtn); addAndMakeVisible(loopBtn); addAndMakeVisible(menuBtn);
     addAndMakeVisible(seqBtn); addAndMakeVisible(pressBtn); addAndMakeVisible(scrubBtn); addAndMakeVisible(revPlayBtn);
@@ -171,7 +204,10 @@ MainComponent::MainComponent(bool pluginMode)
     addAndMakeVisible(dragSmoothSlider);
     stemsBtn.onClick = [this]{ exportStems(); };
     snapBtn.onClick = [this]{ score.setSnap(snapBtn.getToggleState()); };
+}
 
+void MainComponent::buildViewToggles()
+{
     // v1.7: view toggles β€” hide the waveform/envelope editors at the bottom
     // and the instruction hints, so the canvas gains the space. View state
     // only: nothing here changes the piece.
@@ -189,7 +225,10 @@ MainComponent::MainComponent(bool pluginMode)
     envTog.onClick   = [this]{ showEnvEd  = envTog.getToggleState();  resized(); };
     hintsTog.onClick = [this]{ showHints  = hintsTog.getToggleState();
                                score.setShowHints(showHints); resized(); };
+}
 
+void MainComponent::buildAudioOverlay()
+{
     // v1.7 audio settings as an in-app overlay (Android has no closable
     // dialog windows). The selector is created on first use; OK or a tap
     // on the backdrop dismisses it.
@@ -199,7 +238,10 @@ MainComponent::MainComponent(bool pluginMode)
     addChildComponent(audioOverlay); // stays hidden until the Audio button opens it
     audioOkBtn.onClick = [this]{ closeAudioSettings(); };
     audioOverlay.addAndMakeVisible(audioOkBtn);
+}
 
+void MainComponent::buildSettingsOverlay()
+{
     // v1.30 (UPIC-54/56): MIDI and OSC get their own settings overlay; the
     // audio overlay is only the device selector now. Like the audio overlay,
     // this is in-app because Android has no closable dialog windows.
@@ -274,7 +316,10 @@ MainComponent::MainComponent(bool pluginMode)
     oscMcPortSlider.setTooltip("Multicast port (default 54321).");
     settingsOverlay.addAndMakeVisible(oscMcPortLab);
     settingsOverlay.addAndMakeVisible(oscMcPortSlider);
+}
 
+void MainComponent::buildClearOverlay()
+{
     // v1.27: Clear is destructive, so it asks first (in-app, so it also works
     // on Android). The confirm button is red, like the Clear button itself.
     clearOverlay.setName("clearOverlay");
@@ -291,7 +336,10 @@ MainComponent::MainComponent(bool pluginMode)
     clearCancelBtn.onClick  = [this]{ closeClearWarning(); };
     clearOverlay.addAndMakeVisible(clearConfirmBtn);
     clearOverlay.addAndMakeVisible(clearCancelBtn);
+}
 
+void MainComponent::buildLiveControls()
+{
     // v1.9: the live pitch algorithm is selectable - the v1.5 granular
     // shifter stays the default. Tape = varispeed with crossfaded re-anchors
     // (low latency, keeps transients), vocoder = FFT phase vocoder (clean on
@@ -440,7 +488,10 @@ MainComponent::MainComponent(bool pluginMode)
     clearBtn.setColour(juce::TextButton::buttonColourId,   juce::Colour(0xff7a2a2a));
     clearBtn.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff9a3a3a));
     clearBtn.onClick = [this]{ showClearWarning(); };
+}
 
+void MainComponent::buildCombos()
+{
     // --- combos ---
     addAndMakeVisible(pageBox); addAndMakeVisible(toolBox);
     addAndMakeVisible(waveBox); addAndMakeVisible(envBox);
@@ -498,7 +549,10 @@ MainComponent::MainComponent(bool pluginMode)
             refreshScoreBinding();
         }
     };
+}
 
+void MainComponent::buildToolbarControls()
+{
     // v1.26: the toolbar is the current voice AND a live editor for the
     // selected arcs. Wave / env / intensity / Ref changes apply to every
     // selected arc, so the toolbar no longer silently edits only new strokes.
@@ -611,7 +665,10 @@ MainComponent::MainComponent(bool pluginMode)
                      &pmRatioSlider, &pmIndexSlider, &pmFeedbackSlider, &stickSlider,
                      &inGainSlider })
         styleSlider (*s);
+}
 
+void MainComponent::buildMaterialControls()
+{
     // --- material controls: oscillator vs realtime sample pitch-shift ---
     addAndMakeVisible(sampleBox);
     addAndMakeVisible(loadSampleBtn); addAndMakeVisible(refSlider); addAndMakeVisible(tempoSlider); addAndMakeVisible(tempoLab); addAndMakeVisible(pmRatioSlider); addAndMakeVisible(pmIndexSlider);
@@ -625,7 +682,10 @@ MainComponent::MainComponent(bool pluginMode)
     addAndMakeVisible (pmPresetLab); addAndMakeVisible (pmPresetBox);
     addAndMakeVisible (pmFeedbackLab); addAndMakeVisible (pmFeedbackSlider);
     addAndMakeVisible (pmImportBtn); addAndMakeVisible (pmExportBtn);
+}
 
+void MainComponent::buildSieveControls()
+{
     // --- sieve quantizer (with the preset row) ---
     addAndMakeVisible(sieveBtn); addAndMakeVisible(sieveMEdit); addAndMakeVisible(sieveREdit);
     sieveMEdit.setName("sieveMEdit");
@@ -1191,7 +1251,10 @@ MainComponent::MainComponent(bool pluginMode)
         markModelChanged(); // v1.15: the sample voices re-anchor -> fade across it
         flash("Sample pitch: " + samplePitchBox.getText());
     };
+}
 
+void MainComponent::buildLiveInputControls()
+{
     // --- v1.4 live input: monitor toggle, capture toggle, input gain ---
     monBtn.onClick = [this]{
         if (! monBtn.getToggleState()) { monitoring = false; return; }
@@ -1239,7 +1302,10 @@ MainComponent::MainComponent(bool pluginMode)
     statusLab.setColour(juce::Label::textColourId, juce::Colour(0xff9a9aa5));
     statusLab.setFont(juce::Font(juce::FontOptions(12.5f, juce::Font::bold)));
     statusLab.setJustificationType(juce::Justification::centredRight);
+}
 
+void MainComponent::buildScoreArea()
+{
     // --- score ---
     addAndMakeVisible(score);
     score.setName("score");
@@ -1351,7 +1417,10 @@ MainComponent::MainComponent(bool pluginMode)
             publishModelSnapshot();
         }
     };
+}
 
+void MainComponent::buildEditors()
+{
     // --- wave/env editors ---
     addAndMakeVisible(waveEd); addAndMakeVisible(envEd);
     addAndMakeVisible(wSine); addAndMakeVisible(wSaw); addAndMakeVisible(wSqr); addAndMakeVisible(wTri);
@@ -1431,18 +1500,6 @@ MainComponent::MainComponent(bool pluginMode)
     voiceLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     voiceLab.setColour(juce::Label::textColourId, juce::Colour(0xffc9c9d4));
 
-    // v1.29: listen for the phone/MobMuPlat scrub. Message-loop callbacks
-    // mean the playhead moves on the message thread exactly like a drag.
-    // v1.30: the listeners are permanent; startOscReceiver() connects (and
-    // reconnects after the settings overlay changes the endpoints).
-    oscReceiver.addListener(this);
-    multicastReceiver.addListener(this);
-    startOscReceiver();
-
-    refreshBoxes();
-    refreshScoreBinding();
-    updateStatus();
-    setSize(1280, 800);
 }
 
 MainComponent::~MainComponent()
