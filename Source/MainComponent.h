@@ -122,6 +122,8 @@ private:
     void buildArcListPanel();
     void buildMidiControls();
     void buildMaterialTabs();
+    void buildPmControls();
+    void buildSampleControls();
     void buildLiveInputControls();
     void buildScoreArea();
     void buildEditors();

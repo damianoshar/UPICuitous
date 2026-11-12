@@ -48,6 +48,8 @@ MainComponent::MainComponent(bool pluginMode)
     buildArcListPanel();
     buildMidiControls();
     buildMaterialTabs();
+    buildPmControls();
+    buildSampleControls();
     buildLiveInputControls();
     buildScoreArea();
     buildEditors();
@@ -993,6 +995,10 @@ void MainComponent::buildMaterialTabs()
     tempoSlider.setValue (120.0, juce::dontSendNotification);
     tempoSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 18);
     tempoSlider.onValueChange = [this]{ const juce::ScopedLock sl (dataLock); curPage().tempoBpm = (double) tempoSlider.getValue(); refreshBoxes(); };
+}
+
+void MainComponent::buildPmControls()
+{
     pmRatioSlider.setName ("pmRatioSlider");
     pmRatioSlider.setNormalisableRange (juce::NormalisableRange<double> (0.1, 32.0, 0.01, 0.4));
     pmRatioSlider.setValue (2.0, juce::dontSendNotification);
@@ -1180,6 +1186,10 @@ void MainComponent::buildMaterialTabs()
         }
         pushVoice();
     };
+}
+
+void MainComponent::buildSampleControls()
+{
     sampleBox.onChange = [this]{
         int i = sampleBox.getSelectedId() - 1;
         if (i >= 0 && i < (int) sampleSlots.size()) selSlot = i;
