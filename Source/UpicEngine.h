@@ -254,7 +254,7 @@ public:
                 for (int n = i0; n <= i1; ++n)
                 {
                     const double t = playhead + (double) n * step;
-                    const double cFreq = juce::jlimit (10.0, 14000.0, arcPitch (arc, t, map));
+                    const double cFreq = juce::jlimit (upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map));
                     const float env = e != nullptr ? e->valueAt (arc.lifeAt (t)) : 1.0f;
                     const float idxE = (idxEnv != nullptr ? idxEnv->valueAt (arc.lifeAt (t)) : 1.0f);
                     const float edge = edgeFade (t, arcStart, arcEnd);
@@ -304,7 +304,7 @@ public:
                 float env = e != nullptr ? e->valueAt(arc.lifeAt(t)) : 1.0f;
                 const float edge = edgeFade(t, arcStart, arcEnd);
 
-                float freq = (float) juce::jlimit(10.0, 14000.0, arcPitch (arc, t, map));
+                float freq = (float) juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map));
 
                 // v1.31 (U1): the polyagogy - the arc's own wave can also
                 // be a control signal. The curve is read at its own rate
@@ -323,7 +323,7 @@ public:
                         // the pitch follows the curve (a fixed pitch or a
                         // glissando) - the depth is in semitones
                         const double semis = arc.modDepth * 12.0 * m;
-                        freq = (float) juce::jlimit (10.0, 14000.0,
+                        freq = (float) juce::jlimit (upic::kMinFreq, upic::kMaxFreq,
                             freq * std::pow (2.0, semis / 12.0));
                     }
                 }
@@ -356,6 +356,8 @@ public:
         int total = dest.getNumSamples();
         int block = 8192;
         std::vector<float> L((size_t)block), R((size_t)block);
+        // v1.33: the page's own time (the warp moves it)
+        double warpPos = 0.0;
         // local voice state so offline doesn't depend on realtime state
         std::map<int,double> localPh;
         auto saved = phases; phases.clear();
@@ -377,8 +379,13 @@ public:
             if (dest.getNumChannels() > 1) juce::FloatVectorOperations::clear(dest.getWritePointer(1) + pos, n);
             std::fill(L.begin(), L.begin() + n, 0.0f);
             std::fill(R.begin(), R.begin() + n, 0.0f);
-            double ph0 = (double) pos / sampleRate;
-            render(page, ph0, waves, envs, slots, L.data(), R.data(), n, masterGain);
+            // v1.33: the page's acceleration. The offline render walks the
+            // page's own time, so it follows the same tempo sweep the
+            // transport does - a WAV export sounds like the session.
+            const double ph0 = warpPos;
+            const double rate = page.rateAt (ph0);
+            render(page, ph0, waves, envs, slots, L.data(), R.data(), n, masterGain, rate);
+            warpPos += (double) n * rate / sampleRate;
             juce::FloatVectorOperations::copy(dest.getWritePointer(0) + pos, L.data(), n);
             if (dest.getNumChannels() > 1) juce::FloatVectorOperations::copy(dest.getWritePointer(1) + pos, R.data(), n);
             localPh = phases;
@@ -450,8 +457,8 @@ private:
             {
                 const double t0 = a + dt * (double) k;
                 const double t1 = t0 + dt;
-                const double f0 = juce::jlimit(10.0, 14000.0, arcPitch (arc, t0, map));
-                const double f1 = juce::jlimit(10.0, 14000.0, arcPitch (arc, t1, map));
+                const double f0 = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t0, map));
+                const double f1 = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t1, map));
                 const double r0 = juce::jlimit(1.0 / 16.0, 16.0, f0 / ref);
                 const double r1 = juce::jlimit(1.0 / 16.0, 16.0, f1 / ref);
                 pos += 0.5 * (r0 + r1) * dt;
@@ -592,7 +599,7 @@ private:
                 for (int k = 0; k < primeSamples; ++k)
                 {
                     const double pt = t0 + (double) k * step;
-                    const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, pt, map));
+                    const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, pt, map));
                     const double primeRatio = juce::jlimit(1.0 / 16.0, 16.0,
                         freq / ref / juce::jmax(1.0e-6, timeScale));
                     v.voc.next(readMaterial(smp, pp, mirrored), primeRatio);
@@ -626,7 +633,7 @@ private:
         {
             const double t = playhead + (double) n * step;
 
-            const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, t, map));
+            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map));
             const double ratio = juce::jlimit(1.0 / 16.0, 16.0, freq / ref);
 
             const float env = e != nullptr ? e->valueAt(arc.lifeAt(t)) : 1.0f;
@@ -729,7 +736,7 @@ private:
         {
             const double t = playhead + (double) n * (rate * invSr);
 
-            const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, t, map));
+            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map));
             const double ratio = juce::jlimit(upic::kLiveMinRatio,
                                               upic::kLiveMaxRatio, freq / ref);
 

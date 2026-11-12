@@ -197,6 +197,21 @@ is mapped into it, so the same curve can be heard in another register
 (**Half the range**, **Double the range**). Two arcs can sit in two
 spaces at once, and the drawing itself never moves.
 
+**The page's interval and its acceleration** - *"the scale of the
+millimetric surface could be selected, so that the vertical axis could
+correspond to any interval"* - the **Ambitus** picks the interval the
+page's vertical axis covers: the whole range, the 1990s UPIC's
+0.01 Hz - 22 kHz, six octaves, three, one, or a single semitone. The
+page is a page for that interval: the drawing lives inside it, and the
+stepping, the nudge and the spaces all follow it.
+
+**Accel** is the page's acceleration: *"the expansion and contraction of a
+page (with the additional option of acceleration and deceleration)"* -
+the page's own time runs at a varying rate. Positive starts slow and
+speeds up, negative starts fast and slows down; the page still lasts as
+long, the time is redistributed inside it. The WAV render follows the
+same sweep, so an export sounds like the session.
+
 **Scrub audition** - with Scrub on, dragging the centre line or the
 playhead triangle plays a short preview while the transport is stopped.
 The toolbar sets **Scrub len**, **Crossfade**, **Release tail** and
@@ -279,7 +294,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 413 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 435 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -289,6 +304,7 @@ multi-selection / toolbar edits, the v1.27
 wavetable fork / Stop rewind / Clear warning checks, the granular-vs-varispeed
 regression and the UPIC's transformations (transpose, invert, retrograde,
 augment), the discrete frequency space, the four frequency spaces, the
+ambitus, the infrasonic-to-ultrasound range, the page's acceleration, the
 digitised wave page and the micro-time page) and writes the log to
 `%TEMP%\upic_selftest.txt`. The build script also runs the 15-check
 plugin smoke test and pluginval at strictness 5.

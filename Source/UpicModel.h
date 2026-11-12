@@ -18,8 +18,17 @@
 namespace upic
 {
     constexpr int kWaveSize = 1024;
-    constexpr double kMinFreq = 20.0;
-    constexpr double kMaxFreq = 12000.0;
+    // v1.33: the range the 1990s UPIC reached - "the frequency range of the
+    // 1990s UPIC was extended to infrasonics, starting at 0.01 Hz" and the
+    // frequency table could span "as large a range as 0.01-22,050 Hz"
+    // (Robindoré). These are the LIMITS of what a pitch may be; the page's
+    // ambitus (below) is the interval it is drawn in.
+    constexpr double kMinFreq = 0.01;
+    constexpr double kMaxFreq = 22050.0;
+    // The interval the clone has always drawn in: the default page's
+    // ambitus. Widening the limits must not change what a page looks like.
+    constexpr double kDefaultPitchLo = 20.0;
+    constexpr double kDefaultPitchHi = 12000.0;
     constexpr int kMaxWaveforms = 16;
     constexpr int kMaxEnvelopes = 16;
     constexpr int kMaxSampleSlots = 8;
@@ -91,7 +100,9 @@ namespace upic
     {
         static const std::vector<AmbitusPreset> p = [] {
             std::vector<AmbitusPreset> v;
-            v.push_back ({ "The full range (20 Hz - 12 kHz)", kMinFreq, kMaxFreq });
+            v.push_back ({ "The full range (20 Hz - 12 kHz)", kDefaultPitchLo, kDefaultPitchHi });
+            // the 1990s UPIC's whole range, infrasonic to ultrasonic
+            v.push_back ({ "The whole world (0.01 Hz - 22 kHz)", kMinFreq, kMaxFreq });
             // six octaves around middle C: C1 - C7
             v.push_back ({ "Six octaves (C1 - C7)", 261.63 / 8.0, 261.63 * 8.0 });
             // three octaves: C2 - C5
@@ -1244,14 +1255,34 @@ namespace upic
         // The ambitus is the interval the page's vertical axis covers: "the
         // scale of the millimetric surface could be selected, so that the
         // vertical axis could correspond to any interval" (Mache). The
-        // default is the whole canvas range, so an old piece is unchanged.
-        double pitchLo = kMinFreq;
-        double pitchHi = kMaxFreq;
+        // default is the interval the clone has always drawn in, so an old
+        // piece is unchanged.
+        double pitchLo = kDefaultPitchLo;
+        double pitchHi = kDefaultPitchHi;
 
         // The four spaces (the UPIC's four frequency tables). Each is a
         // preset relative to the ambitus; space 0 is the page's own range,
         // which is the identity, so an arc in space 0 sounds as drawn.
         std::array<int, 4> spaces { 0, 0, 0, 0 };
+
+        //---------------- the page's acceleration (v1.33) ----------------
+        // The UPIC's page could be expanded and contracted in time "with the
+        // additional option of acceleration and deceleration" (Robindoré):
+        // the page's own time ran at a varying rate. The warp is a tempo
+        // sweep across the page: 0 is a straight line (the rate is 1 all
+        // the way), a positive value starts slow and speeds up, a negative
+        // one starts fast and slows down.
+        double warp = 0.0;
+
+        // The rate at which the page's time runs at this point of the page.
+        // The integral over the page is the duration, so the page still
+        // lasts as long - the time is redistributed inside it.
+        double rateAt (double playhead) const
+        {
+            if (warp == 0.0 || durationSec <= 0.0) return 1.0;
+            const double x = juce::jlimit (0.0, 1.0, playhead / durationSec);
+            return 1.0 + warp * (2.0 * x - 1.0);
+        }
 
         // The range of one of the page's spaces.
         void spaceRange (int index, double& lo, double& hi) const
@@ -1340,7 +1371,7 @@ namespace upic
             // v1.33: the ambitus and the four spaces. Omitted when they are
             // the defaults, so an old piece's file is byte-for-byte what it
             // was.
-            if (pitchLo != kMinFreq || pitchHi != kMaxFreq)
+            if (pitchLo != kDefaultPitchLo || pitchHi != kDefaultPitchHi)
             {
                 o->setProperty("ambLo", pitchLo);
                 o->setProperty("ambHi", pitchHi);
@@ -1353,6 +1384,8 @@ namespace upic
                 for (auto s : spaces) sarr.add((int) s);
                 o->setProperty("spaces", sarr);
             }
+            // v1.33: the page's acceleration (omitted when it is zero)
+            if (warp != 0.0) o->setProperty("warp", warp);
             return juce::var(o);
         }
         static Page fromVar(const juce::var& v)
@@ -1385,19 +1418,22 @@ namespace upic
                 p.nextZoneId = juce::jmax(p.nextZoneId, z.id + 1);
             // v1.33: the ambitus and the four spaces (absent in old pieces ->
             // the whole canvas range, and the page's own space)
-            p.pitchLo = limits::clampFinite((double) v.getProperty("ambLo", kMinFreq),
+            p.pitchLo = limits::clampFinite((double) v.getProperty("ambLo", kDefaultPitchLo),
                                             kMinFreq, kMaxFreq);
-            p.pitchHi = limits::clampFinite((double) v.getProperty("ambHi", kMaxFreq),
+            p.pitchHi = limits::clampFinite((double) v.getProperty("ambHi", kDefaultPitchHi),
                                             kMinFreq, kMaxFreq);
             if (p.pitchHi <= p.pitchLo * 1.0001)
             {
-                p.pitchLo = kMinFreq;
-                p.pitchHi = kMaxFreq;
+                p.pitchLo = kDefaultPitchLo;
+                p.pitchHi = kDefaultPitchHi;
             }
             if (auto* sarr = v.getProperty("spaces", juce::var()).getArray())
                 for (size_t i = 0; i < p.spaces.size() && i < (size_t) sarr->size(); ++i)
                     p.spaces[i] = juce::jlimit (0, (int) freqSpacePresets().size() - 1,
                                                (int) (*sarr)[(int) i]);
+            // v1.33: the page's acceleration (absent in old pieces -> a
+            // straight line)
+            p.warp = limits::clampFinite ((double) v.getProperty ("warp", 0.0), -0.9, 0.9);
             return p;
         }
     };

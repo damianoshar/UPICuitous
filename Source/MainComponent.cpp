@@ -962,6 +962,19 @@ void MainComponent::buildFrequencyControls()
     ambitusBox.setSelectedId (1, juce::dontSendNotification);
     ambitusBox.onChange = [this]{ pushAmbitus(); };
 
+    // ---- the page's acceleration: a tempo sweep across the page ----
+    addAndMakeVisible(warpSlider); addAndMakeVisible(warpLab);
+    warpSlider.setName("warpSlider");
+    warpSlider.setRange (-0.9, 0.9, 0.05);
+    warpSlider.setValue (0.0, juce::dontSendNotification);
+    warpSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 18);
+    warpSlider.setNumDecimalPlacesToDisplay (2);
+    warpSlider.setTooltip ("The page's acceleration: the page's own time runs\n"
+                            "at a varying rate. Positive starts slow and speeds\n"
+                            "up, negative starts fast and slows down.");
+    warpLab.setTooltip ("The page's acceleration.");
+    warpSlider.onValueChange = [this]{ pushWarp(); };
+
     // ---- the page's four frequency spaces ----
     addAndMakeVisible(spaceBox); addAndMakeVisible(spaceLab);
     spaceBox.setName("spaceBox");
@@ -1073,6 +1086,17 @@ void MainComponent::pushAmbitus()
     markModelChanged();
     score.repaint();
     flash (juce::String (presets[(size_t) id].name));
+}
+
+// The page's acceleration -> the model.
+void MainComponent::pushWarp()
+{
+    {
+        const juce::ScopedLock l(dataLock);
+        curPage().warp = juce::jlimit (-0.9, 0.9, warpSlider.getValue());
+    }
+    publishModelSnapshot();
+    markModelChanged();
 }
 
 void MainComponent::buildArcListPanel()
@@ -1880,6 +1904,8 @@ void MainComponent::refreshBoxes()
         ambitusBox.setSelectedId (match > 0 ? match : (int) presets.size() + 1,
                                   juce::dontSendNotification);
     }
+    // v1.33: the acceleration
+    warpSlider.setValue (curPage().warp, juce::dontSendNotification);
 
     waveBox.clear(juce::dontSendNotification);
     for (size_t i = 0; i < waveforms.size(); ++i)
@@ -2922,12 +2948,17 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
         }
 
         const double remain = reverse ? audioPlayhead : (pg.durationSec - audioPlayhead);
-        int chunk = (int) std::floor(remain * sr / std::abs(rate));
+        // v1.33: the page's acceleration - the page's own time runs at a
+        // varying rate, so the transport's speed is the transport's rate
+        // times the page's rate at the playhead.
+        const double pageRate = pg.rateAt (audioPlayhead);
+        int chunk = (int) std::floor(remain * sr / (std::abs (rate) * pageRate));
         if (chunk < 1) chunk = 1;
         chunk = juce::jlimit(1, n - offset, chunk);
 
         engine.render(pg, audioPlayhead, snap.waveforms, snap.envelopes, snap.slots,
-                      SL + offset, (SR != nullptr ? SR + offset : nullptr), chunk, 1.0f, rate);
+                      SL + offset, (SR != nullptr ? SR + offset : nullptr), chunk, 1.0f,
+                      rate * pageRate);
 
         if (! snap.loopPage && ((reverse && audioPage == 0) || (! reverse && audioPage + 1 >= (int) snap.pages.size())))
         {
@@ -2942,7 +2973,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
             }
         }
 
-        audioPlayhead += (double) chunk * rate / sr;
+        audioPlayhead += (double) chunk * rate * pageRate / sr;
         offset += chunk;
     }
     publishPlayhead();
@@ -3828,9 +3859,10 @@ void MainComponent::resized()
           FL(&stickLab, 38, &stickSlider, 160),
           FL(&gridLab, 44, &gridBox, 84),
           FL(&genLab, 36, &genBox, 220),
-          // v1.33: the page's ambitus and its four frequency spaces (the
-          // UPIC's four tables)
+          // v1.33: the page's ambitus, its acceleration and its four
+          // frequency spaces (the UPIC's four tables)
           FL(&ambitusLab, 58, &ambitusBox, 170),
+          FL(&warpLab, 40, &warpSlider, 120),
           FL(&spaceDefLab[0], 26, &spaceDefBox[0], 130),
           FL(&spaceDefLab[1], 26, &spaceDefBox[1], 130),
           FL(&spaceDefLab[2], 26, &spaceDefBox[2], 130),

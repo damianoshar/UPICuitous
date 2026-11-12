@@ -416,6 +416,10 @@ private:
     juce::ComboBox ambitusBox;
     juce::Label ambitusLab{ {}, "Ambitus" };
 
+    // v1.33: the page's acceleration - a tempo sweep across the page.
+    juce::Slider warpSlider;
+    juce::Label warpLab{ {}, "Accel" };
+
     // v1.27: Clear is destructive, so it asks first. An in-app overlay keeps
     // this working on Android, where floating dialogs cannot be dismissed.
     // v1.30 (5.3 refactor): the overlay type lives in OverlayPanels.h.
@@ -545,6 +549,7 @@ private:
     void pushSpaceDefs();             // v1.33: the page's four spaces
     void refreshSpaceBox();           // v1.33: the arc's space combo
     void pushAmbitus();               // v1.33: the page's ambitus
+    void pushWarp();                 // v1.33: the page's acceleration
     void runGenerator(int kind);      // procedural arc generation (nUPIC-style)
     void exportStems();               // one WAV per voice into a folder
     void flash(const juce::String& m); // transient status message (4s)

@@ -187,8 +187,8 @@ public:
     // v1.33: the page's ambitus - the interval its vertical axis covers.
     // "The scale of the millimetric surface could be selected, so that the
     // vertical axis could correspond to any interval" (Mache).
-    double ambitusLo() const { return page != nullptr ? page->pitchLo : upic::kMinFreq; }
-    double ambitusHi() const { return page != nullptr ? page->pitchHi : upic::kMaxFreq; }
+    double ambitusLo() const { return page != nullptr ? page->pitchLo : upic::kDefaultPitchLo; }
+    double ambitusHi() const { return page != nullptr ? page->pitchHi : upic::kDefaultPitchHi; }
     double yToFreq(float y) const
     {
         auto r = plotArea();

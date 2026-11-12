@@ -1414,10 +1414,128 @@ public:
                    "the ambitus travels with the piece",
                    juce::String (back.pitchLo, 1) + " - "
                    + juce::String (back.pitchHi, 1) + " Hz");
-            // and a piece without one is the full range
+            // and a piece without one is the default interval
             const auto plain = upic::Page::fromVar (upic::Page().toVar());
-            check (plain.pitchLo == upic::kMinFreq && plain.pitchHi == upic::kMaxFreq,
-                   "a piece without an ambitus is the full range");
+            check (plain.pitchLo == upic::kDefaultPitchLo
+                && plain.pitchHi == upic::kDefaultPitchHi,
+                   "a piece without an ambitus is the default interval");
+        }
+
+        // 6i-f5. v1.33: the range reaches infrasonic and ultrasonic. "The
+        //      frequency range of the 1990s UPIC was extended to
+        //      infrasonics, starting at 0.01 Hz" (Robindoré), and the
+        //      frequency table could span "as large a range as
+        //      0.01-22,050 Hz".
+        {
+            check (upic::kMinFreq <= 0.01 + 1e-9 && upic::kMaxFreq >= 22050.0 - 1e-9,
+                   "the pitch range reaches infrasonic and ultrasonic",
+                   juce::String (upic::kMinFreq, 3) + " - "
+                   + juce::String (upic::kMaxFreq, 0) + " Hz");
+
+            auto renderAt = [&](double f, juce::AudioBuffer<float>& buf) {
+                upic::Page pg; pg.durationSec = 4.0;
+                upic::Arc a; a.id = 1; a.mode = 0; a.intensity = 1.0f;
+                a.points = { { 0.0, f }, { 4.0, f } };
+                pg.arcs.push_back (a);
+                auto waves = upic::defaultWaveforms();
+                std::vector<upic::Envelope> envs;
+                upic::Envelope flat; flat.presetFlat(); envs.push_back (flat);
+                std::vector<upic::SampleSlot> noSlots;
+                buf.setSize (2, 44100 * 4); buf.clear();
+                UpicEngine e; e.prepare (44100.0, 8192);
+                e.renderPageOffline (pg, waves, envs, noSlots, buf, 44100.0, 1.0f);
+            };
+            auto crossings = [](const juce::AudioBuffer<float>& buf) {
+                int n = 0; bool high = false; bool finite = true;
+                for (int i = 44100; i < 88200; ++i)
+                {
+                    const float v = buf.getSample (0, i);
+                    if (! std::isfinite (v)) { finite = false; continue; }
+                    if (! high && v > 0.0f) { high = true; ++n; }
+                    else if (high && v < 0.0f) high = false;
+                }
+                return std::make_pair (n, finite);
+            };
+
+            // an infrasonic arc: one slow swell in a second, not a buzz
+            juce::AudioBuffer<float> lo;
+            renderAt (0.01, lo);
+            const auto loX = crossings (lo);
+            check (loX.second && loX.first <= 1,
+                   "an infrasonic arc is a slow swell",
+                   juce::String (loX.first) + " crossings in a second");
+
+            // and an ultrasonic one
+            juce::AudioBuffer<float> hi;
+            renderAt (20000.0, hi);
+            const auto hiX = crossings (hi);
+            check (hiX.second && hiX.first > 15000,
+                   "an ultrasonic arc is still a tone",
+                   juce::String (hiX.first) + " crossings in a second");
+
+            // the middle of the range is untouched
+            juce::AudioBuffer<float> mid;
+            renderAt (440.0, mid);
+            const auto midX = crossings (mid);
+            check (midX.second && std::abs (midX.first - 440) < 20,
+                   "the middle of the range sounds as it always did",
+                   juce::String (midX.first) + " crossings in a second");
+        }
+
+        // 6i-f6. v1.33: the page's acceleration. The UPIC's page could be
+        //      expanded and contracted in time "with the additional option
+        //      of acceleration and deceleration" (Robindoré): the page's
+        //      own time ran at a varying rate.
+        {
+            upic::Page pg;
+            pg.durationSec = 4.0;
+            check (pg.rateAt (0.0) == 1.0 && pg.rateAt (2.0) == 1.0,
+                   "a straight page runs at its own rate");
+            pg.warp = 0.6;
+            check (std::abs (pg.rateAt (0.0) - 0.4) < 1e-9
+                && std::abs (pg.rateAt (4.0) - 1.6) < 1e-9,
+                   "an accelerating page starts slow and speeds up",
+                   juce::String (pg.rateAt (0.0), 2) + " -> "
+                   + juce::String (pg.rateAt (4.0), 2) + "x");
+            pg.warp = -0.6;
+            check (std::abs (pg.rateAt (0.0) - 1.6) < 1e-9,
+                   "a decelerating page starts fast and slows down");
+
+            // it travels with the piece
+            upic::Page warped; warped.warp = 0.3;
+            check (std::abs (upic::Page::fromVar (warped.toVar()).warp - 0.3) < 1e-9,
+                   "the acceleration travels with the piece");
+            check (upic::Page::fromVar (upic::Page().toVar()).warp == 0.0,
+                   "a piece without one is a straight line");
+
+            // and the render follows the sweep: a short arc at page time
+            // 1 s arrives later when the page starts slowly
+            auto clickAt = [&](double warp) {
+                upic::Page p; p.durationSec = 4.0; p.warp = warp;
+                upic::Arc a; a.id = 1; a.mode = 0; a.intensity = 1.0f;
+                a.points = { { 0.9, 1000.0 }, { 1.1, 1000.0 } };
+                p.arcs.push_back (a);
+                auto waves = upic::defaultWaveforms();
+                std::vector<upic::Envelope> envs;
+                upic::Envelope flat; flat.presetFlat(); envs.push_back (flat);
+                std::vector<upic::SampleSlot> noSlots;
+                juce::AudioBuffer<float> buf (2, 44100 * 6);
+                UpicEngine e; e.prepare (44100.0, 8192);
+                e.renderPageOffline (p, waves, envs, noSlots, buf, 44100.0, 1.0f);
+                int peak = -1; float best = 0.0f;
+                for (int i = 0; i < buf.getNumSamples(); ++i)
+                    if (std::abs (buf.getSample (0, i)) > best)
+                    { best = std::abs (buf.getSample (0, i)); peak = i; }
+                return (double) peak / 44100.0;
+            };
+            const double straight = clickAt (0.0);
+            const double swept = clickAt (0.6);
+            check (std::abs (straight - 1.0) < 0.15,
+                   "a straight page plays the arc at its own time",
+                   juce::String (straight, 2) + " s");
+            check (swept > straight + 0.4,
+                   "an accelerating page delays the arc",
+                   juce::String (straight, 2) + " s -> " + juce::String (swept, 2) + " s");
         }
 
         // 6i-b. v1.31 (U4): the digitised wave page - a take becomes one
@@ -2254,11 +2372,11 @@ public:
                            "the ambitus control and the canvas exist");
                     if (amb != nullptr && sc != nullptr)
                     {
-                        // "A semitone (C4 - C#4)" - the last-but-one preset.
-                        // The combo's change notification is asynchronous and
-                        // the selftest runs no message loop, so the handler is
+                        // "A semitone (C4 - C#4)" - the last preset. The
+                        // combo's change notification is asynchronous and the
+                        // selftest runs no message loop, so the handler is
                         // called directly.
-                        amb->setSelectedId (5, juce::dontSendNotification);
+                        amb->setSelectedId (6, juce::dontSendNotification);
                         amb->onChange();
                         const double lo = sc->ambitusLo(), hi = sc->ambitusHi();
                         check (std::abs (lo - 261.63) < 1e-6 && hi > lo && hi < 300.0,
@@ -2274,11 +2392,11 @@ public:
                         check (outside <= hi + 1e-6 && outside >= lo - 1e-6,
                                "a pitch outside the page cannot be drawn on it",
                                juce::String (outside, 1) + " Hz");
-                        // back to the full range for the snapshot
+                        // back to the default interval for the snapshot
                         amb->setSelectedId (1, juce::dontSendNotification);
                         amb->onChange();
-                        check (std::abs (sc->ambitusLo() - upic::kMinFreq) < 1e-6,
-                               "the ambitus goes back to the full range");
+                        check (std::abs (sc->ambitusLo() - upic::kDefaultPitchLo) < 1e-6,
+                               "the ambitus goes back to the default interval");
                     }
                 }
 
