@@ -139,12 +139,59 @@ private:
     void buildScoreArea();
     void buildEditors();
 
+    // v1.33.3: the wavetable's shape buttons wear the colour of the wave
+    // they make - the same palette the arcs and the wave table use.
+    void updateWaveButtonColours();
+
     // --- the layout ---
     // v1.30 (5.3 refactor): resized() was 460 lines. The flow layout (the
     // rows, the scale fitting, the placing) stays in resized(); the side
     // column, the tab strip and the overlay cards have their own methods.
     void layoutSideColumn (const juce::Rectangle<int>& bounds);
     void layoutOverlays (float scale);
+
+    // v1.33.3: the toolbar's fonts follow the layout's scale factor. The
+    // LookAndFeel_V4 derives a button's font from its HEIGHT, which the
+    // shrink-to-fit capped - so a small window made the text wrap or clip.
+    // Here the fonts scale with the layout, so a control's text is always
+    // whole, and the layout can measure the text it needs.
+    class UpicLookAndFeel : public juce::LookAndFeel_V4
+    {
+    public:
+        float uiScale = 1.0f;
+
+        juce::Font buttonFont() const
+        { return withDefaultMetrics (juce::FontOptions (juce::jlimit (8.0f, 16.0f, 16.0f * uiScale))); }
+        juce::Font toggleFont() const
+        { return withDefaultMetrics (juce::FontOptions (juce::jlimit (8.0f, 15.0f, 15.0f * uiScale))); }
+
+        juce::Font getTextButtonFont (juce::TextButton&, int) override { return buttonFont(); }
+        juce::Font getComboBoxFont (juce::ComboBox&) override { return buttonFont(); }
+        juce::Font getLabelFont (juce::Label& l) override
+        { return withDefaultMetrics (juce::FontOptions (l.getFont().getHeight() * uiScale)); }
+
+        // the V4 default, but with the app's scale: the toggle's text then
+        // never has to wrap onto a second line
+        void drawToggleButton (juce::Graphics& g, juce::ToggleButton& button,
+                               bool highlighted, bool down) override
+        {
+            const auto font = toggleFont();
+            const auto fontSize = font.getHeight();
+            const auto tickWidth = fontSize * 1.1f;
+            drawTickBox (g, button, 4.0f, ((float) button.getHeight() - tickWidth) * 0.5f,
+                         tickWidth, tickWidth, button.getToggleState(), button.isEnabled(),
+                         highlighted, down);
+            g.setColour (button.findColour (juce::ToggleButton::textColourId));
+            g.setFont (font);
+            if (! button.isEnabled()) g.setOpacity (0.5f);
+            g.drawFittedText (button.getButtonText(),
+                              button.getLocalBounds()
+                                     .withTrimmedLeft (juce::roundToInt (tickWidth) + 10)
+                                     .withTrimmedRight (2),
+                              juce::Justification::centredLeft, 10);
+        }
+    };
+    UpicLookAndFeel appLaf;
 
     // --- data ---
     std::vector<upic::Waveform> waveforms;
@@ -452,7 +499,7 @@ private:
 
     // --- UI: material (sample pitch-shift) row ---
     juce::ComboBox sampleBox;
-    juce::TextButton loadSampleBtn{ "Load sample..." };
+    juce::TextButton loadSampleBtn{ "Load sample" };
     // v1.19 (wave 17): the selected slot plays backwards. Session-only (the
     // piece format is untouched), like the pitch modes and the grid.
     juce::TextButton revBtn{ "Rev" };

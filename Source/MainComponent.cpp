@@ -22,6 +22,10 @@ MainComponent::MainComponent(bool pluginMode)
         sampleSlots.push_back(std::move(s));
     }
 
+    // v1.33.3: the app's own LookAndFeel - the toolbar's fonts follow the
+    // layout's scale, so a control's text is never wrapped or cut off.
+    setLookAndFeel (&appLaf);
+
     // v1.18 (wave 15): publish the first model snapshot before the audio
     // device starts, so the audio thread always has a model to render from
     // (it never takes dataLock any more).
@@ -630,6 +634,7 @@ void MainComponent::buildToolbarControls()
     waveEditBox.onChange = [this]{
         int idx = waveEditBox.getSelectedId() - 1;
         if (idx >= 0 && idx < (int)waveforms.size()) { selWave = waveforms[(size_t)idx].id; waveEd.bind(&waveforms, &selWave); waveBox.setSelectedId(idx + 1, juce::dontSendNotification); pushVoice(); }
+        updateWaveButtonColours();
     };
     envEditBox.onChange = [this]{
         int idx = envEditBox.getSelectedId() - 1;
@@ -712,6 +717,7 @@ void MainComponent::buildMaterialControls()
     addAndMakeVisible(waveFromSlotBtn);
     addAndMakeVisible(inGainSlider); addAndMakeVisible(inGainLab);
     addAndMakeVisible(slotLab); addAndMakeVisible(refLab); addAndMakeVisible(matHintLab);
+    matHintLab.setName("matHintLab");
     addAndMakeVisible (pmRatioLab); addAndMakeVisible (pmIndexLab);
     addAndMakeVisible (pmIndexEnvLab); addAndMakeVisible (pmIndexEnvBox);
     addAndMakeVisible (pmOpsLab); addAndMakeVisible (pmOpsBox);
@@ -840,7 +846,7 @@ void MainComponent::buildSieveControls()
     genBox.setName("genBox");
     kbdHintLab.setName("kbdHintLab");
 
-    sievePresetBox.setTextWhenNothingSelected("Sieve preset...");
+    sievePresetBox.setTextWhenNothingSelected("Sieve preset");
     {
         auto presets = upic::sievePresets();
         for (int i = 0; i < (int) presets.size(); ++i)
@@ -882,7 +888,7 @@ void MainComponent::buildSieveControls()
         score.setTimeGrid(timeGrid);
     };
 
-    genBox.setTextWhenNothingSelected("Procedural arc gen...");
+    genBox.setTextWhenNothingSelected("Procedural arc generator");
     genBox.addItem("Stochastic arborescence", 1);
     genBox.addItem("Convergent arborescence", 2);
     genBox.addItem("Echelon (Bourbaki)", 3);
@@ -896,15 +902,27 @@ void MainComponent::buildSieveControls()
     // NOTE: keep UI string literals ASCII-only: juce::String(const char*) is an
     // ASCII conversion, and non-ASCII bytes trip a Debug-build assertion
     // (juce_String.cpp) and render as mojibake in Release.
-    kbdHintLab.setText("Wheel: pan pitch  |  Alt+wheel: zoom pitch  |  Ctrl+wheel: zoom time  |  Shift+wheel: pan time"
-                       "  |  Arrows: nudge selection (Shift: grid step / octave)  |  Ctrl+A: select all  |  Ctrl+D: duplicate"
-                       "  |  Del: delete  |  R-click: arc menu  |  centre line: scrub playhead"
+    //
+    // v1.33.3: the hints live in their own sidebar now, one item per line.
+    kbdHintLab.setText("Wheel: pan pitch\n"
+                       "Alt+wheel: zoom pitch\n"
+                       "Ctrl+wheel: zoom time\n"
+                       "Shift+wheel: pan time\n"
+                       "Arrows: nudge selection\n"
+                       "Shift+arrow: grid step / octave\n"
+                       "Ctrl+A: select all\n"
+                       "Ctrl+D: duplicate\n"
+                       "Del: delete\n"
+                       "R-click: arc menu\n"
+                       "centre line: scrub playhead"
                        + juce::String(juce::Desktop::getInstance().getMainMouseSource().isTouch()
-                            ? "   ||   Touch: 1 finger draws  |  pinch / 2-finger drag: zoom / pan  |  long-press: menu"
+                            ? "\nTouch: 1 finger draws\n"
+                              "pinch / 2-finger drag: zoom / pan\n"
+                              "long-press: menu"
                             : ""),
                        juce::dontSendNotification);
     kbdHintLab.setFont(juce::Font(juce::FontOptions(12.5f, juce::Font::bold)));
-    kbdHintLab.setJustificationType(juce::Justification::centredRight);
+    kbdHintLab.setJustificationType(juce::Justification::topLeft);
     kbdHintLab.setColour(juce::Label::textColourId, juce::Colour(0xff7a7a86));
 }
 
@@ -1662,6 +1680,11 @@ void MainComponent::buildLiveInputControls()
         });
     };
     capBtn.setClickingTogglesState(true);
+    capBtn.setName("capBtn");
+    // v1.33.3: the capture button is green, and red while it records - the
+    // button's text turns into "Stop" and the toggle state is on.
+    capBtn.setColour (juce::TextButton::buttonColourId,   juce::Colour (0xff2a6a3a));
+    capBtn.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff6a2a2a));
     capBtn.onClick = [this]{
         if (! capBtn.getToggleState())
         {
@@ -1699,10 +1722,11 @@ void MainComponent::buildLiveInputControls()
     samplePitchLab.setColour(juce::Label::textColourId, juce::Colour(0xffc9c9d4));
     inGainLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     inGainLab.setColour(juce::Label::textColourId, juce::Colour(0xffc9c9d4));
-    matHintLab.setText("Osc: draw arcs on the wavetable | Wave = carrier, Env = amplitude",
+    matHintLab.setText("Osc: draw arcs on the wavetable\n"
+                       "Wave = carrier, Env = amplitude",
                        juce::dontSendNotification);
     matHintLab.setFont(juce::Font(juce::FontOptions(12.5f, juce::Font::bold)));
-    matHintLab.setJustificationType(juce::Justification::centredRight);
+    matHintLab.setJustificationType(juce::Justification::topLeft);
     matHintLab.setColour(juce::Label::textColourId, juce::Colour(0xff7a7a86));
 
     timeLab.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -1835,6 +1859,7 @@ void MainComponent::buildEditors()
     addAndMakeVisible(waveEd); addAndMakeVisible(envEd);
     addAndMakeVisible(wSine); addAndMakeVisible(wSaw); addAndMakeVisible(wSqr); addAndMakeVisible(wTri);
     addAndMakeVisible(wNoise); addAndMakeVisible(wSmooth); addAndMakeVisible(wNorm);
+    wSine.setName("wSine");
     addAndMakeVisible(eFlat); addAndMakeVisible(ePerc); addAndMakeVisible(eSwell); addAndMakeVisible(eGate); addAndMakeVisible(eStr);
     addAndMakeVisible(assignBtn); addAndMakeVisible(delArcBtn); addAndMakeVisible(muteArcBtn);
     addAndMakeVisible(voiceLab); addAndMakeVisible(waveLab); addAndMakeVisible(envLab); addAndMakeVisible(toolLab);
@@ -1868,6 +1893,7 @@ void MainComponent::buildEditors()
     wNoise.onClick = [editWave]{ editWave([](upic::Waveform& w){ w.makeNoise((unsigned)juce::Random::getSystemRandom().nextInt()); }); };
     wSmooth.onClick = [editWave]{ editWave([](upic::Waveform& w){ w.smooth(3); }); };
     wNorm.onClick = [editWave]{ editWave([](upic::Waveform& w){ w.normalize(); }); };
+    updateWaveButtonColours();
 
     eFlat.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetFlat(); envEd.repaint(); } };
     ePerc.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetPercussive(); envEd.repaint(); } };
@@ -1910,6 +1936,33 @@ void MainComponent::buildEditors()
     voiceLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     voiceLab.setColour(juce::Label::textColourId, juce::Colour(0xffc9c9d4));
 
+}
+
+// v1.33.3: the wavetable's shape buttons wear the colour of the wave they
+// make - the same palette the arcs and the wave table use, so the button
+// and the arcs it colours read as one thing. The two operations (Smooth,
+// Norm) follow the wave that is being edited.
+void MainComponent::updateWaveButtonColours()
+{
+    juce::TextButton* const shape[] = { &wSine, &wSaw, &wSqr, &wTri, &wNoise };
+    for (int i = 0; i < 5; ++i)
+    {
+        const auto c = upic::paletteColour (i);
+        shape[i]->setColour (juce::TextButton::buttonColourId,   c.withAlpha (0.55f));
+        shape[i]->setColour (juce::TextButton::buttonOnColourId, c);
+        shape[i]->setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
+        shape[i]->setColour (juce::TextButton::textColourOnId,   juce::Colours::black);
+    }
+    juce::Colour cur = upic::paletteColour (0);
+    for (auto& w : waveforms)
+        if (w.id == selWave) { cur = w.colour; break; }
+    for (auto* b : { &wSmooth, &wNorm })
+    {
+        b->setColour (juce::TextButton::buttonColourId,   cur.withAlpha (0.40f));
+        b->setColour (juce::TextButton::buttonOnColourId, cur.withAlpha (0.75f));
+        b->setColour (juce::TextButton::textColourOffId,  juce::Colours::white);
+        b->setColour (juce::TextButton::textColourOnId,   juce::Colours::black);
+    }
 }
 
 MainComponent::~MainComponent()
@@ -3607,10 +3660,14 @@ void MainComponent::setMaterial(int m)
     drawMatMode = juce::jlimit(0, 3, m);
     score.setLayer(drawMatMode);
     syncMaterialTabs();
-    matHintLab.setText (drawMatMode == 0 ? "Osc: draw arcs on the wavetable | Wave = carrier, Env = amplitude"
-                      : drawMatMode == 1 ? "Sample: Pitch sets how arcs transpose the slot | Ref = unison"
-                      : drawMatMode == 2 ? "Live: arcs multiply the input pitch | 1x = input, 2x = octave up"
-                      : "PM: Ratio x Index into the carrier phase | IdxEnv shapes the modulation index",
+    matHintLab.setText (drawMatMode == 0 ? "Osc: draw arcs on the wavetable\n"
+                                          "Wave = carrier, Env = amplitude"
+                      : drawMatMode == 1 ? "Sample: Pitch sets how arcs transpose the slot\n"
+                                          "Ref = unison"
+                      : drawMatMode == 2 ? "Live: arcs multiply the input pitch\n"
+                                          "1x = input, 2x = octave up"
+                      : "PM: Ratio x Index into the carrier phase\n"
+                        "IdxEnv shapes the modulation index",
                       juce::dontSendNotification);
     resized();
     updateSampleView();
@@ -3901,46 +3958,64 @@ void MainComponent::resized()
     struct FlowItem
     {
         juce::Component* label = nullptr; int labelW = 0;
-        juce::Component* comp  = nullptr; int w = 0;      // w = 0 -> takes the row's rest
-        int minSlice = 24;   // trailing flex labels wrap below this width
+        juce::Component* comp  = nullptr; int w = 0;
+        bool flex = false;       // takes the rest of the line (the status)
+        int minSlice = 0;
     };
-    auto F  = [](juce::Component* c, int w)              { return FlowItem{ nullptr, 0, c, w }; };
-    auto FL = [](juce::Component* l, int lw, juce::Component* c, int w)
-                                                          { return FlowItem{ l, lw, c, w }; };
-    // long explanation labels: wrap to their own row unless they get a real slice
-    auto FH = [](juce::Component* c, int minSlice)        { return FlowItem{ nullptr, 0, c, 0, minSlice }; };
+    struct FlowGroup
+    {
+        juce::String name;
+        std::vector<FlowItem> items;
+    };
 
-    const std::vector<std::vector<FlowItem>> rowsInit {
-        // transport / pages / files / tempo
-        { F(&playBtn, 90), F(&stopBtn, 70), F(&loopBtn, 64), F(&seqBtn, 60), F(&revPlayBtn, 64), F(&pressBtn, 96), F(&scrubBtn, 72),
-          FL(&pageLab, 40, &pageBox, 150),
-          F(&pageAddBtn, 30), F(&pageDupBtn, 46), F(&pageDelBtn, 30),
-          F(&menuBtn, 74), F(&settingsBtn, 78), F(&clearBtn, 64),
-          FL(&tempoLab, 40, &tempoSlider, 140),
-          F(&timeLab, 0) },
-        // voice / view (built below: the tab decides which controls apply)
-        {},
-        // material (filled in below: the tab decides which material)
-        {},
-        // v1.33: the sieve is its own section. It quantises the pitch; it
-        // is not a tool and it is not a page setting.
-        { F(&sieveBtn, 64), F(&sievePresetBox, 150),
-          FL(&sieveMLab, 18, &sieveMEdit, 52), FL(&sieveRLab, 18, &sieveREdit, 84) },
-        // v1.33: the GLOBAL magnets - the stick and the time grid. Every
-        // page and every sieve zone follows these two (a zone can set its
-        // own m/R and its own time grid, but not its own stick).
-        { FL(&stickLab, 84, &stickSlider, 160), FL(&gridLab, 86, &gridBox, 84) },
-        // v1.33: the page's frequency settings - its ambitus, its
-        // acceleration and its four frequency spaces (the UPIC's tables)
-        { FL(&ambitusLab, 58, &ambitusBox, 170),
-          FL(&warpLab, 40, &warpSlider, 120),
-          FL(&spaceDefLab[0], 46, &spaceDefBox[0], 120),
-          FL(&spaceDefLab[1], 46, &spaceDefBox[1], 120),
-          FL(&spaceDefLab[2], 46, &spaceDefBox[2], 120),
-          FL(&spaceDefLab[3], 46, &spaceDefBox[3], 120) },
-        // v1.33: the tools (procedural generators) and the hints
-        { FL(&genLab, 36, &genBox, 220), FH(&kbdHintLab, 220) },
+    // --- the width a control needs for its WHOLE text ---
+    // v1.33.3: JUCE draws a button's text fitted into two lines, so a
+    // narrow button wrapped its label, and a dropdown cut its text off.
+    // Every control is measured here (in design units) and the flow gives
+    // it at least that width, so the text is always whole.
+    appLaf.uiScale = 1.0f;   // the measurement is in design units
+    auto neededWidth = [&] (juce::Component* c) -> int
+    {
+        if (c == nullptr) return 0;
+        juce::Font f;
+        juce::String text;
+        int pad = 6;
+        if (auto* t = dynamic_cast<juce::ToggleButton*> (c))
+        { text = t->getButtonText(); f = appLaf.toggleFont(); pad = 34; }
+        else if (auto* b = dynamic_cast<juce::TextButton*> (c))
+        { text = b->getButtonText(); f = appLaf.buttonFont(); pad = 20; }
+        else if (auto* cb = dynamic_cast<juce::ComboBox*> (c))
+        { text = cb->getText(); f = appLaf.buttonFont(); pad = 38; }
+        else if (auto* l = dynamic_cast<juce::Label*> (c))
+        { text = l->getText(); f = appLaf.getLabelFont (*l); pad = 6; }
+        else return 0;
+        if (text.isEmpty()) return 0;
+        return juce::GlyphArrangement::getStringWidthInt (f, text) + pad;
     };
+
+    // the number of lines of a hint text (the hints are one item per line)
+    auto lineCount = [] (const juce::String& t) -> int
+    {
+        int n = 1;
+        for (int i = 0; i < t.length(); ++i)
+            if (t[i] == static_cast<juce_wchar> ('\n')) ++n;
+        return n;
+    };
+
+    auto fitItem = [&] (juce::Component* l, int lw, juce::Component* c, int w) -> FlowItem
+    {
+        FlowItem it;
+        it.label = l;
+        it.labelW = (l != nullptr) ? juce::jmax (lw, neededWidth (l)) : 0;
+        it.comp = c;
+        it.w = (c != nullptr) ? juce::jmax (w, neededWidth (c)) : 0;
+        return it;
+    };
+    auto F  = [&] (juce::Component* c, int w) { return fitItem (nullptr, 0, c, w); };
+    auto FL = [&] (juce::Component* l, int lw, juce::Component* c, int w)
+              { return fitItem (l, lw, c, w); };
+    auto FX = [&] (juce::Component* c, int minSlice)
+    { FlowItem it; it.comp = c; it.flex = true; it.minSlice = minSlice; return it; };
 
     // v1.21: the material row shows the CURRENT tab's material - the tab IS
     // the material (v1.8). The other tab's controls are hidden, not left in
@@ -3982,79 +4057,125 @@ void MainComponent::resized()
                                           &modRateSlider, &modDepthLab, &modDepthSlider };
     for (auto* c : oscModCtl) c->setVisible (! showSampleCtl && ! showLiveCtl && ! showPmCtl);
 
-    // Each tab shows only the draw/voice controls that apply to its material.
-    std::vector<FlowItem> voiceRow;
-    voiceRow.push_back (FL(&toolLab, 36, &toolBox, 120));
-    if (showWaveCtl)
-        voiceRow.push_back (FL(&waveLab, 42, &waveBox, 140));
-    voiceRow.push_back (FL(&envLab, 34, &envBox, 140));
-    voiceRow.push_back (FL(&intenLab, 40, &intenSlider, 180));
-    voiceRow.push_back (FL(&durLab, 30, &durSlider, 160));
-    voiceRow.push_back (FL(&masterLab, 52, &masterSlider, 180));
-    voiceRow.push_back (F(&snapBtn, 68));
-    // v1.32: the discrete frequency space - the arc's pitch moves through a
-    // temperament. It sits on the voice row because it belongs to the arc's
-    // voice, not to one material, so it shows in every tab.
-    voiceRow.push_back (F(&stepBtn, 76));
-    voiceRow.push_back (FL(&stepDivLab, 52, &stepDivSlider, 110));
-    // v1.33: the arc's frequency space (the UPIC's four tables)
-    voiceRow.push_back (FL(&spaceLab, 44, &spaceBox, 170));
-    voiceRow.push_back (F(&statusLab, 0));
+    // --- the toolbar's groups ---
+    // v1.33.3: the groups keep their order and their internal grouping, but
+    // a group no longer needs a row of its own: the next group continues on
+    // the same line when there is room for it.
+    std::vector<FlowGroup> groups;
 
-    std::vector<FlowItem> materialRow;
-    if (showSampleCtl)
-        materialRow = { FL(&slotLab, 34, &sampleBox, 180),
-                        F(&loadSampleBtn, 110), F(&revBtn, 64),
-                        FL(&refLab, 34, &refSlider, 210),
-                        FL(&samplePitchLab, 34, &samplePitchBox, 180),
-                        FL(&grainLab, 40, &grainSlider, 100),
-                        FL(&inGainLab, 30, &inGainSlider, 140), F(&monBtn, 64), F(&capBtn, 84),
-                        F(&waveFromSlotBtn, 110) };
-    else if (showLiveCtl)
-        materialRow = { FL(&refLab, 34, &refSlider, 210),
-                        FL(&livePitchLab, 42, &livePitchBox, 180),
-                        FL(&liveGrainLab, 40, &liveGrainSlider, 120),
-                        FL(&liveRevLab, 52, &liveRevLenBox, 90),
-                        F(&liveRevBtn, 64) };
-    else if (showPmCtl)
-        materialRow = { FL(&pmOpsLab, 34, &pmOpsBox, 80),
-                        FL(&pmPresetLab, 44, &pmPresetBox, 180),
-                        FL(&pmRatioLab, 40, &pmRatioSlider, 150),
-                        FL(&pmIndexLab, 40, &pmIndexSlider, 150),
-                        FL(&pmIndexEnvLab, 46, &pmIndexEnvBox, 120),
-                        FL(&pmFeedbackLab, 42, &pmFeedbackSlider, 130),
-                        F(&pmImportBtn, 64), F(&pmExportBtn, 64) };
-    else
-        // v1.31 (U1): the Osc tab's material row carries the polyagogy
-        // controls - what the arc's drawn wave does besides being the
-        // timbre.
-        materialRow = { FL(&modUseLab, 56, &modUseBox, 150),
-                        FL(&modRateLab, 34, &modRateSlider, 120),
-                        FL(&modDepthLab, 40, &modDepthSlider, 110) };
-    // the material hint is always there; the sieve group sits with the
-    // sieve preset on the next row (v1.25)
-    materialRow.push_back(FH(&matHintLab, 220));
-    std::vector<std::vector<FlowItem>> rows = rowsInit;
-    rows[1] = voiceRow;
-    rows[2] = materialRow;
-    rows.push_back({ FL(&scrubLenLab, 60, &scrubLenSlider, 130), FL(&scrubCrossLab, 70, &scrubCrossSlider, 130), FL(&scrubTailLab, 60, &scrubTailSlider, 130), FL(&scrubGrainLab, 70, &scrubGrainSlider, 110) });
-    rows.push_back({ F(&muteDragBtn, 90), FL(&dragSmoothLab, 70, &dragSmoothSlider, 130) });
-    // the Hints view toggle drops the explanation labels (from wherever
-    // they sit in the flow)
-    if (! showHints)
+    // transport
+    groups.push_back ({ "transport", { F(&playBtn, 90), F(&stopBtn, 70), F(&loopBtn, 64),
+                                        F(&seqBtn, 60), F(&revPlayBtn, 64), F(&pressBtn, 96),
+                                        F(&scrubBtn, 72) } });
+
+    // the pages and the files
+    groups.push_back ({ "pages", { FL(&pageLab, 40, &pageBox, 150),
+                                   F(&pageAddBtn, 30), F(&pageDupBtn, 46), F(&pageDelBtn, 30) } });
+    groups.push_back ({ "file", { F(&menuBtn, 74), F(&settingsBtn, 78), F(&clearBtn, 64) } });
+
+    // the tempo and the clock
+    groups.push_back ({ "tempo", { FL(&tempoLab, 40, &tempoSlider, 140) } });
+    groups.push_back ({ "clock", { F(&timeLab, 150) } });
+
+    // the voice: what is drawn (the tool, the carrier wave, the envelope)
     {
-        for (auto& r : rows)
-            r.erase (std::remove_if (r.begin(), r.end(),
-                                     [this] (const FlowItem& it)
-                                     { return it.comp == &matHintLab || it.comp == &kbdHintLab; }),
-                     r.end());
+        FlowGroup voice { "voice", {} };
+        voice.items.push_back (FL (&toolLab, 36, &toolBox, 120));
+        if (showWaveCtl)
+            voice.items.push_back (FL (&waveLab, 42, &waveBox, 140));
+        voice.items.push_back (FL (&envLab, 34, &envBox, 140));
+        groups.push_back (voice);
     }
+    // ... and how it sounds: the intensity, the duration and the master
+    // gain are one theme, so they stay together in their own group.
+    groups.push_back ({ "levels", { FL (&intenLab, 40, &intenSlider, 180),
+                                    FL (&durLab, 30, &durSlider, 160),
+                                    FL (&masterLab, 52, &masterSlider, 180) } });
+    // the pitch: the snap, the discrete step (the arc's pitch moves
+    // through a temperament) and the arc's frequency space (the UPIC's
+    // four tables). The step belongs to the arc's voice, not to one
+    // material, so it shows in every tab.
+    groups.push_back ({ "pitch", { F(&snapBtn, 68), F(&stepBtn, 76),
+                                   FL (&stepDivLab, 52, &stepDivSlider, 110),
+                                   FL (&spaceLab, 44, &spaceBox, 170) } });
+
+    // the material: the current tab's own controls
+    {
+        FlowGroup mat { "material", {} };
+        if (showSampleCtl)
+            mat.items = { FL(&slotLab, 34, &sampleBox, 180),
+                          F(&loadSampleBtn, 110), F(&revBtn, 64),
+                          FL(&refLab, 34, &refSlider, 210),
+                          FL(&samplePitchLab, 34, &samplePitchBox, 180),
+                          FL(&grainLab, 40, &grainSlider, 100),
+                          FL(&inGainLab, 30, &inGainSlider, 140), F(&monBtn, 64), F(&capBtn, 84),
+                          F(&waveFromSlotBtn, 110) };
+        else if (showLiveCtl)
+            mat.items = { FL(&refLab, 34, &refSlider, 210),
+                          FL(&livePitchLab, 42, &livePitchBox, 180),
+                          FL(&liveGrainLab, 40, &liveGrainSlider, 120),
+                          FL(&liveRevLab, 52, &liveRevLenBox, 90),
+                          F(&liveRevBtn, 64) };
+        else if (showPmCtl)
+            mat.items = { FL(&pmOpsLab, 34, &pmOpsBox, 80),
+                          FL(&pmPresetLab, 44, &pmPresetBox, 180),
+                          FL(&pmRatioLab, 40, &pmRatioSlider, 150),
+                          FL(&pmIndexLab, 40, &pmIndexSlider, 150),
+                          FL(&pmIndexEnvLab, 46, &pmIndexEnvBox, 120),
+                          FL(&pmFeedbackLab, 42, &pmFeedbackSlider, 130),
+                          F(&pmImportBtn, 64), F(&pmExportBtn, 64) };
+        else
+            // v1.31 (U1): the Osc tab's material group carries the polyagogy
+            // controls - what the arc's drawn wave does besides being the
+            // timbre.
+            mat.items = { FL(&modUseLab, 56, &modUseBox, 150),
+                          FL(&modRateLab, 34, &modRateSlider, 120),
+                          FL(&modDepthLab, 40, &modDepthSlider, 110) };
+        groups.push_back (mat);
+    }
+
+    // v1.33: the sieve is its own section. It quantises the pitch; it
+    // is not a tool and it is not a page setting.
+    groups.push_back ({ "sieve", { F(&sieveBtn, 64), F(&sievePresetBox, 150),
+                                   FL(&sieveMLab, 18, &sieveMEdit, 52),
+                                   FL(&sieveRLab, 18, &sieveREdit, 84) } });
+
+    // v1.33: the GLOBAL magnets - the stick and the time grid. Every
+    // page and every sieve zone follows these two (a zone can set its
+    // own m/R and its own time grid, but not its own stick).
+    groups.push_back ({ "magnets", { FL(&stickLab, 84, &stickSlider, 160),
+                                     FL(&gridLab, 86, &gridBox, 84) } });
+
+    // v1.33: the page's frequency settings - its ambitus, its
+    // acceleration and its four frequency spaces (the UPIC's tables)
+    groups.push_back ({ "page", { FL(&ambitusLab, 58, &ambitusBox, 170),
+                                  FL(&warpLab, 40, &warpSlider, 120),
+                                  FL(&spaceDefLab[0], 46, &spaceDefBox[0], 120),
+                                  FL(&spaceDefLab[1], 46, &spaceDefBox[1], 120),
+                                  FL(&spaceDefLab[2], 46, &spaceDefBox[2], 120),
+                                  FL(&spaceDefLab[3], 46, &spaceDefBox[3], 120) } });
+
+    // v1.33: the tools (procedural generators)
+    groups.push_back ({ "tools", { FL(&genLab, 36, &genBox, 220) } });
+
+    // the scrub's parameters and the arc dragging
+    groups.push_back ({ "scrub", { FL(&scrubLenLab, 60, &scrubLenSlider, 130),
+                                   FL(&scrubCrossLab, 70, &scrubCrossSlider, 130),
+                                   FL(&scrubTailLab, 60, &scrubTailSlider, 130),
+                                   FL(&scrubGrainLab, 70, &scrubGrainSlider, 110) } });
+    groups.push_back ({ "drag", { F(&muteDragBtn, 90),
+                                  FL(&dragSmoothLab, 70, &dragSmoothSlider, 130) } });
+
+    // the status line: it takes the rest of its line
+    groups.push_back ({ "status", { FX (&statusLab, 220) } });
+
+    // the Hints view toggle owns the sidebar (below): the two explanation
+    // labels are no longer part of the flow.
     if (pluginMode_) // host audio: no device selector button in the flow
-        rows[0].erase(std::remove_if(rows[0].begin(), rows[0].end(),
-                                     [this](const FlowItem& it){ return it.comp == &audioBtn; }),
-                      rows[0].end());
-    matHintLab.setVisible(showHints);
-    kbdHintLab.setVisible(showHints);
+        for (auto& grp : groups)
+            grp.items.erase (std::remove_if (grp.items.begin(), grp.items.end(),
+                                             [this] (const FlowItem& it){ return it.comp == &audioBtn; }),
+                             grp.items.end());
 
     auto b = getLocalBounds().reduced(8);
     const int rowH36 = 36, minScoreH = 150, minEdH = 110, wantEdH = 300;
@@ -4068,97 +4189,130 @@ void MainComponent::resized()
     const bool anyEditors = showWaveEd || showEnvEd;
     const bool stripMode  = landscape || ! anyEditors;
 
-    auto rowsUsed = [&](const std::vector<FlowItem>& items, int availW, float s)
+    // --- the flow ---
+    // The groups are placed in order. A group moves to the next line only
+    // when the current one has no room for it; a group that is wider than
+    // the whole line wraps inside itself. The counting pass and the placing
+    // pass must agree exactly, or a line lands on top of the next one.
+    const int groupGapDp = 6;
+
+    auto groupWidth = [&] (const FlowGroup& g) -> int
     {
-        // v1.32: this must count the lines EXACTLY the way placeFlow lays
-        // them out, or a row lands on top of the next one. The two used to
-        // differ by a couple of pixels (the old estimate ignored the
-        // border gap and counted the row's width one pixel too wide), which
-        // only showed up when a row's items ended within a few pixels of
-        // the edge - the "Stepped" controls pushed the voice row into that
-        // window and the time display landed on the material row.
-        //
-        // The geometry is the placer's: x is row-local, the right edge is
-        // one pixel before the row's end, and the flex item wraps when it
-        // cannot keep its minimum slice.
-        const int g2 = juce::jmax (1, (int) std::lround (2.0f * s));
-        const int right = availW - 1;
-        int n = 1, x = 0;
-        for (auto& it : items)
-        {
-            const int lw = it.label != nullptr ? (int) std::lround (it.labelW * s) : 0;
-            const int cw = it.w > 0 ? (int) std::lround (it.w * s) : 0;
-            if (x > 0 && x + lw + cw > right) { ++n; x = 0; }
-            if (it.label == nullptr && cw == 0)
-            {
-                // trailing flex label: it wraps unless it can keep at least
-                // its minimum slice of this row (must agree with placeFlow)
-                if (right - x - g2 < it.minSlice) ++n;
-                continue;
-            }
-            x += lw + cw;
-        }
-        return n;
+        int w = 0;
+        for (auto& it : g.items)
+            w += it.flex ? it.minSlice : (it.labelW + it.w);
+        return w;
     };
+
+    auto flowGroups = [&] (juce::Rectangle<int> area, float sc, bool place,
+                           std::vector<juce::Rectangle<int>>* rects) -> int
+    {
+        const int rh2 = (int) std::lround (rowH36 * sc);
+        const int g2  = juce::jmax (1, (int) std::lround (2.0f * sc));
+        const int gap = juce::jmax (1, (int) std::lround ((float) groupGapDp * sc));
+        const int right = area.getRight();
+        int x = area.getX(), y = area.getY();
+
+        for (auto& grp : groups)
+        {
+            const int gw = (int) std::lround ((float) groupWidth (grp) * sc);
+            // does the group fit on the current line?
+            if (x > area.getX() && x + gw + gap > right) { x = area.getX(); y += rh2; }
+            const int gx = x, gy = y;
+
+            for (auto& it : grp.items)
+            {
+                if (it.flex)
+                {
+                    // the status line takes the rest of its line
+                    const int minPx = (int) std::lround ((float) it.minSlice * sc);
+                    const int fw = juce::jmax (minPx, right - x - g2);
+                    if (place && it.comp != nullptr)
+                        it.comp->setBounds (x + g2, y + g2, juce::jmax (8, fw - 2 * g2), rh2 - 2 * g2);
+                    x += fw;
+                    continue;
+                }
+                const int lw = (int) std::lround ((float) it.labelW * sc);
+                const int cw = (int) std::lround ((float) it.w * sc);
+                // a group that is wider than the line wraps inside itself
+                if (x > area.getX() && x + lw + cw > right) { x = area.getX(); y += rh2; }
+                if (place)
+                {
+                    if (it.label != nullptr)
+                        it.label->setBounds (x + g2, y + g2, juce::jmax (1, lw - 2 * g2), rh2 - 2 * g2);
+                    if (it.comp != nullptr)
+                        it.comp->setBounds (x + lw + g2, y + g2, juce::jmax (1, cw - 2 * g2), rh2 - 2 * g2);
+                }
+                x += lw + cw;
+            }
+            if (rects != nullptr)
+                rects->push_back (juce::Rectangle<int> (gx, gy, juce::jmax (1, x - gx),
+                                                        juce::jmax (1, y + rh2 - gy)));
+            x += gap;
+        }
+        return (y - area.getY()) / rh2 + 1;
+    };
+
+    // the hints sidebar: the long explanations that used to sit in the
+    // toolbar's rows get their own column on the right - the spare space
+    // on a large screen. The "Hints" toggle shows and hides it.
+    const int sidebarW = (showHints && getWidth() >= 820) ? 260 : 0;
 
     // fit-shrink: wrapping is scale-dependent, so settle by iteration
     float s = 1.0f;
     int topRowsTotal = 0;
     for (int iter = 0; ; ++iter)
     {
-        topRowsTotal = 0;
-        for (auto& r : rows) topRowsTotal += rowsUsed(r, b.getWidth(), s);
-        const int minH = topRowsTotal * (int) std::lround(rowH36 * s) + 6
-                       + (int) std::lround(minScoreH * s)
-                       + (int) std::lround(26.0f * s) // Osc|Sample|Live tab strip
-                       + (anyEditors ? (int) std::lround(minEdH * s) + 6 : 0)
-                       + (stripMode ? (int) std::lround(34.0f * s) : 0);
+        auto area = b;
+        if (sidebarW > 0) area.removeFromRight (sidebarW + 8);
+        topRowsTotal = flowGroups (area, s, false, nullptr);
+        const int minH = topRowsTotal * (int) std::lround (rowH36 * s) + 6
+                       + (int) std::lround (minScoreH * s)
+                       + (int) std::lround (26.0f * s) // Osc|Sample|Live tab strip
+                       + (anyEditors ? (int) std::lround (minEdH * s) + 6 : 0)
+                       + (stripMode ? (int) std::lround (34.0f * s) : 0);
         if (minH <= b.getHeight() || iter >= 8) break;
         s *= 0.92f;
         if (s < 0.55f) { s = 0.55f; }
     }
+    appLaf.uiScale = s;   // the fonts follow the layout's scale
 
-    auto placeFlow = [&](juce::Rectangle<int> area, const std::vector<FlowItem>& items, float s)
-    {
-        const int rh2 = (int) std::lround(rowH36 * s);
-        const int g2  = juce::jmax(1, (int) std::lround(2.0f * s));
-        int x = area.getX(), y = area.getY();
-        const int right = area.getRight();
-        for (auto& it : items)
-        {
-            const int lw = it.label != nullptr ? (int) std::lround(it.labelW * s) : 0;
-            const int cw = it.w > 0 ? (int) std::lround(it.w * s) : 0;
-            if (x > area.getX() && x + lw + cw > right) { x = area.getX(); y += rh2; }
-            if (it.label != nullptr)
-            {
-                it.label->setBounds(x + g2, y + g2, juce::jmax(1, lw - 2 * g2), rh2 - 2 * g2);
-                x += lw;
-            }
-            if (cw > 0)
-            {
-                it.comp->setBounds(x + g2, y + g2, juce::jmax(1, cw - 2 * g2), rh2 - 2 * g2);
-            }
-            else
-            {
-                // trailing flex label (time/status/hints): wrap unless it
-                // keeps a decent slice of this row β€” see rowsUsed
-                if (right - x - g2 < it.minSlice) { x = area.getX(); y += rh2; }
-                it.comp->setBounds(x + g2, y + g2, juce::jmax(8, right - x - g2), rh2 - 2 * g2);
-            }
-            x += cw;
-        }
-    };
-
-    // top toolbar block: one wrapped flow per logical row
+    // top toolbar block: the groups share the lines, the hints get the
+    // spare space on the right
     {
         auto top = b.removeFromTop (topRowsTotal * (int) std::lround (rowH36 * s) + 6);
         toolbarGroups.clear();
-        for (auto& r : rows)
+        juce::Rectangle<int> sidebar;
+        if (sidebarW > 0)
+            sidebar = top.removeFromRight (sidebarW);
+        auto area = top;
+        if (sidebarW > 0)
+            area.removeFromRight (8);   // the gap between the groups and the sidebar
+
+        flowGroups (area, s, true, &toolbarGroups);
+
+        // the two explanation labels live in the sidebar now
+        const bool sidebarOn = sidebarW > 0;
+        matHintLab.setVisible (sidebarOn);
+        kbdHintLab.setVisible (sidebarOn);
+        if (sidebarOn)
         {
-            const int n = rowsUsed(r, top.getWidth(), s);
-            auto rowRect = top.removeFromTop(n * (int) std::lround(rowH36 * s));
-            toolbarGroups.push_back(rowRect);
-            placeFlow(rowRect, r, s);
+            toolbarGroups.push_back (sidebar);
+            auto sb = sidebar.reduced (6, 4);
+            const int matLines = lineCount (matHintLab.getText());
+            const int kbdLines = lineCount (kbdHintLab.getText());
+            const float safeS = juce::jmax (0.2f, s);
+            const int matH = juce::jmin (sb.getHeight(), juce::jmax (18, matLines * 16 + 2));
+            auto matRect = sb.removeFromTop (matH);
+            // the text is scaled to the room the sidebar has
+            matHintLab.setFont (juce::Font (juce::FontOptions (
+                juce::jlimit (8.0f, 12.5f, (float) matRect.getHeight() / (float) juce::jmax (1, matLines) / safeS),
+                juce::Font::bold)));
+            matHintLab.setBounds (matRect);
+            kbdHintLab.setFont (juce::Font (juce::FontOptions (
+                juce::jlimit (8.0f, 12.5f, (float) sb.getHeight() / (float) juce::jmax (1, kbdLines) / safeS),
+                juce::Font::bold)));
+            kbdHintLab.setBounds (sb);
         }
     }
 

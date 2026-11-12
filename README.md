@@ -60,6 +60,20 @@ The microphone is opened on demand (Sample tab -> **Mon** / **Capture**, or
 own canvas layer, on the same page and timeline. Switching tabs is
 instant and never touches the audio device (v1.17).
 
+**The toolbar** - the settings are laid out in **groups**: transport, pages,
+files, tempo, clock, voice, levels, pitch, material, sieve, magnets, page,
+tools, scrub and dragging. A group keeps its controls together, but it no
+longer needs a row of its own - the next group continues on the same line
+when there is room. The **level sliders** (intensity, duration, master) are
+one group, so they always sit together. On a large screen the long
+explanations (the material's hint and the keyboard/shortcut list) move into
+their own **sidebar** on the right, where the spare space is; the **Hints**
+toggle in the strip above the canvas shows and hides it. No button cuts its
+own text off - every control is measured and gets at least the width its
+text needs. The **Capture** button is green, and turns red while it
+records; the wavetable's shape buttons wear the colour of the wave they
+make (the same palette the arcs use).
+
 **Score page**
 
 - X = time (5-120 s per page), Y = log pitch 20 Hz - 12 kHz.
@@ -90,8 +104,8 @@ instant and never touches the audio device (v1.17).
 - **Page frequency row** - **Ambitus**, **Accel** and **S1-S4** are the
   page's own settings (see below); the S labels show how many arcs are in
   each space. They are not sieve controls.
-- **Tools row** - the procedural generators (see below) and the keyboard
-  hints.
+- **Tools group** - the procedural generators (see below). The keyboard
+  hints live in the sidebar (see above).
 - **Sieve zones** - the Zone tool draws a magnetic region: inside it the
   points snap to *that zone's* sieve, time grid and stickiness. A zone can
   be **dragged to a new place** (inside it) or **resized by an edge or a
@@ -333,7 +347,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 472 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 479 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -345,8 +359,10 @@ regression and the UPIC's transformations (transpose, invert, retrograde,
 augment), the discrete frequency space, the four frequency spaces, the
 ambitus, the infrasonic-to-ultrasound range, the page's acceleration, the
 movable sieve zones, the quantised line, the per-zone stickiness, the
-sieve checkbox end-to-end, the zone menu actions, the digitised wave page
-and the micro-time page) and writes the log to
+sieve checkbox end-to-end, the zone menu actions, the digitised wave page,
+the micro-time page, the toolbar's group flow, the hints sidebar, the
+button text fitting, the capture button's colours and the wavetable
+buttons' colours) and writes the log to
 `%TEMP%\upic_selftest.txt`. The build script also runs the 15-check
 plugin smoke test and pluginval at strictness 5.
 

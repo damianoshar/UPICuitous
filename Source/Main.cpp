@@ -2425,6 +2425,72 @@ public:
                     }
                 }
 
+                // v1.33.3: the toolbar's new layout - the hints have their
+                // own sidebar, the groups share the lines, and no button
+                // cuts its own text off.
+                {
+                    mc.setSize (1280, 800);
+                    auto* kbd = find ("kbdHintLab");
+                    auto* mat = find ("matHintLab");
+                    auto* page = find ("pageBox");
+                    auto* play = find ("Play");
+                    check (kbd != nullptr && mat != nullptr
+                           && kbd->isVisible() && mat->isVisible(),
+                           "v1.33.3 the hints have their own sidebar (both visible)");
+                    check (kbd != nullptr && page != nullptr
+                           && kbd->getBounds().getX() > page->getBounds().getRight(),
+                           "v1.33.3 the hints sidebar is on the right of the buttons",
+                           kbd != nullptr ? kbd->getBounds().toString() : juce::String());
+                    check (kbd != nullptr && mat != nullptr
+                           && kbd->getBounds().getY() > mat->getBounds().getY(),
+                           "v1.33.3 the material hint sits above the shortcut list");
+                    // the groups share a line: the transport and the pages
+                    // are two groups, and they sit on the same line
+                    check (play != nullptr && page != nullptr
+                           && play->getBounds().getY() == page->getBounds().getY(),
+                           "v1.33.3 two groups share one line",
+                           play != nullptr && page != nullptr
+                             ? play->getBounds().toString() + " vs " + page->getBounds().toString()
+                             : juce::String());
+
+                    // no button may be narrower than its own text
+                    {
+                        bool allFit = true;
+                        juce::String worst;
+                        for (auto* b : { find ("sieveBtn"), find ("wSine"), find ("Play") })
+                        {
+                            auto* tb = dynamic_cast<juce::TextButton*> (b);
+                            if (tb == nullptr) continue;
+                            const auto font = mc.getLookAndFeel().getTextButtonFont (*tb, tb->getHeight());
+                            const int need = juce::GlyphArrangement::getStringWidthInt (font, tb->getButtonText());
+                            if (tb->getWidth() < need)
+                            {
+                                allFit = false;
+                                worst << tb->getName() << " " << tb->getWidth() << "<" << need << "  ";
+                            }
+                        }
+                        check (allFit, "v1.33.3 no button cuts its text off", worst.trim());
+                    }
+
+                    // the capture button: green, and red while it records
+                    {
+                        auto* cap = dynamic_cast<juce::TextButton*> (find ("capBtn"));
+                        check (cap != nullptr
+                               && cap->findColour (juce::TextButton::buttonColourId) == juce::Colour (0xff2a6a3a)
+                               && cap->findColour (juce::TextButton::buttonOnColourId) == juce::Colour (0xff6a2a2a),
+                               "v1.33.3 the capture button is green, and red while it records");
+                    }
+
+                    // the wavetable's shape buttons follow the wave table's
+                    // colours - the same palette the arcs use
+                    {
+                        auto* w0 = dynamic_cast<juce::TextButton*> (find ("wSine"));
+                        check (w0 != nullptr
+                               && w0->findColour (juce::TextButton::buttonOnColourId) == upic::paletteColour (0),
+                               "v1.33.3 the wavetable buttons follow the wave table colours");
+                    }
+                }
+
                 // v1.33: the four frequency spaces - each dropdown has to
                 // reach the model, not just the first one.
                 {
@@ -2760,7 +2826,7 @@ public:
                     };
                     auto* in  = find ("inGainSlider");
                     auto* mon = find ("Mon");
-                    auto* cap = find ("Capture");
+                    auto* cap = find ("capBtn");   // the text changes to "Stop" while it records
                     auto* sb  = find ("sieveBtn");
                     auto* sp  = find ("sievePresetBox");
                     auto* sm  = find ("sieveMEdit");
