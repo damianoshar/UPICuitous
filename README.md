@@ -86,6 +86,16 @@ removes the selected point(s), dragging moves it. Ctrl/Cmd/Shift-click
 adds points to a group and dragging one moves the whole group.
 Double-click adds and right-click deletes as before.
 
+**The wave can be more than a timbre** - the UPIC's central idea: *once
+a line or curve has been drawn, nothing is really decided about its
+interpretation as a signal*. The Osc tab's material row says **Wave as**:
+*Oscillator* (the classic case), *+ Amplitude LFO* (the curve also
+shapes the loudness) or *+ Frequency LFO* (the curve also moves the
+pitch - a fixed pitch or a glissando). **Rate** is the LFO's speed
+(0.05-20 Hz) and **Depth** how deep it goes (1 is an octave of pitch, or
+a full swing of the amplitude). They edit the selected arcs, and the
+settings travel with the piece.
+
 **Sample tab** - four slots: load wav/flac/ogg/aiff, record from the mic,
 In/Mon/Capture, input gain. `Ref` is the material's base pitch; arc pitch
 sets the playback ratio. Pitch modes: **Varispeed** (default),
@@ -96,7 +106,9 @@ length with pitch; Granular (stretch) time-stretches the slot to the arc
 length; Phase vocoder keeps the slot's length and shifts pitch only.
 Sample-speed grid labels Ref x 2^k.
 The **Rev** button plays the selected slot backwards - the material is
-mirrored, the pitch stays the same.
+mirrored, the pitch stays the same. **Slot -> Wave** turns the selected
+slot into a wavetable - the UPIC's digitised wave page, where the take
+becomes one loop of the oscillator (the pitch then follows the arc).
 
 **PM tab** - phase-modulation arcs: Ratio, Index, index envelope,
 Feedback and 2/4 operators, with bell / brass / pluck presets. The PM
@@ -135,6 +147,20 @@ sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
 start. Clear asks first in an in-app warning and uses a red confirm
 button. Dragging the playhead while stopped now plays a short scrub
 preview. A Rev toggle runs the score backwards (a mirrored stroke sounds mirrored); a learned MIDI jog CC drives a signed, smoothed playhead (up to +/- 4x) in the app and the plugin.
+
+**Transforming the page** - the UPIC could transpose, reverse and invert a
+composition. The File menu's **Transform the page...** submenu transposes
+the page up or down an octave or a semitone, and **Invert the pitch**
+mirrors the drawn contour (a rising line becomes a falling one of the
+same size - the canvas is log-pitch, so this is what flipping the drawing
+upside down does, and inverting twice gives the page back). The
+transforms edit the selected arcs if there is a selection, otherwise
+every arc of the page.
+
+**Page duration** - the page's clock, from **5 ms** to **12 minutes**
+(the UPIC's own range: a drawing could sit in micro-time as well as in
+macro-time). The Dur slider's travel is skewed so 30 s sits in the
+middle, and the value box takes an exact number.
 
 **Scrub audition** - with Scrub on, dragging the centre line or the
 playhead triangle plays a short preview while the transport is stopped.
@@ -218,15 +244,16 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 353 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 386 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
 reverse under the global Rev toggle, the MIDI + OSC settings overlay,
 the arc list, the MIDI input, the envelope points, the v1.26
 multi-selection / toolbar edits, the v1.27
-wavetable fork / Stop rewind / Clear warning checks and the
-granular-vs-varispeed regression) and writes the log to
+wavetable fork / Stop rewind / Clear warning checks, the granular-vs-varispeed
+regression and the UPIC's pitch transformations (transpose, invert),
+the digitised wave page and the micro-time page) and writes the log to
 `%TEMP%\upic_selftest.txt`. The build script also runs the 15-check
 plugin smoke test and pluginval at strictness 5.
 
