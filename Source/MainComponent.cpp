@@ -474,6 +474,16 @@ void MainComponent::buildLiveControls()
         m.addItem (5, "Audio settings...");
         m.addItem (6, "MIDI + OSC settings...");
         m.addItem (7, "Clear page...");
+        // v1.31 (U3): the UPIC could transform a composition. The reverse is
+        // already here (the Rev button); these are the pitch transforms.
+        juce::PopupMenu transform;
+        transform.addItem (101, "Transpose up an octave");
+        transform.addItem (102, "Transpose down an octave");
+        transform.addItem (103, "Transpose up a semitone");
+        transform.addItem (104, "Transpose down a semitone");
+        transform.addSeparator();
+        transform.addItem (105, "Invert the pitch (mirror the contour)");
+        m.addSubMenu ("Transform the page...", transform);
         juce::Component::SafePointer<MainComponent> sp (this);
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&menuBtn),
             [sp] (int r) {
@@ -487,6 +497,7 @@ void MainComponent::buildLiveControls()
                     case 5: sp->showAudioSettings(); break;
                     case 6: sp->showSettings(); break;
                     case 7: sp->showClearWarning(); break;
+                    default: sp->transformPage (r); break;
                 }
             });
     };
@@ -4394,5 +4405,68 @@ void MainComponent::clearCurrentPage()
         markModelChanged(); // clearing while playing fades instead of clicking
         publishModelSnapshot();
     }
+    repaint();
+}
+
+//==============================================================================
+// v1.31 (U3): the UPIC's pitch transformations.
+//
+// The reverse is already here (the Rev box, the global Rev, the slot Rev).
+// These are the other two: a transposition and a pitch inversion. They work
+// on the drawn curve - where the music is - and they follow the same scope
+// rule as the rest of the app: the selected arcs if there is a selection,
+// otherwise every arc of the current page.
+//
+// The menu ids come from the "Transform the page..." submenu.
+//==============================================================================
+void MainComponent::transformPage (int op)
+{
+    double semitones = 0.0;
+    bool invert = false;
+    juce::String what;
+
+    switch (op)
+    {
+        case 101: semitones =  12.0; what = "transposed up an octave"; break;
+        case 102: semitones = -12.0; what = "transposed down an octave"; break;
+        case 103: semitones =   1.0; what = "transposed up a semitone"; break;
+        case 104: semitones =  -1.0; what = "transposed down a semitone"; break;
+        case 105: invert = true;  what = "inverted (the pitch mirrored)"; break;
+        default: return;
+    }
+
+    const auto ids = score.getSelectedArcs();
+    const bool onlySelected = ! ids.empty();
+    int touched = 0;
+
+    {
+        const juce::ScopedLock l(dataLock);
+        for (auto& a : curPage().arcs)
+        {
+            if (onlySelected
+                && std::find (ids.begin(), ids.end(), a.id) == ids.end())
+                continue;
+
+            if (invert) a.invertPitch();
+            else        a.transpose (semitones);
+            ++touched;
+        }
+        if (touched > 0)
+        {
+            markModelChanged(); // the voices re-anchor -> fade across it
+            publishModelSnapshot();
+            arcListDirty = true;
+        }
+    }
+
+    if (touched == 0)
+    {
+        flash ("Nothing to transform on this page");
+        return;
+    }
+
+    flash (juce::String (touched) + (touched == 1 ? " arc " : " arcs ") + what
+           + (onlySelected ? " (the selection)" : ""));
+    score.repaint();
     repaint();
 }

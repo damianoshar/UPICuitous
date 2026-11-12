@@ -253,6 +253,41 @@ namespace upic
         double startTime() const { return points.empty() ? 0 : points.front().t; }
         double endTime()   const { return points.empty() ? 0 : points.back().t; }
 
+        //---------------- the UPIC's drawn-curve transformations -------------
+        // The real UPIC could transpose, reverse and invert a composition
+        // (v1.31 / U3). The reverse already exists - the Rev box, the
+        // global Rev and the slot Rev are the time mirror. These two are
+        // the pitch ones, and they work on the drawn curve, which is where
+        // the music lives.
+        //
+        // Transposing moves every drawn pitch by a number of semitones.
+        // The material's unison (refFreq) stays where it is, so the arc
+        // moves relative to the grid - which is what transposing a score
+        // means. In all three tabs the stored frequency is the absolute
+        // pitch the arc plays (the sample and live ratios are derived from
+        // it), so one operation covers them.
+        void transpose (double semitones)
+        {
+            if (semitones == 0.0 || points.empty()) return;
+            const double factor = std::pow (2.0, semitones / 12.0);
+            for (auto& p : points)
+                p.freq = limits::clampFinite (p.freq * factor, kMinFreq, kMaxFreq);
+        }
+
+        // Inverting mirrors the pitch contour about the arc's own centre
+        // (the geometric mean of its pitches). The canvas is log-pitch, so
+        // this is exactly what flipping the drawing upside down does, and
+        // it is its own inverse: inverting twice gives the arc back.
+        void invertPitch()
+        {
+            if (points.size() < 2) return;
+            double sumLog = 0.0;
+            for (auto& p : points) sumLog += std::log2 (juce::jmax (1.0, p.freq));
+            const double centre = std::pow (2.0, sumLog / (double) points.size());
+            for (auto& p : points)
+                p.freq = limits::clampFinite (centre * centre / p.freq, kMinFreq, kMaxFreq);
+        }
+
         // log-domain interpolation so glissandi sound linear in pitch
         double freqAt(double t) const
         {

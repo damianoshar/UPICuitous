@@ -1145,7 +1145,51 @@ public:
                   juce::String(reverse, 4));
         }
 
-        // 6i. v1.30 (S-03): a piece is untrusted input. The parsers clamp
+        // 6i. v1.31 (U3): the UPIC's pitch transformations - transpose and
+        //     invert. The reverse already exists; these are the pitch ones.
+        {
+            upic::Arc a;
+            a.points = { { 0.0, 220.0 }, { 1.0, 440.0 }, { 2.0, 880.0 } };
+
+            // an octave up doubles every pitch
+            a.transpose (12.0);
+            check (std::abs (a.points[0].freq - 440.0) < 1e-6
+                && std::abs (a.points[1].freq - 880.0) < 1e-6
+                && std::abs (a.points[2].freq - 1760.0) < 1e-6,
+                   "transpose up an octave doubles the drawn pitches",
+                   juce::String (a.points[0].freq, 1) + " / "
+                   + juce::String (a.points[1].freq, 1) + " / "
+                   + juce::String (a.points[2].freq, 1));
+
+            // and back down again
+            a.transpose (-12.0);
+            check (std::abs (a.points[0].freq - 220.0) < 1e-6
+                && std::abs (a.points[2].freq - 880.0) < 1e-6,
+                   "transpose down an octave is the inverse");
+
+            // the inversion mirrors the contour: a rising line becomes a
+            // falling one of the same size, around the same centre
+            upic::Arc b;
+            b.points = { { 0.0, 220.0 }, { 1.0, 440.0 }, { 2.0, 880.0 } };
+            const double centre = std::sqrt (220.0 * 880.0); // the geometric mean
+            b.invertPitch();
+            check (std::abs (b.points[0].freq - centre * centre / 220.0) < 1e-6
+                && std::abs (b.points[2].freq - centre * centre / 880.0) < 1e-6
+                && b.points[0].freq > b.points[1].freq
+                && b.points[1].freq > b.points[2].freq,
+                   "invert mirrors the pitch contour",
+                   juce::String (b.points[0].freq, 1) + " / "
+                   + juce::String (b.points[1].freq, 1) + " / "
+                   + juce::String (b.points[2].freq, 1));
+
+            // and it is its own inverse
+            b.invertPitch();
+            check (std::abs (b.points[0].freq - 220.0) < 1e-6
+                && std::abs (b.points[2].freq - 880.0) < 1e-6,
+                   "inverting twice gives the arc back");
+        }
+
+        // 6j. v1.30 (S-03): a piece is untrusted input. The parsers clamp
         //     the counts and reject non-finite numbers, so a crafted piece
         //     cannot be used to freeze the UI or to push NaN into the audio
         //     thread.

@@ -544,6 +544,8 @@ private:
     void showClearWarning();
     void closeClearWarning();
     void clearCurrentPage();
+    // v1.31 (U3): the UPIC's pitch transformations (transpose, invert).
+    void transformPage (int op);
 
     // v1.11 VST3 plugin mode
     bool pluginMode_ = false;
