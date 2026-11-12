@@ -37,6 +37,30 @@ public:
     // audio thread never takes dataLock any more.
     void renderScoreBlock(const ModelSnapshot& snap, float* left, float* right, int numSamples);
 
+    // v1.30 (5.3 refactor): the parts of the audio block that were inlined
+    // in getNextAudioBlock() are their own methods. They all run on the
+    // audio thread, so they only touch the members.
+    struct AudioBlock
+    {
+        float* outL = nullptr;      // the device / host buffer
+        float* outR = nullptr;
+        float* scoreL = nullptr;    // the rendered score
+        float* scoreR = nullptr;
+        float* freezeL = nullptr;   // the frozen (held) score
+        float* freezeR = nullptr;
+        int numSamples = 0;
+        bool playingAtStart = false;
+    };
+
+    void mixMonitorInput (float* left, float* right, int numSamples);
+    void applyScoreFade (float* scoreLeft, float* scoreRight, int numSamples,
+                         int fadeSamples, bool rendered, bool modelChanged);
+    void mixMasterGain (float* left, float* right, const float* scoreLeft,
+                        const float* scoreRight, int numSamples);
+    void applyStopFade (float* left, float* right, int numSamples, bool stopping);
+    void renderScrubPreview (const ModelSnapshot& snap, AudioBlock& block, double previewGain);
+    void renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& block, double freezeGain);
+
     // v1.15: call after a change that replaces the sound that is playing
     // (page change, loaded material, pitch-mode switch) - the audio thread
     // fades across it instead of cutting

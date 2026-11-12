@@ -2754,6 +2754,22 @@ public:
                 check(minDrag > 0.005f,
                       "scrub preview: continuous vocoder drag stays audible",
                       juce::String(minDrag, 4));
+
+                // The freeze sustain: a click without a drag holds the page.
+                // The editor calls onScrubFreezeStart, the app renders the
+                // held score into the freeze buffer (v1.30: that path moved
+                // out of getNextAudioBlock() into renderScrubFreeze()).
+                if (sc->onScrubFreezeStart != nullptr)
+                {
+                    sc->onScrubFreezeStart (0.5);
+                    juce::Thread::sleep (60); // the crossfade from the preview
+                    float held = 0.0f;
+                    for (int i = 0; i < 60; ++i) // ...and past the short preview
+                        held = juce::jmax (held, blockPeak());
+                    check (held > 0.001f,
+                           "scrub freeze: the held page keeps sounding",
+                           juce::String(held, 4));
+                }
             }
         }
 

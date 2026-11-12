@@ -2037,18 +2037,7 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     const int scoreFadeN = juce::jmax(1, (int) std::lround(audioSampleRate * (double) dragSmoothMs.load(std::memory_order_relaxed) / 1000.0));
 
     if (mon) // monitor mix: live passthrough, independent of the transport
-    {
-        const float* s0 = inScratch.getReadPointer(0);
-        const float* s1 = inScratch.getNumChannels() > 1 ? inScratch.getReadPointer(1) : s0;
-        for (int i = 0; i < n; ++i)
-        {
-            // v1.15: the monitor gain is smoothed per sample - a step in a
-            // gain (a slider move, host automation) is a click
-            inGainSmoothed += (inputGain.load() - inGainSmoothed) * kGainSmooth;
-            L[i] += s0[i] * inGainSmoothed;
-            if (R != nullptr) R[i] += s1[i] * inGainSmoothed;
-        }
-    }
+        mixMonitorInput (L, R, n);
 
     // v1.15: the score renders into its own buffer, so a block that cannot
     // be rendered (the UI thread holds the model lock) can be faded out
@@ -2143,87 +2132,10 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             }
 
             // v1.28: scrub audition (short preview while dragging the playhead)
-            if (! playingAtStart && scrubPreviewActive.load(std::memory_order_relaxed))
-            {
-                int remaining = scrubPreviewRemaining.load(std::memory_order_relaxed);
-                if (remaining > 0 && ! snap->pages.empty())
-                {
-                    int p = juce::jlimit(0, (int) snap->pages.size() - 1, audioPage);
-                    const upic::Page& pg = snap->pages[(size_t) p];
-                    int chunk = juce::jmin(n, remaining);
-                    juce::FloatVectorOperations::clear(SL, chunk);
-                    if (SR != nullptr) juce::FloatVectorOperations::clear(SR, chunk);
-                    double ph = scrubPreviewPlayhead.load(std::memory_order_relaxed);
-                    const double rate = scrubRate.load(std::memory_order_relaxed);
-                    const int sps = scrubPreviewSerial.load(std::memory_order_relaxed);
-                    if (sps != seenScrubPreviewSerial)
-                    {
-                        seenScrubPreviewSerial = sps;
-                        scrubEngine.reset(); // re-anchor to the dragged playhead
-                    }
-                    scrubEngine.render(pg, ph, snap->waveforms, snap->envelopes, snap->slots,
-                                      SL, (SR != nullptr ? SR : SL), chunk, 1.0f, rate);
-                    const int fade = juce::jmin(chunk / 4, (int) (audioSampleRate * 0.005));
-                    for (int i = 0; i < chunk; ++i)
-                    {
-                        float g = 1.0f;
-                        if (fade > 0)
-                        {
-                            if (i < fade) g = (float) i / (float) fade;
-                            else if (i >= chunk - fade) g = (float) (chunk - 1 - i) / (float) fade;
-                        }
-                        SL[i] *= g;
-                        if (SR != nullptr) SR[i] *= g;
-                    }
-                    const float mg = masterGain.load(std::memory_order_relaxed) * (float) previewGain;
-                    for (int i = 0; i < chunk; ++i)
-                    {
-                        L[i] += SL[i] * mg;
-                        if (R != nullptr) R[i] += (SR != nullptr ? SR[i] : SL[i]) * mg;
-                    }
-                    scrubPreviewPlayhead.store(ph + (double) chunk * rate / audioSampleRate, std::memory_order_relaxed);
-                    const int left = remaining - chunk;
-                    scrubPreviewRemaining.store(left, std::memory_order_relaxed);
-                    if (left <= 0) scrubPreviewActive.store(false, std::memory_order_relaxed);
-                }
-                else
-                {
-                    scrubPreviewActive.store(false, std::memory_order_relaxed);
-                }
-            }
-
-            // v1.28: freeze sustain (click without drag)
-            if (! playingAtStart && scrubFreezeActive.load(std::memory_order_relaxed))
-            {
-                const double nowMs2 = juce::Time::getMillisecondCounterHiRes();
-                const double stopAt = scrubFreezeStopAtMs.load(std::memory_order_relaxed);
-                if (stopAt > 0.0 && nowMs2 >= stopAt)
-                {
-                    scrubFreezeActive.store(false, std::memory_order_relaxed);
-                    scrubFreezeStopAtMs.store(0.0, std::memory_order_relaxed);
-                }
-                else if (! snap->pages.empty())
-                {
-                    int p = juce::jlimit(0, (int) snap->pages.size() - 1, audioPage);
-                    const upic::Page& pg = snap->pages[(size_t) p];
-                    juce::FloatVectorOperations::clear(FL, n);
-                    if (FR != nullptr) juce::FloatVectorOperations::clear(FR, n);
-                    engine.render(pg, audioPlayhead, snap->waveforms, snap->envelopes, snap->slots,
-                                  FL, (FR != nullptr ? FR : FL), n, 1.0f, 0.0, true);
-                    float gain = 1.0f;
-                    if (stopAt > 0.0)
-                    {
-                        const double rem = stopAt - nowMs2;
-                        gain = (float) juce::jlimit(0.0, 1.0, rem / juce::jmax(1, scrubTailMs));
-                    }
-                    const float mg = masterGain.load(std::memory_order_relaxed) * gain * (float) freezeGain;
-                    for (int i = 0; i < n; ++i)
-                    {
-                        L[i] += FL[i] * mg;
-                        if (R != nullptr) R[i] += (FR != nullptr ? FR[i] : FL[i]) * mg;
-                    }
-                }
-            }
+            // and the freeze sustain (the click without a drag)
+            AudioBlock block { L, R, SL, SR, FL, FR, n, playingAtStart };
+            renderScrubPreview (*snap, block, previewGain);
+            renderScrubFreeze (*snap, block, freezeGain);
 
             // Absorb model edits while stopped (no sound to fade).
             const int epoch = modelEpoch.load(std::memory_order_relaxed);
@@ -2282,6 +2194,43 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     }
 
     // v1.15: fade the score in/out, so that no block boundary can click
+    applyScoreFade (SL, SR, n, scoreFadeN, rendered, modelChanged);
+
+    // add the score to the output (the monitor mix is already in there)
+    mixMasterGain (L, R, SL, SR, n);
+
+    // a model edit was audible this block: drop the old voices now, on the
+    // audio thread (the message thread never touches the engine any more)
+    if (modelChanged)
+        engine.reset();
+
+    // Click-free manual stop: keep rendering the page for kStopFadeSec while
+    // the output ramps to silence, then halt (playhead keeps its position).
+    applyStopFade (L, R, n, stopping);
+}
+
+//==============================================================================
+// v1.30 (5.3 refactor): the parts of the audio block that were inlined in
+// getNextAudioBlock() are their own methods now. They all run on the audio
+// thread, so they only touch the members - no message thread, no locks.
+//==============================================================================
+void MainComponent::mixMonitorInput (float* L, float* R, int n)
+{
+    const float* s0 = inScratch.getReadPointer(0);
+    const float* s1 = inScratch.getNumChannels() > 1 ? inScratch.getReadPointer(1) : s0;
+    for (int i = 0; i < n; ++i)
+    {
+        // v1.15: the monitor gain is smoothed per sample - a step in a
+        // gain (a slider move, host automation) is a click
+        inGainSmoothed += (inputGain.load() - inGainSmoothed) * kGainSmooth;
+        L[i] += s0[i] * inGainSmoothed;
+        if (R != nullptr) R[i] += s1[i] * inGainSmoothed;
+    }
+}
+
+void MainComponent::applyScoreFade (float* SL, float* SR, int n, int scoreFadeN,
+                                    bool rendered, bool modelChanged)
+{
     if (rendered && ! modelChanged)
     {
         if (scoreGain < 1.0f)
@@ -2313,8 +2262,10 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         scoreGain = 0.0f;
         scoreTail = 0.0f;
     }
+}
 
-    // add the score to the output (the monitor mix is already in there)
+void MainComponent::mixMasterGain (float* L, float* R, const float* SL, const float* SR, int n)
+{
     for (int i = 0; i < n; ++i)
     {
         // v1.15: the master gain is smoothed per sample (a step = a click)
@@ -2322,14 +2273,109 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         L[i] += SL[i] * masterSmoothed;
         if (R != nullptr) R[i] += SR[i] * masterSmoothed;
     }
+}
 
-    // a model edit was audible this block: drop the old voices now, on the
-    // audio thread (the message thread never touches the engine any more)
-    if (modelChanged)
-        engine.reset();
+void MainComponent::renderScrubPreview (const ModelSnapshot& snap, AudioBlock& b, double previewGain)
+{
+    if (b.playingAtStart || ! scrubPreviewActive.load(std::memory_order_relaxed))
+        return;
 
-    // Click-free manual stop: keep rendering the page for kStopFadeSec while
-    // the output ramps to silence, then halt (playhead keeps its position).
+    int remaining = scrubPreviewRemaining.load(std::memory_order_relaxed);
+    if (remaining <= 0 || snap.pages.empty())
+    {
+        scrubPreviewActive.store(false, std::memory_order_relaxed);
+        return;
+    }
+
+    const int p = juce::jlimit(0, (int) snap.pages.size() - 1, audioPage);
+    const upic::Page& pg = snap.pages[(size_t) p];
+    const int chunk = juce::jmin(b.numSamples, remaining);
+    juce::FloatVectorOperations::clear (b.scoreL, chunk);
+    if (b.scoreR != nullptr) juce::FloatVectorOperations::clear (b.scoreR, chunk);
+
+    double ph = scrubPreviewPlayhead.load(std::memory_order_relaxed);
+    const double rate = scrubRate.load(std::memory_order_relaxed);
+    const int sps = scrubPreviewSerial.load(std::memory_order_relaxed);
+    if (sps != seenScrubPreviewSerial)
+    {
+        seenScrubPreviewSerial = sps;
+        scrubEngine.reset(); // re-anchor to the dragged playhead
+    }
+
+    scrubEngine.render (pg, ph, snap.waveforms, snap.envelopes, snap.slots,
+                        b.scoreL, (b.scoreR != nullptr ? b.scoreR : b.scoreL),
+                        chunk, 1.0f, rate);
+
+    const int fade = juce::jmin (chunk / 4, (int) (audioSampleRate * 0.005));
+    for (int i = 0; i < chunk; ++i)
+    {
+        float g = 1.0f;
+        if (fade > 0)
+        {
+            if (i < fade) g = (float) i / (float) fade;
+            else if (i >= chunk - fade) g = (float) (chunk - 1 - i) / (float) fade;
+        }
+        b.scoreL[i] *= g;
+        if (b.scoreR != nullptr) b.scoreR[i] *= g;
+    }
+
+    const float mg = masterGain.load(std::memory_order_relaxed) * (float) previewGain;
+    for (int i = 0; i < chunk; ++i)
+    {
+        b.outL[i] += b.scoreL[i] * mg;
+        if (b.outR != nullptr)
+            b.outR[i] += (b.scoreR != nullptr ? b.scoreR[i] : b.scoreL[i]) * mg;
+    }
+
+    scrubPreviewPlayhead.store (ph + (double) chunk * rate / audioSampleRate, std::memory_order_relaxed);
+    const int left = remaining - chunk;
+    scrubPreviewRemaining.store (left, std::memory_order_relaxed);
+    if (left <= 0) scrubPreviewActive.store (false, std::memory_order_relaxed);
+}
+
+void MainComponent::renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& b, double freezeGain)
+{
+    if (b.playingAtStart || ! scrubFreezeActive.load(std::memory_order_relaxed))
+        return;
+
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+    const double stopAt = scrubFreezeStopAtMs.load(std::memory_order_relaxed);
+    if (stopAt > 0.0 && nowMs >= stopAt)
+    {
+        scrubFreezeActive.store (false, std::memory_order_relaxed);
+        scrubFreezeStopAtMs.store (0.0, std::memory_order_relaxed);
+        return;
+    }
+
+    if (snap.pages.empty())
+        return;
+
+    const int p = juce::jlimit(0, (int) snap.pages.size() - 1, audioPage);
+    const upic::Page& pg = snap.pages[(size_t) p];
+    juce::FloatVectorOperations::clear (b.freezeL, b.numSamples);
+    if (b.freezeR != nullptr) juce::FloatVectorOperations::clear (b.freezeR, b.numSamples);
+
+    engine.render (pg, audioPlayhead, snap.waveforms, snap.envelopes, snap.slots,
+                   b.freezeL, (b.freezeR != nullptr ? b.freezeR : b.freezeL),
+                   b.numSamples, 1.0f, 0.0, true);
+
+    float gain = 1.0f;
+    if (stopAt > 0.0)
+    {
+        const double rem = stopAt - nowMs;
+        gain = (float) juce::jlimit (0.0, 1.0, rem / juce::jmax (1, scrubTailMs));
+    }
+
+    const float mg = masterGain.load(std::memory_order_relaxed) * gain * (float) freezeGain;
+    for (int i = 0; i < b.numSamples; ++i)
+    {
+        b.outL[i] += b.freezeL[i] * mg;
+        if (b.outR != nullptr)
+            b.outR[i] += (b.freezeR != nullptr ? b.freezeR[i] : b.freezeL[i]) * mg;
+    }
+}
+
+void MainComponent::applyStopFade (float* L, float* R, int n, bool stopping){
     if (stopping && isPlaying.load(std::memory_order_relaxed))
     {
         for (int i = 0; i < n; ++i)
