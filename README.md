@@ -149,13 +149,19 @@ button. Dragging the playhead while stopped now plays a short scrub
 preview. A Rev toggle runs the score backwards (a mirrored stroke sounds mirrored); a learned MIDI jog CC drives a signed, smoothed playhead (up to +/- 4x) in the app and the plugin.
 
 **Transforming the page** - the UPIC could transpose, reverse and invert a
-composition. The File menu's **Transform the page...** submenu transposes
-the page up or down an octave or a semitone, and **Invert the pitch**
-mirrors the drawn contour (a rising line becomes a falling one of the
-same size - the canvas is log-pitch, so this is what flipping the drawing
-upside down does, and inverting twice gives the page back). The
-transforms edit the selected arcs if there is a selection, otherwise
-every arc of the page.
+composition. The File menu's **Transform the page...** submenu carries the
+classical transformation family, applied to the selected arcs if there is
+a selection and to every arc of the page otherwise:
+
+- **Transpose** up or down an octave or a semitone.
+- **Invert the pitch** - mirrors the drawn contour (a rising line becomes
+  a falling one of the same size; the canvas is log-pitch, so this is
+  what flipping the drawing upside down does, and inverting twice gives
+  the page back).
+- **Retrograde** - mirrors it in time, so the contour reads backwards
+  inside its own span.
+- **Augment / diminish** - stretches or compresses it in time (x2, x0.5):
+  the same shape, played slower or faster.
 
 **Page duration** - the page's clock, from **5 ms** to **12 minutes**
 (the UPIC's own range: a drawing could sit in micro-time as well as in
@@ -244,7 +250,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 386 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 393 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -252,8 +258,8 @@ reverse under the global Rev toggle, the MIDI + OSC settings overlay,
 the arc list, the MIDI input, the envelope points, the v1.26
 multi-selection / toolbar edits, the v1.27
 wavetable fork / Stop rewind / Clear warning checks, the granular-vs-varispeed
-regression and the UPIC's pitch transformations (transpose, invert),
-the digitised wave page and the micro-time page) and writes the log to
+regression and the UPIC's transformations (transpose, invert, retrograde,
+augment), the digitised wave page and the micro-time page) and writes the log to
 `%TEMP%\upic_selftest.txt`. The build script also runs the 15-check
 plugin smoke test and pluginval at strictness 5.
 
