@@ -1189,6 +1189,54 @@ public:
                    "inverting twice gives the arc back");
         }
 
+        // 6i-e. v1.31: the time-axis half of the classical transformation
+        //      family - retrograde (mirror in time) and augmentation /
+        //      diminution (scale in time).
+        {
+            upic::Arc a;
+            a.points = { { 0.0, 220.0 }, { 1.0, 440.0 }, { 2.0, 880.0 } };
+
+            // the retrograde reads backwards inside the arc's own span
+            upic::Arc r = a;
+            r.retrograde();
+            check (std::abs (r.points[0].t - 0.0) < 1e-9
+                && std::abs (r.points[2].t - 2.0) < 1e-9,
+                   "the retrograde keeps the arc's time span",
+                   juce::String (r.points[0].t, 3) + " .. "
+                   + juce::String (r.points[2].t, 3));
+            check (std::abs (r.points[0].freq - 880.0) < 1e-6
+                && std::abs (r.points[2].freq - 220.0) < 1e-6,
+                   "the retrograde plays the contour backwards",
+                   juce::String (r.points[0].freq, 1) + " -> "
+                   + juce::String (r.points[2].freq, 1));
+            bool sorted = true;
+            for (size_t i = 1; i < r.points.size(); ++i)
+                if (r.points[i].t < r.points[i-1].t) sorted = false;
+            check (sorted, "the retrograde keeps the points sorted in time");
+
+            // and it is its own inverse
+            r.retrograde();
+            check (std::abs (r.points[0].freq - 220.0) < 1e-6
+                && std::abs (r.points[2].freq - 880.0) < 1e-6,
+                   "retrograding twice gives the arc back");
+
+            // the augmentation stretches the contour in time
+            upic::Arc g = a;
+            g.scaleTime (2.0);
+            check (std::abs ((g.points[2].t - g.points[0].t) - 4.0) < 1e-6,
+                   "the augmentation doubles the arc's time span",
+                   juce::String (g.points[2].t - g.points[0].t, 3) + " s");
+            check (std::abs (g.points[1].freq - 440.0) < 1e-6,
+                   "the augmentation keeps the pitch");
+
+            // and the diminution halves it
+            upic::Arc d = a;
+            d.scaleTime (0.5);
+            check (std::abs ((d.points[2].t - d.points[0].t) - 1.0) < 1e-6,
+                   "the diminution halves the arc's time span",
+                   juce::String (d.points[2].t - d.points[0].t, 3) + " s");
+        }
+
         // 6i-b. v1.31 (U4): the digitised wave page - a take becomes one
         //      loop of the oscillator.
         {

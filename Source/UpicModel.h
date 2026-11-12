@@ -317,6 +317,35 @@ namespace upic
                 p.freq = limits::clampFinite (centre * centre / p.freq, kMinFreq, kMaxFreq);
         }
 
+        // Retrograde: the time mirror, the other half of the classical
+        // transformation family. The contour is mirrored about the arc's
+        // own time centre and the points are reversed, so the curve reads
+        // backwards inside its own span (a rising line becomes a falling
+        // one). It is its own inverse.
+        void retrograde()
+        {
+            if (points.size() < 2) return;
+            const double centre = (points.front().t + points.back().t) * 0.5;
+            for (auto& p : points) p.t = centre - (p.t - centre);
+            std::reverse (points.begin(), points.end());
+            for (auto& p : points) p.t = limits::clampFinite (p.t, 0.0, kMaxPageSeconds);
+        }
+
+        // Augmentation / diminution: the time scale. The contour is
+        // stretched (factor > 1) or compressed (factor < 1) from the arc's
+        // own start - the same shape, played slower or faster. Scaling
+        // from the start (not from the centre) keeps the arc in the page
+        // and is the classic form: the phrase begins when it began and
+        // takes longer.
+        void scaleTime (double factor)
+        {
+            if (points.size() < 2 || ! (factor > 0.0) || ! std::isfinite (factor)) return;
+            const double t0 = points.front().t;
+            for (auto& p : points)
+                p.t = limits::clampFinite (t0 + (p.t - t0) * factor,
+                                           0.0, kMaxPageSeconds);
+        }
+
         // log-domain interpolation so glissandi sound linear in pitch
         double freqAt(double t) const
         {

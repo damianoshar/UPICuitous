@@ -483,6 +483,10 @@ void MainComponent::buildLiveControls()
         transform.addItem (104, "Transpose down a semitone");
         transform.addSeparator();
         transform.addItem (105, "Invert the pitch (mirror the contour)");
+        transform.addSeparator();
+        transform.addItem (106, "Retrograde (mirror it in time)");
+        transform.addItem (107, "Augment (stretch it in time x2)");
+        transform.addItem (108, "Diminish (compress it in time x0.5)");
         m.addSubMenu ("Transform the page...", transform);
         juce::Component::SafePointer<MainComponent> sp (this);
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&menuBtn),
@@ -4574,17 +4578,22 @@ void MainComponent::clearCurrentPage()
 //==============================================================================
 void MainComponent::transformPage (int op)
 {
+    // 0 = transpose, 1 = invert (pitch), 2 = retrograde (time), 3 = scale (time)
+    int kind = 0;
     double semitones = 0.0;
-    bool invert = false;
+    double factor = 1.0;
     juce::String what;
 
     switch (op)
     {
-        case 101: semitones =  12.0; what = "transposed up an octave"; break;
-        case 102: semitones = -12.0; what = "transposed down an octave"; break;
-        case 103: semitones =   1.0; what = "transposed up a semitone"; break;
-        case 104: semitones =  -1.0; what = "transposed down a semitone"; break;
-        case 105: invert = true;  what = "inverted (the pitch mirrored)"; break;
+        case 101: kind = 0; semitones =  12.0; what = "transposed up an octave"; break;
+        case 102: kind = 0; semitones = -12.0; what = "transposed down an octave"; break;
+        case 103: kind = 0; semitones =   1.0; what = "transposed up a semitone"; break;
+        case 104: kind = 0; semitones =  -1.0; what = "transposed down a semitone"; break;
+        case 105: kind = 1; what = "inverted (the pitch mirrored)"; break;
+        case 106: kind = 2; what = "retrograded (the time mirrored)"; break;
+        case 107: kind = 3; factor = 2.0; what = "augmented (twice as long)"; break;
+        case 108: kind = 3; factor = 0.5; what = "diminished (half as long)"; break;
         default: return;
     }
 
@@ -4600,8 +4609,14 @@ void MainComponent::transformPage (int op)
                 && std::find (ids.begin(), ids.end(), a.id) == ids.end())
                 continue;
 
-            if (invert) a.invertPitch();
-            else        a.transpose (semitones);
+            switch (kind)
+            {
+                case 0: a.transpose (semitones); break;
+                case 1: a.invertPitch(); break;
+                case 2: a.retrograde(); break;
+                case 3: a.scaleTime (factor); break;
+                default: break;
+            }
             ++touched;
         }
         if (touched > 0)
