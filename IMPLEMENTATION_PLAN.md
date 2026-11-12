@@ -33,7 +33,7 @@ its state.
 | 4.3 Web prototype | open (the source is not in this repo) |
 | 5.1 Binary search for the point lookups | **done** |
 | 5.2 try/catch around parsing | **done** (the plugin and the app paths) |
-| 5.3 Refactor MainComponent | open |
+| 5.3 Refactor MainComponent | **in progress** (branch `feature/refactor-maincomponent`) |
 | 6.x Features | open |
 
 ### Notes on what changed along the way
@@ -55,6 +55,23 @@ its state.
 - **The Python and web prototypes are gitignored here** (only
   `python-upic/test_upic.wav` remains), so S-07 does not apply to this
   repository.
+- **5.3 (MainComponent refactor) is in progress** on
+  `feature/refactor-maincomponent`. So far:
+  1. the overlay panel types moved to `Source/OverlayPanels.h`,
+  2. the 1400-line constructor split into 16 named `build*()` methods,
+  3. the OSC receiver and its endpoints moved to `Source/OscScrubReceiver`,
+  4. the sieve row, the arc list, the MIDI controls and the material tabs
+     split into their own `build*()` methods,
+  5. the overlay card layout moved out of `resized()`.
+
+  Every step was verified mechanically (the code lines and their brace
+  depths are unchanged - only the boundaries moved) and by the 367-check
+  selftest, the VST3 smoke test and the Android build.
+
+  Still to do: the MIDI section and the sieve section could become their
+  own classes (they are still widget-building code inside MainComponent),
+  and `getNextAudioBlock()` (the audio thread) and `renderScoreBlock()`
+  could move into the engine.
 
 
 ---
