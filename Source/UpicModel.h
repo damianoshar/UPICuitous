@@ -25,6 +25,15 @@ namespace upic
     constexpr int kMaxSampleSlots = 8;
     constexpr double kDefaultRefFreq = 261.63; // C4: base pitch for sample pitch-shift arcs
 
+    //---------------- the page duration range (U2) ----------------
+    // The real UPIC's page ran from a few milliseconds to several minutes
+    // ("the range was 6 milliseconds to 12 minutes", Xenakis 1992) - the
+    // drawings could sit in micro-time as well as in macro-time. The page
+    // duration is the piece's clock: the same drawing can be played fast or
+    // slow, and it is the one control that sets the time scale.
+    constexpr double kMinPageSeconds = 0.005;  // 5 ms
+    constexpr double kMaxPageSeconds = 720.0;  // 12 minutes
+
     inline double midiToFreq(double midi) { return 440.0 * std::pow(2.0, (midi - 69.0) / 12.0); }
     inline double freqToMidi(double f)
     {
@@ -381,7 +390,7 @@ namespace upic
                 {
                     if ((int) a.points.size() >= limits::kMaxPointsPerArc) break;
                     upic::ArcPoint pt;
-                    pt.t = limits::clampFinite((double) pv.getProperty("t", 0), 0.0, 600.0);
+                    pt.t = limits::clampFinite((double) pv.getProperty("t", 0), 0.0, kMaxPageSeconds);
                     pt.freq = limits::clampFinite((double) pv.getProperty("f", 440), kMinFreq, kMaxFreq);
                     pt.i = limits::clampIntensity((float)(double) pv.getProperty("i", 1.0));
                     a.points.push_back(pt);
@@ -491,8 +500,8 @@ namespace upic
         {
             SieveZone z;
             z.id = (int) v.getProperty("id", 1);
-            z.t0 = limits::clampFinite((double) v.getProperty("t0", 0.0), 0.0, 600.0);
-            z.t1 = limits::clampFinite((double) v.getProperty("t1", 0.0), 0.0, 600.0);
+            z.t0 = limits::clampFinite((double) v.getProperty("t0", 0.0), 0.0, kMaxPageSeconds);
+            z.t1 = limits::clampFinite((double) v.getProperty("t1", 0.0), 0.0, kMaxPageSeconds);
             z.f0 = limits::clampFinite((double) v.getProperty("f0", kMinFreq), kMinFreq, kMaxFreq);
             z.f1 = limits::clampFinite((double) v.getProperty("f1", kMaxFreq), kMinFreq, kMaxFreq);
             z.m = juce::jlimit(2, 120, (int) v.getProperty("m", 12));
@@ -1041,7 +1050,8 @@ namespace upic
         static Page fromVar(const juce::var& v)
         {
             Page p;
-            p.durationSec = limits::clampFinite((double) v.getProperty("duration", 30.0), 1.0, 600.0);
+            p.durationSec = limits::clampFinite((double) v.getProperty("duration", 30.0),
+                                              kMinPageSeconds, kMaxPageSeconds);
             p.tempoBpm    = limits::clampFinite((double) v.getProperty("tempo", 120.0), 20.0, 400.0);
             p.nextArcId = (int) v.getProperty("nextArcId", 1);
             if (auto* arr = v.getProperty("arcs", juce::var()).getArray())

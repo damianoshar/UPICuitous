@@ -1218,6 +1218,39 @@ public:
                    juce::String (first, 3) + " -> " + juce::String (last, 3));
         }
 
+        // 6i-c. v1.31 (U2): the micro-time end of the duration range. The
+        //      real UPIC's page ran from a few milliseconds to 12 minutes.
+        {
+            check (upic::kMinPageSeconds <= 0.01
+                && upic::kMaxPageSeconds >= 700.0,
+                   "the page duration range reaches micro-time and macro-time",
+                   juce::String (upic::kMinPageSeconds, 3) + " s .. "
+                   + juce::String (upic::kMaxPageSeconds, 0) + " s");
+
+            // a millisecond-scale page survives the parser
+            const auto pg = upic::Page::fromVar (juce::JSON::parse (
+                "{\"duration\":0.02,\"arcs\":[{\"id\":1,\"points\":["
+                "{\"t\":0,\"f\":220},{\"t\":0.015,\"f\":440}]}]}"));
+            check (std::abs (pg.durationSec - 0.02) < 1e-9,
+                   "a millisecond-scale page loads",
+                   juce::String (pg.durationSec, 4) + " s");
+            check (pg.arcs.size () == 1 && pg.arcs[0].points.size () == 2
+                && pg.arcs[0].points[1].t <= 0.02,
+                   "the arcs of a millisecond-scale page keep their times",
+                   juce::String (pg.arcs[0].points[1].t, 4));
+
+            // and a 12-minute page too
+            const auto longPg = upic::Page::fromVar (juce::JSON::parse (
+                "{\"duration\":900,\"arcs\":[{\"id\":1,\"points\":["
+                "{\"t\":0,\"f\":220},{\"t\":700,\"f\":440}]}]}"));
+            check (std::abs (longPg.durationSec - 720.0) < 1e-9,
+                   "a 12-minute page is clamped to the top of the range",
+                   juce::String (longPg.durationSec, 1) + " s");
+            check (longPg.arcs[0].points[1].t <= 720.0,
+                   "an arc beyond the top of the range is clamped",
+                   juce::String (longPg.arcs[0].points[1].t, 1));
+        }
+
         // 6j. v1.30 (S-03): a piece is untrusted input. The parsers clamp
         //     the counts and reject non-finite numbers, so a crafted piece
         //     cannot be used to freeze the UI or to push NaN into the audio

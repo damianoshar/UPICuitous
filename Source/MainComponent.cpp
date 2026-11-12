@@ -635,7 +635,16 @@ void MainComponent::buildToolbarControls()
     addAndMakeVisible(pageLab); addAndMakeVisible(durLab); addAndMakeVisible(masterLab); addAndMakeVisible(intenLab);
     addAndMakeVisible(timeLab); addAndMakeVisible(statusLab);
 
-    durSlider.setRange(5.0, 120.0, 0.5); durSlider.setValue(30.0);
+    // v1.31 (U2): the page duration runs from the UPIC's micro-time end
+    // (a few milliseconds) to its macro-time end (12 minutes). A linear
+    // slider over that range would be useless at the top, so the travel is
+    // skewed: 30 s sits in the middle and the value box takes an exact
+    // number (the UPIC's range was 6 ms to 12 min).
+    durSlider.setRange (upic::kMinPageSeconds, upic::kMaxPageSeconds, 0.005);
+    durSlider.setSkewFactorFromMidPoint (30.0);
+    durSlider.setValue (30.0);
+    durSlider.setNumDecimalPlacesToDisplay (3);
+    durSlider.setTextValueSuffix (" s");
     durSlider.onValueChange = [this]{
         juce::ScopedLock l(dataLock);
         curPage().durationSec = durSlider.getValue();
@@ -668,6 +677,9 @@ void MainComponent::buildToolbarControls()
     durSlider.setTextBoxStyle    (juce::Slider::TextBoxRight, false, 72, 18);
     masterSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 18);
     intenSlider.setTextBoxStyle  (juce::Slider::TextBoxRight, false, 72, 18);
+    // v1.31 (U2): the duration now reaches "720.000 s", so its value box
+    // needs a little more room than the shared 72 px.
+    durSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 92, 18);
     // v1.25: brighter tracks and thumbs - the dark scheme put the unfilled
     // track almost on top of the toolbar card.
     auto styleSlider = [](juce::Slider& s)
