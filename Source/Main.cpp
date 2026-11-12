@@ -1,4 +1,4 @@
-﻿#include <JuceHeader.h>
+#include <JuceHeader.h>
 #include "MainComponent.h"
 #include "AndroidBars.h"
 
@@ -6,7 +6,7 @@ class UpicApplication : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "UPICuitous"; }
-    const juce::String getApplicationVersion() override { return "0.28.0"; } // keep in sync with Plugin/CMakeLists.txt
+    const juce::String getApplicationVersion() override { return "0.28.1"; } // keep in sync with Plugin/CMakeLists.txt
     bool moreThanOneInstanceAllowed() override { return true; }
 
     void initialise(const juce::String& commandLine) override
@@ -1982,6 +1982,11 @@ public:
             for (auto& p : ps)
                 wt = wt || (p.m == 12 && p.remainders == std::vector<int>({ 0,2,4,6,8,10 }));
             check(wt, "preset whole-tone = m12 {0,2,4,6,8,10}");
+            bool chrom = false;
+            for (auto& p : ps)
+                chrom = chrom || (p.name == "Chromatic" && p.m == 12
+                                  && (int) p.remainders.size() == 12);
+            check(chrom, "preset Chromatic allows all twelve semitones");
         }
 
         // 13. sieve zones: containment, JSON, unified quantizePoint precedence
@@ -1996,10 +2001,19 @@ public:
             check(upic::zoneAt(zones, 6.0, 500.0) != nullptr, "zoneAt finds zone");
             check(upic::zoneAt(zones, 1.0, 500.0) == nullptr, "zoneAt misses outside");
 
+            z.stickiness = 0.4;
             auto zj = upic::SieveZone::fromVar(juce::JSON::parse(juce::JSON::toString(z.toVar(), false)));
             check(zj.id == 7 && std::abs(zj.t0 - 5.0) < 1e-9 && std::abs(zj.f1 - 800.0) < 1e-9
                   && zj.m == 12 && zj.remainders == z.remainders
-                  && std::abs(zj.timeGrid - 8.0) < 1e-9, "zone JSON round-trip");
+                  && std::abs(zj.timeGrid - 8.0) < 1e-9
+                  && std::abs(zj.stickiness - 0.4) < 1e-9, "zone JSON round-trip");
+            {
+                // a zone written before per-zone stickiness follows the global
+                auto legacy = upic::SieveZone::fromVar(juce::JSON::parse(
+                    "{\"id\":9,\"t0\":0,\"t1\":1,\"f0\":100,\"f1\":200,\"m\":12,\"r\":[0]}"));
+                check(std::abs(legacy.stickiness + 1.0) < 1e-9,
+                      "a legacy zone follows the global stick");
+            }
 
             upic::Page pz; pz.durationSec = 20; pz.zones.push_back(z); pz.nextZoneId = 8;
             auto pb = upic::Page::fromVar(juce::JSON::parse(juce::JSON::toString(pz.toVar(), false)));
@@ -2024,6 +2038,26 @@ public:
             upic::quantizePoint(true, false, 12, { 0 }, 0.0, 0.5, {}, t, f);
             check(std::abs(f - 445.0) < 0.6, "stickiness 0.5 half-snaps (450 -> ~445)",
                   juce::String(f, 2));
+
+            // v1.33.2: per-zone stickiness. The zone's own value wins inside
+            // it; -1 means "follow the global stick" (old pieces).
+            {
+                upic::SieveZone zs;
+                zs.t0 = 0; zs.t1 = 10; zs.f0 = 100; zs.f1 = 1000;
+                zs.m = 12; zs.remainders = { 0 }; zs.timeGrid = 0; zs.stickiness = 0.0;
+                std::vector<upic::SieveZone> zz { zs };
+                t = 5.0; f = 450.0;
+                upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, t, f);
+                check(std::abs(f - 450.0) < 1e-9,
+                      "zone stick 0 leaves the pitch free inside the zone",
+                      juce::String(f, 2));
+                zz[0].stickiness = -1.0;
+                t = 5.0; f = 450.0;
+                upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, t, f);
+                check(std::abs(upic::freqToMidi(f) - 72.0) < 0.05,
+                      "zone stick -1 follows the global stick (450 -> C5)",
+                      juce::String(f, 2));
+            }
         }
 
         // 14. freehand curve simplification (RDP): fewer points, shape kept
@@ -2414,6 +2448,76 @@ public:
                     }
                 }
 
+                // v1.33.2: the toolbar's Sieve checkbox and its m/R fields
+                // must reach the canvas. The unit tests above call setSieve()
+                // directly, which is exactly how a broken checkbox can hide.
+                {
+                    // the layout loop above ends at 360x640; the drawing
+                    // tests need the full-size canvas so a screen y maps to
+                    // the page's real pitch range.
+                    mc.setSize (1280, 800);
+                    auto* sc = dynamic_cast<ScoreEditor*> (find ("score"));
+                    auto* sb = dynamic_cast<juce::ToggleButton*> (find ("sieveBtn"));
+                    auto* me = dynamic_cast<juce::TextEditor*> (find ("sieveMEdit"));
+                    auto* re = dynamic_cast<juce::TextEditor*> (find ("sieveREdit"));
+                    check (sc != nullptr && sb != nullptr && me != nullptr && re != nullptr,
+                           "the Sieve checkbox and its m/R fields exist");
+                    if (sc != nullptr && sb != nullptr && me != nullptr && re != nullptr)
+                    {
+                        me->setText ("7", juce::dontSendNotification); me->onTextChange();
+                        re->setText ("0,2", juce::dontSendNotification); re->onTextChange();
+                        sb->setToggleState (true, juce::dontSendNotification); sb->onClick();
+                        check (sc->getSieveOn() && sc->getSieveM() == 7
+                               && sc->getSieveR() == std::vector<int>({ 0, 2 }),
+                               "the Sieve checkbox and fields reach the canvas",
+                               juce::String (sc->getSieveOn() ? "on " : "off ")
+                               + juce::String (sc->getSieveM()) + " {"
+                               + ScoreEditor::remaindersTextForTest (sc->getSieveR()) + "}");
+                        // End-to-end: the checked box must change the drawn
+                        // pitches. m12 {0} is the octave sieve: every point
+                        // lands on a C. With the box off the same line is
+                        // chromatic (the Snap default), so it has non-C's.
+                        sc->setSnap (true);
+                        sc->setTimeGrid (0.0);
+                        sc->setStickiness (1.0);
+                        me->setText ("12", juce::dontSendNotification); me->onTextChange();
+                        re->setText ("0", juce::dontSendNotification); re->onTextChange();
+                        sc->commitLineForTest ({ sc->getWidth() * 0.15f, sc->getHeight() * 0.25f },
+                                                { sc->getWidth() * 0.75f, sc->getHeight() * 0.80f });
+                        const auto sieved = sc->lastArcFreqsForTest();
+                        bool allC = ! sieved.empty();
+                        for (double f : sieved)
+                        {
+                            const double n = upic::freqToMidi (f);
+                            const int nn = (int) std::llround (n);
+                            if (std::abs (n - (double) nn) > 1e-6
+                                || ((nn % 12) + 12) % 12 != 0)
+                                allC = false;
+                        }
+                        check (allC, "the Sieve box changes the drawn pitches (C-only)",
+                               juce::String ((int) sieved.size()) + " points, first "
+                               + juce::String (sieved.empty() ? 0.0 : upic::freqToMidi (sieved.front()), 2)
+                               + "/" + juce::String (sieved.empty() ? 0.0 : upic::freqToMidi (sieved.back()), 2));
+
+                        sb->setToggleState (false, juce::dontSendNotification); sb->onClick();
+                        check (! sc->getSieveOn(), "unchecking the Sieve box turns the sieve off");
+                        sc->commitLineForTest ({ sc->getWidth() * 0.15f, sc->getHeight() * 0.25f },
+                                                { sc->getWidth() * 0.75f, sc->getHeight() * 0.80f });
+                        const auto freeFreqs = sc->lastArcFreqsForTest();
+                        bool anyNonC = false;
+                        for (double f : freeFreqs)
+                        {
+                            const int nn = (int) std::llround (upic::freqToMidi (f));
+                            if (((nn % 12) + 12) % 12 != 0) anyNonC = true;
+                        }
+                        check (anyNonC, "with the Sieve box off the line is chromatic again");
+                        // back to the defaults for the snapshot
+                        me->setText ("12", juce::dontSendNotification); me->onTextChange();
+                        re->setText ("0", juce::dontSendNotification); re->onTextChange();
+                        sb->setToggleState (false, juce::dontSendNotification); sb->onClick();
+                    }
+                }
+
                 // v1.33: a sieve zone can be moved and resized. The zone
                 // tool used to let you draw one and delete it, but not
                 // touch it afterwards.
@@ -2451,6 +2555,77 @@ public:
                                juce::String (wBefore, 0) + " -> "
                                + juce::String (wAfter, 0) + " px");
                         sc->deleteZone (zid);
+                    }
+                }
+
+                // v1.33.2: every zone-menu action must reach the zone, and a
+                // zone's own stick must override the global stick inside it.
+                {
+                    auto* sc = dynamic_cast<ScoreEditor*> (find ("score"));
+                    check (sc != nullptr, "the canvas exists for the zone menu test");
+                    if (sc != nullptr)
+                    {
+                        sc->setSieve (true, 12, { 0, 7 });
+                        sc->setTimeGrid (2.0);
+                        sc->setStickiness (0.8);
+                        const int zid = sc->addZone (1.0, 9.0, 120.0, 900.0);
+                        check (zid > 0, "the zone-menu zone can be drawn");
+                        check (std::abs (sc->zoneStickinessForTest (zid) - 0.8) < 1e-9,
+                               "a new zone inherits the global stick",
+                               juce::String (sc->zoneStickinessForTest (zid), 2));
+
+                        // use the toolbar's current sieve
+                        sc->setSieve (true, 5, { 1, 3 });
+                        sc->applyZoneMenuForTest (zid, ScoreEditor::zoneMenuSieveCurrent);
+                        check (sc->zoneSieveMForTest (zid) == 5
+                               && sc->zoneSieveRForTest (zid) == std::vector<int>({ 1, 3 }),
+                               "zone menu: use the current sieve reaches the zone");
+
+                        // a sieve preset (Major is index 2)
+                        sc->applyZoneMenuForTest (zid, ScoreEditor::zoneMenuSievePreset + 2);
+                        check (sc->zoneSieveMForTest (zid) == 12
+                               && sc->zoneSieveRForTest (zid)
+                                      == std::vector<int>({ 0, 2, 4, 5, 7, 9, 11 }),
+                               "zone menu: a sieve preset reaches the zone",
+                               "m" + juce::String (sc->zoneSieveMForTest (zid)) + " {"
+                               + ScoreEditor::remaindersTextForTest (sc->zoneSieveRForTest (zid)) + "}");
+
+                        // a time grid (4/s is index 3)
+                        sc->applyZoneMenuForTest (zid, ScoreEditor::zoneMenuGridChoice + 3);
+                        check (std::abs (sc->zoneTimeGridForTest (zid) - 4.0) < 1e-9,
+                               "zone menu: a time grid reaches the zone");
+
+                        // stick 0% -> the page's global stick (1.0) is ignored
+                        sc->applyZoneMenuForTest (zid, ScoreEditor::zoneMenuStickChoice);
+                        check (std::abs (sc->zoneStickinessForTest (zid)) < 1e-9,
+                               "zone menu: a stick value reaches the zone");
+                        sc->setStickiness (1.0);
+                        double t = 5.0, f = 450.0;
+                        sc->quantizeXY (t, f);
+                        check (std::abs (f - 450.0) < 0.5,
+                               "a zone's own stick overrides the global stick",
+                               juce::String (f, 1) + " Hz");
+
+                        // follow the global stick again -> the major sieve bites
+                        sc->applyZoneMenuForTest (zid, ScoreEditor::zoneMenuStickFollow);
+                        check (sc->zoneStickinessForTest (zid) < 0.0,
+                               "zone menu: follow the global stick");
+                        t = 5.0; f = 450.0;
+                        sc->quantizeXY (t, f);
+                        check (std::abs (f - 440.0) < 0.6,
+                               "follow-global uses the global stick",
+                               juce::String (f, 1) + " Hz, stick "
+                               + juce::String (sc->zoneStickinessForTest (zid), 2)
+                               + ", m" + juce::String (sc->zoneSieveMForTest (zid))
+                               + " {" + ScoreEditor::remaindersTextForTest (sc->zoneSieveRForTest (zid)) + "}");
+
+                        // delete through the menu
+                        sc->applyZoneMenuForTest (zid, ScoreEditor::zoneMenuDelete);
+                        check (sc->zoneSieveMForTest (zid) == -1,
+                               "zone menu: delete removes the zone");
+                        sc->setStickiness (1.0);
+                        sc->setSieve (false, 12, { 0 });
+                        sc->setTimeGrid (0.0);
                     }
                 }
 
@@ -2570,7 +2745,7 @@ public:
                     auto* in  = find ("inGainSlider");
                     auto* mon = find ("Mon");
                     auto* cap = find ("Capture");
-                    auto* sb  = find ("Sieve");
+                    auto* sb  = find ("sieveBtn");
                     auto* sp  = find ("sievePresetBox");
                     auto* sm  = find ("sieveMEdit");
                     auto* sr  = find ("sieveREdit");
@@ -3027,9 +3202,11 @@ public:
                 const float py = (float) scoreBounds.getY() + 4.0f;
                 const float pw = (float) scoreBounds.getWidth() - 12.0f;
                 const float phh = (float) scoreBounds.getHeight() - 10.0f;
-                // zone (t1..5 of 12s, 200..900Hz) -> pick t=3s, f=350Hz
+                // zone (t1..5 of 12s, 200..900Hz) -> pick t=3.07s, f=350Hz.
+                // 3.07 (not 3.00) avoids the zone's 2/s time-grid line, and
+                // 350 Hz sits between the zone's sieve guide lines.
                 const float norm350 = (float) (std::log2(350.0 / 20.0) / std::log2(12000.0 / 20.0));
-                const auto zonePx = img.getPixelAt((int) (px + pw * (3.0 / 12.0)),
+                const auto zonePx = img.getPixelAt((int) (px + pw * (3.07 / 12.0)),
                                                    (int) (py + phh * (1.0 - norm350)));
                 check(zonePx.getRed() >= 34 && zonePx.getRed() <= 46
                       && zonePx.getGreen() >= 52 && zonePx.getGreen() <= 64

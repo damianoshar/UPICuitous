@@ -726,6 +726,7 @@ void MainComponent::buildSieveControls()
     addAndMakeVisible(sieveBtn); addAndMakeVisible(sieveMEdit); addAndMakeVisible(sieveREdit);
     sieveMEdit.setName("sieveMEdit");
     sieveREdit.setName("sieveREdit");
+    sieveBtn.setName("sieveBtn");
     sieveMEdit.setTextToShowWhenEmpty("m=12", juce::Colour(0xff6a6a76));
     sieveREdit.setTextToShowWhenEmpty("0,7", juce::Colour(0xff6a6a76));
     sieveMEdit.setFont(juce::Font(juce::FontOptions(12.0f)));
@@ -737,27 +738,30 @@ void MainComponent::buildSieveControls()
     sieveBtn.onClick = [this]{ pushSieve(); };
 
     // v1.33: the sieve row says what each control does. The stickiness in
-    // particular was a mystery: it is the ONE global knob that says how
-    // strongly the drawing is pulled toward whatever magnet is active, and
-    // the sieve zones follow it (a zone has its own m/R and its own time
-    // grid, but not its own stickiness).
+    // particular was a mystery: it is the global knob that says how
+    // strongly the drawing is pulled toward whatever magnet is active.
+    // v1.33.2: the zones no longer follow it blindly - each zone carries
+    // its own stick (the zone menu sets it) and only follows the global
+    // value until one is chosen.
     sieveBtn.setTooltip ("The sieve quantises the drawing's PITCHES: only the\n"
                          "pitches n mod m in the remainder list are allowed,\n"
-                         "so the curve becomes a staircase of steps.");
-    sieveMEdit.setTooltip ("The sieve's modulus: how many equal divisions of\n"
-                           "the octave. 12 is the chromatic scale.");
+                         "so the curve becomes a staircase of steps.\n"
+                         "The allowed pitches are drawn as guides on the page.\n"
+                         "Inside a sieve zone the zone's own sieve wins.");
+    sieveMEdit.setTooltip ("The sieve's modulus: the octave is divided into m\n"
+                           "equal steps. 12 means semitones.");
     sieveREdit.setTooltip ("The sieve's remainders: which of the m divisions\n"
-                           "are allowed. 0 alone is the chromatic scale,\n"
-                           "0,7 is the diatonic one.");
+                           "are allowed. 0 leaves only the C's (an octave sieve),\n"
+                           "0,4,7 is a major triad, 0,7 is C and G.");
     sievePresetBox.setTooltip ("Sieve presets: they set the m/R and switch the\n"
                                "sieve on.");
     stickSlider.setTooltip ("How strongly the drawing is pulled toward the\n"
                              "magnet: the sieve (the pitches), a zone's own\n"
                              "sieve, and the time grid (the times). 1 is a\n"
                              "hard snap, 0 leaves the drawing free.\n"
-                             "GLOBAL: every page and every sieve zone uses\n"
-                             "this one value. A zone has its own m/R and\n"
-                             "time grid, but not its own stick.");
+                             "GLOBAL: this value applies outside the zones.\n"
+                             "A zone carries its own stick (right-click it);\n"
+                             "until you set one it follows this value.");
     gridBox.setTooltip ("Quantises the drawing's TIMES (the sieve quantises\n"
                         "the pitches). The points are pulled toward the grid\n"
                         "by Stick, so the curve takes the grid's shape.\n"
@@ -2222,8 +2226,12 @@ void MainComponent::pushSieve()
         if (t.isEmpty() || ! t.containsOnly("-0123456789")) continue;
         rs.push_back(((t.getIntValue() % sieveM) + sieveM) % sieveM);
     }
-    sieveR = rs; // empty = sieve inert (identity)
+    // v1.33.2: an empty/unparseable remainder field must not silently turn
+    // the sieve off (the checkbox then looked like it did nothing). Keep the
+    // last valid list while the field is being edited.
+    if (! rs.empty()) sieveR = rs;
     score.setSieve(sieveOn, sieveM, sieveR);
+    updateStatus();
 }
 
 // nUPIC-style procedural arc generation: the four generators from the reference

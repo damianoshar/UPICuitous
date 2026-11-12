@@ -1,4 +1,4 @@
-﻿# VST3 target for UPICuitous (v1.27).
+# VST3 target for UPICuitous (v0.28).
 #
 # This is a separate CMake project from the repo-root CMakeLists.txt (which
 # builds the stand-alone app and, via Builds/Android, the APK). It only builds
@@ -11,7 +11,7 @@
 
 cmake_minimum_required(VERSION 3.22)
 
-project(UPICuitousPlugin VERSION 0.28.0 LANGUAGES C CXX)
+project(UPICuitousPlugin VERSION 0.28.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -680,11 +680,13 @@ namespace upic
     //---------------- Sieve preset library ----------------
     // Ready-made Xenakian/Messiaen/etc. sieves (UPISketch ships a library of
     // examples; custom m/R stay editable in the sieve fields).
+    // The sieve is n mod m ∈ R on the semitone axis, so the chromatic set is
+    // all twelve remainders - {0} alone would leave only the C's.
     struct SievePreset { juce::String name; int m; std::vector<int> remainders; };
     inline std::vector<SievePreset> sievePresets()
     {
         return {
-            { "Chromatic",                 12, {0} },
+            { "Chromatic",                 12, {0,1,2,3,4,5,6,7,8,9,10,11} },
             { "Whole-tone",                12, {0,2,4,6,8,10} },
             { "Major",                     12, {0,2,4,5,7,9,11} },
             { "Minor",                     12, {0,2,3,5,7,8,10} },
@@ -708,6 +710,16 @@ namespace upic
         int m = 12;
         std::vector<int> remainders { 0 }; // empty = pitch inert inside the zone
         double timeGrid = 0;       // divisions/sec inside the zone (0 = none)
+        // v1.33.2: a zone carries its own stickiness, so "global" really is
+        // global only outside the zones. -1 = follow the global stick (the
+        // behaviour of old pieces, which had no per-zone stick).
+        double stickiness = -1.0;
+
+        double effectiveStickiness(double globalStick) const
+        {
+            const double s = (stickiness >= 0.0) ? stickiness : globalStick;
+            return juce::jlimit(0.0, 1.0, s);
+        }
 
         bool contains(double t, double f) const
         {
@@ -728,6 +740,7 @@ namespace upic
             for (int r : remainders) ra.add(r);
             o->setProperty("r", ra);
             if (timeGrid > 0) o->setProperty("timeGrid", timeGrid);
+            if (stickiness >= 0.0) o->setProperty("stick", stickiness);
             return juce::var(o);
         }
         static SieveZone fromVar(const juce::var& v)
@@ -740,6 +753,10 @@ namespace upic
             z.f1 = limits::clampFinite((double) v.getProperty("f1", kMaxFreq), kMinFreq, kMaxFreq);
             z.m = juce::jlimit(2, 120, (int) v.getProperty("m", 12));
             z.timeGrid = limits::clampFinite((double) v.getProperty("timeGrid", 0.0), 0.0, 64.0);
+            {
+                const double st = (double) v.getProperty("stick", -1.0);
+                z.stickiness = (st >= 0.0) ? limits::clampFinite(st, 0.0, 1.0) : -1.0;
+            }
             std::vector<int> rs;
             if (auto* arr = v.getProperty("r", juce::var()).getArray())
                 for (auto& rv : *arr)
@@ -763,13 +780,15 @@ namespace upic
 
     //---------------- Unified quantization: global params + zone override --------
     // Precedence: zone sieve > global sieve > plain chromatic snap; the zone's
-    // time grid overrides the global one. Stickiness (0..1) softens ALL snaps.
+    // time grid overrides the global one. A zone's own stick (when set) also
+    // overrides the global stick, so "global" only means outside the zones.
     inline void quantizePoint(bool chromaticSnap, bool sieveOn, int sieveM,
                               const std::vector<int>& sieveR, double timeGrid,
                               double stickiness, const std::vector<SieveZone>& zones,
                               double& t, double& f)
     {
         const SieveZone* z = zoneAt(zones, t, f);
+        const double stick = (z != nullptr) ? z->effectiveStickiness(stickiness) : stickiness;
         double target = f;
         if (z != nullptr)          target = sieveQuantizeHz(f, z->m, z->remainders);
         else if (sieveOn)          target = sieveQuantizeHz(f, sieveM, sieveR);
@@ -779,10 +798,10 @@ namespace upic
             mn = juce::jlimit(12.0, 120.0, mn);
             target = midiToFreq(mn);
         }
-        f = juce::jlimit(kMinFreq, kMaxFreq, stickify(f, target, stickiness));
+        f = juce::jlimit(kMinFreq, kMaxFreq, stickify(f, target, stick));
 
         const double g = (z != nullptr) ? z->timeGrid : timeGrid;
-        t = juce::jmax(0.0, stickify(t, timeGridSnap(t, g), stickiness));
+        t = juce::jmax(0.0, stickify(t, timeGridSnap(t, g), stick));
     }
 
     //---------------- Freehand curve simplification (Ramer-Douglas-Peucker) ------

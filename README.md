@@ -64,8 +64,8 @@ instant and never touches the audio device (v1.17).
 
 - X = time (5-120 s per page), Y = log pitch 20 Hz - 12 kHz.
 - Tools: Draw (snap), Line, Sine, Erase, Select/Move, Zone.
-- Magnetic sieve zones with their own sieve + time grid; global sieve
-  (Xenakis `n mod m` remainders), stickiness, time grid, presets.
+- Magnetic sieve zones with their own sieve, time grid and stickiness; global
+  sieve (Xenakis `n mod m` remainders), stickiness, time grid, presets.
 - **The sieve row** - the sieve on its own, because it only quantises the
   drawing's **pitches**: **Sieve** + **m** + **R** allow only the pitches
   whose MIDI number is `n mod m` in the remainder list. With a hard snap
@@ -75,26 +75,31 @@ instant and never touches the audio device (v1.17).
   sound holds and jumps with them. (The freehand and the Line tool both
   produce this; the time grid can still move the corner in time.) Below 1
   the drawing keeps its intermediate pitches and stays a smooth magnetised
-  curve.
-- **Global magnets row** - **Stick** and **T-grid**. **Stick** is the one
+  curve. The allowed pitches are also drawn as faint **guide lines** on the
+  page, so switching the box on/off is visible before you draw.
+- **Global magnets row** - **Stick** and **T-grid**. **Stick** is the
   global knob: how strongly the drawing is pulled toward whatever magnet
   is active - the sieve (the pitches), a zone's own sieve, and the time
-  grid (the times). 1 is a hard snap, 0 leaves the drawing free. **The
-  sieve zones follow it too**: a zone has its own `m`/`R` and its own time
-  grid, but there is one stickiness. **T-grid** quantises the drawing's
-  **times**; its points are pulled toward the grid by the stickiness, so
-  the curve takes the grid's shape; Off leaves the times free. A sieve
-  zone can set its own time grid, which applies inside the zone.
+  grid (the times). 1 is a hard snap, 0 leaves the drawing free. It applies
+  **outside the zones**: a zone carries its own stick (see below) and only
+  follows the global value until you set one. **T-grid** quantises the
+  drawing's **times**; its points are pulled toward the grid by the
+  stickiness, so the curve takes the grid's shape; Off leaves the times
+  free. A sieve zone can set its own time grid, which applies inside the
+  zone.
 - **Page frequency row** - **Ambitus**, **Accel** and **S1-S4** are the
   page's own settings (see below); the S labels show how many arcs are in
   each space. They are not sieve controls.
 - **Tools row** - the procedural generators (see below) and the keyboard
   hints.
 - **Sieve zones** - the Zone tool draws a magnetic region: inside it the
-  points snap to *that zone's* sieve and time grid. A zone can be
-  **dragged to a new place** (inside it) or **resized by an edge or a
-  corner**; right-click a zone to delete it or to give it the sieve or the
-  time grid the toolbar is showing now.
+  points snap to *that zone's* sieve, time grid and stickiness. A zone can
+  be **dragged to a new place** (inside it) or **resized by an edge or a
+  corner**; right-click a zone for **Sieve**, **Time grid** and
+  **Stickiness** submenus (the tick marks show what the zone uses now) and
+  the two delete actions. The zone's label shows its `m`/`R`, grid and
+  stick, and its allowed pitches and grid are drawn inside it. Inside a
+  zone the zone's sieve wins over the toolbar's global Sieve box.
 - Procedural generators: stochastic / convergent arborescence, echelon,
   ordinal spine.
 - Multi-select: Ctrl+A, Ctrl+C (count), Ctrl+D, Del, arrow nudge,
@@ -328,7 +333,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 450 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 470 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -339,8 +344,9 @@ wavetable fork / Stop rewind / Clear warning checks, the granular-vs-varispeed
 regression and the UPIC's transformations (transpose, invert, retrograde,
 augment), the discrete frequency space, the four frequency spaces, the
 ambitus, the infrasonic-to-ultrasound range, the page's acceleration, the
-movable sieve zones, the quantised line, the digitised wave page and the
-micro-time page) and writes the log to
+movable sieve zones, the quantised line, the per-zone stickiness, the
+sieve checkbox end-to-end, the zone menu actions, the digitised wave page
+and the micro-time page) and writes the log to
 `%TEMP%\upic_selftest.txt`. The build script also runs the 15-check
 plugin smoke test and pluginval at strictness 5.
 

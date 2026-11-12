@@ -138,6 +138,21 @@ public:
     }
     int getSelectedZone() const { return selectedZone; }
 
+    // Zone-menu action ids. applyZoneMenu() is the single place that mutates
+    // a zone from the menu, so the menu cannot silently do nothing - the
+    // selftest drives the same function.
+    static constexpr int zoneMenuDelete       = 1;
+    static constexpr int zoneMenuDeleteAll    = 2;
+    static constexpr int zoneMenuSieveCurrent = 10;
+    static constexpr int zoneMenuSieveOff     = 11;
+    static constexpr int zoneMenuSievePreset  = 12;  // + preset index
+    static constexpr int zoneMenuGridCurrent  = 30;
+    static constexpr int zoneMenuGridOff      = 31;
+    static constexpr int zoneMenuGridChoice   = 32;  // + index in grid choices
+    static constexpr int zoneMenuStickFollow  = 40;
+    static constexpr int zoneMenuStickCurrent = 41;
+    static constexpr int zoneMenuStickChoice  = 42;  // + index in stick choices
+
     // v1.33: the selftest drives the zone drag directly (a synthesised
     // mouse event needs a real MouseInputSource).
     juce::Rectangle<float> zoneRectForTest (int id) const
@@ -179,6 +194,41 @@ public:
                 return true;
         return false;
     }
+    std::vector<double> lastArcFreqsForTest() const
+    {
+        std::vector<double> f;
+        if (page == nullptr || page->arcs.empty()) return f;
+        for (auto& p : page->arcs.back().points) f.push_back (p.freq);
+        return f;
+    }
+    // v1.33.2: the zone menu actions are testable directly.
+    void applyZoneMenuForTest (int id, int action) { applyZoneMenu (id, action); }
+    static juce::String remaindersTextForTest (const std::vector<int>& r)
+    { return remaindersText (r); }
+    int zoneSieveMForTest (int id) const
+    {
+        if (page == nullptr) return -1;
+        for (auto& z : page->zones) if (z.id == id) return z.m;
+        return -1;
+    }
+    std::vector<int> zoneSieveRForTest (int id) const
+    {
+        if (page == nullptr) return {};
+        for (auto& z : page->zones) if (z.id == id) return z.remainders;
+        return {};
+    }
+    double zoneTimeGridForTest (int id) const
+    {
+        if (page == nullptr) return -1.0;
+        for (auto& z : page->zones) if (z.id == id) return z.timeGrid;
+        return -1.0;
+    }
+    double zoneStickinessForTest (int id) const
+    {
+        if (page == nullptr) return -2.0;
+        for (auto& z : page->zones) if (z.id == id) return z.stickiness;
+        return -2.0;
+    }
 
     void setSnap(bool s) { snap = s; }
     void setShowGrid(bool s) { showGrid = s; repaint(); }
@@ -214,6 +264,8 @@ public:
     void setSieve(bool on, int m, std::vector<int> remainders)
     { sieveOn = on; sieveM = juce::jmax(2, m); sieveR = std::move(remainders); repaint(); }
     bool getSieveOn() const { return sieveOn; }
+    int getSieveM() const { return sieveM; }
+    const std::vector<int>& getSieveR() const { return sieveR; }
 
     // v1.2: magnetism controls (UPISketch-style)
     void setStickiness(double s) { stickiness = juce::jlimit(0.0, 1.0, s); }
@@ -362,7 +414,7 @@ public:
     }
 
     // Zone tool: create a magnetic region from two corner times/freqs.
-    // The zone inherits the current sieve (m/R) and time grid.
+    // The zone inherits the current sieve (m/R), time grid and stickiness.
     int addZone(double ta, double tb, double fa, double fb)
     {
         if (! page) return -1;
@@ -377,6 +429,7 @@ public:
             z.m = sieveM;
             z.remainders = sieveR;
             z.timeGrid = timeGrid;
+            z.stickiness = juce::jlimit(0.0, 1.0, stickiness);
             page->zones.push_back(z);
         }
         selectedZone = z.id;
@@ -489,10 +542,15 @@ public:
                                                  : juce::Colour(0x805ac8fa));
                 g.drawRect(rect, z.id == selectedZone ? 2.0f : 1.0f);
                 juce::String lab = "m" + juce::String(z.m) + " {";
-                for (size_t i = 0; i < z.remainders.size(); ++i)
-                    lab += (i > 0 ? "," : "") + juce::String(z.remainders[i]);
+                if ((int) z.remainders.size() >= z.m)
+                    lab += "all";
+                else
+                    for (size_t i = 0; i < z.remainders.size(); ++i)
+                        lab += (i > 0 ? "," : "") + juce::String(z.remainders[i]);
                 lab += "}";
                 if (z.timeGrid > 0) lab += " " + juce::String(z.timeGrid, 0) + "/s";
+                if (z.stickiness >= 0.0)
+                    lab += " s" + juce::String((int) std::round(z.stickiness * 100.0)) + "%";
                 overlay.push_back({ lab, 10.0f, juce::Colour(0xffb8e0ff), (int) rect.getX() + 4, (int) rect.getY() + 13 });
             }
         }
@@ -572,6 +630,60 @@ public:
                 {
                     overlay.push_back({ juce::MidiMessage::getMidiNoteName(midi, true, true, 3),
                                         10.0f, juce::Colour(0xff8a8a99), (int)r.getX() + 3, (int)y - 3 });
+                }
+            }
+        }
+
+        // v1.33.2: show the active sieve's allowed pitches as faint guides.
+        // Switching the Sieve box on/off changes the page immediately, and a
+        // zone's own sieve and time grid are visible inside the zone. The
+        // pitch guides are Hz/MIDI, so they belong to the Osc layer only
+        // (Sample and Live map the vertical axis to ratios).
+        if (page)
+        {
+            const bool pitchGuides = (layer == 0);
+            auto drawSievePitches = [&](int m, const std::vector<int>& R,
+                                        double fLo, double fHi,
+                                        float x0, float x1, juce::Colour col)
+            {
+                if (m < 2 || R.empty() || x1 <= x0 + 1.0f) return;
+                g.setColour (col);
+                for (int midi = 12; midi <= 120; ++midi)
+                {
+                    const int rr = ((midi % m) + m) % m;
+                    if (std::find (R.begin(), R.end(), rr) == R.end()) continue;
+                    const double f = upic::midiToFreq ((double) midi);
+                    if (f < fLo || f > fHi) continue;
+                    const float y = freqToY (f);
+                    if (y < r.getY() || y > r.getBottom()) continue;
+                    g.drawHorizontalLine ((int) y, x0, x1);
+                }
+            };
+
+            if (pitchGuides && sieveOn)
+                drawSievePitches (sieveM, sieveR, ambitusLo(), ambitusHi(),
+                                  r.getX(), r.getRight(), juce::Colour (0x2438bdf8));
+
+            for (auto& z : page->zones)
+            {
+                const auto clip = zoneRect (z).getIntersection (r);
+                if (clip.isEmpty()) continue;
+                if (pitchGuides)
+                    drawSievePitches (z.m, z.remainders,
+                                      juce::jmin (z.f0, z.f1), juce::jmax (z.f0, z.f1),
+                                      clip.getX(), clip.getRight(), juce::Colour (0x3048e0a0));
+                if (z.timeGrid > 0)
+                {
+                    g.setColour (juce::Colour (0x2848e0a0));
+                    const double step = 1.0 / z.timeGrid;
+                    int guard = 0;
+                    for (double t = 0.0; t <= page->durationSec + 1e-9 && guard < 512;
+                         t += step, ++guard)
+                    {
+                        const float x = timeToX (t);
+                        if (x < clip.getX() || x > clip.getRight()) continue;
+                        g.drawVerticalLine ((int) x, clip.getY(), clip.getBottom());
+                    }
                 }
             }
         }
@@ -703,10 +815,10 @@ public:
             : (layer == 1)
                 ? juce::String("SAMPLE tab: drawn arcs play the slot; Pitch sets how they transpose it  |  Del: delete  |  Tool=") + toolName()
                 : juce::String("Draw: drag  |  R-click: menu  |  Shift-click: cycle  |  Ctrl+A: all  |  Ctrl+D: dup  |  Del: delete  |  Tool=") + toolName();
-        if (tool == Zone) hint = "Zone: drag a magnetic region (inherits sieve + grid)  |  drag inside a zone to move it, an edge to resize  |  R-click: edit  |  Del: remove  |  Tool=Zone";
+        if (tool == Zone) hint = "Zone: drag a magnetic region (inherits sieve + grid + stick)  |  drag inside to move, an edge to resize  |  R-click: sieve / grid / stick  |  Del: remove  |  Tool=Zone";
         if (sieveOn)
         {
-            hint += "  |  SIEVE m" + juce::String(sieveM) + " {";
+            hint += "  |  SIEVE (global) m" + juce::String(sieveM) + " {";
             for (size_t i = 0; i < sieveR.size(); ++i)
                 hint += (i > 0 ? "," : "") + juce::String(sieveR[i]);
             hint += "}";
@@ -1508,9 +1620,12 @@ private:
     {
         if (! page) return -1;
         const double t = xToTime(pos.x), f = yToFreq(pos.y);
-        // topmost (last drawn) first
+        // topmost (last drawn) first. A few pixels of slack let the border
+        // itself be grabbed for a move/resize (the exact edge can round to
+        // just outside the time/frequency rectangle).
         for (auto it = page->zones.rbegin(); it != page->zones.rend(); ++it)
-            if (it->contains(t, f)) return it->id;
+            if (it->contains(t, f) || zoneRect(*it).expanded (4.0f).contains (pos))
+                return it->id;
         return -1;
     }
 
@@ -1637,42 +1752,149 @@ private:
         });
     }
 
+    // Zone-menu action ids are declared with the public test hooks above.
+
+    static juce::String remaindersText (const std::vector<int>& r)
+    {
+        juce::String s;
+        for (size_t i = 0; i < r.size(); ++i)
+            s += (i > 0 ? "," : "") + juce::String (r[i]);
+        return s;
+    }
+
     void showZoneMenu(int id)
     {
+        const upic::SieveZone* z = findZone (id);
+        const auto presets = upic::sievePresets();
+        auto pct = [](double v) { return juce::String ((int) std::round (v * 100.0)) + "%"; };
+        auto sameR = [](const upic::SieveZone* zz, int mm, const std::vector<int>& rr)
+        {
+            return zz != nullptr && zz->m == mm && zz->remainders == rr;
+        };
+
         juce::PopupMenu m;
-        m.addItem(1, "Delete zone");
-        m.addItem(2, "Delete all zones");
+        m.addItem (zoneMenuDelete, "Delete zone");
+        m.addItem (zoneMenuDeleteAll, "Delete all zones");
         m.addSeparator();
-        // v1.33: a zone carries its own sieve and its own time grid. They
-        // used to be fixed at the moment the zone was drawn - now they can
-        // be re-set from the toolbar's current values.
-        m.addItem(3, "Use the sieve as it is now (m/R)");
-        m.addItem(4, "Use the time grid as it is now");
+
+        // v1.33.2: the zone's sieve, time grid and stick are three submenus.
+        // The tick shows what the zone actually uses now, so a change (or a
+        // no-op) is visible instead of being a guess.
+        juce::PopupMenu sieve;
+        sieve.addItem (zoneMenuSieveCurrent,
+                       "Use the current m" + juce::String (sieveM) + " {"
+                           + remaindersText (sieveR) + "}",
+                       true, sameR (z, sieveM, sieveR));
+        sieve.addItem (zoneMenuSieveOff, "Off (free pitch)", true,
+                       z != nullptr && z->remainders.empty());
+        sieve.addSeparator();
+        for (int i = 0; i < (int) presets.size(); ++i)
+            sieve.addItem (zoneMenuSievePreset + i, presets[(size_t) i].name, true,
+                           sameR (z, presets[(size_t) i].m, presets[(size_t) i].remainders));
+        m.addSubMenu ("Sieve", sieve);
+
+        juce::PopupMenu grid;
+        grid.addItem (zoneMenuGridCurrent,
+                      "Use the current (" + (timeGrid > 0.0
+                          ? juce::String (timeGrid, 0) + "/s" : juce::String ("off")) + ")",
+                      true, z != nullptr && std::abs (z->timeGrid - timeGrid) < 1e-9);
+        grid.addItem (zoneMenuGridOff, "Off", true, z != nullptr && z->timeGrid <= 0.0);
+        grid.addSeparator();
+        static const double gridChoices[] = { 0.5, 1.0, 2.0, 4.0, 8.0, 16.0 };
+        for (int i = 0; i < 6; ++i)
+            grid.addItem (zoneMenuGridChoice + i, juce::String (gridChoices[i], 0) + "/s",
+                          true, z != nullptr && std::abs (z->timeGrid - gridChoices[i]) < 1e-9);
+        m.addSubMenu ("Time grid", grid);
+
+        juce::PopupMenu stick;
+        stick.addItem (zoneMenuStickFollow, "Follow the global (" + pct (stickiness) + ")",
+                       true, z != nullptr && z->stickiness < 0.0);
+        stick.addItem (zoneMenuStickCurrent, "Use the current (" + pct (stickiness) + ")",
+                       true, z != nullptr && z->stickiness >= 0.0
+                               && std::abs (z->stickiness - stickiness) < 1e-9);
+        stick.addSeparator();
+        static const double stickChoices[] = { 0.0, 0.25, 0.5, 0.75, 1.0 };
+        for (int i = 0; i < 5; ++i)
+            stick.addItem (zoneMenuStickChoice + i, pct (stickChoices[i]), true,
+                           z != nullptr && z->stickiness >= 0.0
+                               && std::abs (z->stickiness - stickChoices[i]) < 1e-9);
+        m.addSubMenu ("Stickiness", stick);
+
         juce::Component::SafePointer<ScoreEditor> sp(this);
         m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
                         [sp, id](int result)
         {
-            if (sp == nullptr || result == 0 || sp->page == nullptr) return;
-            if (result == 1) { sp->deleteZone(id); return; }
-            if (result == 2)
-            {
-                std::vector<int> ids;
-                for (auto& z : sp->page->zones) ids.push_back(z.id);
-                for (int zid : ids) sp->deleteZone(zid);
-                return;
-            }
-            if (result == 3 || result == 4)
-            {
-                const juce::ScopedLock modelSl (sp->modelLock != nullptr ? *sp->modelLock : sp->dummyLock);
-                if (auto* z = sp->findZone (id))
-                {
-                    if (result == 3) { z->m = sp->sieveM; z->remainders = sp->sieveR; }
-                    else             { z->timeGrid = sp->timeGrid; }
-                    sp->notify();
-                    sp->repaint();
-                }
-            }
+            if (sp == nullptr || result == 0) return;
+            sp->applyZoneMenu (id, result);
         });
+    }
+
+    void applyZoneMenu (int id, int action)
+    {
+        if (page == nullptr) return;
+        if (action == zoneMenuDelete) { deleteZone (id); return; }
+        if (action == zoneMenuDeleteAll)
+        {
+            std::vector<int> ids;
+            for (auto& z : page->zones) ids.push_back (z.id);
+            for (int zid : ids) deleteZone (zid);
+            return;
+        }
+
+        bool changed = false;
+        {
+            const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+            auto* z = findZone (id);
+            if (z == nullptr) return;
+
+            if (action == zoneMenuSieveCurrent)
+            {
+                z->m = sieveM; z->remainders = sieveR; changed = true;
+            }
+            else if (action == zoneMenuSieveOff)
+            {
+                z->remainders.clear(); changed = true;
+            }
+            else if (action >= zoneMenuSievePreset
+                     && action < zoneMenuSievePreset + (int) upic::sievePresets().size())
+            {
+                // copy: the vector returned by sievePresets() is a temporary,
+                // so a reference into it would dangle (it freed m/R).
+                const auto pr = upic::sievePresets()[(size_t) (action - zoneMenuSievePreset)];
+                z->m = pr.m; z->remainders = pr.remainders; changed = true;
+            }
+            else if (action == zoneMenuGridCurrent)
+            {
+                z->timeGrid = timeGrid; changed = true;
+            }
+            else if (action == zoneMenuGridOff)
+            {
+                z->timeGrid = 0.0; changed = true;
+            }
+            else if (action >= zoneMenuGridChoice && action < zoneMenuGridChoice + 6)
+            {
+                static const double gridChoices[] = { 0.5, 1.0, 2.0, 4.0, 8.0, 16.0 };
+                z->timeGrid = gridChoices[action - zoneMenuGridChoice]; changed = true;
+            }
+            else if (action == zoneMenuStickFollow)
+            {
+                z->stickiness = -1.0; changed = true;
+            }
+            else if (action == zoneMenuStickCurrent)
+            {
+                z->stickiness = juce::jlimit (0.0, 1.0, stickiness); changed = true;
+            }
+            else if (action >= zoneMenuStickChoice && action < zoneMenuStickChoice + 5)
+            {
+                static const double stickChoices[] = { 0.0, 0.25, 0.5, 0.75, 1.0 };
+                z->stickiness = stickChoices[action - zoneMenuStickChoice]; changed = true;
+            }
+        }
+        if (changed)
+        {
+            notify();
+            repaint();
+        }
     }
 
     // Active pitch magnet at (t, f): zone > sieve > chromatic snap.

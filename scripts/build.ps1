@@ -48,6 +48,24 @@ function Find-MSBuild {
     return $null
 }
 
+# ----------------------------------------------------------------- CMake ---
+# JUCE 8 uses the WRITE_BASIC_CONFIG_VERSION_FILE "ExactVersion" mode that
+# CMake 4.4 removed, and WinGet can put its own mingw CMake 4.4 ahead of the
+# Visual Studio one on PATH. Prefer the CMake that ships with VS (the build
+# project's generator), and only fall back to PATH if it is missing.
+function Find-CMake {
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $vsRoot = & $vswhere -latest -products * -property installationPath 2>$null |
+                    Select-Object -First 1
+        if ($vsRoot) {
+            $cand = Join-Path $vsRoot "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+            if (Test-Path $cand) { return $cand }
+        }
+    }
+    return "cmake"
+}
+
 # --------------------------------------------------- plugin version bump ---
 # JUCE writes the Windows version resource from Info.txt into
 # <Name>_resources.rc, but the custom command that does it only depends on
@@ -185,18 +203,19 @@ $vst3Path = Join-Path $root "Builds\Plugin\UPICuitousPlugin_artefacts\Release\VS
 
 if (-not $SkipPlugin) {
     Step "Plugin build (Release)"
+    $cmake = Find-CMake
     if (-not (Test-Path (Join-Path $root "Builds\Plugin\CMakeCache.txt"))) {
-        cmake -S Plugin -B Builds/Plugin -G "Visual Studio 18 2026" -A x64
+        & $cmake -S Plugin -B Builds/Plugin -G "Visual Studio 18 2026" -A x64
         if ($LASTEXITCODE -ne 0) { Die "cmake configure failed" }
     }
     Remove-StaleVersionResource
 
-    cmake --build Builds/Plugin --config Release --parallel 4
+    & $cmake --build Builds/Plugin --config Release --parallel 4
     if ($LASTEXITCODE -ne 0) { Die "plugin build failed" }
 
     if (-not $SkipSmoke) {
         Step "Plugin smoke test"
-        cmake --build Builds/Plugin --config Release --target UPICuitousPluginSmokeTest --parallel 4
+        & $cmake --build Builds/Plugin --config Release --target UPICuitousPluginSmokeTest --parallel 4
         if ($LASTEXITCODE -ne 0) { Die "smoke test build failed" }
         $smoke = Join-Path $root "Builds\Plugin\UPICuitousPluginSmokeTest_artefacts\Release\UPICuitousPluginSmokeTest.exe"
         $smokeOut = & $smoke
