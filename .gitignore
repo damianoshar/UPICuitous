@@ -58,3 +58,6 @@ JuceLibraryCode/
 .opencode/
 python-upic/
 web-upic/
+
+# stray simulation dumps from a Verilog testbench (Icarus)
+*.vcd
