@@ -296,6 +296,13 @@ namespace upic
         // of equal divisions per octave the pitch is moved through.
         int stepDivisions = 0;
 
+        //---------------- the frequency space (v1.33) ----------------
+        // Which of the page's four spaces this arc is played in (0..3).
+        // The UPIC assigned a table to an arc "the same way as one would
+        // assign the waveform or envelope to it"; the space itself is the
+        // page's, the name is the arc's.
+        int space = 0;
+
         double startTime() const { return points.empty() ? 0 : points.front().t; }
         double endTime()   const { return points.empty() ? 0 : points.back().t; }
 
@@ -427,6 +434,8 @@ namespace upic
             o->setProperty("modDepth", modDepth);
             // v1.32: the discrete frequency space travels with the piece
             if (stepDivisions > 0) o->setProperty("sd", stepDivisions);
+            // v1.33: the frequency space the arc is played in
+            if (space != 0) o->setProperty("sp", space);
             juce::Array<juce::var> arr;
             for (auto& p : points)
             {
@@ -465,6 +474,9 @@ namespace upic
             // v1.32: the discrete frequency space (absent in older pieces ->
             // the continuum)
             a.stepDivisions = juce::jlimit (0, 99, (int) v.getProperty ("sd", 0));
+            // v1.33: the frequency space (absent in older pieces -> the
+            // page's own range, which is the identity)
+            a.space = juce::jlimit (0, 3, (int) v.getProperty ("sp", 0));
             if (auto* arr = v.getProperty("points", juce::var()).getArray())
                 for (auto& pv : *arr)
                 {
@@ -519,6 +531,61 @@ namespace upic
         // a temperament must never move the pitch out of the world: a NaN or
         // a zero here would silence the arc.
         return (std::isfinite (out) && out > 0.0) ? out : hz;
+    }
+
+    //---------------- the frequency spaces (v1.33) ----------------
+    // The UPIC's real-time versions had a "Frequency Table": "a composer
+    // could choose to operate within up to four different simultaneous
+    // tables or grids that could be superimposed on each page. These grids
+    // were invisible to the eye, however, and accessed by assigning one of
+    // four tables to whatever arc was being drawn, the same way as one
+    // would assign the waveform or envelope to it. An arc could thus be
+    // 'placed' within different frequency spaces determined by the
+    // composer." (Robindoré, in "From Xenakis's UPIC to Graphic Notation
+    // Today", Hatje Cantz 2024)
+    //
+    // So a space is a range of the frequency axis, and the page's vertical
+    // axis (its ambitus) is mapped into it: the same drawing lands in a
+    // different frequency space, with its intervals scaled or its register
+    // moved. The four spaces live on the page; an arc names the one it is
+    // played in, exactly as it names its wave or its envelope.
+    //
+    // A space is stored as a PRESET (a span factor and a centre shift in
+    // octaves) relative to the page's ambitus, so that changing the
+    // ambitus moves the spaces with it.
+    struct FreqSpacePreset
+    {
+        const char* name = "";
+        double span  = 1.0;  // the space's span, as a factor of the ambitus's
+        double shift = 0.0;  // the space's centre, in octaves from the ambitus's
+    };
+
+    inline const std::vector<FreqSpacePreset>& freqSpacePresets()
+    {
+        static const std::vector<FreqSpacePreset> p = {
+            { "The page's range",      1.0,  0.0 },
+            { "Half the range",        0.5,  0.0 },
+            { "Double the range",      2.0,  0.0 },
+            { "An octave up",          1.0,  1.0 },
+            { "An octave down",        1.0, -1.0 },
+            { "Half, an octave up",    0.5,  1.0 },
+            { "Double, an octave down", 2.0, -1.0 },
+        };
+        return p;
+    }
+
+    // The range of a space, given the page's ambitus.
+    inline void freqSpaceRange (double ambLo, double ambHi, int preset,
+                                double& lo, double& hi)
+    {
+        const auto& presets = freqSpacePresets();
+        const FreqSpacePreset p = presets[(size_t) juce::jlimit (0, (int) presets.size() - 1, preset)];
+        const double a0 = std::log2 (juce::jmax (1.0, ambLo));
+        const double a1 = std::log2 (juce::jmax (1.0, ambHi));
+        const double centre = (a0 + a1) * 0.5 + p.shift;
+        const double half   = (a1 - a0) * 0.5 * p.span;
+        lo = std::pow (2.0, centre - half);
+        hi = std::pow (2.0, centre + half);
     }
 
     //---------------- Magnetic snap: stickiness + time grid (UPISketch-style) ----
@@ -1121,6 +1188,77 @@ namespace upic
         std::vector<SieveZone> zones; // magnetic sieve regions (empty = none)
         int nextZoneId = 1;
 
+        //---------------- the page's frequency spaces (v1.33) ----------------
+        // The ambitus is the interval the page's vertical axis covers: "the
+        // scale of the millimetric surface could be selected, so that the
+        // vertical axis could correspond to any interval" (Mache). The
+        // default is the whole canvas range, so an old piece is unchanged.
+        double pitchLo = kMinFreq;
+        double pitchHi = kMaxFreq;
+
+        // The four spaces (the UPIC's four frequency tables). Each is a
+        // preset relative to the ambitus; space 0 is the page's own range,
+        // which is the identity, so an arc in space 0 sounds as drawn.
+        std::array<int, 4> spaces { 0, 0, 0, 0 };
+
+        // The range of one of the page's spaces.
+        void spaceRange (int index, double& lo, double& hi) const
+        {
+            const auto m = spaceMap (index);
+            lo = std::exp2 (m.t0);
+            hi = std::exp2 (m.t1);
+        }
+
+        // The pitch a drawn pitch sounds at in one of the page's spaces:
+        // the position on the page's vertical axis is mapped into the
+        // space. The intervals are scaled with it (a space half as wide
+        // halves them) and the register moves with the space's centre.
+        double placeInSpace (double hz, int index) const
+        {
+            return spaceMap (index).apply (hz);
+        }
+
+        // The mapping of the page's vertical axis into one of its spaces.
+        // It is precomputed ONCE per arc on the audio thread: the per-
+        // sample cost is a log2 and an exp2, not a table lookup and a
+        // range calculation.
+        struct SpaceMap
+        {
+            double a0 = 0.0, a1 = 1.0;   // the ambitus, in log2
+            double t0 = 0.0, t1 = 1.0;   // the space, in log2
+            // The page's own space IS the identity: the pitch passes through
+            // UNCHANGED, bit for bit. That matters: the phase vocoder picks
+            // its output bin with a truncated (k * ratio), so a mapping that
+            // returns the pitch with one ULP different can move a partial
+            // into the next bin and wreck the voice. An identity mapping
+            // must therefore not round-trip through log2/exp2 at all.
+            bool identity = true;
+            double apply (double hz) const
+            {
+                if (identity) return hz;
+                const double n = juce::jlimit (0.0, 1.0,
+                                (std::log2 (juce::jmax (1.0, hz)) - a0)
+                                  / juce::jmax (1.0e-6, a1 - a0));
+                return std::exp2 (t0 + n * (t1 - t0));
+            }
+        };
+
+        SpaceMap spaceMap (int index) const
+        {
+            const auto& presets = freqSpacePresets();
+            const FreqSpacePreset p = presets[(size_t) juce::jlimit (0, (int) presets.size() - 1,
+                                                spaces[(size_t) juce::jlimit (0, 3, index)])];
+            SpaceMap m;
+            m.a0 = std::log2 (juce::jmax (1.0, pitchLo));
+            m.a1 = std::log2 (juce::jmax (1.0, pitchHi));
+            const double centre = (m.a0 + m.a1) * 0.5 + p.shift;
+            const double half   = (m.a1 - m.a0) * 0.5 * p.span;
+            m.t0 = centre - half;
+            m.t1 = centre + half;
+            m.identity = (p.shift == 0.0 && p.span == 1.0);
+            return m;
+        }
+
         double beatsToSeconds (double beat) const {
             const double bpm = (tempoBpm > 1.0) ? tempoBpm : 120.0;
             return beat * (60.0 / bpm);
@@ -1146,6 +1284,22 @@ namespace upic
                 for (auto& z : zones) zarr.add(z.toVar());
                 o->setProperty("zones", zarr);
                 o->setProperty("nextZoneId", nextZoneId);
+            }
+            // v1.33: the ambitus and the four spaces. Omitted when they are
+            // the defaults, so an old piece's file is byte-for-byte what it
+            // was.
+            if (pitchLo != kMinFreq || pitchHi != kMaxFreq)
+            {
+                o->setProperty("ambLo", pitchLo);
+                o->setProperty("ambHi", pitchHi);
+            }
+            bool anySpace = false;
+            for (auto s : spaces) if (s != 0) { anySpace = true; break; }
+            if (anySpace)
+            {
+                juce::Array<juce::var> sarr;
+                for (auto s : spaces) sarr.add((int) s);
+                o->setProperty("spaces", sarr);
             }
             return juce::var(o);
         }
@@ -1177,6 +1331,21 @@ namespace upic
                 }
             for (auto& z : p.zones)
                 p.nextZoneId = juce::jmax(p.nextZoneId, z.id + 1);
+            // v1.33: the ambitus and the four spaces (absent in old pieces ->
+            // the whole canvas range, and the page's own space)
+            p.pitchLo = limits::clampFinite((double) v.getProperty("ambLo", kMinFreq),
+                                            kMinFreq, kMaxFreq);
+            p.pitchHi = limits::clampFinite((double) v.getProperty("ambHi", kMaxFreq),
+                                            kMinFreq, kMaxFreq);
+            if (p.pitchHi <= p.pitchLo * 1.0001)
+            {
+                p.pitchLo = kMinFreq;
+                p.pitchHi = kMaxFreq;
+            }
+            if (auto* sarr = v.getProperty("spaces", juce::var()).getArray())
+                for (size_t i = 0; i < p.spaces.size() && i < (size_t) sarr->size(); ++i)
+                    p.spaces[i] = juce::jlimit (0, (int) freqSpacePresets().size() - 1,
+                                               (int) (*sarr)[(int) i]);
             return p;
         }
     };

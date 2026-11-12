@@ -46,6 +46,7 @@ MainComponent::MainComponent(bool pluginMode)
     buildMaterialControls();
     buildSieveControls();
     buildStepControls();
+    buildSpaceControls();
     buildArcListPanel();
     buildMidiControls();
     buildMaterialTabs();
@@ -933,6 +934,113 @@ void MainComponent::applyStepToSelection()
     stepDivSlider.setEnabled (divs > 0);
 }
 
+// v1.33: the frequency spaces - the UPIC's four frequency tables. "A
+// composer could choose to operate within up to four different
+// simultaneous tables or grids that could be superimposed on each page.
+// These grids were invisible to the eye, however, and accessed by
+// assigning one of four tables to whatever arc was being drawn, the same
+// way as one would assign the waveform or envelope to it." (Robindoré)
+//
+// So: the PAGE owns the four spaces, and an arc names the one it is
+// played in. A space is a range of the frequency axis - the position on
+// the page's vertical axis is mapped into it, so the same drawing can be
+// heard in another register, with its intervals scaled.
+void MainComponent::buildSpaceControls()
+{
+    addAndMakeVisible(spaceBox); addAndMakeVisible(spaceLab);
+    spaceBox.setName("spaceBox");
+    spaceBox.setTooltip ("The frequency space this arc is played in.\n"
+                         "The page has four (the UPIC's four tables);\n"
+                         "the drawing is mapped into the one you pick.");
+    for (int i = 0; i < 4; ++i)
+    {
+        addAndMakeVisible(spaceDefBox[i]); addAndMakeVisible(spaceDefLab[i]);
+        spaceDefBox[i].setName ("spaceDefBox" + juce::String (i));
+        spaceDefLab[i].setName ("spaceDefLab" + juce::String (i));
+        spaceDefLab[i].setJustificationType (juce::Justification::centredRight);
+        spaceDefLab[i].setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
+        spaceDefLab[i].setText ("S" + juce::String (i + 1), juce::dontSendNotification);
+        spaceDefLab[i].setTooltip ("The page's frequency space " + juce::String (i + 1)
+                                   + " - the range the page's vertical axis is\n"
+                                     "mapped into for the arcs that use it.");
+        const auto& presets = upic::freqSpacePresets();
+        for (int p = 0; p < (int) presets.size(); ++p)
+            spaceDefBox[i].addItem (juce::String (presets[(size_t) p].name), p + 1);
+        spaceDefBox[i].setSelectedId (1, juce::dontSendNotification);
+        spaceDefBox[i].onChange = [this]{ pushSpaceDefs(); };
+    }
+
+    spaceBox.onChange = [this]{
+        applySpaceToSelection();
+        const int s = juce::jlimit (0, 3, spaceBox.getSelectedId() - 1);
+        flash ("Space " + juce::String (s + 1) + ": "
+               + upic::freqSpacePresets()[(size_t) curPage().spaces[(size_t) s]].name);
+    };
+}
+
+// The page's four spaces -> the model.
+void MainComponent::pushSpaceDefs()
+{
+    {
+        const juce::ScopedLock l(dataLock);
+        auto& pg = curPage();
+        for (int i = 0; i < 4; ++i)
+            pg.spaces[(size_t) i] = juce::jlimit (0,
+                (int) upic::freqSpacePresets().size() - 1,
+                spaceDefBox[i].getSelectedId() - 1);
+    }
+    publishModelSnapshot();
+    markModelChanged();
+    refreshSpaceBox();
+    score.repaint();
+}
+
+// The arc's space: the assignment, the way a wave or an envelope is
+// assigned.
+void MainComponent::applySpaceToSelection()
+{
+    const int s = juce::jlimit (0, 3, spaceBox.getSelectedId() - 1);
+    const auto ids = score.getSelectedArcs();
+    if (! ids.empty())
+    {
+        {
+            const juce::ScopedLock l(dataLock);
+            for (auto& a : curPage().arcs)
+                if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
+                    a.space = s;
+        }
+        publishModelSnapshot();
+        markModelChanged();
+        score.repaint();
+    }
+    // a new arc is born in the space on show
+    score.setCurrentSpace (s);
+}
+
+// The arc's combo lists the page's four spaces by name.
+void MainComponent::refreshSpaceBox()
+{
+    const auto ids = score.getSelectedArcs();
+    int cur = -1;
+    {
+        const juce::ScopedLock l(dataLock);
+        for (auto& a : curPage().arcs)
+            if (! ids.empty() && std::find (ids.begin(), ids.end(), a.id) != ids.end())
+            { cur = juce::jlimit (0, 3, a.space); break; }
+        if (cur < 0) cur = score.getCurrentSpace();
+    }
+    spaceBox.clear (juce::dontSendNotification);
+    const auto& presets = upic::freqSpacePresets();
+    for (int i = 0; i < 4; ++i)
+    {
+        const int p = juce::jlimit (0, (int) presets.size() - 1,
+                                    curPage().spaces[(size_t) i]);
+        spaceBox.addItem (juce::String (i + 1) + ": " + juce::String (presets[(size_t) p].name),
+                          i + 1);
+    }
+    spaceBox.setSelectedId (cur + 1, juce::dontSendNotification);
+}
+
 void MainComponent::buildArcListPanel()
 {
     // v1.21 (wave 19): the arc list panel - the score's inventory on the
@@ -1549,7 +1657,8 @@ void MainComponent::buildScoreArea()
                 double arcDur = juce::jmax(1.0e-6, a.endTime() - a.startTime());
                 double progress = juce::jlimit(0.0, 1.0, (t - a.startTime()) / arcDur);
                 double pos = arcMapped ? progress * sd
-                                       : UpicEngine::scrubMaterialPos(a, t, ref, sd);
+                                       : UpicEngine::scrubMaterialPos(a, t, ref, sd,
+                                                 curPage().spaceMap (a.space));
                 frac = std::fmod(pos, sd) / sd;
                 break;
             }
@@ -1718,6 +1827,13 @@ void MainComponent::refreshBoxes()
     pageBox.setSelectedId(currentPage + 1, juce::dontSendNotification);
     durSlider.setValue(curPage().durationSec, juce::dontSendNotification);
 
+    // v1.33: the page's four frequency spaces
+    for (int i = 0; i < 4; ++i)
+        spaceDefBox[i].setSelectedId (juce::jlimit (0,
+            (int) upic::freqSpacePresets().size() - 1,
+            curPage().spaces[(size_t) i]) + 1, juce::dontSendNotification);
+    refreshSpaceBox();
+
     waveBox.clear(juce::dontSendNotification);
     for (size_t i = 0; i < waveforms.size(); ++i)
         waveBox.addItem(juce::String(waveforms[i].id) + ": " + waveforms[i].name, (int)i + 1);
@@ -1853,6 +1969,8 @@ void MainComponent::pushVoice()
     // v1.32: a new arc is born with the frequency space on show
     score.setCurrentStep (stepBtn.getToggleState()
                             ? juce::jlimit (1, 99, (int) stepDivSlider.getValue()) : 0);
+    // v1.33: and in the frequency space on show
+    score.setCurrentSpace (juce::jlimit (0, 3, spaceBox.getSelectedId() - 1));
     int pmEnvId = 0;
     const int pmIdx = pmIndexEnvBox.getSelectedId();
     if (pmIdx >= 2 && pmIdx - 2 < (int) envelopes.size())
@@ -1912,6 +2030,9 @@ void MainComponent::syncControlsToArc(int arcId)
                                        a.stepDivisions > 0 ? a.stepDivisions : 12),
                                     juce::dontSendNotification);
             stepDivSlider.setEnabled (a.stepDivisions > 0);
+            // v1.33: the frequency space follows the selected arc
+            score.setCurrentSpace (juce::jlimit (0, 3, a.space));
+            refreshSpaceBox();
             // reflect material in the tabs (the arc is in this tab's layer)
             drawMatMode = juce::jlimit(0, 3, a.mode);
             syncMaterialTabs();
@@ -3660,6 +3781,11 @@ void MainComponent::resized()
           FL(&stickLab, 38, &stickSlider, 160),
           FL(&gridLab, 44, &gridBox, 84),
           FL(&genLab, 36, &genBox, 220),
+          // v1.33: the page's four frequency spaces (the UPIC's four tables)
+          FL(&spaceDefLab[0], 26, &spaceDefBox[0], 130),
+          FL(&spaceDefLab[1], 26, &spaceDefBox[1], 130),
+          FL(&spaceDefLab[2], 26, &spaceDefBox[2], 130),
+          FL(&spaceDefLab[3], 26, &spaceDefBox[3], 130),
           FH(&kbdHintLab, 220) },
     };
 
@@ -3718,6 +3844,8 @@ void MainComponent::resized()
     // voice, not to one material, so it shows in every tab.
     voiceRow.push_back (F(&stepBtn, 76));
     voiceRow.push_back (FL(&stepDivLab, 52, &stepDivSlider, 110));
+    // v1.33: the arc's frequency space (the UPIC's four tables)
+    voiceRow.push_back (FL(&spaceLab, 44, &spaceBox, 170));
     voiceRow.push_back (F(&statusLab, 0));
 
     std::vector<FlowItem> materialRow;

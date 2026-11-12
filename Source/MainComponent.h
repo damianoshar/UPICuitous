@@ -120,6 +120,7 @@ private:
     void buildMaterialControls();
     void buildSieveControls();
     void buildStepControls();
+    void buildSpaceControls();
     void buildArcListPanel();
     void buildMidiControls();
     void buildMaterialTabs();
@@ -402,6 +403,14 @@ private:
     juce::Slider stepDivSlider;
     juce::Label stepDivLab{ {}, "Div/oct" };
 
+    // v1.33: the frequency spaces (the UPIC's four frequency tables). The
+    // PAGE owns the four spaces; an arc names the one it is played in, the
+    // way it names its wave or its envelope.
+    juce::ComboBox spaceBox;          // the arc's space
+    juce::ComboBox spaceDefBox[4];    // the page's four spaces
+    juce::Label spaceDefLab[4];
+    juce::Label spaceLab{ {}, "Space" };
+
     // v1.27: Clear is destructive, so it asks first. An in-app overlay keeps
     // this working on Android, where floating dialogs cannot be dismissed.
     // v1.30 (5.3 refactor): the overlay type lives in OverlayPanels.h.
@@ -527,6 +536,9 @@ private:
     void loadSampleIntoSlot(int slotIndex);
     void pushSieve();                 // sieve UI -> state + ScoreEditor
     void applyStepToSelection();      // v1.32: the discrete frequency space
+    void applySpaceToSelection();     // v1.33: the arc's frequency space
+    void pushSpaceDefs();             // v1.33: the page's four spaces
+    void refreshSpaceBox();           // v1.33: the arc's space combo
     void runGenerator(int kind);      // procedural arc generation (nUPIC-style)
     void exportStems();               // one WAV per voice into a folder
     void flash(const juce::String& m); // transient status message (4s)

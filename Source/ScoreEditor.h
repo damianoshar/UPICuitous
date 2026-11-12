@@ -95,6 +95,10 @@ public:
     // per-arc, but a new arc must be born with the value currently shown in
     // the toolbar (the same "what you see is what gets drawn" rule).
     void setCurrentStep(int divisions) { curStep = juce::jlimit(0, 99, divisions); }
+    // v1.33: the frequency space a new arc is born in (the UPIC's four
+    // tables). Same rule as the step: what you see is what gets drawn.
+    void setCurrentSpace(int space) { curSpace = juce::jlimit(0, 3, space); }
+    int getCurrentSpace() const { return curSpace; }
     // The PM controls are per-arc, but a new PM arc must be born with the
     // values currently shown in the toolbar (the same "what you see is what
     // gets drawn" rule as wave / env / intensity / Ref).
@@ -1125,6 +1129,7 @@ private:
     double curPmRatio = 2.0, curPmIndex = 1.5, curPmFeedback = 0.0;
     int curPmIndexEnv = 0, curPmOps = 2;
     int curStep = 0;             // v1.32: the discrete frequency space (0 = continuum)
+    int curSpace = 0;            // v1.33: the frequency space (0..3)
     std::vector<int> selArcs;   // multi-selection (sorted by insertion)
     int selectedZone = -1;
     bool snap = true, showGrid = true, isPlaying = false;
@@ -1490,7 +1495,7 @@ private:
     }
 
     // Next magnetically allowed pitch strictly above (dir>0) or below (dir<0)
-    // the current one — so arrow steps always land ON the sieve.
+    // the current one β€” so arrow steps always land ON the sieve.
     double nextAllowedPitch(double f, int dir, double t) const
     {
         int m = 12; std::vector<int> R;
@@ -1533,6 +1538,7 @@ private:
         a.waveformId = curWave; a.envelopeId = curEnv; a.intensity = curInten;
         a.mode = curMode(); a.sampleId = curSampleId; a.refFreq = curRef;
         a.stepDivisions = curStep;   // v1.32: the discrete frequency space
+        a.space = curSpace;           // v1.33: the frequency space
         if (a.mode == 3)
         {
             a.pmRatio = curPmRatio; a.pmIndex = curPmIndex;
@@ -1594,6 +1600,7 @@ private:
         a.waveformId = curWave; a.envelopeId = curEnv; a.intensity = curInten;
         a.mode = curMode(); a.sampleId = curSampleId; a.refFreq = curRef;
         a.stepDivisions = curStep;   // v1.32: the discrete frequency space
+        a.space = curSpace;           // v1.33: the frequency space
         if (a.mode == 3)
         {
             a.pmRatio = curPmRatio; a.pmIndex = curPmIndex;
@@ -1616,3 +1623,4 @@ private:
 
     void notify() { repaint(); if (onChange) onChange(); }
 };
+

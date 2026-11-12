@@ -1272,14 +1272,16 @@ public:
 
             // the glissando becomes a staircase: every step of the sweep
             // lands on the scale, and the sweep visits several steps
+            upic::Page plainPage;   // the page's own space: the identity
             upic::Arc g;
             g.points = { { 0.0, 400.0 }, { 1.0, 800.0 } };
             g.stepDivisions = 12;
+            const auto plainMap = plainPage.spaceMap (0);
             bool allOnScale = true;
             std::set<double> visited;
             for (int i = 0; i <= 100; ++i)
             {
-                const double f = UpicEngine::arcPitch (g, (double) i / 100.0);
+                const double f = UpicEngine::arcPitch (g, (double) i / 100.0, plainMap);
                 const double l = std::log2 (f / ref) * 12.0;
                 if (std::abs (l - std::round (l)) > 1e-9) allOnScale = false;
                 visited.insert (std::round (l));
@@ -1295,7 +1297,7 @@ public:
             bool anyOffScale = false;
             for (int i = 0; i <= 100; ++i)
             {
-                const double f = UpicEngine::arcPitch (c, (double) i / 100.0);
+                const double f = UpicEngine::arcPitch (c, (double) i / 100.0, plainMap);
                 const double l = std::log2 (f / ref) * 12.0;
                 if (std::abs (l - std::round (l)) > 1e-9) anyOffScale = true;
             }
@@ -1315,6 +1317,66 @@ public:
             upic::Arc plain = upic::Arc::fromVar (upic::Arc().toVar());
             check (plain.stepDivisions == 0,
                    "a piece without it is the continuum");
+        }
+
+        // 6i-f2. v1.33: the frequency spaces - the UPIC's four frequency
+        //      tables. The page owns four spaces; an arc names the one it
+        //      is played in, the way it names its wave or its envelope.
+        {
+            upic::Page pg;   // the ambitus: 20 Hz - 12 kHz
+            const double mid = 2000.0;
+
+            // space 0 IS the page's range: the pitch passes through
+            // unchanged, bit for bit (the phase vocoder's bin index is a
+            // truncated k*ratio, so an identity mapping must not round-trip
+            // through log2/exp2)
+            check (pg.placeInSpace (mid, 0) == mid,
+                   "the page's own space is the identity",
+                   juce::String (pg.placeInSpace (mid, 0), 6) + " Hz");
+
+            // an octave up: the same drawing, one octave higher
+            pg.spaces[1] = 3;   // "An octave up"
+            const double up = pg.placeInSpace (mid, 1);
+            check (std::abs (up - mid * 2.0) < 1e-6,
+                   "a space an octave up sounds an octave up",
+                   juce::String (up, 1) + " Hz");
+
+            // half the range: the intervals are scaled with it
+            pg.spaces[2] = 1;   // "Half the range"
+            const double half = pg.placeInSpace (mid, 2);
+            check (half < mid && half > mid * 0.4 && half < mid * 0.6,
+                   "half the range compresses the drawing's intervals",
+                   juce::String (half, 1) + " Hz");
+            // the edges of the drawing land on the edges of the space
+            double sLo = 0.0, sHi = 0.0;
+            pg.spaceRange (2, sLo, sHi);
+            check (std::abs (pg.placeInSpace (upic::kMinFreq, 2) - sLo) < 1e-6
+                && std::abs (pg.placeInSpace (upic::kMaxFreq, 2) - sHi) < 1e-6,
+                   "the space's edges are where the drawing's edges land",
+                   juce::String (sLo, 1) + " - " + juce::String (sHi, 1) + " Hz");
+
+            // the arcs are independent: each names its own space
+            upic::Arc a1, a2;
+            a1.points = { { 0.0, mid }, { 1.0, mid } };
+            a2.points = { { 0.0, mid }, { 1.0, mid } };
+            a1.space = 0;
+            a2.space = 1;
+            const auto m0 = pg.spaceMap (a1.space);
+            const auto m1 = pg.spaceMap (a2.space);
+            check (std::abs (UpicEngine::arcPitch (a1, 0.5, m0) - mid) < 1e-9
+                && std::abs (UpicEngine::arcPitch (a2, 0.5, m1) - mid * 2.0) < 1e-3,
+                   "two arcs can sit in two spaces at the same time",
+                   juce::String (UpicEngine::arcPitch (a1, 0.5, m0), 1) + " / "
+                   + juce::String (UpicEngine::arcPitch (a2, 0.5, m1), 1) + " Hz");
+
+            // the space travels with the piece
+            upic::Arc saved = upic::Arc::fromVar (a2.toVar());
+            check (saved.space == 1, "the frequency space travels with the piece");
+            check (upic::Arc::fromVar (a1.toVar()).space == 0,
+                   "an arc without a space is in the page's own");
+            const auto pageBack = upic::Page::fromVar (pg.toVar());
+            check (pageBack.spaces[1] == 3 && pageBack.spaces[2] == 1,
+                   "the page's four spaces travel with the piece");
         }
 
         // 6i-b. v1.31 (U4): the digitised wave page - a take becomes one

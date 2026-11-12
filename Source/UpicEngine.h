@@ -56,9 +56,10 @@ public:
     void setScrubPreview(bool on) { scrubPreview = on; }
     // Shared with the material view so its time bar uses the same tape
     // position as the audio engine (pitch-scaled, not ratio * elapsed).
-    static double scrubMaterialPos(const upic::Arc& arc, double t, double ref, double matDur)
+    static double scrubMaterialPos(const upic::Arc& arc, double t, double ref, double matDur,
+                                   const upic::Page::SpaceMap& map)
     {
-        return pitchScaledPos(arc, t, ref, matDur);
+        return pitchScaledPos(arc, t, ref, matDur, map);
     }
 
     // v1.32: the arc's SOUNDING pitch. The drawn pitch goes through the
@@ -66,12 +67,24 @@ public:
     // "discrete/non-discrete" function) the continuum becomes a staircase
     // of steps, so a glissando is heard as discrete pitches. With no
     // temperament this is the drawn pitch, unchanged.
-    static inline double arcPitch (const upic::Arc& arc, double t)
+    //
+    // v1.33: the drawn pitch is first placed in the page's frequency space
+    // the arc names (the UPIC's four frequency tables) - the position on
+    // the page's vertical axis is mapped into that space - and the
+    // temperament then divides the space.
+    //
+    // The space's mapping is precomputed per arc (see upic::Page::spaceMap),
+    // so the per-sample cost is one log2 and one exp2. The map is passed BY
+    // VALUE: through a reference the compiler has to reload its five fields
+    // on every sample (it cannot prove they do not alias the arc), which
+    // cost a third of the render path.
+    static inline double arcPitch (const upic::Arc& arc, double t,
+                                   upic::Page::SpaceMap map)
     {
-        const double f = arc.freqAt (t);
-        return arc.stepDivisions > 0
-             ? upic::applyTemperament (f, arc.stepDivisions, upic::kDefaultRefFreq)
-             : f;
+        double f = map.apply (arc.freqAt (t));
+        if (arc.stepDivisions > 0)
+            f = upic::applyTemperament (f, arc.stepDivisions, upic::kDefaultRefFreq);
+        return f;
     }
 
     // Time scale for a sample voice. Mode 1 (granular stretch) uses the same
@@ -195,6 +208,11 @@ public:
             const upic::Envelope* e = findEnv(envs, arc.envelopeId);
             const float intensity = arc.intensity;
 
+            // v1.33: the frequency space this arc is played in (the UPIC's
+            // four tables). The mapping is computed once per arc, not per
+            // sample.
+            const upic::Page::SpaceMap map = page.spaceMap (arc.space);
+
             if (freeze && arc.mode == 2) continue; // live input cannot be frozen
 
             // ---- mode 1: pitch-shifted sample material (see samplePitchMode) ----
@@ -202,14 +220,14 @@ public:
             {
                 const upic::SampleSlot* smp = findSlot(slots, arc.sampleId);
                 if (smp == nullptr) continue;
-                renderSampleArc(arc, *smp, playhead, i0, i1, invSr, e, rate, freeze);
+                renderSampleArc(arc, *smp, playhead, i0, i1, invSr, e, map, rate, freeze);
                 continue;
             }
 
             // ---- mode 2: live input, pitch follows the arc in realtime ----
             if (arc.mode == 2)
             {
-                renderLiveArc(arc, playhead, i0, i1, invSr, e, rate);
+                renderLiveArc(arc, playhead, i0, i1, invSr, e, map, rate);
                 continue;
             }
             // ---- mode 3: phase modulation (PM). pmOps operators (2 or 4),
@@ -236,7 +254,7 @@ public:
                 for (int n = i0; n <= i1; ++n)
                 {
                     const double t = playhead + (double) n * step;
-                    const double cFreq = juce::jlimit (10.0, 14000.0, arcPitch (arc, t));
+                    const double cFreq = juce::jlimit (10.0, 14000.0, arcPitch (arc, t, map));
                     const float env = e != nullptr ? e->valueAt (arc.lifeAt (t)) : 1.0f;
                     const float idxE = (idxEnv != nullptr ? idxEnv->valueAt (arc.lifeAt (t)) : 1.0f);
                     const float edge = edgeFade (t, arcStart, arcEnd);
@@ -286,7 +304,7 @@ public:
                 float env = e != nullptr ? e->valueAt(arc.lifeAt(t)) : 1.0f;
                 const float edge = edgeFade(t, arcStart, arcEnd);
 
-                float freq = (float) juce::jlimit(10.0, 14000.0, arcPitch (arc, t));
+                float freq = (float) juce::jlimit(10.0, 14000.0, arcPitch (arc, t, map));
 
                 // v1.31 (U1): the polyagogy - the arc's own wave can also
                 // be a control signal. The curve is read at its own rate
@@ -413,7 +431,8 @@ private:
     // Varispeed material position for a scrub reset: integrate the arc's
     // pitch ratio from the arc start to `t`, so a falling pitch curve still
     // advances the sample forward instead of flipping direction.
-    static double pitchScaledPos(const upic::Arc& arc, double t, double ref, double matDur)
+    static double pitchScaledPos(const upic::Arc& arc, double t, double ref, double matDur,
+                                 const upic::Page::SpaceMap& map)
     {
         const double start = arc.startTime();
         const double end = juce::jmin(t, arc.endTime());
@@ -431,8 +450,8 @@ private:
             {
                 const double t0 = a + dt * (double) k;
                 const double t1 = t0 + dt;
-                const double f0 = juce::jlimit(10.0, 14000.0, arcPitch (arc, t0));
-                const double f1 = juce::jlimit(10.0, 14000.0, arcPitch (arc, t1));
+                const double f0 = juce::jlimit(10.0, 14000.0, arcPitch (arc, t0, map));
+                const double f1 = juce::jlimit(10.0, 14000.0, arcPitch (arc, t1, map));
                 const double r0 = juce::jlimit(1.0 / 16.0, 16.0, f0 / ref);
                 const double r1 = juce::jlimit(1.0 / 16.0, 16.0, f1 / ref);
                 pos += 0.5 * (r0 + r1) * dt;
@@ -510,7 +529,8 @@ private:
     // the slot's seamless loop.
     void renderSampleArc(const upic::Arc& arc, const upic::SampleSlot& smp,
                          double playhead, int i0, int i1, double invSr,
-                         const upic::Envelope* e, double rate = 1.0, bool freeze = false)
+                         const upic::Envelope* e, const upic::Page::SpaceMap& map,
+                         double rate = 1.0, bool freeze = false)
     {
         const int nFrames = smp.data != nullptr ? smp.data->getNumSamples() : 0;
         const double matDur = smp.durationSec();
@@ -548,7 +568,7 @@ private:
             const double progress = juce::jlimit(0.0, 1.0, elapsed / arcDur);
             double anchorPos;
             if (mode == 0)
-                anchorPos = pitchScaledPos(arc, t0, ref, matDur);
+                anchorPos = pitchScaledPos(arc, t0, ref, matDur, map);
             else if (mode == 1)
                 anchorPos = progress * matDur; // stretch granular maps the slot to the arc
             else if (mode == 2)
@@ -572,7 +592,7 @@ private:
                 for (int k = 0; k < primeSamples; ++k)
                 {
                     const double pt = t0 + (double) k * step;
-                    const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, pt));
+                    const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, pt, map));
                     const double primeRatio = juce::jlimit(1.0 / 16.0, 16.0,
                         freq / ref / juce::jmax(1.0e-6, timeScale));
                     v.voc.next(readMaterial(smp, pp, mirrored), primeRatio);
@@ -606,7 +626,7 @@ private:
         {
             const double t = playhead + (double) n * step;
 
-            const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, t));
+            const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, t, map));
             const double ratio = juce::jlimit(1.0 / 16.0, 16.0, freq / ref);
 
             const float env = e != nullptr ? e->valueAt(arc.lifeAt(t)) : 1.0f;
@@ -669,7 +689,8 @@ private:
     // mode) and can read the REVERSED ring (the same content, mirrored in
     // time) instead of the forward one.
     void renderLiveArc(const upic::Arc& arc, double playhead, int i0, int i1,
-                       double invSr, const upic::Envelope* e, double rate = 1.0)
+                       double invSr, const upic::Envelope* e, const upic::Page::SpaceMap& map,
+                       double rate = 1.0)
     {
         // the arc's own mode, or the tab's setting
         const int mode = arc.pitchMode >= 0
@@ -708,7 +729,7 @@ private:
         {
             const double t = playhead + (double) n * (rate * invSr);
 
-            const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, t));
+            const double freq = juce::jlimit(10.0, 14000.0, arcPitch (arc, t, map));
             const double ratio = juce::jlimit(upic::kLiveMinRatio,
                                               upic::kLiveMaxRatio, freq / ref);
 
@@ -841,3 +862,4 @@ inline std::vector<juce::File> renderStems(const upic::Page& page,
     }
     return written;
 }
+
