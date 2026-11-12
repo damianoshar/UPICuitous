@@ -4519,6 +4519,11 @@ void MainComponent::loadFromVar(const juce::var& v)
             if ((int) sieveR.size() >= upic::limits::kMaxSieveRemainders) break;
             sieveR.push_back((((int) rv % sieveM) + sieveM) % sieveM);
         }
+    // v1.33.2: an old settings file can carry an empty sieveR (the field was
+    // allowed to be empty, and the placeholder made it look like 0,7). That
+    // restored a sieve with no remainders, which is inert - the Sieve
+    // checkbox then did nothing. Fall back to the octave sieve.
+    if (sieveR.empty()) sieveR = { 0 };
     seqBtn.setToggleState(seqPages, juce::dontSendNotification);
     pressBtn.setToggleState(recordPressure, juce::dontSendNotification);
     scrubBtn.setToggleState(scrubAudition, juce::dontSendNotification);

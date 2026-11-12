@@ -262,7 +262,15 @@ public:
     bool getRecordPressure() const { return recordPressure; }
     // v1.1: Xenakis sieve quantizer applied at draw time (takes precedence over snap)
     void setSieve(bool on, int m, std::vector<int> remainders)
-    { sieveOn = on; sieveM = juce::jmax(2, m); sieveR = std::move(remainders); repaint(); }
+    {
+        sieveOn = on;
+        sieveM = juce::jmax(2, m);
+        // the global sieve's empty remainder list is the *off* state, not a
+        // sieve: keep the previous set, so a cleared field cannot turn the
+        // checkbox into a no-op (a zone may still be empty = free pitch there)
+        if (! remainders.empty()) sieveR = std::move(remainders);
+        repaint();
+    }
     bool getSieveOn() const { return sieveOn; }
     int getSieveM() const { return sieveM; }
     const std::vector<int>& getSieveR() const { return sieveR; }

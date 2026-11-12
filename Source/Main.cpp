@@ -2210,6 +2210,14 @@ public:
             ed.bind(&pg, &waves, &ph, nullptr);
             ed.setSize(1000, 400);
 
+            // v1.33.2: the global sieve cannot become empty (the checkbox is
+            // the off switch); an empty list keeps the last valid set.
+            ed.setSieve (true, 12, { 0 });
+            ed.setSieve (true, 12, {});
+            check (ed.getSieveR() == std::vector<int>({ 0 }),
+                   "setSieve(empty) keeps the last remainders");
+            ed.setSieve (false, 12, { 0 });
+
             ed.keyPressed(juce::KeyPress('A', juce::ModifierKeys::commandModifier, 0));
             check(ed.getSelectedArcs().size() == 3, "ctrl+A selects all arcs",
                   juce::String((int) ed.getSelectedArcs().size()));
@@ -2515,6 +2523,14 @@ public:
                         me->setText ("12", juce::dontSendNotification); me->onTextChange();
                         re->setText ("0", juce::dontSendNotification); re->onTextChange();
                         sb->setToggleState (false, juce::dontSendNotification); sb->onClick();
+                        // an empty R field must keep the last valid list: the
+                        // placeholder made it look like 0,7 while the real
+                        // list was empty, so the checkbox quantised nothing.
+                        re->setText ("", juce::dontSendNotification); re->onTextChange();
+                        check (sc->getSieveR() == std::vector<int>({ 0 }),
+                               "an empty R field keeps the last valid sieve",
+                               ScoreEditor::remaindersTextForTest (sc->getSieveR()));
+                        re->setText ("0", juce::dontSendNotification); re->onTextChange();
                     }
                 }
 
