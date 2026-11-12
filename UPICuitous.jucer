@@ -25,6 +25,7 @@
     <FILE id="mHub22" name="MidiHub.h" compile="0" resource="0" file="Source/MidiHub.h"/>
     <FILE id="aSio23" name="AsioConfig.h" compile="0" resource="0" file="Source/AsioConfig.h"/>
     <FILE id="pLim24" name="PieceLimits.h" compile="0" resource="0" file="Source/PieceLimits.h"/>
+    <FILE id="oVly25" name="OverlayPanels.h" compile="0" resource="0" file="Source/OverlayPanels.h"/>
     </GROUP>
   </MAINGROUP>
   <MODULES>

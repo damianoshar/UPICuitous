@@ -9,6 +9,7 @@
 #include "MidiHub.h"
 #include "WaveformEditor.h"
 #include "EnvelopeEditor.h"
+#include "OverlayPanels.h"
 
 //==============================================================================
 // Main UPIC window: transport + score page + wavetable/envelope editors.
@@ -303,47 +304,7 @@ private:
     // v1.7 audio settings: an in-app overlay, since Android has no floating
     // dialog windows (a DialogWindow there has no title bar and no close
     // button, so the audio settings could never be dismissed).
-    struct AudioOverlay : juce::Component
-    {
-        static constexpr int titleH = 28;
-        std::function<void()> onDismiss;
-        juce::String title { "Audio Settings" };
-
-        juce::Rectangle<int> cardRect() const
-        {
-            auto r = getLocalBounds().reduced(10);
-            return juce::Rectangle<int>(juce::jmin(560, r.getWidth()),
-                                        juce::jmin(600, r.getHeight())).withCentre(r.getCentre());
-        }
-        void paint(juce::Graphics& g) override
-        {
-            g.fillAll(juce::Colour(0xcc000000));
-            auto card = cardRect();
-            g.setColour(juce::Colour(0xff1e1e26));
-            g.fillRoundedRectangle(card.toFloat(), 6.0f);
-            g.setColour(juce::Colour(0xff34343f));
-            g.drawRoundedRectangle(card.toFloat().reduced(0.5f), 6.0f, 1.0f);
-            g.setFont(juce::Font(juce::FontOptions(14.0f, juce::Font::bold)));
-            g.setColour(juce::Colour(0xffc8c8d0));
-            g.drawText(title, card.reduced(12, 0).removeFromTop(titleH),
-                       juce::Justification::centredLeft);
-        }
-        void mouseDown(const juce::MouseEvent& e) override
-        {
-            // tapping the backdrop dismisses (device changes apply live)
-            if (! cardRect().contains(e.getPosition()) && onDismiss != nullptr)
-                onDismiss();
-        }
-        bool keyPressed(const juce::KeyPress& k) override
-        {
-            if (k.getKeyCode() == juce::KeyPress::escapeKey && onDismiss != nullptr)
-            {
-                onDismiss();
-                return true;
-            }
-            return false;
-        }
-    };
+    // v1.30 (5.3 refactor): the overlay type lives in OverlayPanels.h.
     AudioOverlay audioOverlay;
     std::unique_ptr<juce::AudioDeviceSelectorComponent> audioSelector;
     juce::TextButton audioOkBtn{ "OK" };
@@ -363,52 +324,7 @@ private:
 
     // v1.27: Clear is destructive, so it asks first. An in-app overlay keeps
     // this working on Android, where floating dialogs cannot be dismissed.
-    struct ClearOverlay : juce::Component
-    {
-        static constexpr int titleH = 28;
-        std::function<void()> onCancel;
-        int pageNumber = 1;
-
-        juce::Rectangle<int> cardRect() const
-        {
-            auto r = getLocalBounds().reduced(10);
-            return juce::Rectangle<int>(juce::jmin(480, r.getWidth()),
-                                        juce::jmin(210, r.getHeight())).withCentre(r.getCentre());
-        }
-        void paint(juce::Graphics& g) override
-        {
-            g.fillAll(juce::Colour(0xcc000000));
-            auto card = cardRect();
-            g.setColour(juce::Colour(0xff1e1e26));
-            g.fillRoundedRectangle(card.toFloat(), 6.0f);
-            g.setColour(juce::Colour(0xff34343f));
-            g.drawRoundedRectangle(card.toFloat().reduced(0.5f), 6.0f, 1.0f);
-            auto inner = card.reduced(16, 0);
-            g.setFont(juce::Font(juce::FontOptions(15.0f, juce::Font::bold)));
-            g.setColour(juce::Colour(0xffe0a040));
-            g.drawText("Clear page " + juce::String(pageNumber) + "?",
-                       inner.removeFromTop(titleH), juce::Justification::centredLeft);
-            g.setFont(juce::Font(juce::FontOptions(13.0f)));
-            g.setColour(juce::Colour(0xffc8c8d0));
-            inner.removeFromBottom(54);
-            g.drawFittedText("This deletes every arc on this page.\nThis cannot be undone.",
-                             inner, juce::Justification::centredLeft, 3);
-        }
-        void mouseDown(const juce::MouseEvent& e) override
-        {
-            if (! cardRect().contains(e.getPosition()) && onCancel != nullptr)
-                onCancel();
-        }
-        bool keyPressed(const juce::KeyPress& k) override
-        {
-            if (k.getKeyCode() == juce::KeyPress::escapeKey && onCancel != nullptr)
-            {
-                onCancel();
-                return true;
-            }
-            return false;
-        }
-    };
+    // v1.30 (5.3 refactor): the overlay type lives in OverlayPanels.h.
     ClearOverlay clearOverlay;
     juce::TextButton clearConfirmBtn{ "Clear page" }, clearCancelBtn{ "Cancel" };
     // v1.9: live pitch algorithm for LIVE-tab arcs (session-only setting)
