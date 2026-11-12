@@ -46,7 +46,7 @@ MainComponent::MainComponent(bool pluginMode)
     buildMaterialControls();
     buildSieveControls();
     buildStepControls();
-    buildSpaceControls();
+    buildFrequencyControls();
     buildArcListPanel();
     buildMidiControls();
     buildMaterialTabs();
@@ -945,8 +945,24 @@ void MainComponent::applyStepToSelection()
 // played in. A space is a range of the frequency axis - the position on
 // the page's vertical axis is mapped into it, so the same drawing can be
 // heard in another register, with its intervals scaled.
-void MainComponent::buildSpaceControls()
+void MainComponent::buildFrequencyControls()
 {
+    // ---- the page's ambitus: the interval its vertical axis covers ----
+    addAndMakeVisible(ambitusBox); addAndMakeVisible(ambitusLab);
+    ambitusBox.setName("ambitusBox");
+    ambitusBox.setTooltip ("The interval the page's vertical axis covers.\n"
+                            "The UPIC's normal ambitus was six octaves; it\n"
+                            "could be ten, or as small as a semitone.");
+    {
+        const auto& presets = upic::ambitusPresets();
+        for (int i = 0; i < (int) presets.size(); ++i)
+            ambitusBox.addItem (juce::String (presets[(size_t) i].name), i + 1);
+        ambitusBox.addItem ("Custom", (int) presets.size() + 1);
+    }
+    ambitusBox.setSelectedId (1, juce::dontSendNotification);
+    ambitusBox.onChange = [this]{ pushAmbitus(); };
+
+    // ---- the page's four frequency spaces ----
     addAndMakeVisible(spaceBox); addAndMakeVisible(spaceLab);
     spaceBox.setName("spaceBox");
     spaceBox.setTooltip ("The frequency space this arc is played in.\n"
@@ -1039,6 +1055,24 @@ void MainComponent::refreshSpaceBox()
                           i + 1);
     }
     spaceBox.setSelectedId (cur + 1, juce::dontSendNotification);
+}
+
+// The page's ambitus -> the model.
+void MainComponent::pushAmbitus()
+{
+    const auto& presets = upic::ambitusPresets();
+    const int id = ambitusBox.getSelectedId() - 1;
+    if (id < 0 || id >= (int) presets.size()) return;   // "Custom": nothing to do
+    {
+        const juce::ScopedLock l(dataLock);
+        auto& pg = curPage();
+        pg.pitchLo = presets[(size_t) id].lo;
+        pg.pitchHi = presets[(size_t) id].hi;
+    }
+    publishModelSnapshot();
+    markModelChanged();
+    score.repaint();
+    flash (juce::String (presets[(size_t) id].name));
 }
 
 void MainComponent::buildArcListPanel()
@@ -1833,6 +1867,19 @@ void MainComponent::refreshBoxes()
             (int) upic::freqSpacePresets().size() - 1,
             curPage().spaces[(size_t) i]) + 1, juce::dontSendNotification);
     refreshSpaceBox();
+
+    // v1.33: the ambitus - the combo shows the preset that matches, or
+    // "Custom" when the page carries an interval of its own
+    {
+        const auto& presets = upic::ambitusPresets();
+        int match = 0;
+        for (int i = 0; i < (int) presets.size(); ++i)
+            if (std::abs (curPage().pitchLo - presets[(size_t) i].lo) < 1e-6
+                && std::abs (curPage().pitchHi - presets[(size_t) i].hi) < 1e-6)
+            { match = i + 1; break; }
+        ambitusBox.setSelectedId (match > 0 ? match : (int) presets.size() + 1,
+                                  juce::dontSendNotification);
+    }
 
     waveBox.clear(juce::dontSendNotification);
     for (size_t i = 0; i < waveforms.size(); ++i)
@@ -3781,7 +3828,9 @@ void MainComponent::resized()
           FL(&stickLab, 38, &stickSlider, 160),
           FL(&gridLab, 44, &gridBox, 84),
           FL(&genLab, 36, &genBox, 220),
-          // v1.33: the page's four frequency spaces (the UPIC's four tables)
+          // v1.33: the page's ambitus and its four frequency spaces (the
+          // UPIC's four tables)
+          FL(&ambitusLab, 58, &ambitusBox, 170),
           FL(&spaceDefLab[0], 26, &spaceDefBox[0], 130),
           FL(&spaceDefLab[1], 26, &spaceDefBox[1], 130),
           FL(&spaceDefLab[2], 26, &spaceDefBox[2], 130),

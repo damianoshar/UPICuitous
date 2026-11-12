@@ -120,7 +120,7 @@ private:
     void buildMaterialControls();
     void buildSieveControls();
     void buildStepControls();
-    void buildSpaceControls();
+    void buildFrequencyControls();
     void buildArcListPanel();
     void buildMidiControls();
     void buildMaterialTabs();
@@ -411,6 +411,11 @@ private:
     juce::Label spaceDefLab[4];
     juce::Label spaceLab{ {}, "Space" };
 
+    // v1.33: the page's ambitus - the interval its vertical axis covers
+    // ("the vertical axis could correspond to any interval", Mache).
+    juce::ComboBox ambitusBox;
+    juce::Label ambitusLab{ {}, "Ambitus" };
+
     // v1.27: Clear is destructive, so it asks first. An in-app overlay keeps
     // this working on Android, where floating dialogs cannot be dismissed.
     // v1.30 (5.3 refactor): the overlay type lives in OverlayPanels.h.
@@ -539,6 +544,7 @@ private:
     void applySpaceToSelection();     // v1.33: the arc's frequency space
     void pushSpaceDefs();             // v1.33: the page's four spaces
     void refreshSpaceBox();           // v1.33: the arc's space combo
+    void pushAmbitus();               // v1.33: the page's ambitus
     void runGenerator(int kind);      // procedural arc generation (nUPIC-style)
     void exportStems();               // one WAV per voice into a folder
     void flash(const juce::String& m); // transient status message (4s)

@@ -1379,6 +1379,47 @@ public:
                    "the page's four spaces travel with the piece");
         }
 
+        // 6i-f3. v1.33: the ambitus - the interval the page's vertical axis
+        //      covers. "The scale of the millimetric surface could be
+        //      selected, so that the vertical axis could correspond to any
+        //      interval."
+        {
+            // the mapping is the page's interval, not the whole world
+            const double lo = 261.63 / 4.0, hi = 261.63 * 4.0;   // three octaves
+            check (std::abs (upic::normYToFreqIn (0.0f, lo, hi) - lo) < 1e-6
+                && std::abs (upic::normYToFreqIn (1.0f, lo, hi) - hi) < 1e-6,
+                   "the page's interval spans its axis");
+            check (std::abs (upic::freqToNormYIn (lo, lo, hi) - 0.0f) < 1e-6
+                && std::abs (upic::freqToNormYIn (hi, lo, hi) - 1.0f) < 1e-6,
+                   "the page's interval maps back to its axis");
+            // the middle of the axis is the middle of the interval, in log
+            // pitch: the geometric mean, not the arithmetic one
+            check (std::abs (upic::normYToFreqIn (0.5f, lo, hi)
+                             - std::sqrt (lo * hi)) < 1e-6,
+                   "the middle of the page is the geometric middle",
+                   juce::String (upic::normYToFreqIn (0.5f, lo, hi), 1) + " Hz");
+
+            // a pitch outside the page is off the page (not clamped onto it)
+            check (upic::freqToNormYIn (upic::kMinFreq, lo, hi) < 0.0f
+                && upic::freqToNormYIn (upic::kMaxFreq, lo, hi) > 1.0f,
+                   "a pitch outside the page is off the page");
+
+            // the ambitus travels with the piece
+            upic::Page pg;
+            pg.pitchLo = lo;
+            pg.pitchHi = hi;
+            const auto back = upic::Page::fromVar (pg.toVar());
+            check (std::abs (back.pitchLo - lo) < 1e-9
+                && std::abs (back.pitchHi - hi) < 1e-9,
+                   "the ambitus travels with the piece",
+                   juce::String (back.pitchLo, 1) + " - "
+                   + juce::String (back.pitchHi, 1) + " Hz");
+            // and a piece without one is the full range
+            const auto plain = upic::Page::fromVar (upic::Page().toVar());
+            check (plain.pitchLo == upic::kMinFreq && plain.pitchHi == upic::kMaxFreq,
+                   "a piece without an ambitus is the full range");
+        }
+
         // 6i-b. v1.31 (U4): the digitised wave page - a take becomes one
         //      loop of the oscillator.
         {
@@ -2201,6 +2242,43 @@ public:
                         check(ok,
                               juce::String("responsive layout ") + juce::String(z.w)
                               + "x" + juce::String(z.h), detail.trim());
+                    }
+                }
+
+                // v1.33: the ambitus reaches the canvas - the page's own
+                // interval, not the whole world.
+                {
+                    auto* amb = dynamic_cast<juce::ComboBox*> (find ("ambitusBox"));
+                    auto* sc  = dynamic_cast<ScoreEditor*> (find ("score"));
+                    check (amb != nullptr && sc != nullptr,
+                           "the ambitus control and the canvas exist");
+                    if (amb != nullptr && sc != nullptr)
+                    {
+                        // "A semitone (C4 - C#4)" - the last-but-one preset.
+                        // The combo's change notification is asynchronous and
+                        // the selftest runs no message loop, so the handler is
+                        // called directly.
+                        amb->setSelectedId (5, juce::dontSendNotification);
+                        amb->onChange();
+                        const double lo = sc->ambitusLo(), hi = sc->ambitusHi();
+                        check (std::abs (lo - 261.63) < 1e-6 && hi > lo && hi < 300.0,
+                               "the ambitus control sets the page's interval",
+                               juce::String (lo, 1) + " - " + juce::String (hi, 1) + " Hz");
+                        // the canvas maps through it, both ways
+                        const double mid = std::sqrt (lo * hi);
+                        check (std::abs (sc->yToFreq (sc->freqToY (mid)) - mid) < 1e-6,
+                               "the canvas maps the page's interval");
+                        // and a pitch outside the page is off the page: it
+                        // cannot be drawn back
+                        const double outside = sc->yToFreq (sc->freqToY (mid * 4.0));
+                        check (outside <= hi + 1e-6 && outside >= lo - 1e-6,
+                               "a pitch outside the page cannot be drawn on it",
+                               juce::String (outside, 1) + " Hz");
+                        // back to the full range for the snapshot
+                        amb->setSelectedId (1, juce::dontSendNotification);
+                        amb->onChange();
+                        check (std::abs (sc->ambitusLo() - upic::kMinFreq) < 1e-6,
+                               "the ambitus goes back to the full range");
                     }
                 }
 

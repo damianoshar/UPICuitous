@@ -54,6 +54,58 @@ namespace upic
         return std::pow(2.0, lo + n * (hi - lo));
     }
 
+    //---------------- the ambitus (v1.33) ----------------
+    // "The scale of the millimetric surface could be selected, so that the
+    // vertical axis could correspond to any interval" (Mache). The canvas
+    // maps the pitch through the PAGE's interval, not through the whole
+    // world: a page drawn for a semitone is a page for a semitone.
+    //
+    // Note: freqToNormYIn does NOT clamp - a pitch outside the interval is
+    // off the page, and the canvas has to be able to draw it off the edge
+    // (the plot area clips it). normYToFreqIn does clamp: the page only
+    // holds what is inside it.
+    inline float freqToNormYIn (double f, double lo, double hi)
+    {
+        const double l0 = std::log2 (juce::jmax (1.0, lo));
+        const double l1 = std::log2 (juce::jmax (1.0, hi));
+        return (float) ((std::log2 (juce::jmax (1.0, f)) - l0)
+                        / juce::jmax (1.0e-6, l1 - l0));
+    }
+    inline double normYToFreqIn (float n, double lo, double hi)
+    {
+        n = juce::jlimit (0.0f, 1.0f, n);
+        const double l0 = std::log2 (juce::jmax (1.0, lo));
+        const double l1 = std::log2 (juce::jmax (1.0, hi));
+        return std::exp2 (l0 + (double) n * (l1 - l0));
+    }
+
+    // The page's intervals on offer. The UPIC's normal ambitus was six
+    // octaves; it could go up to ten (with infrasounds and ultrasounds) or
+    // down to a very small interval. The centring is on middle C.
+    struct AmbitusPreset
+    {
+        const char* name = "";
+        double lo = kMinFreq, hi = kMaxFreq;
+    };
+    inline const std::vector<AmbitusPreset>& ambitusPresets()
+    {
+        static const std::vector<AmbitusPreset> p = [] {
+            std::vector<AmbitusPreset> v;
+            v.push_back ({ "The full range (20 Hz - 12 kHz)", kMinFreq, kMaxFreq });
+            // six octaves around middle C: C1 - C7
+            v.push_back ({ "Six octaves (C1 - C7)", 261.63 / 8.0, 261.63 * 8.0 });
+            // three octaves: C2 - C5
+            v.push_back ({ "Three octaves (C2 - C5)", 261.63 / 4.0, 261.63 * 4.0 });
+            // one octave: C3 - C4
+            v.push_back ({ "One octave (C3 - C4)", 261.63 / 2.0, 261.63 * 2.0 });
+            // a semitone: C4 - C4 sharp
+            v.push_back ({ "A semitone (C4 - C#4)", 261.63,
+                           261.63 * std::pow (2.0, 1.0 / 12.0) });
+            return v;
+        }();
+        return p;
+    }
+
     inline juce::Colour paletteColour(int i)
     {
         static const juce::Colour cols[] = {

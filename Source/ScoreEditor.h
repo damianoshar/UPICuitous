@@ -184,18 +184,27 @@ public:
         double f = (t - timeOffset) * timeZoom / juce::jmax(0.001, dur);
         return r.getX() + (float)f * r.getWidth();
     }
+    // v1.33: the page's ambitus - the interval its vertical axis covers.
+    // "The scale of the millimetric surface could be selected, so that the
+    // vertical axis could correspond to any interval" (Mache).
+    double ambitusLo() const { return page != nullptr ? page->pitchLo : upic::kMinFreq; }
+    double ambitusHi() const { return page != nullptr ? page->pitchHi : upic::kMaxFreq; }
     double yToFreq(float y) const
     {
         auto r = plotArea();
         float sN = 1.0f - juce::jlimit(0.0f, 1.0f, (y - r.getY()) / juce::jmax(1.0f, r.getHeight()));
         double norm = (double) sN / freqZoom + freqOffset;
-        return upic::normYToFreq((float) juce::jlimit(0.0, 1.0, norm));
+        return upic::normYToFreqIn((float) juce::jlimit(0.0, 1.0, norm),
+                                   ambitusLo(), ambitusHi());
     }
     float freqToY(double f) const
     {
         auto r = plotArea();
-        double sN = (upic::freqToNormY(f) - freqOffset) * freqZoom;
-        return r.getBottom() - (float) juce::jlimit(0.0, 1.0, sN) * r.getHeight();
+        // NOT clamped: a pitch outside the page's ambitus (or outside the
+        // zoomed window) has to be drawn off the edge, where the plot area
+        // clips it - clamping it would draw it as a line along the border.
+        double sN = (upic::freqToNormYIn(f, ambitusLo(), ambitusHi()) - freqOffset) * freqZoom;
+        return r.getBottom() - (float) sN * r.getHeight();
     }
 
     // --- quantization used by draw/line/remagnetize (zone-aware, sticky) ---
@@ -204,6 +213,9 @@ public:
         if (! page) return;
         upic::quantizePoint(snap, sieveOn, sieveM, sieveR, timeGrid, stickiness,
                             page->zones, t, f);
+        // v1.33: the page's ambitus - the drawing lives inside the page's
+        // interval, so a stroke cannot leave the paper.
+        f = juce::jlimit (page->pitchLo, page->pitchHi, f);
     }
 
     // --- editing operations (also used by the context menu / shortcuts) ---
@@ -1496,11 +1508,12 @@ private:
 
     // Next magnetically allowed pitch strictly above (dir>0) or below (dir<0)
     // the current one β€” so arrow steps always land ON the sieve.
+    // v1.33: the steps stay inside the page's ambitus, like the drawing.
     double nextAllowedPitch(double f, int dir, double t) const
     {
         int m = 12; std::vector<int> R;
         if (! pitchMagnet(m, R, t, f))
-            return juce::jlimit(upic::kMinFreq, upic::kMaxFreq,
+            return juce::jlimit(ambitusLo(), ambitusHi(),
                                 f * std::pow(2.0, dir / 12.0));
         const double n = upic::freqToMidi(f);
         double best = dir > 0 ? 1.0e18 : -1.0e18;
@@ -1513,8 +1526,8 @@ private:
             else         { if (cand >= n - 1e-9) cand -= m; best = juce::jmax(best, cand); }
         }
         if (best < 12.0 || best > 120.0)
-            return juce::jlimit(upic::kMinFreq, upic::kMaxFreq, f); // edge: stay
-        return juce::jlimit(upic::kMinFreq, upic::kMaxFreq, upic::midiToFreq(best));
+            return juce::jlimit(ambitusLo(), ambitusHi(), f); // edge: stay
+        return juce::jlimit(ambitusLo(), ambitusHi(), upic::midiToFreq(best));
     }
 
     double nudgePitch(double t, double f, int dSemi) const
@@ -1523,8 +1536,8 @@ private:
         int m = 12; std::vector<int> R;
         const double raw = f * std::pow(2.0, dSemi / 12.0);
         if (! pitchMagnet(m, R, t, f))
-            return juce::jlimit(upic::kMinFreq, upic::kMaxFreq, raw);
-        return upic::sieveQuantizeHz(raw, m, R);
+            return juce::jlimit(ambitusLo(), ambitusHi(), raw);
+        return juce::jlimit(ambitusLo(), ambitusHi(), upic::sieveQuantizeHz(raw, m, R));
     }
 
     void commitStroke()
