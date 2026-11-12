@@ -3935,14 +3935,14 @@ void MainComponent::paint(juce::Graphics& g)
                                           juce::Colour (0xff1a241d), juce::Colour (0xff241a28) };
     static const juce::Colour borders[] { juce::Colour (0xff39455c), juce::Colour (0xff3a3a4a),
                                           juce::Colour (0xff3a5a44), juce::Colour (0xff5a3a5a) };
-    for (int i = 0; i < (int) toolbarGroups.size(); ++i)
+    for (auto& card : toolbarGroups)
     {
-        auto& r = toolbarGroups[(size_t) i];
+        auto r = card.area;
         if (r.isEmpty()) continue;
         auto rf = r.toFloat().reduced (1.0f, 2.0f);
-        g.setColour (fills[i & 3]);
+        g.setColour (fills[(size_t) (card.colour & 3)]);
         g.fillRoundedRectangle (rf, 5.0f);
-        g.setColour (borders[i & 3]);
+        g.setColour (borders[(size_t) (card.colour & 3)]);
         g.drawRoundedRectangle (rf, 5.0f, 1.0f);
     }
 }
@@ -4205,7 +4205,7 @@ void MainComponent::resized()
     };
 
     auto flowGroups = [&] (juce::Rectangle<int> area, float sc, bool place,
-                           std::vector<juce::Rectangle<int>>* rects) -> int
+                           std::vector<ToolbarCard>* rects) -> int
     {
         const int rh2 = (int) std::lround (rowH36 * sc);
         const int g2  = juce::jmax (1, (int) std::lround (2.0f * sc));
@@ -4213,12 +4213,24 @@ void MainComponent::resized()
         const int right = area.getRight();
         int x = area.getX(), y = area.getY();
 
+        int groupColour = 0;
         for (auto& grp : groups)
         {
             const int gw = (int) std::lround ((float) groupWidth (grp) * sc);
             // does the group fit on the current line?
             if (x > area.getX() && x + gw + gap > right) { x = area.getX(); y += rh2; }
             const int gx = x, gy = y;
+            // a wide group wraps inside itself: every line it touches gets
+            // its own card, or the middle of the group would sit on the bare
+            // background and a bounding box would paint over the line gaps
+            int segX = gx, segY = gy;
+            auto closeSegment = [&]()
+            {
+                if (rects != nullptr && x > segX)
+                    rects->push_back ({ juce::Rectangle<int> (segX, segY,
+                                                              juce::jmax (1, x - segX), rh2),
+                                        groupColour });
+            };
 
             for (auto& it : grp.items)
             {
@@ -4235,7 +4247,12 @@ void MainComponent::resized()
                 const int lw = (int) std::lround ((float) it.labelW * sc);
                 const int cw = (int) std::lround ((float) it.w * sc);
                 // a group that is wider than the line wraps inside itself
-                if (x > area.getX() && x + lw + cw > right) { x = area.getX(); y += rh2; }
+                if (x > area.getX() && x + lw + cw > right)
+                {
+                    closeSegment();
+                    x = area.getX(); y += rh2;
+                    segX = x; segY = y;
+                }
                 if (place)
                 {
                     if (it.label != nullptr)
@@ -4245,10 +4262,9 @@ void MainComponent::resized()
                 }
                 x += lw + cw;
             }
-            if (rects != nullptr)
-                rects->push_back (juce::Rectangle<int> (gx, gy, juce::jmax (1, x - gx),
-                                                        juce::jmax (1, y + rh2 - gy)));
+            closeSegment();
             x += gap;
+            ++groupColour;
         }
         return (y - area.getY()) / rh2 + 1;
     };
@@ -4281,6 +4297,7 @@ void MainComponent::resized()
     // spare space on the right
     {
         auto top = b.removeFromTop (topRowsTotal * (int) std::lround (rowH36 * s) + 6);
+        toolbarBounds = top;
         toolbarGroups.clear();
         juce::Rectangle<int> sidebar;
         if (sidebarW > 0)
@@ -4297,7 +4314,7 @@ void MainComponent::resized()
         kbdHintLab.setVisible (sidebarOn);
         if (sidebarOn)
         {
-            toolbarGroups.push_back (sidebar);
+            toolbarGroups.push_back ({ sidebar, (int) groups.size() });
             auto sb = sidebar.reduced (6, 4);
             const int matLines = lineCount (matHintLab.getText());
             const int kbdLines = lineCount (kbdHintLab.getText());

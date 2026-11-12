@@ -64,7 +64,9 @@ instant and never touches the audio device (v1.17).
 files, tempo, clock, voice, levels, pitch, material, sieve, magnets, page,
 tools, scrub and dragging. A group keeps its controls together, but it no
 longer needs a row of its own - the next group continues on the same line
-when there is room. The **level sliders** (intensity, duration, master) are
+when there is room. A group wider than the line wraps inside itself, and
+its card follows it line by line, so no control is left on the bare
+background. The **level sliders** (intensity, duration, master) are
 one group, so they always sit together. On a large screen the long
 explanations (the material's hint and the keyboard/shortcut list) move into
 their own **sidebar** on the right, where the spare space is; the **Hints**
@@ -347,7 +349,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 479 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 480 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live

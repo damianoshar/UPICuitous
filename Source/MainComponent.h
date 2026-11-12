@@ -109,6 +109,17 @@ public:
     void injectOscMessageForTest (const juce::OSCMessage& m) { osc.handleMessageForTest (m); }
     void updateExternalScrubForTest (double nowMs) { updateExternalScrub (nowMs); }
 
+    // v1.33.3: the toolbar cards, so the selftest can prove that every
+    // toolbar control sits on a card (a wrapped group used to leave the
+    // middle of its controls on the bare background).
+    int toolbarCardCountForTest() const { return (int) toolbarGroups.size(); }
+    juce::Rectangle<int> toolbarCardBoundsForTest (int i) const
+    {
+        return (i >= 0 && i < (int) toolbarGroups.size())
+                 ? toolbarGroups[(size_t) i].area : juce::Rectangle<int>();
+    }
+    juce::Rectangle<int> toolbarBoundsForTest() const { return toolbarBounds; }
+
     void paint(juce::Graphics& g) override;
     void resized() override;
     void timerCallback() override;
@@ -220,7 +231,16 @@ private:
     std::atomic<int>    dirChangeSerial { 0 };
     double scrubVelocity = 0.0, scrubTarget = 0.0;
     double lastStopClickMs = -1.0e9;  // v1.27: double-click Stop = rewind
-    std::vector<juce::Rectangle<int>> toolbarGroups; // one panel per toolbar row
+    // v1.33.3: a group wider than its line wraps inside itself, so its card
+    // needs one rect per line segment - a single bounding box would leave the
+    // middle segment on the bare background and paint over the line gaps.
+    struct ToolbarCard
+    {
+        juce::Rectangle<int> area;
+        int colour = 0;
+    };
+    std::vector<ToolbarCard> toolbarGroups;
+    juce::Rectangle<int> toolbarBounds; // the whole toolbar block (cards + sidebar)
     bool   scrubActive = false;
     bool   scrubAudition = true;            // v1.28: short audio preview while scrubbing
     std::atomic<bool> arcEditing { false }; // an arc is being dragged/drawn

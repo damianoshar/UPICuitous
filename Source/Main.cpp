@@ -2489,6 +2489,37 @@ public:
                                && w0->findColour (juce::TextButton::buttonOnColourId) == upic::paletteColour (0),
                                "v1.33.3 the wavetable buttons follow the wave table colours");
                     }
+
+                    // every toolbar control must sit on a card. A group that
+                    // is wider than its line wraps inside itself; its card
+                    // has to follow it line by line, or the middle of the
+                    // group ends up floating on the bare background.
+                    {
+                        const auto tb = mc.toolbarBoundsForTest();
+                        const int nCards = mc.toolbarCardCountForTest();
+                        bool allOnCards = true;
+                        juce::String loose;
+                        int toolbarControls = 0;
+                        for (int i = 0; i < mc.getNumChildComponents(); ++i)
+                        {
+                            auto* c = mc.getChildComponent (i);
+                            if (! c->isVisible() || c->getBounds().isEmpty()) continue;
+                            if (! tb.contains (c->getBounds())) continue;
+                            ++toolbarControls;
+                            bool on = false;
+                            for (int k = 0; k < nCards && ! on; ++k)
+                                if (mc.toolbarCardBoundsForTest (k).contains (c->getBounds()))
+                                    on = true;
+                            if (! on)
+                            {
+                                allOnCards = false;
+                                loose << c->getName() << c->getBounds().toString() << "  ";
+                            }
+                        }
+                        check (allOnCards && toolbarControls > 0,
+                               "v1.33.3 every toolbar control sits on a card",
+                               loose.trim());
+                    }
                 }
 
                 // v1.33: the four frequency spaces - each dropdown has to
