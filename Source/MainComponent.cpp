@@ -3766,6 +3766,13 @@ void MainComponent::resized()
     }
     score.setBounds(b);
 
+
+    // v1.30 (5.3 refactor): the overlay cards have their own method.
+    layoutOverlays (s);
+}
+
+void MainComponent::layoutOverlays (float s)
+{
     // v1.7 audio settings overlay: full-window backdrop + centred card
     audioOverlay.setBounds(getLocalBounds());
     if (audioSelector != nullptr && audioOverlay.isVisible())
@@ -3855,7 +3862,6 @@ void MainComponent::resized()
     }
 }
 
-//==============================================================================
 juce::var MainComponent::pieceToVar() const
 {
     auto* o = new juce::DynamicObject();

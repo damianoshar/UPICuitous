@@ -102,6 +102,13 @@ private:
     void buildScoreArea();
     void buildEditors();
 
+    // --- the layout ---
+    // v1.30 (5.3 refactor): resized() was 460 lines. The flow layout (the
+    // rows, the scale fitting, the placing) stays in resized(); the side
+    // column, the tab strip and the overlay cards have their own methods.
+    void layoutSideColumn (const juce::Rectangle<int>& bounds);
+    void layoutOverlays (float scale);
+
     // --- data ---
     std::vector<upic::Waveform> waveforms;
     std::vector<upic::Envelope> envelopes;
