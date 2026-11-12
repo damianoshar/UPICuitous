@@ -291,6 +291,9 @@ private:
     // the preallocated buffers; slot install happens on the message thread.
     juce::ToggleButton monBtn{ "Mon" };
     juce::TextButton capBtn{ "Capture" };
+    // v1.31 (U4): the UPIC's wave page could be digitised from a
+    // recording. This turns the selected slot into a wavetable.
+    juce::TextButton waveFromSlotBtn{ "Slot -> Wave" };
     juce::Slider inGainSlider;
     juce::Label inGainLab{ {}, "In" };
     bool inputEnabled = false;
@@ -546,6 +549,8 @@ private:
     void clearCurrentPage();
     // v1.31 (U3): the UPIC's pitch transformations (transpose, invert).
     void transformPage (int op);
+    // v1.31 (U4): the digitised wave page (the slot becomes a wavetable).
+    void waveFromSelectedSlot();
 
     // v1.11 VST3 plugin mode
     bool pluginMode_ = false;

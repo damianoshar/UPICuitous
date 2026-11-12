@@ -691,6 +691,7 @@ void MainComponent::buildMaterialControls()
     addAndMakeVisible(loadSampleBtn); addAndMakeVisible(refSlider); addAndMakeVisible(tempoSlider); addAndMakeVisible(tempoLab); addAndMakeVisible(pmRatioSlider); addAndMakeVisible(pmIndexSlider);
     addAndMakeVisible(samplePitchBox); addAndMakeVisible(samplePitchLab);
     addAndMakeVisible(monBtn); addAndMakeVisible(capBtn);
+    addAndMakeVisible(waveFromSlotBtn);
     addAndMakeVisible(inGainSlider); addAndMakeVisible(inGainLab);
     addAndMakeVisible(slotLab); addAndMakeVisible(refLab); addAndMakeVisible(matHintLab);
     addAndMakeVisible (pmRatioLab); addAndMakeVisible (pmIndexLab);
@@ -1315,6 +1316,17 @@ void MainComponent::buildLiveInputControls()
     inGainSlider.setValue(0.8, juce::dontSendNotification);
     inGainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 72, 18);
     inGainSlider.onValueChange = [this]{ inputGain = (float) inGainSlider.getValue(); };
+
+    // v1.31 (U4): the digitised wave page. The real UPIC could fill the
+    // wavetable from a recording (Xenakis sampled the bulls for
+    // Taurhiphanie). Here the selected sample slot becomes a wavetable: the
+    // whole take is resampled into one loop of the oscillator.
+    waveFromSlotBtn.setName("waveFromSlotBtn");
+    waveFromSlotBtn.setTooltip("Turn the selected slot into a wavetable\n"
+                                "(the UPIC's digitised wave page: the take\n"
+                                "becomes one loop of the oscillator, so its\n"
+                                "pitch follows the arc).");
+    waveFromSlotBtn.onClick = [this]{ waveFromSelectedSlot(); };
 
     slotLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     slotLab.setColour(juce::Label::textColourId, juce::Colour(0xffc9c9d4));
@@ -3515,7 +3527,8 @@ void MainComponent::resized()
     juce::Component* const sampleCtl[] = { &slotLab, &sampleBox, &loadSampleBtn, &revBtn,
                                            &samplePitchLab, &samplePitchBox,
                                            &grainLab, &grainSlider,
-                                           &inGainLab, &inGainSlider, &monBtn, &capBtn };
+                                           &inGainLab, &inGainSlider, &monBtn, &capBtn,
+                                           &waveFromSlotBtn };
     for (auto* c : sampleCtl) c->setVisible(showSampleCtl);
     juce::Component* const liveCtl[] = { &livePitchLab, &livePitchBox,
                                          &liveGrainLab, &liveGrainSlider,
@@ -3556,7 +3569,8 @@ void MainComponent::resized()
                         FL(&refLab, 34, &refSlider, 210),
                         FL(&samplePitchLab, 34, &samplePitchBox, 180),
                         FL(&grainLab, 40, &grainSlider, 100),
-                        FL(&inGainLab, 30, &inGainSlider, 140), F(&monBtn, 64), F(&capBtn, 84) };
+                        FL(&inGainLab, 30, &inGainSlider, 140), F(&monBtn, 64), F(&capBtn, 84),
+                        F(&waveFromSlotBtn, 110) };
     else if (showLiveCtl)
         materialRow = { FL(&refLab, 34, &refSlider, 210),
                         FL(&livePitchLab, 42, &livePitchBox, 180),
@@ -4390,6 +4404,61 @@ void MainComponent::showClearWarning()
 void MainComponent::closeClearWarning()
 {
     clearOverlay.setVisible(false);
+}
+
+//==============================================================================
+// v1.31 (U4): the digitised wave page.
+//
+// The real UPIC's wave page could be filled from a recording - the wavetable
+// was digitised through an A/D converter, and Xenakis sampled the bellowing
+// of bulls for Taurhiphanie (1988). Here the selected sample slot (a file
+// or a mic take) becomes a wavetable: the whole take is resampled into one
+// loop of the oscillator.
+//==============================================================================
+void MainComponent::waveFromSelectedSlot()
+{
+    const upic::SampleSlot* slot = nullptr;
+    {
+        const juce::ScopedLock l(dataLock);
+        if (selSlot >= 0 && selSlot < (int) sampleSlots.size())
+            slot = &sampleSlots[(size_t) selSlot];
+    }
+
+    if (slot == nullptr || slot->data == nullptr || slot->data->getNumSamples() <= 0)
+    {
+        flash ("No sample in this slot - load or capture one first");
+        return;
+    }
+
+    upic::Waveform wave;
+    {
+        const juce::ScopedLock l(dataLock);
+        int newId = 0;
+        for (const auto& w : waveforms) newId = juce::jmax (newId, w.id + 1);
+
+        juce::String name = slot->name.isNotEmpty() ? slot->name : juce::String ("Slot " + juce::String (slot->id));
+        name += " wave";
+        int n = 2;
+        for (;;)
+        {
+            bool used = false;
+            for (const auto& w : waveforms) if (w.name == name) { used = true; break; }
+            if (! used) break;
+            name = (slot->name.isNotEmpty() ? slot->name : juce::String ("Slot " + juce::String (slot->id)))
+                 + " wave " + juce::String (n++);
+        }
+
+        wave = upic::waveFromTake (*slot->data, newId, name);
+        waveforms.push_back (wave);
+        selWave = newId;
+    }
+
+    refreshBoxes();
+    waveEd.bind (&waveforms, &selWave);
+    pushVoice();
+    publishModelSnapshot();
+    markModelChanged();
+    flash ("Wave page digitised: \"" + wave.name + "\" (one loop)");
 }
 
 void MainComponent::clearCurrentPage()

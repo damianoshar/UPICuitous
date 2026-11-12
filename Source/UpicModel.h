@@ -969,6 +969,37 @@ namespace upic
         return s;
     }
 
+    //---------------- the digitised wave page (U4) ----------------
+    // The real UPIC could fill the wave page from a recording: the wavetable
+    // was digitised through an A/D converter (Xenakis sampled the bellowing
+    // of bulls for Taurhiphanie, 1988). The take becomes one loop of the
+    // oscillator - the whole take is resampled into a single cycle of the
+    // wavetable, which is what the oscillator then plays round and round.
+    inline Waveform waveFromTake(const juce::AudioBuffer<float>& take, int id,
+                                 const juce::String& name)
+    {
+        Waveform w;
+        w.id = id;
+        w.name = name;
+        w.samples.assign ((size_t) kWaveSize, 0.0f);
+
+        const int n = take.getNumSamples();
+        if (n <= 0) return w;
+
+        for (int i = 0; i < kWaveSize; ++i)
+        {
+            const double pos = (double) i * (double) n / (double) kWaveSize;
+            const int i0 = juce::jlimit (0, n - 1, (int) pos);
+            const int i1 = juce::jmin (i0 + 1, n - 1);
+            const float f = (float) (pos - (double) i0);
+            const float v0 = take.getSample (0, i0);
+            const float v1 = take.getSample (0, i1);
+            w.samples[(size_t) i] = v0 + (v1 - v0) * f;
+        }
+        w.normalize();
+        return w;
+    }
+
     //---------------- Page ----------------
     struct Page
     {

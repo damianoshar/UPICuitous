@@ -1189,6 +1189,35 @@ public:
                    "inverting twice gives the arc back");
         }
 
+        // 6i-b. v1.31 (U4): the digitised wave page - a take becomes one
+        //      loop of the oscillator.
+        {
+            // a sine over four cycles, resampled into one cycle of 1024
+            juce::AudioBuffer<float> take (1, 4096);
+            for (int i = 0; i < 4096; ++i)
+                take.setSample (0, i, 0.5f * (float) std::sin (
+                    2.0 * juce::MathConstants<double>::pi * 4.0 * i / 4096.0));
+
+            const auto w = upic::waveFromTake (take, 42, "take");
+            check (w.id == 42 && w.name == "take",
+                   "the digitised wave keeps its id and name");
+            check ((int) w.samples.size () == upic::kWaveSize,
+                   "the digitised wave is one cycle of the wavetable",
+                   juce::String ((int) w.samples.size ()));
+            float peak = 0.0f;
+            for (auto s : w.samples) peak = juce::jmax (peak, std::abs (s));
+            check (peak > 0.9f && peak <= 1.0f,
+                   "the digitised wave is normalised",
+                   juce::String (peak, 3));
+
+            // the loop is seamless: the last sample meets the first
+            const float first = w.samples.front();
+            const float last  = w.samples.back();
+            check (std::abs (first - last) < 0.05f,
+                   "the digitised wave loops without a step",
+                   juce::String (first, 3) + " -> " + juce::String (last, 3));
+        }
+
         // 6j. v1.30 (S-03): a piece is untrusted input. The parsers clamp
         //     the counts and reject non-finite numbers, so a crafted piece
         //     cannot be used to freeze the UI or to push NaN into the audio
