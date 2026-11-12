@@ -251,6 +251,26 @@ namespace upic
         // are NOT written to the piece (the format is untouched).
         int pitchMode = -1;
         bool reversed = false;
+
+        //---------------- the polyagogy (U1) ----------------
+        // The real UPIC's central idea: "once a line or curve has been
+        // drawn, nothing is really decided about its interpretation as a
+        // signal". The curve could be the carrier's timbre AND a control
+        // signal at the same time - an amplitude LFO (envelope shaping) or a
+        // frequency LFO (a fixed pitch or a glissando), read at its own rate.
+        //
+        // Here the modulating curve is the arc's OWN wave: the same drawn
+        // curve that makes the sound also shapes it. waveUse says what it
+        // does besides being the wavetable.
+        enum WaveUse
+        {
+            waveAsOscillator = 0,   // only the timbre (the classic case)
+            waveAlsoAmplitude = 1,  // and an amplitude LFO
+            waveAlsoFrequency = 2   // and a frequency LFO
+        };
+        int    waveUse = waveAsOscillator;
+        double modRate  = 1.0;    // the LFO's rate, in cycles per second
+        double modDepth = 0.0;    // 0..1 - how deep the modulation goes
         double pmRatio = 2.0;        // PM: modulator / carrier
         double pmIndex = 1.5;        // PM: peak modulation index
         int    pmIndexEnv = 0;       // PM: envelope shaping the index (0 = flat)
@@ -355,6 +375,10 @@ namespace upic
             o->setProperty ("pmI2", pmI2); o->setProperty ("pmI3", pmI3); o->setProperty ("pmI4", pmI4);
             o->setProperty("sampleId", sampleId);
             o->setProperty("refFreq", refFreq);
+            // v1.31 (U1): the polyagogy settings travel with the piece
+            o->setProperty("waveUse", waveUse);
+            o->setProperty("modRate", modRate);
+            o->setProperty("modDepth", modDepth);
             juce::Array<juce::var> arr;
             for (auto& p : points)
             {
@@ -385,6 +409,11 @@ namespace upic
             a.pmI2  = limits::clampFinite((double) v.getProperty ("pmI2", 1.0), 0.0, 100.0);  a.pmI3 = limits::clampFinite((double) v.getProperty ("pmI3", 1.0), 0.0, 100.0);  a.pmI4 = limits::clampFinite((double) v.getProperty ("pmI4", 1.0), 0.0, 100.0);
             a.sampleId = juce::jlimit(1, kMaxSampleSlots, (int) v.getProperty("sampleId", 1));
             a.refFreq = limits::clampFinite((double) v.getProperty("refFreq", 261.63), 20.0, 4000.0);
+            // v1.31 (U1): the polyagogy settings (absent in older pieces ->
+            // the classic oscillator)
+            a.waveUse = juce::jlimit (0, 2, (int) v.getProperty ("waveUse", 0));
+            a.modRate  = limits::clampFinite ((double) v.getProperty ("modRate", 1.0), 0.01, 100.0);
+            a.modDepth = limits::clampFinite ((double) v.getProperty ("modDepth", 0.0), 0.0, 1.0);
             if (auto* arr = v.getProperty("points", juce::var()).getArray())
                 for (auto& pv : *arr)
                 {

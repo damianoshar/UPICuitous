@@ -273,7 +273,30 @@ public:
                 float env = e != nullptr ? e->valueAt(arc.lifeAt(t)) : 1.0f;
                 const float edge = edgeFade(t, arcStart, arcEnd);
 
-                const float freq = (float) juce::jlimit(10.0, 14000.0, arc.freqAt(t));
+                float freq = (float) juce::jlimit(10.0, 14000.0, arc.freqAt(t));
+
+                // v1.31 (U1): the polyagogy - the arc's own wave can also
+                // be a control signal. The curve is read at its own rate
+                // (the LFO's), so it is a shape over the arc's life at rate
+                // 1 and a free-running LFO above it.
+                if (arc.waveUse != upic::Arc::waveAsOscillator && arc.modDepth > 0.0)
+                {
+                    const double m = w->valueAt (std::fmod (t * arc.modRate, 1.0));
+                    if (arc.waveUse == upic::Arc::waveAlsoAmplitude)
+                    {
+                        // the amplitude follows the curve (envelope shaping)
+                        env *= (float) juce::jmax (0.0, 1.0 + arc.modDepth * m);
+                    }
+                    else
+                    {
+                        // the pitch follows the curve (a fixed pitch or a
+                        // glissando) - the depth is in semitones
+                        const double semis = arc.modDepth * 12.0 * m;
+                        freq = (float) juce::jlimit (10.0, 14000.0,
+                            freq * std::pow (2.0, semis / 12.0));
+                    }
+                }
+
                 const float osc = w->valueAt(ph);
                 ph += freq * invSr;
                 if (ph >= 1.0) ph -= std::floor(ph);

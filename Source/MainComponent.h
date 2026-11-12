@@ -380,6 +380,14 @@ private:
     juce::ToggleButton oscMcBtn{ "Multicast" };
     juce::ToggleButton oscOnBtn{ "OSC on" };
 
+    // v1.31 (U1): the polyagogy - the arc's own wave can also be a control
+    // signal (an amplitude LFO or a frequency LFO). These live on the Osc
+    // tab's material row and apply to the selected arcs.
+    juce::ComboBox modUseBox;
+    juce::Slider modRateSlider, modDepthSlider;
+    juce::Label modUseLab{ {}, "Wave as" }, modRateLab{ {}, "Rate" },
+              modDepthLab{ {}, "Depth" };
+
     // v1.27: Clear is destructive, so it asks first. An in-app overlay keeps
     // this working on Android, where floating dialogs cannot be dismissed.
     // v1.30 (5.3 refactor): the overlay type lives in OverlayPanels.h.

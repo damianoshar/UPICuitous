@@ -1251,6 +1251,110 @@ public:
                    juce::String (longPg.arcs[0].points[1].t, 1));
         }
 
+        // 6i-d. v1.31 (U1): the polyagogy. The same drawn curve can be the
+        //      timbre AND a control signal - an amplitude LFO or a frequency
+        //      LFO. The sound has to change when the arc's wave is put to
+        //      that second use.
+        {
+            upic::Page pg; pg.durationSec = 4.0;
+            upic::Arc a; a.id = 1; a.mode = 0; a.intensity = 1.0f;
+            a.refFreq = 220.0;
+            a.points = { { 0.0, 220.0 }, { 4.0, 220.0 } };
+            pg.arcs.push_back (a);
+            upic::Envelope flat; flat.presetFlat();
+            std::vector<upic::Envelope> envs { flat };
+            auto waves = upic::defaultWaveforms();
+
+            // render the arc plain, then with its own wave as an amplitude
+            // LFO, and compare the two
+            auto renderArc = [&] (const upic::Arc& arc, juce::AudioBuffer<float>& buf)
+            {
+                upic::Page p2 = pg; p2.arcs[0] = arc;
+                UpicEngine e; e.prepare (44100.0, 8192);
+                buf.setSize (1, 44100);
+                buf.clear();
+                e.renderPageOffline (p2, waves, envs, {}, buf, 44100.0, 1.0f);
+            };
+
+            juce::AudioBuffer<float> plainBuf (1, 44100);
+            renderArc (a, plainBuf);
+            auto peakOf = [] (const juce::AudioBuffer<float>& b)
+            {
+                float pk = 0.0f;
+                for (int i = 0; i < b.getNumSamples(); ++i)
+                    pk = juce::jmax (pk, std::abs (b.getSample (0, i)));
+                return pk;
+            };
+            const float plain = peakOf (plainBuf);
+            check (plain > 0.01f, "the plain oscillator arc sounds",
+                   juce::String (plain, 4));
+
+            // the amplitude LFO: the same wave now shapes the loudness, so
+            // the signal is no longer the same - and it tremolos (the
+            // loudness in one eighth of a second differs from the next)
+            juce::AudioBuffer<float> ampBuf (1, 44100);
+            upic::Arc modAmp = a;
+            modAmp.waveUse = upic::Arc::waveAlsoAmplitude;
+            modAmp.modRate = 4.0;   // 4 sweeps a second
+            modAmp.modDepth = 1.0;
+            renderArc (modAmp, ampBuf);
+
+            double maxDiff = 0.0;
+            for (int i = 0; i < plainBuf.getNumSamples(); ++i)
+                maxDiff = juce::jmax (maxDiff, (double) std::abs (
+                    plainBuf.getSample (0, i) - ampBuf.getSample (0, i)));
+            check (maxDiff > 0.01,
+                   "the wave as an amplitude LFO changes the sound",
+                   juce::String (maxDiff, 4));
+
+            auto slicePeak = [&] (const juce::AudioBuffer<float>& b, int from, int to)
+            {
+                float pk = 0.0f;
+                for (int i = from; i < to; ++i) pk = juce::jmax (pk, std::abs (b.getSample (0, i)));
+                return pk;
+            };
+            // the loudest and the quietest 10 ms window of the first second:
+            // a full-depth tremolo swings the gain from 0 to 2
+            float loudest = 0.0f, quietest = 1e9f;
+            for (int from = 0; from + 441 <= ampBuf.getNumSamples(); from += 441)
+            {
+                const float pk = slicePeak (ampBuf, from, from + 441);
+                loudest = juce::jmax (loudest, pk);
+                quietest = juce::jmin (quietest, pk);
+            }
+            check (loudest > quietest * 1.5f,
+                   "the amplitude LFO tremolos the arc",
+                   juce::String (quietest, 4) + " .. " + juce::String (loudest, 4));
+
+            // the frequency LFO: the same wave now moves the pitch, so the
+            // waveform itself changes (the peak stays the same - it is a
+            // vibrato)
+            juce::AudioBuffer<float> freqBuf (1, 44100);
+            upic::Arc modFreq = a;
+            modFreq.waveUse = upic::Arc::waveAlsoFrequency;
+            modFreq.modRate = 4.0;
+            modFreq.modDepth = 1.0;
+            renderArc (modFreq, freqBuf);
+
+            double maxDiffF = 0.0;
+            for (int i = 0; i < plainBuf.getNumSamples(); ++i)
+                maxDiffF = juce::jmax (maxDiffF, (double) std::abs (
+                    plainBuf.getSample (0, i) - freqBuf.getSample (0, i)));
+            check (maxDiffF > 0.01,
+                   "the wave as a frequency LFO changes the sound",
+                   juce::String (maxDiffF, 4));
+
+            // and the settings travel with the piece
+            upic::Arc saved = upic::Arc::fromVar (modAmp.toVar());
+            check (saved.waveUse == upic::Arc::waveAlsoAmplitude
+                && std::abs (saved.modRate - 4.0) < 1e-6
+                && std::abs (saved.modDepth - 1.0) < 1e-6,
+                   "the polyagogy settings survive a piece round trip",
+                   juce::String (saved.waveUse) + " / "
+                   + juce::String (saved.modRate, 2) + " / "
+                   + juce::String (saved.modDepth, 2));
+        }
+
         // 6j. v1.30 (S-03): a piece is untrusted input. The parsers clamp
         //     the counts and reject non-finite numbers, so a crafted piece
         //     cannot be used to freeze the UI or to push NaN into the audio

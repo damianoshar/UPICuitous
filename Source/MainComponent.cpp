@@ -730,6 +730,62 @@ void MainComponent::buildSieveControls()
     sieveREdit.onTextChange = [this]{ pushSieve(); };
     sieveBtn.onClick = [this]{ pushSieve(); };
 
+    // --- v1.31 (U1): the polyagogy. The UPIC's wave page had no fixed
+    //     meaning: the same drawn curve could be the carrier's timbre AND a
+    //     control signal. Here the arc's own wave can also be an amplitude
+    //     LFO (envelope shaping) or a frequency LFO (a fixed pitch or a
+    //     glissando), read at its own rate.
+    addAndMakeVisible(modUseBox); addAndMakeVisible(modRateSlider);
+    addAndMakeVisible(modDepthSlider); addAndMakeVisible(modUseLab);
+    addAndMakeVisible(modRateLab); addAndMakeVisible(modDepthLab);
+    modUseBox.setName("modUseBox");
+    modRateSlider.setName("modRateSlider");
+    modDepthSlider.setName("modDepthSlider");
+    modUseBox.addItem("Oscillator", 1);
+    modUseBox.addItem("+ Amplitude LFO", 2);
+    modUseBox.addItem("+ Frequency LFO", 3);
+    modUseBox.setSelectedId (1, juce::dontSendNotification);
+    modUseBox.setTooltip ("What the arc's drawn wave does besides being\n"
+                          "the timbre - the UPIC let the same curve be\n"
+                          "the sound and a control signal at once.");
+    modRateSlider.setRange (0.05, 20.0, 0.05);
+    modRateSlider.setValue (1.0, juce::dontSendNotification);
+    modRateSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 18);
+    modRateSlider.setNumDecimalPlacesToDisplay (2);
+    modRateSlider.setTextValueSuffix (" Hz");
+    modRateSlider.setTooltip ("The LFO's rate: 1 Hz is one sweep over a\n"
+                              "second of score time.");
+    modDepthSlider.setRange (0.0, 1.0, 0.01);
+    modDepthSlider.setValue (0.0, juce::dontSendNotification);
+    modDepthSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 18);
+    modDepthSlider.setNumDecimalPlacesToDisplay (2);
+    modDepthSlider.setTooltip ("How deep the modulation goes: 1 is an octave\n"
+                              "of pitch, or a full swing of the amplitude.");
+    // the three controls edit the selected arcs, like the other live editors
+    auto applyModToSelection = [this]{
+        const auto ids = score.getSelectedArcs();
+        if (ids.empty()) return;
+        {
+            const juce::ScopedLock l(dataLock);
+            for (auto& a : curPage().arcs)
+                if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
+                {
+                    a.waveUse = modUseBox.getSelectedId() - 1;
+                    a.modRate = modRateSlider.getValue();
+                    a.modDepth = modDepthSlider.getValue();
+                }
+        }
+        publishModelSnapshot();
+        markModelChanged();
+        score.repaint();
+    };
+    modUseBox.onChange = [this, applyModToSelection]{
+        applyModToSelection();
+        flash ("Wave as: " + modUseBox.getText());
+    };
+    modRateSlider.onValueChange = [this, applyModToSelection]{ applyModToSelection(); };
+    modDepthSlider.onValueChange = [this, applyModToSelection]{ applyModToSelection(); };
+
     // --- v1.2 magnetic-sieve row: preset library, stickiness, time grid,
     //     procedural arc generators + persistent shortcut/wheel hint ---
     addAndMakeVisible(sievePresetBox); addAndMakeVisible(stickSlider);
@@ -1776,6 +1832,10 @@ void MainComponent::syncControlsToArc(int arcId)
             pmOpsBox.setSelectedId (a.pmOps == 4 ? 2 : 1, juce::dontSendNotification);
             intenSlider.setValue(a.intensity, juce::dontSendNotification);
             drawIntensity = a.intensity; // keep new strokes in sync with the slider
+            // v1.31 (U1): the polyagogy controls follow the selected arc
+            modUseBox.setSelectedId (juce::jlimit (0, 2, a.waveUse) + 1, juce::dontSendNotification);
+            modRateSlider.setValue (a.modRate, juce::dontSendNotification);
+            modDepthSlider.setValue (a.modDepth, juce::dontSendNotification);
             // reflect material in the tabs (the arc is in this tab's layer)
             drawMatMode = juce::jlimit(0, 3, a.mode);
             syncMaterialTabs();
@@ -3561,6 +3621,11 @@ void MainComponent::resized()
                                        &pmIndexEnvLab, &pmIndexEnvBox, &pmFeedbackLab,
                                        &pmFeedbackSlider, &pmImportBtn, &pmExportBtn };
     for (auto* c : pmCtl) c->setVisible (showPmCtl);
+    // v1.31 (U1): the polyagogy controls belong to the Osc tab (the wave
+    // page is the Osc material's).
+    juce::Component* const oscModCtl[] = { &modUseLab, &modUseBox, &modRateLab,
+                                          &modRateSlider, &modDepthLab, &modDepthSlider };
+    for (auto* c : oscModCtl) c->setVisible (! showSampleCtl && ! showLiveCtl && ! showPmCtl);
 
     // Each tab shows only the draw/voice controls that apply to its material.
     std::vector<FlowItem> voiceRow;
@@ -3597,6 +3662,13 @@ void MainComponent::resized()
                         FL(&pmIndexEnvLab, 46, &pmIndexEnvBox, 120),
                         FL(&pmFeedbackLab, 42, &pmFeedbackSlider, 130),
                         F(&pmImportBtn, 64), F(&pmExportBtn, 64) };
+    else
+        // v1.31 (U1): the Osc tab's material row carries the polyagogy
+        // controls - what the arc's drawn wave does besides being the
+        // timbre.
+        materialRow = { FL(&modUseLab, 56, &modUseBox, 150),
+                        FL(&modRateLab, 34, &modRateSlider, 120),
+                        FL(&modDepthLab, 40, &modDepthSlider, 110) };
     // the material hint is always there; the sieve group sits with the
     // sieve preset on the next row (v1.25)
     materialRow.push_back(FH(&matHintLab, 220));
