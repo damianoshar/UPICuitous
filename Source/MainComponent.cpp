@@ -4737,9 +4737,70 @@ void MainComponent::saveFile()
             if (sp == nullptr) return;
             auto f = c.getResult();
             if (f == juce::File()) return;
-            juce::ScopedLock l(dataLock);
-            f.replaceWithText(juce::JSON::toString(pieceToVar(), true));
+            savePieceToFile (f);
         });
+}
+
+//==============================================================================
+// v1.33.4 (H6): the piece saver.
+//
+// The loader refuses a piece over the file cap, but the saver used to write
+// whatever it had: a 30 s stereo capture at 96 kHz is 15.4 MB of base64, so
+// the app saved a file it then refused to open ("Piece too large"). The
+// saver measures the piece first, refuses it with a message that says what
+// to do, and never touches the destination when it refuses - the file that
+// was there before is still there. The write itself goes to a temporary
+// sibling and replaces the target only when the whole piece is on disk.
+bool MainComponent::savePieceToFile (const juce::File& f, juce::int64 maxBytes)
+{
+    if (f == juce::File()) return false;
+
+    juce::String json;
+    {
+        juce::ScopedLock l (dataLock);
+        json = juce::JSON::toString (pieceToVar(), true);
+    }
+
+    const juce::int64 bytes = (juce::int64) json.getNumBytesAsUTF8();
+    auto humanSize = [] (juce::int64 b) -> juce::String
+    {
+        return b >= 1024 * 1024 ? (juce::String ((int) (b / (1024 * 1024))) + " MB")
+                                : (juce::String ((int) (b / 1024)) + " KB");
+    };
+
+    if (bytes > maxBytes)
+    {
+        flash ("Piece too large to save (" + humanSize (bytes) + ", the limit is "
+               + humanSize (maxBytes) + ") - shorten the capture or the sample, "
+               "or export the audio to a WAV instead");
+        return false;
+    }
+
+    juce::TemporaryFile temp (f);
+    {
+        auto out = temp.getFile().createOutputStream();
+        if (out == nullptr)
+        {
+            flash ("Could not write " + f.getFileName());
+            return false;
+        }
+        // JUCE 8's write() reports success as a bool
+        const bool wrote = out->write (json.toRawUTF8(), (size_t) bytes);
+        out.reset();
+        if (! wrote)
+        {
+            flash ("Could not write " + f.getFileName());
+            return false;
+        }
+    }
+    if (! temp.overwriteTargetFileWithTemporary())
+    {
+        flash ("Could not write " + f.getFileName());
+        return false;
+    }
+
+    flash ("Saved " + f.getFileName());
+    return true;
 }
 
 void MainComponent::loadFile()
@@ -4758,7 +4819,10 @@ void MainComponent::loadFile()
             // hostile file cannot exhaust memory before it is even parsed.
             if (f.getSize() > (juce::int64) upic::limits::kMaxPieceBytes)
             {
-                flash("Piece too large (max 10 MB)");
+                // v1.33.4 (H6): the limit is derived from the sample budget
+                // now, so the message states the real number.
+                flash ("Piece too large (max "
+                       + juce::String ((int) (upic::limits::kMaxPieceBytes / (1024 * 1024))) + " MB)");
                 return;
             }
             // SECURITY (S-03): the whole load is wrapped, so a piece that

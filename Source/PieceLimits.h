@@ -22,11 +22,25 @@ namespace upic
 {
     namespace limits
     {
+        // --- the sample budget (the file cap below is derived from it) ---
+        // The decoded PCM of every slot together, as it sits in memory
+        // (32-bit float).
+        constexpr size_t kMaxTotalSampleBytes = 50u * 1024u * 1024u;
+
         // --- the file / state blob itself ---
-        // A piece is JSON with the samples base64-edoded inside it. 10 MB is
-        // far above any real piece (the biggest test piece is ~150 KB) and
-        // far below anything that could exhaust memory.
-        constexpr size_t kMaxPieceBytes = 10u * 1024u * 1024u;
+        // A piece is JSON with the samples base64-ed inside it. The cap is
+        // derived from the sample budget above, so that everything the app
+        // can hold in memory can also be written to a piece and read back:
+        // a sample is 4 bytes in memory (32-bit float) and 2 + 2/3 bytes in
+        // the file (16-bit, base64-ed), so the file is two thirds of the
+        // memory.
+        //
+        // The two limits used to disagree: the 10 MB file cap bound long
+        // before the 50 MB sample budget, so the app could hold - and save
+        // - a piece it then refused to reopen ("Piece too large"). A 30 s
+        // stereo capture at 96 kHz is 15.4 MB of base64, which the old cap
+        // rejected.
+        constexpr size_t kMaxPieceBytes = (kMaxTotalSampleBytes / 3u) * 2u;
 
         // --- the arrays in a piece ---
         constexpr int kMaxPages = 100;
@@ -38,15 +52,13 @@ namespace upic
         constexpr int kMaxSieveZones = 200;
         constexpr int kMaxSieveRemainders = 5000;
 
-        // --- the sample material ---
+        // --- the per-sample limits ---
         // 60 seconds at the highest sample rate the app accepts. The same
         // 60-second cap already applies to files loaded through the file
         // chooser; this makes the piece format obey it too.
         constexpr double kMaxSampleSeconds = 60.0;
         constexpr double kMaxSampleRate = 96000.0;
         constexpr int kMaxFramesPerSample = (int) (kMaxSampleSeconds * kMaxSampleRate);
-        // The decoded PCM of every slot together (16-bit stereo).
-        constexpr size_t kMaxTotalSampleBytes = 50u * 1024u * 1024u;
         // Base64 is 4/3 of the binary it carries; allow a little slack for
         // the padding, so an oversized string is rejected before decoding.
         constexpr size_t kBase64Overhead = 2; // 4/3 rounded up, with slack

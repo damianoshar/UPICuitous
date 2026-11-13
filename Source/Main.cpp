@@ -3294,6 +3294,67 @@ public:
                     check(zoneOk, "piece json round-trips sieve zones");
                 }
 
+                // --- v1.33.4 (H6): the saver measures the piece ---
+                // The loader refuses a piece over the file cap; the saver
+                // used to write whatever it had, so the app could save a
+                // piece it then refused to reopen.
+                {
+                    auto saveHolder = std::make_unique<MainComponent>();
+                    auto& mcSave = *saveHolder;
+                    mcSave.setSize(1280, 800);
+                    mcSave.loadFromVar(juce::JSON::parse(
+                        "{\"pages\":[{\"duration\":8,\"nextArcId\":2,\"arcs\":["
+                        "{\"id\":1,\"mode\":0,\"waveformId\":0,\"envelopeId\":0,\"intensity\":0.8,"
+                        "\"points\":[{\"t\":0,\"f\":220},{\"t\":4,\"f\":880}]}]}]}"));
+
+                    auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                    .getChildFile("upic_piece_save_test.json");
+                    file.deleteFile();
+                    const bool saved = mcSave.savePieceToFile(file);
+                    check(saved && file.existsAsFile() && file.getSize() > 100,
+                          "the piece saver writes a piece that fits",
+                          juce::String((int) file.getSize()));
+
+                    // ...and that file loads into a fresh app
+                    bool reloaded = false;
+                    if (file.existsAsFile())
+                    {
+                        auto loadHolder = std::make_unique<MainComponent>();
+                        auto& mcLoad = *loadHolder;
+                        mcLoad.loadFromVar(juce::JSON::parse(file.loadFileAsString()));
+                        // NB: getProperty() returns a reference into the var,
+                        // so the piece has to stay alive in a named variable
+                        auto piece = mcLoad.pieceToVar();
+                        if (auto* pgArr = piece.getProperty("pages", juce::var()).getArray();
+                            pgArr != nullptr && !pgArr->isEmpty())
+                        {
+                            auto* arcs = pgArr->getReference(0).getProperty("arcs", juce::var()).getArray();
+                            reloaded = arcs != nullptr && arcs->size() == 1;
+                        }
+                    }
+                    check(reloaded, "the saved piece reloads into a fresh app");
+
+                    // a piece over the limit is refused, and the file that was
+                    // there before is not touched
+                    const auto sizeBefore = file.getSize();
+                    const bool refused = mcSave.savePieceToFile(file, 1024);
+                    check(!refused && file.existsAsFile() && file.getSize() == sizeBefore,
+                          "the piece saver refuses a piece over the limit",
+                          juce::String((int) file.getSize()) + " vs " + juce::String((int) sizeBefore));
+
+                    // the two limits agree: the longest capture the app can
+                    // make (30 s at 96 kHz, stereo) has to fit in a piece
+                    const juce::int64 captureBytes = (juce::int64)(30.0 * 96000.0) * 2 * 2; // 16-bit stereo
+                    const juce::int64 asBase64 = (captureBytes * 4 + 2) / 3;
+                    check(asBase64 < (juce::int64) upic::limits::kMaxPieceBytes,
+                          "the piece cap fits the longest capture",
+                          juce::String((int)(asBase64 / (1024 * 1024))) + " MB vs "
+                              + juce::String((int)(upic::limits::kMaxPieceBytes / (1024 * 1024))) + " MB");
+                    check(upic::limits::kMaxPieceBytes == (upic::limits::kMaxTotalSampleBytes / 3u) * 2u,
+                          "the piece cap is derived from the sample budget");
+                    file.deleteFile();
+                }
+
                 mc.setSize(1280, 800);
 
                 // --- v1.2 controls exist with sane bounds ---

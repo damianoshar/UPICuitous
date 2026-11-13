@@ -648,6 +648,13 @@ public:
     juce::var pieceToVar() const;
     void loadFromVar(const juce::var& v);
 
+    // v1.33.4 (H6): the piece saver. It measures the piece first and refuses
+    // (with a message) when it would be bigger than the loader accepts, so
+    // the app never writes a piece it cannot reopen. `maxBytes` is the limit
+    // to check against - the selftest passes a small one.
+    bool savePieceToFile (const juce::File& f,
+                          juce::int64 maxBytes = (juce::int64) upic::limits::kMaxPieceBytes);
+
     // v1.33.4 (H12): the PM preset file operations, split out of the file
     // dialogs so the selftest can drive them without a chooser.
     // buildPmPresetText() returns the export text of the selected PM arc
