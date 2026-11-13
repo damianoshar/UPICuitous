@@ -169,6 +169,24 @@ int main()
             UpicuitousAudioProcessor::applyState (safe, juce::JSON::parse ("{\"pages\":[]}"));
             check (true, "a state load after the processor's death is skipped, not a crash");
         }
+
+        // 9) v1.33.4 (M18): the host's MIDI reaches the app. The VST3 only
+        //    declares a MIDI input bus when the build asked for one
+        //    (NEEDS_MIDI_INPUT in Plugin/CMakeLists.txt - the compile-time
+        //    guard in PluginProcessor.cpp keeps the two in step); here the
+        //    message itself is checked.
+        {
+            check (proc.acceptsMidi(), "the processor accepts MIDI");
+            juce::MidiBuffer hostMidi;
+            hostMidi.addEvent (juce::MidiMessage::controllerEvent (3, 42, 99), 0);
+            proc.processBlock (buf, hostMidi);
+            const auto activity = main.midiHub().pollActivity();
+            check (activity.valid && activity.type == MidiHub::kTypeCc
+                   && activity.channel == 3 && activity.number == 42 && activity.value == 99,
+                   "the host's MIDI reaches the app",
+                   "ch " + juce::String (activity.channel + 1) + " CC "
+                       + juce::String (activity.number) + " = " + juce::String (activity.value));
+        }
     }
 
     std::cout << (failures == 0 ? "ALL CHECKS PASSED"

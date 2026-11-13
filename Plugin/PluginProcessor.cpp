@@ -3,6 +3,18 @@
 #include "MainComponent.h"
 
 //==============================================================================
+// v1.33.4 (M18): the VST3 wrapper only declares a MIDI input bus when the
+// build asked for one (NEEDS_MIDI_INPUT in Plugin/CMakeLists.txt). The
+// processor consumes the host's MIDI and says acceptsMidi() == true, so the
+// two have to agree - otherwise the host never sends a note and the MIDI
+// scrub transport (UPIC-28) can never be reached.
+#if defined(JucePlugin_Build_VST3) && JucePlugin_Build_VST3
+ #if ! defined(JucePlugin_WantsMidiInput) || ! JucePlugin_WantsMidiInput
+  #error "the VST3 declares no MIDI input bus but the processor consumes MIDI: set NEEDS_MIDI_INPUT TRUE in Plugin/CMakeLists.txt"
+ #endif
+#endif
+
+//==============================================================================
 UpicuitousAudioProcessor::UpicuitousAudioProcessor()
     : juce::AudioProcessor(BusesProperties()
           .withInput("Input", juce::AudioChannelSet::stereo(), true)

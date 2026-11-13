@@ -29,7 +29,10 @@ juce_add_plugin(UPICuitousPlugin
     FORMATS VST3
     VST3_CATEGORIES Fx
     IS_SYNTH FALSE
-    NEEDS_MIDI_INPUT FALSE
+    # v1.33.4 (M18): the plugin consumes the host's MIDI (processBlock hands
+    # the messages to the app, and acceptsMidi() says so) - so it has to
+    # declare a MIDI input bus, or the host never sends any.
+    NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE

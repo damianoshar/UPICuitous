@@ -194,7 +194,8 @@ button or the menu) lists the MIDI inputs (`None` when there is none),
 shows the last message (CC or note, value, channel, device) and has a
 **Learn** row for the master gain and the draw intensity: press Learn,
 move a control, and the parameter follows it. The bindings are a
-controller map - session state, not part of the piece.
+controller map - session state, not part of the piece. The VST3 declares
+a MIDI input bus, so the host's notes and CCs reach the app as well.
 
 **Transport and IO** - Play/Stop with click-free fades, Loop, page
 sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
@@ -370,7 +371,7 @@ button text fitting, the capture button's colours, the wavetable
 buttons' colours, the PM preset round trip, the WAV export, the piece
 saver and the MIDI device handling) and writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
-18-check plugin smoke test and pluginval at strictness 5.
+20-check plugin smoke test and pluginval at strictness 5.
 
 ## Xenakis notes
 
