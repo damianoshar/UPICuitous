@@ -81,6 +81,8 @@ void MainComponent::buildTransportControls()
     addAndMakeVisible(audioBtn); addAndMakeVisible(clearBtn);
     addAndMakeVisible(settingsBtn);
     settingsBtn.setName("settingsBtn");
+    loopBtn.setName("loopBtn");
+    seqBtn.setName("seqBtn");
     if (pluginMode_) audioBtn.setVisible(false);
     saveBtn.setVisible (false); loadBtn.setVisible (false); exportBtn.setVisible (false); stemsBtn.setVisible (false); audioBtn.setVisible (false);
     loopBtn.setToggleState(true, juce::dontSendNotification);
@@ -112,8 +114,11 @@ void MainComponent::buildTransportControls()
             score.repaint();
         }
     };
-    loopBtn.onClick = [this]{ loopPage = loopBtn.getToggleState(); };
-    seqBtn.onClick = [this]{ seqPages = seqBtn.getToggleState(); };
+    // v1.33.4 (M22): the loop and the page sequencer are part of the model
+    // the audio thread renders from, so they have to mark it as changed -
+    // the status timer publishes the snapshot only when the revision moved.
+    loopBtn.onClick = [this]{ loopPage = loopBtn.getToggleState(); markModelChanged(); };
+    seqBtn.onClick = [this]{ seqPages = seqBtn.getToggleState(); markModelChanged(); };
     revPlayBtn.onClick = [this]{
         const bool rev = revPlayBtn.getToggleState();
         const double now = playRate.load(std::memory_order_relaxed);
@@ -649,12 +654,14 @@ void MainComponent::buildToolbarControls()
 
     waveEditBox.onChange = [this]{
         int idx = waveEditBox.getSelectedId() - 1;
-        if (idx >= 0 && idx < (int)waveforms.size()) { selWave = waveforms[(size_t)idx].id; waveEd.bind(&waveforms, &selWave); waveBox.setSelectedId(idx + 1, juce::dontSendNotification); pushVoice(); }
+        // v1.33.4 (M22): bind() replaces the change callback, so the mark
+        // has to be passed here too
+        if (idx >= 0 && idx < (int)waveforms.size()) { selWave = waveforms[(size_t)idx].id; waveEd.bind(&waveforms, &selWave, [this]{ markModelChanged(); }); waveBox.setSelectedId(idx + 1, juce::dontSendNotification); pushVoice(); }
         updateWaveButtonColours();
     };
     envEditBox.onChange = [this]{
         int idx = envEditBox.getSelectedId() - 1;
-        if (idx >= 0 && idx < (int)envelopes.size()) { selEnv = envelopes[(size_t)idx].id; envEd.bind(&envelopes, &selEnv); envBox.setSelectedId(idx + 1, juce::dontSendNotification); pushVoice(); }
+        if (idx >= 0 && idx < (int)envelopes.size()) { selEnv = envelopes[(size_t)idx].id; envEd.bind(&envelopes, &selEnv, [this]{ markModelChanged(); }); envBox.setSelectedId(idx + 1, juce::dontSendNotification); pushVoice(); }
     };
 
     // --- sliders ---
@@ -1837,6 +1844,11 @@ void MainComponent::buildScoreArea()
     // v1.33.4 (H13): the editor refuses an edit that the piece format
     // cannot hold and says why.
     score.onNotice = [this](const juce::String& m){ flash (m); };
+    // v1.33.4 (M22): a drag edits the model in place. The light hook marks
+    // the model as changed, so the status timer publishes it - the full
+    // change callback (which refreshes every combo box) is too heavy to run
+    // on every mouse move.
+    score.onModelEdited = [this]{ markModelChanged(); };
     score.onArcEditingChanged = [this](bool editing){
         arcEditing.store(editing, std::memory_order_relaxed);
         if (! editing)
@@ -1855,6 +1867,7 @@ void MainComponent::buildEditors()
     addAndMakeVisible(wSine); addAndMakeVisible(wSaw); addAndMakeVisible(wSqr); addAndMakeVisible(wTri);
     addAndMakeVisible(wNoise); addAndMakeVisible(wSmooth); addAndMakeVisible(wNorm);
     wSine.setName("wSine");
+    eFlat.setName("envFlatBtn");
     addAndMakeVisible(eFlat); addAndMakeVisible(ePerc); addAndMakeVisible(eSwell); addAndMakeVisible(eGate); addAndMakeVisible(eStr);
     addAndMakeVisible(assignBtn); addAndMakeVisible(delArcBtn); addAndMakeVisible(muteArcBtn);
     addAndMakeVisible(voiceLab); addAndMakeVisible(waveLab); addAndMakeVisible(envLab); addAndMakeVisible(toolLab);
@@ -1890,11 +1903,13 @@ void MainComponent::buildEditors()
     wNorm.onClick = [editWave]{ editWave([](upic::Waveform& w){ w.normalize(); }); };
     updateWaveButtonColours();
 
-    eFlat.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetFlat(); envEd.repaint(); } };
-    ePerc.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetPercussive(); envEd.repaint(); } };
-    eSwell.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetSwell(); envEd.repaint(); } };
-    eGate.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetGate(); envEd.repaint(); } };
-    eStr.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetStrings(); envEd.repaint(); } };
+    // v1.33.4 (M22): the envelope presets change the model, so they mark it
+    // as changed - the status timer publishes the snapshot only then.
+    eFlat.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetFlat(); envEd.repaint(); markModelChanged(); } };
+    ePerc.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetPercussive(); envEd.repaint(); markModelChanged(); } };
+    eSwell.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetSwell(); envEd.repaint(); markModelChanged(); } };
+    eGate.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetGate(); envEd.repaint(); markModelChanged(); } };
+    eStr.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetStrings(); envEd.repaint(); markModelChanged(); } };
 
     assignBtn.onClick = [this]{
         juce::ScopedLock l(dataLock);
@@ -2063,11 +2078,17 @@ void MainComponent::refreshBoxes()
 
 void MainComponent::refreshScoreBinding()
 {
-    score.bind(&curPage(), &waveforms, &playheadSec, [this]{ updateStatus(); refreshBoxes(); });
+    // v1.33.4 (M22): the editors change the model, so they mark it as
+    // changed - the status timer publishes the snapshot only when the
+    // revision moved (it used to copy the model on every tick, whatever
+    // happened). The callback is passed to every bind() because bind()
+    // replaces it.
+    score.bind(&curPage(), &waveforms, &playheadSec, [this]{
+        markModelChanged(); updateStatus(); refreshBoxes(); });
     pushVoice();
     score.setPlaying(isPlaying);
-    waveEd.bind(&waveforms, &selWave);
-    envEd.bind(&envelopes, &selEnv);
+    waveEd.bind(&waveforms, &selWave, [this]{ markModelChanged(); });
+    envEd.bind(&envelopes, &selEnv, [this]{ markModelChanged(); });
     updateSampleView();
     score.repaint(); waveEd.repaint(); envEd.repaint();
 }
@@ -2139,6 +2160,9 @@ bool MainComponent::prepareWaveEdit()
     {
         refreshBoxes();
         pushVoice();
+        // v1.33.4 (M22): the fork changed the model - mark it, so the
+        // status timer publishes the snapshot even if no edit follows
+        markModelChanged();
     }
     score.repaint();
     return true;
@@ -2456,7 +2480,12 @@ void MainComponent::publishModelSnapshot()
     snap->pageEpoch = pageEpoch.load(std::memory_order_relaxed);
     snap->seqPages = seqPages;
     snap->loopPage = loopPage;
+    // v1.33.4 (M22): the revision this snapshot was built from
+    snap->revision = modelRevision.load(std::memory_order_relaxed);
     snapshots.publish(snap); // frees the snapshots the reader retired
+    lastPublishedRevision = snap->revision;
+    lastModelPublishMs = (uint64_t) juce::Time::getMillisecondCounter();
+    snapshotPublishCount.fetch_add(1, std::memory_order_relaxed);
 }
 
 void MainComponent::seekPlayhead(double t)
@@ -3974,10 +4003,27 @@ void MainComponent::timerCallback()
         }
     }
     // v1.18 (wave 15): publish the immutable model the audio thread renders
-    // from. Unconditional on every tick - there is no "publish on change"
-    // path that could be forgotten.
+    // from.
+    //
+    // v1.33.4 (M22): only when the model actually changed. The timer used
+    // to deep-copy every page, arc, waveform and envelope on EVERY tick -
+    // 30 times a second, even while nothing changed and even with the
+    // plugin editor closed. The revision moves when the model changes
+    // (markModelChanged), so the copy happens when there is something new
+    // to copy.
+    //
+    // The safety net: a publish every 2 s even when the revision did not
+    // move. A change path that forgets to mark itself would then be silent
+    // for at most 2 s instead of forever.
     if (!(muteWhileDragging && arcEditing.load(std::memory_order_relaxed)))
-        publishModelSnapshot();
+    {
+        const auto rev = modelRevision.load(std::memory_order_relaxed);
+        const auto nowMs = (uint64_t) juce::Time::getMillisecondCounter();
+        const bool changed = (rev != lastPublishedRevision);
+        const bool safetyNet = (nowMs - lastModelPublishMs) >= 2000;
+        if (changed || safetyNet)
+            publishModelSnapshot();
+    }
     const double dur = curPage().durationSec;
     const bool revNow = playRate.load(std::memory_order_relaxed) < 0.0;
     timeLab.setText((revNow ? juce::String("REV ") : juce::String()) + juce::String(displayPlayhead(), 1) + " / " + juce::String(dur, 1) + " s",
@@ -5576,7 +5622,7 @@ void MainComponent::waveFromSelectedSlot()
     }
 
     refreshBoxes();
-    waveEd.bind (&waveforms, &selWave);
+    waveEd.bind (&waveforms, &selWave, [this]{ markModelChanged(); });
     pushVoice();
     publishModelSnapshot();
     markModelChanged();

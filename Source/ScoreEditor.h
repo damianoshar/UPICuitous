@@ -1130,6 +1130,10 @@ public:
                 }
                 std::stable_sort(a.points.begin(), a.points.end(), [](auto& x, auto& y){ return x.t < y.t; });
             }
+            // v1.33.4 (M22): the arc moved in the model - mark it, so the
+            // audio thread sees the moved arc while the drag is still going
+            // (the full onChange is too heavy for every mouse move)
+            if (onModelEdited) onModelEdited();
             repaint();
             return;
         }
@@ -1328,6 +1332,12 @@ public:
 
     std::function<void(int)> onSelect;
     std::function<void(bool)> onArcEditingChanged;
+    // v1.33.4 (M22): a lightweight "the model changed" hook. It is called
+    // while a drag edits the model in place, where the full onChange (which
+    // refreshes every combo box) would be far too heavy to run on every
+    // mouse move. The app uses it to mark the model as changed, so the
+    // status timer publishes the new model.
+    std::function<void()> onModelEdited;
     // v1.33.4 (H13): a short message for the user - the editor refuses to
     // create something the piece format cannot hold, and says so instead of
     // letting the loader drop it later.

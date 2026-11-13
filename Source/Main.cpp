@@ -537,6 +537,63 @@ public:
             }
         }
 
+        // 6a-3. v1.33.4 (M22): the status timer must not copy the model 30
+        //     times a second. It used to deep-copy every page, arc,
+        //     waveform and envelope on EVERY tick - even while nothing
+        //     changed and even with the plugin editor closed. Now it
+        //     publishes only when the model changed (plus a 2 s safety
+        //     net for a change path that forgets to mark itself).
+        {
+            std::function<juce::Component*(juce::Component&, const juce::String&)> findByNameM22 =
+                [&findByNameM22](juce::Component& c, const juce::String& n) -> juce::Component* {
+                    if (c.getName() == n) return &c;
+                    for (int i = 0; i < c.getNumChildComponents(); ++i)
+                        if (auto* r = findByNameM22(*c.getChildComponent(i), n)) return r;
+                    return nullptr;
+                };
+
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize (1280, 800);
+
+            // idle: 30 ticks, nothing changes - the model must not be
+            // copied on every tick
+            const auto before = mc.modelSnapshotPublishCount();
+            for (int i = 0; i < 30; ++i)
+                mc.timerCallback();
+            const auto idle = mc.modelSnapshotPublishCount() - before;
+            check (idle <= 1,
+                   "the timer does not copy the model while nothing changes",
+                   juce::String (idle) + " publish(es) in 30 ticks (the 2 s safety net may fire once)");
+
+            // a change is published: the loop toggle marks the model, and
+            // the timer picks the new model up on its next tick
+            auto* loop = dynamic_cast<juce::ToggleButton*> (findByNameM22 (mc, "loopBtn"));
+            const auto beforeChange = mc.modelSnapshotPublishCount();
+            if (loop != nullptr)
+            {
+                loop->setToggleState (! loop->getToggleState(), juce::dontSendNotification);
+                loop->onClick();
+            }
+            mc.timerCallback();
+            check (loop != nullptr && mc.modelSnapshotPublishCount() > beforeChange,
+                   "the timer publishes the model after a change",
+                   juce::String (mc.modelSnapshotPublishCount() - beforeChange) + " publish(es)");
+
+            // the editor change paths mark the model too - the score, the
+            // waveform editor and the envelope editor used to publish
+            // nothing at all, and only the unconditional timer publish made
+            // them audible
+            auto* envFlat = dynamic_cast<juce::Button*> (findByNameM22 (mc, "envFlatBtn"));
+            const auto beforeEnv = mc.modelSnapshotPublishCount();
+            if (envFlat != nullptr)
+                envFlat->onClick();
+            mc.timerCallback();
+            check (envFlat != nullptr && mc.modelSnapshotPublishCount() > beforeEnv,
+                   "an envelope edit reaches the audio thread",
+                   juce::String (mc.modelSnapshotPublishCount() - beforeEnv) + " publish(es)");
+        }
+
         // 6b. live take -> sample slot (v1.4 capture path, headless)
         {
             juce::AudioBuffer<float> take(2, 48000);

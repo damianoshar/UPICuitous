@@ -168,4 +168,7 @@ struct ModelSnapshot : SnapshotBase
     int  pageEpoch   = 0;   // bumped when the page changes -> the reader adopts it
     bool seqPages    = false;
     bool loopPage    = true;
+    // v1.33.4 (M22): the model revision this snapshot was built from - the
+    // status timer publishes only when the revision moved.
+    uint64_t revision = 0;
 };

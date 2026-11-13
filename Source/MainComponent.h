@@ -64,7 +64,20 @@ public:
     // v1.15: call after a change that replaces the sound that is playing
     // (page change, loaded material, pitch-mode switch) - the audio thread
     // fades across it instead of cutting
-    void markModelChanged() { modelEpoch.fetch_add(1, std::memory_order_relaxed); }
+    //
+    // v1.33.4 (M22): it also bumps the model REVISION - the counter that
+    // says "the model changed". The status timer used to deep-copy every
+    // page, arc, waveform and envelope 30 times a second, even while
+    // nothing changed; now it copies only when the revision moved.
+    void markModelChanged()
+    {
+        modelEpoch.fetch_add(1, std::memory_order_relaxed);
+        modelRevision.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // v1.33.4 (M22): how many model snapshots were published (the timer
+    // publishes only when the model changed). The selftest watches it.
+    int modelSnapshotPublishCount() const { return snapshotPublishCount.load (std::memory_order_relaxed); }
 
     // v1.16: the host can only compensate ONE latency for the whole plugin,
     // and the score paths have none while the live path has a lot - so the
@@ -359,6 +372,15 @@ private:
     // counter and the audio thread fades across the change.
     std::atomic<int> modelEpoch { 0 };
     int seenModelEpoch = 0;   // audio thread
+
+    // v1.33.4 (M22): the model revision. It moves whenever the model
+    // changes (markModelChanged), and the status timer publishes a snapshot
+    // only when it moved - the timer used to deep-copy the whole model 30
+    // times a second, even while nothing changed.
+    std::atomic<uint64_t> modelRevision { 0 };
+    uint64_t lastPublishedRevision = 0;   // message thread
+    uint64_t lastModelPublishMs = 0;      // message thread: the safety-net publish
+    std::atomic<int> snapshotPublishCount { 0 };
 
     // --- v1.1 piece state ---
     bool seqPages = false;              // page sequencer: cycle all pages while looping
