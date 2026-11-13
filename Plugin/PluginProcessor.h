@@ -65,7 +65,11 @@ public:
 
         try
         {
-            handle->loadFromVar (v);
+            // v1.33.4 (M25): a state that is not a piece is refused, and the
+            // current state is kept (the host gets a log line, not a wiped
+            // plugin).
+            if (! handle->loadFromVar (v))
+                juce::Logger::writeToLog ("UPICuitous: the host state was not a piece - the current state was kept");
         }
         catch (const std::exception& e)
         {

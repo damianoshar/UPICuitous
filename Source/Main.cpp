@@ -4003,6 +4003,44 @@ public:
                     }
                 }
 
+                // --- v1.33.4 (M25): a failed load keeps the composition ---
+                // loadFromVar used to clear the model before it parsed, so a
+                // file that was not a piece left an empty default page
+                // behind and the unsaved work was gone. Now the piece is
+                // parsed into a temporary model and swapped in only when it
+                // really is a piece.
+                {
+                    auto mcHolder = std::make_unique<MainComponent>(true);
+                    auto& mcM25 = *mcHolder;
+                    mcM25.setSize (1280, 800);
+                    const auto piece = juce::JSON::parse (
+                        "{\"pages\":[{\"duration\":30,\"nextArcId\":2,\"arcs\":["
+                        "{\"id\":1,\"mode\":0,\"intensity\":0.8,"
+                        "\"points\":[{\"t\":0,\"f\":220},{\"t\":1,\"f\":220}]}]}]}");
+                    check (mcM25.loadFromVar (piece) && mcM25.arcCountForTest() == 1,
+                           "a piece loads");
+                    const int arcsBefore = mcM25.arcCountForTest();
+                    // a file that is not a piece at all
+                    const bool loaded = mcM25.loadFromVar (juce::JSON::parse ("{\"foo\":1}"));
+                    check (! loaded && mcM25.arcCountForTest() == arcsBefore
+                           && mcM25.pageCountForTest() == 1,
+                           "a file that is not a piece does not wipe the composition",
+                           juce::String (mcM25.arcCountForTest()) + " arcs, "
+                               + juce::String (mcM25.pageCountForTest()) + " pages");
+                    // and an empty state
+                    const bool loadedVoid = mcM25.loadFromVar (juce::var());
+                    check (! loadedVoid && mcM25.arcCountForTest() == arcsBefore
+                           && mcM25.pageCountForTest() == 1,
+                           "an empty state does not wipe the composition",
+                           juce::String (mcM25.arcCountForTest()) + " arcs, "
+                               + juce::String (mcM25.pageCountForTest()) + " pages");
+                    // a piece with no pages is not a piece either
+                    const bool loadedEmpty = mcM25.loadFromVar (juce::JSON::parse ("{\"pages\":[]}"));
+                    check (! loadedEmpty && mcM25.arcCountForTest() == arcsBefore,
+                           "a piece with no pages does not wipe the composition",
+                           juce::String (mcM25.arcCountForTest()) + " arcs");
+                }
+
                 mc.setSize(1280, 800);
 
                 // --- v1.2 controls exist with sane bounds ---

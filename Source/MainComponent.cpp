@@ -4652,16 +4652,31 @@ juce::var MainComponent::pieceToVar() const
     return juce::var(o);
 }
 
-void MainComponent::loadFromVar(const juce::var& v)
+bool MainComponent::loadFromVar(const juce::var& v)
 {
-    juce::ScopedLock l(dataLock);
-    stopPlayback();
-    // stopPlayback only starts a fade while playing: make the stop immediate
-    // here, since the piece (and possibly its pages) is about to be replaced
-    isPlaying.store(false);
-    wantsStop.store(false);
-    waveforms.clear(); envelopes.clear(); pages.clear();
-    for (auto& s : sampleSlots) { s.name = juce::String(); s.data.reset(); s.sampleRate = 44100.0; }
+    // v1.33.4 (M25): the piece is parsed into a temporary model first, and it
+    // replaces the current one only when it really is a piece. The old code
+    // cleared the model before it parsed, so a file that was not a piece (or
+    // a host state that was rubbish) left an empty default page behind and
+    // the unsaved work was gone.
+    if (v.isVoid())
+        return false;
+    auto* pagesVar = v.getProperty("pages", juce::var()).getArray();
+    if (pagesVar == nullptr || pagesVar->isEmpty())
+        return false;
+
+    // --- the piece is parsed into temporary containers (the model is not
+    //     touched yet, so a parse that fails leaves the piece alone) ---
+    std::vector<upic::Waveform> newWaves;
+    std::vector<upic::Envelope> newEnvelopes;
+    std::vector<upic::Page> newPages;
+    std::vector<upic::SampleSlot> newSlots;
+    for (int i = 0; i < upic::kMaxSampleSlots; ++i)
+    {
+        upic::SampleSlot s;
+        s.id = i + 1;
+        newSlots.push_back(std::move(s));
+    }
     // v1.33.4 (H13): the piece format caps the page, arc, zone and point
     // counts. A piece over a cap used to lose the extra music silently on
     // the next open; the user is told what did not make it in.
@@ -4692,7 +4707,7 @@ void MainComponent::loadFromVar(const juce::var& v)
                 totalSampleBytes += (size_t) slot.data->getNumSamples()
                                   * (size_t) slot.data->getNumChannels() * sizeof(float);
             if (totalSampleBytes > upic::limits::kMaxTotalSampleBytes) break;
-            for (auto& s : sampleSlots)
+            for (auto& s : newSlots)
                 if (s.id == slot.id) { s = std::move(slot); ++stored; break; }
         }
         noteDrop ("sample", "samples", (int) arr->size() - stored);
@@ -4703,57 +4718,73 @@ void MainComponent::loadFromVar(const juce::var& v)
         int i = 0;
         for (auto& wv : *arr)
         {
-            if ((int) waveforms.size() >= upic::limits::kMaxWaveforms) break;
-            waveforms.push_back(upic::Waveform::fromVar(wv, i++));
+            if ((int) newWaves.size() >= upic::limits::kMaxWaveforms) break;
+            newWaves.push_back(upic::Waveform::fromVar(wv, i++));
         }
-        noteDrop ("wavetable", "wavetables", (int) arr->size() - (int) waveforms.size());
+        noteDrop ("wavetable", "wavetables", (int) arr->size() - (int) newWaves.size());
     }
     if (auto* arr = v.getProperty("envelopes", juce::var()).getArray())
     {
         int i = 0;
         for (auto& ev : *arr)
         {
-            if ((int) envelopes.size() >= upic::limits::kMaxEnvelopes) break;
-            envelopes.push_back(upic::Envelope::fromVar(ev, i++));
+            if ((int) newEnvelopes.size() >= upic::limits::kMaxEnvelopes) break;
+            newEnvelopes.push_back(upic::Envelope::fromVar(ev, i++));
         }
-        noteDrop ("envelope", "envelopes", (int) arr->size() - (int) envelopes.size());
+        noteDrop ("envelope", "envelopes", (int) arr->size() - (int) newEnvelopes.size());
         // the envelope's own points are capped too
-        for (int ei = 0; ei < (int) envelopes.size() && ei < (int) arr->size(); ++ei)
+        for (int ei = 0; ei < (int) newEnvelopes.size() && ei < (int) arr->size(); ++ei)
             if (auto* ptsArr = arr->getReference(ei).getProperty("points", juce::var()).getArray())
                 noteDrop ("envelope point", "envelope points",
-                          (int) ptsArr->size() - (int) envelopes[(size_t) ei].points.size());
+                          (int) ptsArr->size() - (int) newEnvelopes[(size_t) ei].points.size());
     }
     if (auto* arr = v.getProperty("pages", juce::var()).getArray())
     {
         for (auto& pv : *arr)
         {
-            if ((int) pages.size() >= upic::limits::kMaxPages) break;
-            pages.push_back(upic::Page::fromVar(pv));
+            if ((int) newPages.size() >= upic::limits::kMaxPages) break;
+            newPages.push_back(upic::Page::fromVar(pv));
         }
-        noteDrop ("page", "pages", (int) arr->size() - (int) pages.size());
+        noteDrop ("page", "pages", (int) arr->size() - (int) newPages.size());
         // the arcs, the sieve zones and the arc points of the pages that
         // were loaded (the page's own parser caps them)
-        for (int pi = 0; pi < (int) pages.size(); ++pi)
+        for (int pi = 0; pi < (int) newPages.size(); ++pi)
         {
             const juce::var pageVar = arr->getReference(pi);
             if (auto* arcsArr = pageVar.getProperty("arcs", juce::var()).getArray())
             {
-                noteDrop ("arc", "arcs", (int) arcsArr->size() - (int) pages[(size_t) pi].arcs.size());
-                for (int ai = 0; ai < (int) pages[(size_t) pi].arcs.size(); ++ai)
+                noteDrop ("arc", "arcs", (int) arcsArr->size() - (int) newPages[(size_t) pi].arcs.size());
+                for (int ai = 0; ai < (int) newPages[(size_t) pi].arcs.size(); ++ai)
                     if (auto* ptsArr = arcsArr->getReference(ai).getProperty("points", juce::var()).getArray())
                         noteDrop ("arc point", "arc points",
-                                  (int) ptsArr->size() - (int) pages[(size_t) pi].arcs[(size_t) ai].points.size());
+                                  (int) ptsArr->size() - (int) newPages[(size_t) pi].arcs[(size_t) ai].points.size());
             }
             if (auto* zonesArr = pageVar.getProperty("zones", juce::var()).getArray())
                 noteDrop ("sieve zone", "sieve zones",
-                          (int) zonesArr->size() - (int) pages[(size_t) pi].zones.size());
+                          (int) zonesArr->size() - (int) newPages[(size_t) pi].zones.size());
         }
     }
-    if (waveforms.empty()) waveforms = upic::defaultWaveforms();
-    if (envelopes.empty()) envelopes = upic::defaultEnvelopes();
-    if (pages.empty()) pages.push_back(upic::Page());
-    // clamp ids
-    currentPage = juce::jlimit(0, (int)pages.size() - 1, (int) v.getProperty("currentPage", 0));
+    if (newWaves.empty()) newWaves = upic::defaultWaveforms();
+    if (newEnvelopes.empty()) newEnvelopes = upic::defaultEnvelopes();
+    if (newPages.empty()) newPages.push_back(upic::Page());
+
+    // --- the piece is good: swap it in ---
+    {
+        juce::ScopedLock l(dataLock);
+        stopPlayback();
+        // stopPlayback only starts a fade while playing: make the stop immediate
+        // here, since the piece (and possibly its pages) is about to be replaced
+        isPlaying.store(false);
+        wantsStop.store(false);
+        waveforms = std::move (newWaves);
+        envelopes = std::move (newEnvelopes);
+        pages = std::move (newPages);
+        sampleSlots = std::move (newSlots);
+    }
+    {
+        juce::ScopedLock l(dataLock);
+        // clamp ids
+        currentPage = juce::jlimit(0, (int)pages.size() - 1, (int) v.getProperty("currentPage", 0));
     // SECURITY (S-03): the master gain is clamped to the slider's range, so a
     // piece cannot push the mix into clipping or silence.
     masterGain.store(upic::limits::clampGain((float)(double) v.getProperty("master", 0.8)));
@@ -4862,6 +4893,9 @@ void MainComponent::loadFromVar(const juce::var& v)
     // it did not make it in. Say so instead of losing the music silently.
     if (! droppedMsg.isEmpty())
         flash ("This piece is bigger than the app supports - not loaded: " + droppedMsg);
+    } // the settings scope
+
+    return true;
 }
 
 juce::String MainComponent::pieceStateText()
@@ -4978,8 +5012,19 @@ void MainComponent::loadFile()
                 auto txt = f.loadFileAsString();
                 if (txt.getNumBytesAsUTF8() > upic::limits::kMaxPieceBytes) return;
                 auto v = juce::JSON::parse(txt);
-                if (v.isVoid()) return;
-                loadFromVar(v);
+                if (v.isVoid())
+                {
+                    // v1.33.4 (M25): the file is not a piece at all - the
+                    // current piece is kept, so a bad file cannot wipe the
+                    // unsaved work.
+                    flash ("Not a UPIC piece (the JSON is broken) - the current piece was kept");
+                    return;
+                }
+                if (! loadFromVar(v))
+                {
+                    flash ("This file is not a UPIC piece - the current piece was kept");
+                    return;
+                }
             }
             catch (const std::exception& e)
             {

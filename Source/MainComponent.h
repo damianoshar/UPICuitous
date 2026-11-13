@@ -658,7 +658,11 @@ public:
     void injectMidiMessage (const juce::MidiMessage&); // v1.25: plugin host MIDI bus
     // Piece (de)serialization — public so the selftest can round-trip them.
     juce::var pieceToVar() const;
-    void loadFromVar(const juce::var& v);
+    // v1.33.4 (M25): the piece is parsed into a temporary model first and
+    // replaces the current one only when it really is a piece. Returns false
+    // when the var is not a piece - the current piece is then kept, so a
+    // broken file cannot wipe the unsaved work.
+    bool loadFromVar(const juce::var& v);
 
     // v1.33.4 (H6): the piece saver. It measures the piece first and refuses
     // (with a message) when it would be bigger than the loader accepts, so

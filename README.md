@@ -204,7 +204,9 @@ a MIDI input bus, so the host's notes and CCs reach the app as well.
 
 **Transport and IO** - Play/Stop with click-free fades, Loop, page
 sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
-(shared with the Python and web builds). The piece carries everything that
+(shared with the Python and web builds). A file that is not a piece is
+refused with a message and the current piece is kept - a bad file can
+never wipe the unsaved work. The piece carries everything that
 changes the sound - the arc's own pitch algorithm and its reversal, the
 sample slot's direction and the global pitch modes - so a reopened piece
 (or a reopened DAW session) sounds the same; older pieces without those
@@ -373,7 +375,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 529 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 533 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -391,8 +393,8 @@ button text fitting, the capture button's colours, the wavetable
 buttons' colours, the PM preset round trip, the WAV export, the piece
 saver, the MIDI device handling, the sound-affecting settings that
 travel with a piece, the export of a page with an acceleration, the piece
-format's limits at limit minus one, limit and limit plus one, and the
-sample material's own sample rate) and
+format's limits at limit minus one, limit and limit plus one, the sample
+material's own sample rate, and a failed load keeping the composition) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 20-check plugin smoke test and pluginval at strictness 5.
