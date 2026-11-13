@@ -57,6 +57,9 @@ JuceLibraryCode/
 # Development documentation (kept locally, not part of the release repo)
 BACKLOG.md
 BUILDING.md
+IMPLEMENTATION_PLAN.md
+GAP_ANALYSTIS.md
+SECURITY_REVIEW.md
 FUTURE_IDEAS.md
 PROGRESS.md
 RELEASE.txt
