@@ -75,6 +75,11 @@ public:
     void publishLatency();      // hand the current latency to the host
     int publishedLatency = -1;   // the value last handed to the host
     double getAudioSampleRate() const { return audioSampleRate; }
+    // v1.33.4 (M23): the rate the exports use. The prepared rate is the
+    // device's rate in standalone and the HOST's rate in a plugin - the
+    // device manager knows nothing in a plugin, so the export used to fall
+    // back to 44.1 kHz and sound different from the session.
+    double exportSampleRate() const { return audioSampleRate > 0.0 ? audioSampleRate : 44100.0; }
     std::atomic<int> timerTicks { 0 };  // diagnostics: how often the status timer ran
 
     // v1.20 (wave 18): the live reverse - the frozen segment the shifter

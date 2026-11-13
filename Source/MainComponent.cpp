@@ -2344,9 +2344,7 @@ void MainComponent::exportStems()
             if (sp == nullptr) return;
             auto dir = c.getResult();
             if (dir == juce::File()) return;
-            double sr = 44100.0;
-            if (auto* dev = sp->deviceManager.getCurrentAudioDevice())
-                if (dev->getCurrentSampleRate() > 0) sr = dev->getCurrentSampleRate();
+            double sr = sp->exportSampleRate();
             StemExport res;
             {
                 juce::ScopedLock l(sp->dataLock);
@@ -2358,11 +2356,15 @@ void MainComponent::exportStems()
             // v1.33.4 (H11): only the files that were really written are
             // counted, and a failed render is reported instead of being
             // silently dropped (the old files are left alone).
+            // v1.33.4 (M23): what was left out (the live arcs) is said out
+            // loud, so a PM-only page is not mistaken for an empty score.
             if (res.written.empty())
             {
                 if (res.failed > 0)
                     sp->flash("Stems: the export failed (" + juce::String(res.failed)
                               + " file(s) could not be written - the old ones were kept)");
+                else if (! res.note.isEmpty())
+                    sp->flash("Stems: " + res.note);
                 else
                     sp->flash("Stems: nothing to render (no audible arcs / voices in this page)");
             }
@@ -2370,7 +2372,8 @@ void MainComponent::exportStems()
             {
                 sp->flash("Wrote " + juce::String((int) res.written.size()) + " stem file(s) to "
                           + dir.getFullPathName()
-                          + (res.failed > 0 ? " - " + juce::String(res.failed) + " failed" : juce::String()));
+                          + (res.failed > 0 ? " - " + juce::String(res.failed) + " failed" : juce::String())
+                          + (res.note.isEmpty() ? juce::String() : " - " + res.note));
             }
         });
 }
@@ -5220,9 +5223,11 @@ void MainComponent::renderWav()
             auto f = c.getResult();
             if (f == juce::File()) return;
             f = f.withFileExtension("wav");
-            double sr = 44100.0;
-            if (auto* dev = sp->deviceManager.getCurrentAudioDevice())
-                if (dev->getCurrentSampleRate() > 0) sr = dev->getCurrentSampleRate();
+            // v1.33.4 (M23): the prepared rate - the device's rate in
+            // standalone, the host's rate in a plugin (the device manager
+            // knows nothing there, so the export used to be 44.1 kHz while
+            // the session played at the host's rate).
+            double sr = sp->exportSampleRate();
             bool ok = false;
             {
                 juce::ScopedLock l(sp->dataLock);

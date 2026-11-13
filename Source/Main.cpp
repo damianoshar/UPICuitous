@@ -1945,6 +1945,51 @@ public:
             check(sizesOk, "stems: files exist and non-empty");
             dir.deleteRecursively();
 
+            // v1.33.4 (M23): a PM-only page exports its stems too (the old
+            // grouping knew only the wavetable and the sample modes, so such
+            // a page produced no files at all).
+            {
+                upic::Page pm; pm.durationSec = 1.0;
+                auto mkPm = [&] (int id, double ratio, double index) {
+                    upic::Arc a; a.id = id; a.mode = 3; a.waveformId = 1;
+                    a.pmRatio = ratio; a.pmIndex = index; a.pmOps = 2;
+                    a.points = { {0.0, 440.0}, {1.0, 440.0} };
+                    return a;
+                };
+                pm.arcs.push_back (mkPm (1, 2.0, 3.0));   // voice 1
+                pm.arcs.push_back (mkPm (2, 2.0, 3.0));   // the same voice again
+                pm.arcs.push_back (mkPm (3, 3.0, 1.0));   // voice 2
+                auto dirPm = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("upic_stems_pm_test");
+                dirPm.deleteRecursively();
+                auto res = renderStems (pm, waves, envs, noSlots, dirPm, "stem", 44100.0, 0.8f);
+                check (res.written.size() == 2 && res.failed == 0,
+                       "stems: a PM-only page exports one file per PM voice",
+                       juce::String ((int) res.written.size()) + " files (expect 2)");
+                bool pmOk = res.written.size() == 2;
+                for (auto& f : res.written)
+                    pmOk = pmOk && f.getFileName().contains ("pm") && f.existsAsFile() && f.getSize() > 4096;
+                check (pmOk, "stems: the PM files exist and are named stem_pm1/2");
+                dirPm.deleteRecursively();
+            }
+
+            // v1.33.4 (M23): a page that holds only live material says so
+            // instead of quietly producing nothing.
+            {
+                upic::Page live; live.durationSec = 1.0;
+                upic::Arc la; la.id = 1; la.mode = 2; la.waveformId = 1;
+                la.points = { {0.0, 440.0}, {1.0, 440.0} };
+                live.arcs.push_back (la);
+                auto dirLive = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                   .getChildFile ("upic_stems_live_test");
+                dirLive.deleteRecursively();
+                auto res = renderStems (live, waves, envs, noSlots, dirLive, "stem", 44100.0, 0.8f);
+                check (res.written.empty() && res.note.contains ("live"),
+                       "stems: a live-only page says what it cannot export",
+                       res.note);
+                dirLive.deleteRecursively();
+            }
+
             // v1.33.4 (H11): a stem export that cannot write is reported as
             // failed, not as a written file. The output folder is a file, so
             // every stem inside it cannot be created.

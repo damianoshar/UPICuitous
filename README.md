@@ -204,7 +204,12 @@ a MIDI input bus, so the host's notes and CCs reach the app as well.
 
 **Transport and IO** - Play/Stop with click-free fades, Loop, page
 sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
-(shared with the Python and web builds). A file that is not a piece is
+(shared with the Python and web builds). The stems are one WAV per voice -
+the wavetable voices, the sample slots and the PM voices (a PM-only page
+exports its stems too); the live arcs need the microphone, so they are not
+exported and the export says so. The export uses the session's own rate
+(the device's in standalone, the host's in a plugin). A file that is not a
+piece is
 refused with a message and the current piece is kept - a bad file can
 never wipe the unsaved work. The piece carries everything that
 changes the sound - the arc's own pitch algorithm and its reversal, the
@@ -375,7 +380,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 536 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 539 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -394,11 +399,11 @@ buttons' colours, the PM preset round trip, the WAV export, the piece
 saver, the MIDI device handling, the sound-affecting settings that
 travel with a piece, the export of a page with an acceleration, the piece
 format's limits at limit minus one, limit and limit plus one, the sample
-material's own sample rate, a failed load keeping the composition, and the
-sample PCM surviving repeated saves) and
+material's own sample rate, a failed load keeping the composition, the
+sample PCM surviving repeated saves, and the stems of a PM-only page) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
-20-check plugin smoke test and pluginval at strictness 5.
+21-check plugin smoke test and pluginval at strictness 5.
 
 ## Xenakis notes
 

@@ -933,6 +933,9 @@ struct StemExport
     std::vector<juce::File> written;
     int attempted = 0;
     int failed = 0;
+    // v1.33.4 (M23): what was left out, in words - the live arcs cannot be
+    // rendered offline, and a page that holds nothing else says so.
+    juce::String note;
 };
 
 // Stems: render one WAV per voice (wavetable for synth arcs / sample slot for
@@ -968,6 +971,19 @@ inline StemExport renderStems(const upic::Page& page,
     };
 
     std::vector<int> wIds, sIds;
+    // v1.33.4 (M23): the PM arcs are grouped by their PM voice (the
+    // operators, the ratio, the index and the envelope), so a PM-only page
+    // exports its stems too - the old grouping knew only the wavetable and
+    // the sample modes, and a PM page produced no files at all.
+    auto samePmVoice = [] (const upic::Arc& a, const upic::Arc& b)
+    {
+        return a.pmOps == b.pmOps && a.pmRatio == b.pmRatio && a.pmIndex == b.pmIndex
+            && a.pmIndexEnv == b.pmIndexEnv && a.pmFeedback == b.pmFeedback
+            && a.pmR2 == b.pmR2 && a.pmR3 == b.pmR3 && a.pmR4 == b.pmR4
+            && a.pmI2 == b.pmI2 && a.pmI3 == b.pmI3 && a.pmI4 == b.pmI4;
+    };
+    std::vector<upic::Arc> pmVoices;   // one representative per PM voice
+    int liveArcs = 0;
     for (auto& a : page.arcs)
     {
         if (a.muted || a.points.size() < 2) continue;
@@ -981,8 +997,31 @@ inline StemExport renderStems(const upic::Page& page,
         {
             wIds.push_back(a.waveformId);
         }
+        else if (a.mode == 3)
+        {
+            bool known = false;
+            for (auto& v : pmVoices)
+                if (samePmVoice (v, a)) { known = true; break; }
+            if (! known) pmVoices.push_back (a);
+        }
+        else if (a.mode == 2)
+        {
+            // the live input is realtime-only: the offline render has no
+            // microphone, so these arcs are not exported
+            ++liveArcs;
+        }
     }
-    if (wIds.empty() && sIds.empty()) return result;
+    if (wIds.empty() && sIds.empty() && pmVoices.empty())
+    {
+        // v1.33.4 (M23): a page that holds only live material says so
+        // instead of quietly producing nothing.
+        if (liveArcs > 0)
+            result.note = "the page holds only live material ("
+                          + juce::String (liveArcs) + " live arc(s)) - there is nothing to export";
+        return result;
+    }
+    if (liveArcs > 0)
+        result.note = juce::String (liveArcs) + " live arc(s) were not exported (they need the microphone)";
 
     outDir.createDirectory();
 
@@ -1013,6 +1052,16 @@ inline StemExport renderStems(const upic::Page& page,
         for (auto& a : page.arcs)
             if (! a.muted && a.mode == 1 && a.sampleId == id) one.arcs.push_back(a);
         renderOne(one, outDir.getChildFile(prefix + "_sample" + juce::String(id) + ".wav"));
+    }
+    // v1.33.4 (M23): the PM voices get a stem each
+    for (size_t vi = 0; vi < pmVoices.size(); ++vi)
+    {
+        upic::Page one = page;
+        one.arcs.clear();
+        for (auto& a : page.arcs)
+            if (! a.muted && a.mode == 3 && samePmVoice (pmVoices[vi], a))
+                one.arcs.push_back(a);
+        renderOne(one, outDir.getChildFile(prefix + "_pm" + juce::String ((int) vi + 1) + ".wav"));
     }
     return result;
 }

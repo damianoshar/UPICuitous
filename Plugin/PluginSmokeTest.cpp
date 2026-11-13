@@ -119,6 +119,13 @@ int main()
             check(mb2.toString() == text, "state round-trips through host save/load");
         }
 
+        // v1.33.4 (M23): the exports use the host's rate - in a plugin there
+        // is no audio device, so the export used to fall back to 44.1 kHz and
+        // sound different from the session.
+        check(main.exportSampleRate() == (double) sr,
+              "the export uses the host's sample rate",
+              juce::String(main.exportSampleRate(), 0) + " Hz (host " + juce::String(sr, 0) + " Hz)");
+
         // 6) the host latency: a live-only page reports the shifter's delay
         //    (the component publishes it from its status timer, so the
         //     message loop has to run for it to reach the host)
