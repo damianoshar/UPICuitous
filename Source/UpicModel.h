@@ -1171,16 +1171,24 @@ namespace upic
             SampleSlot s;
             s.id = juce::jlimit(1, kMaxSampleSlots, (int) v.getProperty("id", fallbackId));
             s.name = v.getProperty("name", "").toString();
+            // v1.33.4 (M19): the stored rate is kept as it is (bounded to the
+            // range the app supports). The old code clamped it to 96 kHz
+            // while keeping the frames, so a 192 kHz take played at half
+            // speed after a save and a load.
             s.sampleRate = limits::clampFinite((double) v.getProperty("sampleRate", 44100.0),
                                                1000.0, limits::kMaxSampleRate);
             // v1.33.4 (H7): the slot's direction (absent in older pieces ->
             // forwards)
             s.reversed = (bool) v.getProperty ("reversed", false);
             const int ch = juce::jlimit(1, 2, (int) v.getProperty("channels", 1));
-            // The declared frame count is clamped to the 60-second cap before
-            // anything is allocated: a crafted "frames" value must not be able
-            // to ask for a gigabyte of buffer.
-            const int n = juce::jlimit(0, limits::kMaxFramesPerSample, (int) v.getProperty("frames", 0));
+            // The declared frame count is clamped before anything is
+            // allocated: a crafted "frames" value must not be able to ask
+            // for a gigabyte of buffer. The cap is the duration - 60 s at
+            // the material's OWN rate - and the memory budget (M19: the old
+            // cap was 60 s at 96 kHz whatever the material's rate was).
+            const int maxBySeconds = (int) juce::jmin ((juce::int64) limits::kMaxFramesPerSample,
+                                                       (juce::int64) (limits::kMaxSampleSeconds * s.sampleRate));
+            const int n = juce::jlimit(0, maxBySeconds, (int) v.getProperty("frames", 0));
             auto b64 = v.getProperty("data", "").toString();
             // ...and the base64 string is checked against the size it claims
             // to carry BEFORE it is decoded, so an oversized payload is
@@ -1227,6 +1235,87 @@ namespace upic
             }
         }
         buf = std::move(out);
+    }
+
+    //---------------- loading a file as sample material (M19)----------------
+    // The material keeps the file's own rate. The old importer clamped the
+    // rate to 96 kHz and kept the frames, so a 192 kHz file was played at
+    // half speed (and the seamless-loop crossfade used the wrong rate too).
+    // Now: a file above the app's ceiling is refused with a message (it is
+    // never retuned), the length is capped at the duration - 60 s counted
+    // at the file's OWN rate - and at the memory budget, and the decoder's
+    // return value is checked (it used to be ignored, so a file that could
+    // not be decoded became silence). JUCE's reader pads a short file with
+    // zeros and does not report a frame count, so a file that was cut short
+    // by the cap is reported, and one that is merely broken is refused.
+    struct LoadedSample
+    {
+        juce::AudioBuffer<float> data;
+        double sampleRate = 44100.0;
+        juce::String warning;   // set when the file was cut short
+    };
+
+    inline bool loadSampleFile (const juce::File& f, LoadedSample& out, juce::String& error)
+    {
+        out = LoadedSample();
+        error.clear();
+
+        juce::AudioFormatManager fm;
+        fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+        if (reader == nullptr)
+        {
+            error = "Unsupported audio file: " + f.getFileName();
+            return false;
+        }
+
+        // SECURITY (S-03): the rate and the length come from the file
+        // header, so they are not trusted. The rate is bounded, and the
+        // length by the duration (at the file's own rate) and the budget.
+        const double srFile = limits::clampFinite (reader->sampleRate, 1000.0, 1.0e9);
+        if (srFile > limits::kMaxSampleRate)
+        {
+            error = "This file is " + juce::String (srFile / 1000.0, 1) + " kHz - the app supports up to "
+                    + juce::String (limits::kMaxSampleRate / 1000.0, 0)
+                    + " kHz; convert it to 44.1 or 48 kHz";
+            return false;
+        }
+        const auto fileFrames = reader->lengthInSamples;
+        const auto maxBySeconds = (juce::int64) (limits::kMaxSampleSeconds * srFile);
+        const auto maxFrames64 = juce::jmin (maxBySeconds,
+                                             (juce::int64) limits::kMaxFramesPerSample,
+                                             fileFrames);
+        const int maxFrames = (int) juce::jmax ((juce::int64) 0, maxFrames64);
+        if (maxFrames <= 0)
+        {
+            error = "The audio file is empty";
+            return false;
+        }
+
+        const int ch = juce::jmax (1, juce::jmin (2, (int) reader->numChannels));
+        juce::AudioBuffer<float> tmp (ch, maxFrames);
+        tmp.clear();
+        // The decoder's return value is checked (it used to be ignored, so a
+        // file that could not be decoded was silently turned into silence).
+        // JUCE's reader pads a short file with zeros and does not report a
+        // frame count, so the length comes from the header.
+        const bool readOk = reader->read (&tmp, 0, maxFrames, 0, true, ch > 1);
+        reader.reset();
+        if (! readOk)
+        {
+            error = "The audio file could not be decoded";
+            return false;
+        }
+        if (fileFrames > maxFrames64)
+        {
+            out.warning = "Only the first " + juce::String ((double) maxFrames / srFile, 1)
+                          + " s of the file were loaded (the limit)";
+        }
+
+        makeSeamlessLoop (tmp, srFile);
+        out.data = std::move (tmp);
+        out.sampleRate = srFile;
+        return true;
     }
 
     // Live take -> sample material: copy (up to stereo) + seamless loop, the

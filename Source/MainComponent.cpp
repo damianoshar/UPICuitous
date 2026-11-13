@@ -3592,8 +3592,17 @@ void MainComponent::startCapture()
 {
     if (capturing.load()) return;
     const double rate = audioSampleRate > 0.0 ? audioSampleRate : 44100.0;
+    // v1.33.4 (M19): the take keeps the device rate, so a device above the
+    // app's ceiling is refused: the material would not survive a save and a
+    // load (the loader keeps the rate it is given).
+    if (rate < 1000.0 || rate > upic::limits::kMaxSampleRate)
+    {
+        flash("Cannot capture at this sample rate (" + juce::String (rate / 1000.0, 1) + " kHz)");
+        capBtn.setToggleState(false, juce::dontSendNotification);
+        return;
+    }
     const int maxFrames = (int) juce::jmin((juce::int64) (1LL << 28),
-                                           (juce::int64) (kMaxCaptureSec * rate));
+                                            (juce::int64) (kMaxCaptureSec * rate));
     if (maxFrames < 64)
     {
         flash("Cannot capture at this sample rate");
@@ -4669,9 +4678,16 @@ void MainComponent::loadFromVar(const juce::var& v)
         // is capped, so a piece with many huge slots cannot exhaust memory.
         size_t totalSampleBytes = 0;
         int stored = 0;
+        int droppedFrames = 0;
         for (auto& sv : *arr)
         {
             auto slot = upic::SampleSlot::fromVar(sv, 1);
+            // v1.33.4 (M19): the frames the slot lost to the caps (the
+            // duration at the material's own rate, the budget) are counted
+            // too, so the user hears about the cut material.
+            const int rawFrames = (int) sv.getProperty("frames", 0);
+            const int keptFrames = slot.data != nullptr ? slot.data->getNumSamples() : 0;
+            droppedFrames += juce::jmax (0, rawFrames - keptFrames);
             if (slot.data != nullptr)
                 totalSampleBytes += (size_t) slot.data->getNumSamples()
                                   * (size_t) slot.data->getNumChannels() * sizeof(float);
@@ -4680,6 +4696,7 @@ void MainComponent::loadFromVar(const juce::var& v)
                 if (s.id == slot.id) { s = std::move(slot); ++stored; break; }
         }
         noteDrop ("sample", "samples", (int) arr->size() - stored);
+        noteDrop ("sample frame", "sample frames", droppedFrames);
     }
     if (auto* arr = v.getProperty("waveforms", juce::var()).getArray())
     {
@@ -4997,36 +5014,19 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
             // instead of taking the app down.
             try
             {
-            juce::AudioFormatManager fm;
-            fm.registerBasicFormats();
-            std::unique_ptr<juce::AudioFormatReader> reader(fm.createReaderFor(f));
-            if (reader == nullptr)
+            // v1.33.4 (M19): the material keeps the file's own rate. The old
+            // code clamped the rate to 96 kHz and kept the frames, so a
+            // 192 kHz file was played at half speed. A file above the app's
+            // ceiling is refused with a message instead of being retuned, the
+            // duration cap is counted at the file's own rate, and the
+            // decoder's return value is checked.
+            upic::LoadedSample loaded;
+            juce::String error;
+            if (! upic::loadSampleFile (f, loaded, error))
             {
-                flash("Unsupported audio file: " + f.getFileName());
+                flash (error);
                 return;
             }
-
-            // SECURITY (S-03): the sample rate and the length come from the
-            // file header, so they are not trusted: a crafted header could
-            // ask for a huge allocation. The rate is clamped to the range
-            // the piece format accepts, and the length to 60 seconds of it.
-            const double srIn = upic::limits::clampFinite (reader->sampleRate, 1000.0, upic::limits::kMaxSampleRate);
-            const auto maxFrames64 = juce::jmin ((juce::int64) upic::limits::kMaxFramesPerSample,
-                                                 reader->lengthInSamples);
-            const int maxFrames = (int) juce::jmax ((juce::int64) 0, maxFrames64);
-            const int ch = juce::jmax(1, juce::jmin(2, (int) reader->numChannels));
-            if (maxFrames <= 0)
-            {
-                flash("The audio file is empty");
-                return;
-            }
-            juce::AudioBuffer<float> tmp(ch, maxFrames);
-            tmp.clear();
-            reader->read(&tmp, 0, maxFrames, 0, true, ch > 1);
-            reader.reset();
-
-            // make the material loop seamlessly for the grain reader
-            upic::makeSeamlessLoop(tmp, srIn);
 
             {
                 // model is read by the audio thread -> mutate under the lock.
@@ -5036,12 +5036,15 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
                 juce::ScopedLock l(dataLock);
                 auto& slot = sampleSlots[(size_t) slotIndex];
                 slot.name = f.getFileNameWithoutExtension();
-                slot.sampleRate = srIn;
-                slot.data = std::make_shared<const juce::AudioBuffer<float>>(std::move(tmp));
+                slot.sampleRate = loaded.sampleRate;
+                slot.data = std::make_shared<const juce::AudioBuffer<float>>(std::move (loaded.data));
                 markModelChanged(); // v1.15: new material -> fade across it
                 publishModelSnapshot(); // the next block must see it (no timer needed)
             }
-            flash("Loaded \"" + f.getFileNameWithoutExtension() + "\" into slot "
+            if (! loaded.warning.isEmpty())
+                flash (loaded.warning);
+            else
+                flash("Loaded \"" + f.getFileNameWithoutExtension() + "\" into slot "
                   + juce::String(sampleSlots[(size_t) slotIndex].id));
              score.sampleDurations[sampleSlots[(size_t) slotIndex].id] = sampleSlots[(size_t) slotIndex].durationSec();
              score.sampleDurations[sampleSlots[(size_t) slotIndex].id] = sampleSlots[(size_t) slotIndex].durationSec();

@@ -157,7 +157,12 @@ sets the playback ratio. Pitch modes: **Varispeed** (default),
 transpose. Varispeed and Granular (no stretch) change the slot's playback
 length with pitch; Granular (stretch) time-stretches the slot to the arc
 length; Phase vocoder keeps the slot's length and shifts pitch only.
-Sample-speed grid labels Ref x 2^k.
+Sample-speed grid labels Ref x 2^k. A loaded file keeps its own sample
+rate (up to 192 kHz), so a high-resolution file plays at the right speed
+instead of being retuned; a file above that rate is refused with a message
+rather than played at the wrong speed, and a file longer than 60 seconds
+is cut at 60 seconds (counted at the file's own rate) with a note saying
+so.
 The **Rev** button plays the selected slot backwards - the material is
 mirrored, the pitch stays the same. **Slot -> Wave** turns the selected
 slot into a wavetable - the UPIC's digitised wave page, where the take
@@ -368,7 +373,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 524 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 529 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -385,8 +390,9 @@ the micro-time page, the toolbar's group flow, the hints sidebar, the
 button text fitting, the capture button's colours, the wavetable
 buttons' colours, the PM preset round trip, the WAV export, the piece
 saver, the MIDI device handling, the sound-affecting settings that
-travel with a piece, the export of a page with an acceleration and the
-piece format's limits at limit minus one, limit and limit plus one) and
+travel with a piece, the export of a page with an acceleration, the piece
+format's limits at limit minus one, limit and limit plus one, and the
+sample material's own sample rate) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 20-check plugin smoke test and pluginval at strictness 5.

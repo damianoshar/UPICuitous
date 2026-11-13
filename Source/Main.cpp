@@ -3902,6 +3902,107 @@ public:
                     }
                 }
 
+                // --- v1.33.4 (M19): the material keeps its own rate ---
+                // The importer clamped the file's rate to 96 kHz and kept the
+                // frames, so a 192 kHz file was played at half speed (and the
+                // seamless-loop crossfade used the wrong rate too). The piece
+                // loader did the same to a captured 192 kHz take. Now the rate
+                // is kept, a file above the app's ceiling is refused with a
+                // message instead of being retuned, and the duration cap is
+                // counted at the material's own rate.
+                {
+                    const juce::File dir = juce::File::getSpecialLocation (juce::File::tempDirectory);
+
+                    // a 192 kHz file keeps its rate
+                    {
+                        const juce::File f = dir.getChildFile ("upic_m19_192k.wav");
+                        f.deleteFile();
+                        juce::AudioBuffer<float> buf (1, 192000);
+                        for (int i = 0; i < buf.getNumSamples(); ++i)
+                            buf.setSample (0, i, 0.5f * std::sin ((float) i * 0.01f));
+                        writeWavFile (f, buf, 192000.0);
+                        upic::LoadedSample loaded;
+                        juce::String error;
+                        const bool ok = upic::loadSampleFile (f, loaded, error);
+                        // the seamless loop eats the 50 ms crossfade
+                        const double secs = loaded.data.getNumSamples() / loaded.sampleRate;
+                        check (ok && loaded.sampleRate == 192000.0 && std::abs (secs - 0.95) < 0.02,
+                               "a 192 kHz file keeps its rate (it does not play at half speed)",
+                               juce::String (loaded.sampleRate, 0) + " Hz, " + juce::String (secs, 3) + " s"
+                                   + (error.isEmpty() ? juce::String() : " - " + error));
+                        f.deleteFile();
+                    }
+
+                    // a file above the app's ceiling is refused, not retuned
+                    {
+                        const juce::File f = dir.getChildFile ("upic_m19_256k.wav");
+                        f.deleteFile();
+                        juce::AudioBuffer<float> buf (1, 256000);
+                        writeWavFile (f, buf, 256000.0);
+                        upic::LoadedSample loaded;
+                        juce::String error;
+                        const bool ok = upic::loadSampleFile (f, loaded, error);
+                        check (! ok && error.contains ("kHz"),
+                               "a file above the app's rate ceiling is refused, not retuned",
+                               error);
+                        f.deleteFile();
+                    }
+
+                    // the duration cap counts the seconds at the file's own rate
+                    // (the old cap was 60 s at 96 kHz whatever the file was, so
+                    // a 44.1 kHz file could hold 130 s)
+                    {
+                        const juce::File f = dir.getChildFile ("upic_m19_long.wav");
+                        f.deleteFile();
+                        const int n = (int) (65.0 * 44100.0);
+                        juce::AudioBuffer<float> buf (1, n);
+                        for (int i = 0; i < n; ++i)
+                            buf.setSample (0, i, 0.25f * std::sin ((float) i * 0.01f));
+                        writeWavFile (f, buf, 44100.0);
+                        upic::LoadedSample loaded;
+                        juce::String error;
+                        const bool ok = upic::loadSampleFile (f, loaded, error);
+                        const double secs = loaded.data.getNumSamples() / loaded.sampleRate;
+                        check (ok && secs > 59.0 && secs <= 60.1,
+                               "the duration cap counts the seconds at the file's own rate",
+                               juce::String (secs, 2) + " s"
+                                   + (loaded.warning.isEmpty() ? juce::String() : " - " + loaded.warning));
+                        f.deleteFile();
+                    }
+
+                    // a piece keeps the rate of the material it carries
+                    {
+                        juce::AudioBuffer<float> buf (1, 1000);
+                        for (int i = 0; i < 1000; ++i) buf.setSample (0, i, 0.5f);
+                        upic::SampleSlot slot;
+                        slot.id = 1;
+                        slot.name = "take";
+                        slot.sampleRate = 192000.0;
+                        slot.data = std::make_shared<const juce::AudioBuffer<float>>(buf);
+                        const auto loadedSlot = upic::SampleSlot::fromVar (slot.toVar(), 1);
+                        check (loadedSlot.sampleRate == 192000.0 && loadedSlot.loaded(),
+                               "a piece keeps the rate of the material it carries",
+                               juce::String (loadedSlot.sampleRate, 0) + " Hz, "
+                                   + juce::String (loadedSlot.data != nullptr
+                                                       ? loadedSlot.data->getNumSamples() : 0) + " frames");
+                    }
+
+                    // a file the decoder cannot read is refused with a
+                    // message, not turned into silence
+                    {
+                        const juce::File f = dir.getChildFile ("upic_m19_broken.wav");
+                        f.deleteFile();
+                        f.replaceWithText ("this is not a wav file at all");
+                        upic::LoadedSample loaded;
+                        juce::String error;
+                        const bool ok = upic::loadSampleFile (f, loaded, error);
+                        check (! ok && ! error.isEmpty(),
+                               "a file the decoder cannot read is refused with a message",
+                               error);
+                        f.deleteFile();
+                    }
+                }
+
                 mc.setSize(1280, 800);
 
                 // --- v1.2 controls exist with sane bounds ---

@@ -53,12 +53,24 @@ namespace upic
         constexpr int kMaxSieveRemainders = 5000;
 
         // --- the per-sample limits ---
-        // 60 seconds at the highest sample rate the app accepts. The same
-        // 60-second cap already applies to files loaded through the file
-        // chooser; this makes the piece format obey it too.
+        // 60 seconds of material, counted at the material's OWN rate: a
+        // 44.1 kHz file is 60 s (2.65 M frames), not 130 s. The cap used to
+        // be counted at 96 kHz whatever the file was, so a 44.1 kHz file
+        // could hold more than twice its stated length.
         constexpr double kMaxSampleSeconds = 60.0;
-        constexpr double kMaxSampleRate = 96000.0;
-        constexpr int kMaxFramesPerSample = (int) (kMaxSampleSeconds * kMaxSampleRate);
+        // The highest rate the app keeps. The capture records at the device
+        // rate and an imported file keeps its own rate, so the app has to
+        // accept the rates a modern device or file can have - but never by
+        // retuning the material: a rate that is changed while the frames
+        // are kept plays at the wrong speed (a 192 kHz file read as 96 kHz
+        // sounds at half speed).
+        constexpr double kMaxSampleRate = 192000.0;
+        // The frames one slot may hold: the decoded stereo float PCM has to
+        // stay inside the total sample budget above (the piece loader counts
+        // every slot together, so one slot cannot use more than the whole).
+        // At 96 kHz the duration cap (60 s) binds first; at 192 kHz this one
+        // does (about 34 s).
+        constexpr int kMaxFramesPerSample = (int) (kMaxTotalSampleBytes / (2u * sizeof(float)));
         // Base64 is 4/3 of the binary it carries; allow a little slack for
         // the padding, so an oversized string is rejected before decoding.
         constexpr size_t kBase64Overhead = 2; // 4/3 rounded up, with slack
