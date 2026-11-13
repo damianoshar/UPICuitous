@@ -549,6 +549,7 @@ private:
     // activity monitor and the learn (in the audio settings overlay).
     MidiHub midi;
     juce::ComboBox midiDevBox;
+    juce::StringArray midiDeviceIds;   // the identifier of each combo box item (v1.33.4 / H9)
     juce::Label midiDevLab{ {}, "MIDI in" };
     juce::Label midiActLab{ {}, "no MIDI yet" };
     juce::TextButton midiLearnGain{ "Learn" }, midiLearnInt{ "Learn" }, midiLearnScrub{ "Learn" }, midiLearnTransport{ "Learn" };

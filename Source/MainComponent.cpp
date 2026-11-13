@@ -1283,7 +1283,11 @@ void MainComponent::buildMidiControls()
     midiDevBox.onChange = [this]
     {
         const int id = midiDevBox.getSelectedId();
-        const bool ok = midi.open (id <= 1 ? juce::String() : midiDevBox.getItemText (id - 1));
+        // v1.33.4 (H9): the device is opened by its identifier - two devices
+        // can have the same name, and a name can change.
+        const juce::String devId = (id <= 1 || (size_t) (id - 2) >= midiDeviceIds.size())
+                                     ? juce::String() : midiDeviceIds[(size_t) (id - 2)];
+        const bool ok = midi.open (devId);
         if (! ok)
         {
             flash ("Could not open the MIDI input");
@@ -3368,15 +3372,18 @@ void MainComponent::refreshMidiDevices()
 {
     // the list is rebuilt when the overlay opens, so a device plugged in
     // after the app started shows up; the open device stays selected
-    const juce::String current = midi.openDeviceName();
+    const juce::String current = midi.openDeviceId();
     midiDevBox.clear (juce::dontSendNotification);
     midiDevBox.addItem ("None", 1);
-    const auto names = MidiHub::deviceNames();
+    midiDeviceIds.clear();
+    const auto infos = MidiHub::deviceInfos();
     int selected = 1;
-    for (int i = 0; i < names.size(); ++i)
+    for (int i = 0; i < infos.size(); ++i)
     {
-        midiDevBox.addItem (names[i], i + 2);
-        if (names[i] == current) selected = i + 2;
+        midiDevBox.addItem (infos[i].name, i + 2);
+        midiDeviceIds.add (infos[i].identifier);
+        // v1.33.4 (H9): the selection follows the identifier, not the name
+        if (infos[i].identifier == current) selected = i + 2;
     }
     midiDevBox.setSelectedId (selected, juce::dontSendNotification);
     if (midi.isOpen() && selected == 1)

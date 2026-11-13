@@ -4688,6 +4688,66 @@ public:
                       "a cleared binding leaves the parameter alone");
             }
 
+            // v1.33.4 (H9): the MIDI input has to be *started* - JUCE drops
+            // every message that arrives before start(), so the standalone
+            // never saw a byte of MIDI. The device list and the opener are
+            // seams, so this can be checked without a MIDI device.
+            {
+                struct FakeDevice final : MidiHub::Device
+                {
+                    bool started = false, stopped = false;
+                    void start() override { started = true; }
+                    void stop()  override { stopped = true; }
+                };
+                // the hub owns the device it opens, so the fake is shared and
+                // the test keeps it alive
+                struct SharedFake final : MidiHub::Device
+                {
+                    explicit SharedFake (std::shared_ptr<FakeDevice> f) : fake (std::move (f)) {}
+                    void start() override { fake->started = true; }
+                    void stop()  override { fake->stopped = true; }
+                    std::shared_ptr<FakeDevice> fake;
+                };
+
+                juce::Array<juce::MidiDeviceInfo> fakeDevices;
+                // two devices with the same name: only the identifier tells
+                // them apart
+                fakeDevices.add (juce::MidiDeviceInfo ("UPIC Test In", "id-a"));
+                fakeDevices.add (juce::MidiDeviceInfo ("UPIC Test In", "id-b"));
+                fakeDevices.add (juce::MidiDeviceInfo ("UPIC Other", "id-c"));
+
+                juce::String askedFor;
+                auto fake = std::make_shared<FakeDevice>();
+
+                MidiHub testHub;
+                testHub.setSeamsForTest (
+                    [fakeDevices] { return fakeDevices; },
+                    [&askedFor, fake] (const juce::String& id, juce::MidiInputCallback*)
+                    {
+                        askedFor = id;
+                        return std::unique_ptr<MidiHub::Device> (new SharedFake (fake));
+                    });
+
+                const bool opened = testHub.open ("id-b");
+                check(opened && testHub.isOpen() && askedFor == "id-b",
+                      "the MIDI hub opens the device by its identifier",
+                      askedFor);
+                check(fake->started, "the MIDI hub starts the device it opens");
+                check(testHub.openDeviceId() == "id-b" && testHub.openDeviceName() == "UPIC Test In",
+                      "the MIDI hub remembers the device it opened");
+
+                // a device that is not in the list is not opened
+                askedFor.clear();
+                check(!testHub.open("id-nope") && askedFor.isEmpty(),
+                      "the MIDI hub does not open a device that is not there");
+
+                // closing stops the device
+                testHub.open ("id-c");
+                testHub.close();
+                check(!testHub.isOpen() && fake->stopped,
+                      "closing the MIDI hub stops the device");
+            }
+
             // v1.30 (UPIC-53): the LIVE tab has its own granular grain size
             // (the Sample tab's grain control used to be the only one).
             {

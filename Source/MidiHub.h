@@ -1,6 +1,8 @@
 #pragma once
 #include <JuceHeader.h>
 #include <atomic>
+#include <functional>
+#include <memory>
 
 //==============================================================================
 // The MIDI input foundation (wave 20).
@@ -45,31 +47,63 @@ public:
     MidiHub() = default;
     ~MidiHub() { close(); }
 
-    //--- the devices ----------------------------------------------------
-    static juce::StringArray deviceNames()
+    //--- the device handle ----------------------------------------------
+    // A thin wrapper over the platform MIDI input.
+    //
+    // JUCE only delivers messages to an input that was *started*: the
+    // MidiInput returned by openDevice() is inactive until start() is
+    // called, and every message that arrives before that is dropped. The
+    // wrapper exists so that "the hub starts what it opens" is one visible
+    // step, and so that the selftest can hand in a fake and watch it.
+    class Device
     {
-        juce::StringArray names;
-        for (const auto& d : juce::MidiInput::getAvailableDevices())
-            names.add (d.name);
-        return names;
+    public:
+        virtual ~Device() = default;
+        virtual void start() = 0;
+        virtual void stop() = 0;
+    };
+
+    // The real thing: a juce::MidiInput.
+    class RealDevice final : public Device
+    {
+    public:
+        explicit RealDevice (std::unique_ptr<juce::MidiInput> d) : input (std::move (d)) {}
+        void start() override { if (input != nullptr) input->start(); }
+        void stop()  override { if (input != nullptr) input->stop(); }
+    private:
+        std::unique_ptr<juce::MidiInput> input;
+    };
+
+    //--- the devices ----------------------------------------------------
+    // The devices the app can listen to (name and identifier). The
+    // identifier is what identifies a device - two devices can share a
+    // name, and a name can change.
+    static juce::Array<juce::MidiDeviceInfo> deviceInfos()
+    {
+        return juce::MidiInput::getAvailableDevices();
     }
 
-    // Opens a device by its name ("" = close). Returns false when the device
-    // could not be opened.
-    bool open (const juce::String& deviceName)
+    // Opens a device by its identifier ("" = close). Returns false when the
+    // device could not be opened.
+    bool open (const juce::String& deviceId)
     {
         close();
-        if (deviceName.isEmpty()) return true;
+        if (deviceId.isEmpty()) return true;
 
-        for (const auto& d : juce::MidiInput::getAvailableDevices())
+        for (const auto& d : currentDevices())
         {
-            if (d.name != deviceName) continue;
+            if (d.identifier != deviceId) continue;
 
             callback = std::make_unique<Callback> (*this);
-            input = juce::MidiInput::openDevice (d.identifier, callback.get());
-            if (input != nullptr)
+            auto dev = openDevice (deviceId, callback.get());
+            if (dev != nullptr)
             {
-                openName = deviceName;
+                // v1.33.4 (H9): JUCE drops every message until the input is
+                // started - openDevice() alone never delivers anything.
+                dev->start();
+                device = std::move (dev);
+                openId = deviceId;
+                openName = d.name;
                 return true;
             }
             callback.reset();
@@ -80,13 +114,16 @@ public:
 
     void close()
     {
-        input.reset();   // closes the device
+        if (device != nullptr) device->stop();
+        device.reset();   // closes the device
         callback.reset();
+        openId.clear();
         openName.clear();
     }
 
-    bool isOpen() const { return input != nullptr; }
+    bool isOpen() const { return device != nullptr; }
     juce::String openDeviceName() const { return openName; }
+    juce::String openDeviceId() const { return openId; }
 
     //--- the activity (the message thread polls it) ----------------------
     // Returns the newest message (and clears it). An empty one means
@@ -158,6 +195,18 @@ public:
         publishRaw (type, channel, number, value);
     }
 
+    // The selftest replaces the device list and the opener, so that "the hub
+    // opens the device it was asked for, by identifier, and starts it" can
+    // be checked without a MIDI device.
+    using DeviceList = std::function<juce::Array<juce::MidiDeviceInfo>()>;
+    using Opener = std::function<std::unique_ptr<Device>(const juce::String& identifier,
+                                                           juce::MidiInputCallback* callback)>;
+    void setSeamsForTest (DeviceList l, Opener o)
+    {
+        deviceList = std::move (l);
+        opener = std::move (o);
+    }
+
     static constexpr int kTypeCc = 0, kTypeNoteOn = 1, kTypeNoteOff = 2, kTypeOther = 3;
 
 private:
@@ -173,9 +222,26 @@ private:
         MidiHub& hub;
     };
 
-    std::unique_ptr<juce::MidiInput> input;
+    std::unique_ptr<Device> device;
     std::unique_ptr<Callback> callback;
     juce::String openName;
+    juce::String openId;
+
+    // The device list and the opener (the seams the selftest replaces).
+    DeviceList deviceList = [] { return juce::MidiInput::getAvailableDevices(); };
+    Opener opener = [] (const juce::String& identifier, juce::MidiInputCallback* cb)
+        -> std::unique_ptr<Device>
+    {
+        if (auto in = juce::MidiInput::openDevice (identifier, cb))
+            return std::unique_ptr<Device> (new RealDevice (std::move (in)));
+        return nullptr;
+    };
+
+    juce::Array<juce::MidiDeviceInfo> currentDevices() const { return deviceList(); }
+    std::unique_ptr<Device> openDevice (const juce::String& id, juce::MidiInputCallback* cb)
+    {
+        return opener (id, cb);
+    }
 
     // the packed message + a counter, in one atomic (so a reader always sees
     // a consistent pair)
