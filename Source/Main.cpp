@@ -4041,6 +4041,51 @@ public:
                            juce::String (mcM25.arcCountForTest()) + " arcs");
                 }
 
+                // --- v1.33.4 (M26): the sample PCM conversion is stable ---
+                // The encoder scaled by 32767 and truncated, the decoder
+                // divided by 32768, so every save/load cycle lost 1/32768 of
+                // the level: 0.5 became 0.496948 after a hundred cycles. One
+                // symmetric, rounded conversion makes the round trip a fixed
+                // point.
+                {
+                    // the value after n save/load cycles
+                    auto afterCycles = [] (float x, int cycles, float& first)
+                    {
+                        upic::SampleSlot slot;
+                        slot.id = 1;
+                        slot.sampleRate = 44100.0;
+                        juce::AudioBuffer<float> buf (1, 4);
+                        for (int i = 0; i < 4; ++i) buf.setSample (0, i, x);
+                        slot.data = std::make_shared<const juce::AudioBuffer<float>>(buf);
+                        float v = x;
+                        first = x;
+                        for (int cycle = 0; cycle < cycles; ++cycle)
+                        {
+                            const auto loaded = upic::SampleSlot::fromVar (slot.toVar(), 1);
+                            if (loaded.data == nullptr) return false;
+                            v = loaded.data->getSample (0, 0);
+                            slot.data = loaded.data;
+                            if (cycle == 0) first = v;
+                        }
+                        return true;
+                    };
+
+                    float firstHalf = 0.0f, half = 0.0f, full = 0.0f, minus = 0.0f;
+                    const bool okHalf = afterCycles (0.5f, 100, firstHalf);
+                    afterCycles (0.5f, 100, half);
+                    afterCycles (1.0f, 1, full);
+                    afterCycles (-1.0f, 1, minus);
+                    check (okHalf && std::abs (half - 0.5f) < 1e-4f,
+                           "the sample PCM survives 100 save/load cycles",
+                           juce::String (half, 6));
+                    check (half == firstHalf,
+                           "the sample PCM stops changing after the first cycle",
+                           juce::String (firstHalf, 6) + " -> " + juce::String (half, 6));
+                    check (full == 1.0f && minus == -1.0f,
+                           "the sample PCM keeps full scale",
+                           juce::String (full, 6) + "/" + juce::String (minus, 6));
+                }
+
                 mc.setSize(1280, 800);
 
                 // --- v1.2 controls exist with sane bounds ---

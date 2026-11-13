@@ -17,6 +17,16 @@
 
 namespace upic
 {
+    // The sample's PCM conversion (M26): ONE symmetric, rounded conversion.
+    // The encoder scales by this number and rounds to the nearest step; the
+    // decoder divides by the same number. The old pair was asymmetric (the
+    // encoder scaled by 32767 and truncated, the decoder divided by 32768),
+    // so every save/load cycle lost 1/32768 of the level: 0.5 became
+    // 0.496948 after a hundred cycles. With one scale and a rounding step
+    // the round trip is a fixed point - the value stops changing after the
+    // first cycle.
+    constexpr float kPcmScale = 32767.0f;
+
     constexpr int kWaveSize = 1024;
     // v1.33: the range the 1990s UPIC reached - "the frequency range of the
     // 1990s UPIC was extended to infrasonics, starting at 0.01 Hz" and the
@@ -1161,7 +1171,14 @@ namespace upic
                 auto* dst = static_cast<short*>(mb.getData());
                 for (int i = 0; i < n; ++i)
                     for (int c = 0; c < ch; ++c)
-                        *dst++ = (short) juce::jlimit(-32767.0f, 32767.0f, data->getSample(c, i) * 32767.0f);
+                    {
+                        // v1.33.4 (M26): the value is ROUNDED to the nearest
+                        // step (the old code truncated, so every save/load
+                        // cycle lost a step of level) and scaled with the same
+                        // number the decoder divides by.
+                        const double v = (double) data->getSample(c, i) * (double) kPcmScale;
+                        *dst++ = (short) juce::jlimit (-32767.0, 32767.0, std::round (v));
+                    }
                 o->setProperty("data", juce::Base64::toBase64(mb.getData(), mb.getSize()));
             }
             return juce::var(o);
@@ -1205,7 +1222,9 @@ namespace upic
                     const auto* src = static_cast<const short*>(mo.getData());
                     for (int i = 0; i < n; ++i)
                         for (int c = 0; c < ch; ++c)
-                            buf.setSample(c, i, (float) (*src++) / 32768.0f);
+                            // v1.33.4 (M26): the same scale the encoder used,
+                            // so a save/load cycle does not change the level.
+                            buf.setSample(c, i, (float) (*src++) / kPcmScale);
                     s.data = std::make_shared<const juce::AudioBuffer<float>>(std::move(buf));
                 }
             }
