@@ -961,9 +961,14 @@ public:
                       "peak " + juce::String(m.second, 3));
             }
 
-            // the flag is session state: the piece format does not carry it
-            check(rampSlot(true).toVar().getProperty("reversed", "absent").toString() == "absent",
-                  "sample reverse: the flag is session-only (the piece format is untouched)");
+            // v1.33.4 (H7): the flag changes the sound, so it travels with
+            // the piece - it used to be dropped on save, so a reopened piece
+            // played the material forwards
+            check((bool) rampSlot(true).toVar().getProperty("reversed", false),
+                  "sample reverse: the flag travels with the piece",
+                  rampSlot(true).toVar().getProperty("reversed", "absent").toString());
+            check(!(bool) rampSlot(false).toVar().getProperty("reversed", false),
+                  "sample reverse: a forward slot is not marked reversed");
         }
 
         // 6f. v1.20 (wave 18): the live reverse. The capture is written with
@@ -3353,6 +3358,208 @@ public:
                     check(upic::limits::kMaxPieceBytes == (upic::limits::kMaxTotalSampleBytes / 3u) * 2u,
                           "the piece cap is derived from the sample budget");
                     file.deleteFile();
+                }
+
+                // --- v1.33.4 (H7): the settings that change the sound ---
+                // The arc's own pitch mode and its reversal, the sample
+                // slot's reversal and the global pitch modes used to be
+                // dropped when a piece was saved, so a reopened piece (or a
+                // reopened DAW session) sounded different.
+                {
+                    // a one-second tone, the piece format's way
+                    const int nFrames = 44100;
+                    juce::MemoryBlock mb ((size_t) nFrames * sizeof(short));
+                    {
+                        auto* p = static_cast<short*> (mb.getData());
+                        for (int i = 0; i < nFrames; ++i)
+                            p[i] = (short) (std::sin (2.0 * juce::MathConstants<double>::pi
+                                                      * 220.0 * (double) i / 44100.0) * 20000.0);
+                    }
+                    const auto b64 = juce::Base64::toBase64 (mb.getData(), mb.getSize());
+
+                    // a piece with a backwards sample slot, an arc with its
+                    // own algorithm, a second arc that follows the tab, and
+                    // the global pitch modes
+                    auto makePiece = [&b64, nFrames] (bool slotReversed, int arcPitchMode)
+                    {
+                        auto* p = new juce::DynamicObject();
+                        p->setProperty ("samplePitchMode", 1);   // granular (stretch)
+                        p->setProperty ("livePitchMode", 2);     // phase vocoder
+
+                        auto* slot = new juce::DynamicObject();
+                        slot->setProperty ("id", 1);
+                        slot->setProperty ("name", "tone");
+                        slot->setProperty ("sampleRate", 44100.0);
+                        slot->setProperty ("channels", 1);
+                        slot->setProperty ("frames", nFrames);
+                        slot->setProperty ("data", b64);
+                        if (slotReversed) slot->setProperty ("reversed", true);
+                        juce::Array<juce::var> slots;
+                        slots.add (juce::var (slot));
+                        p->setProperty ("samples", slots);
+
+                        auto addArc = [] (juce::Array<juce::var>& arcs, int id,
+                                          int pitchMode, bool reversed)
+                        {
+                            auto* a = new juce::DynamicObject();
+                            a->setProperty ("id", id);
+                            a->setProperty ("mode", 1);          // a sample arc
+                            a->setProperty ("sampleId", 1);
+                            a->setProperty ("refFreq", 261.63);
+                            if (pitchMode >= 0) a->setProperty ("pitchMode", pitchMode);
+                            if (reversed) a->setProperty ("reversed", true);
+                            juce::Array<juce::var> points;
+                            auto* p0 = new juce::DynamicObject();
+                            p0->setProperty ("t", 0.0); p0->setProperty ("f", 261.63);
+                            auto* p1 = new juce::DynamicObject();
+                            p1->setProperty ("t", 4.0); p1->setProperty ("f", 523.25);
+                            points.add (juce::var (p0));
+                            points.add (juce::var (p1));
+                            a->setProperty ("points", points);
+                            arcs.add (juce::var (a));
+                        };
+
+                        auto* page = new juce::DynamicObject();
+                        page->setProperty ("duration", 8.0);
+                        page->setProperty ("nextArcId", 3);
+                        juce::Array<juce::var> arcs;
+                        addArc (arcs, 1, arcPitchMode, true);   // its own algorithm
+                        addArc (arcs, 2, -1, false);            // follows the tab
+                        page->setProperty ("arcs", arcs);
+                        juce::Array<juce::var> pages;
+                        pages.add (juce::var (page));
+                        p->setProperty ("pages", pages);
+                        return juce::var (p);
+                    };
+
+                    // the offline render of a piece - the path the WAV export
+                    // uses, so the comparison is the sound the user hears
+                    auto renderPiece = [] (const juce::var& pv, int samplePitchMode)
+                    {
+                        upic::Page page;
+                        std::vector<upic::Waveform> waves;
+                        std::vector<upic::Envelope> envs;
+                        std::vector<upic::SampleSlot> slots;
+                        const auto pagesVar = pv.getProperty ("pages", juce::var());
+                        if (auto* pages = pagesVar.getArray(); pages != nullptr && ! pages->isEmpty())
+                            page = upic::Page::fromVar (pages->getReference (0));
+                        const auto wavesVar = pv.getProperty ("waveforms", juce::var());
+                        if (auto* arr = wavesVar.getArray(); arr != nullptr)
+                            for (auto& w : *arr) waves.push_back (upic::Waveform::fromVar (w, 0));
+                        const auto envsVar = pv.getProperty ("envelopes", juce::var());
+                        if (auto* arr = envsVar.getArray(); arr != nullptr)
+                            for (auto& e : *arr) envs.push_back (upic::Envelope::fromVar (e, 0));
+                        const auto slotsVar = pv.getProperty ("samples", juce::var());
+                        if (auto* arr = slotsVar.getArray(); arr != nullptr)
+                            for (auto& s : *arr) slots.push_back (upic::SampleSlot::fromVar (s, 1));
+
+                        const double sr = 44100.0;
+                        juce::AudioBuffer<float> buf (2, (int) (sr * 5.0));
+                        buf.clear();
+                        UpicEngine eng;
+                        eng.setSamplePitchMode (samplePitchMode);
+                        eng.renderPageOffline (page, waves, envs, slots, buf, sr, 0.8f);
+                        return buf;
+                    };
+                    auto maxDiff = [] (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
+                    {
+                        double d = 0.0;
+                        const int n = juce::jmin (a.getNumSamples(), b.getNumSamples());
+                        for (int c = 0; c < juce::jmin (a.getNumChannels(), b.getNumChannels()); ++c)
+                            for (int i = 0; i < n; ++i)
+                                d = std::max (d, std::abs ((double) a.getSample (c, i) - (double) b.getSample (c, i)));
+                        return d;
+                    };
+                    auto peakOf = [] (const juce::AudioBuffer<float>& a)
+                    {
+                        double p = 0.0;
+                        for (int c = 0; c < a.getNumChannels(); ++c)
+                            for (int i = 0; i < a.getNumSamples(); ++i)
+                                p = std::max (p, std::abs ((double) a.getSample (c, i)));
+                        return p;
+                    };
+
+                    // the piece round trip: what is written comes back
+                    const auto pieceVar = makePiece (true, 2);
+                    auto h7Holder = std::make_unique<MainComponent>();
+                    auto& mcH7 = *h7Holder;
+                    mcH7.loadFromVar (pieceVar);
+                    check (mcH7.samplePitchModeForTest() == 1 && mcH7.livePitchModeForTest() == 2,
+                           "the global pitch modes come back with the piece",
+                           juce::String (mcH7.samplePitchModeForTest()) + " / "
+                               + juce::String (mcH7.livePitchModeForTest()));
+
+                    const auto saved = mcH7.pieceToVar();
+                    bool arcKept = false, slotKept = false;
+                    {
+                        const auto pagesVar = saved.getProperty ("pages", juce::var());
+                        if (auto* pages = pagesVar.getArray(); pages != nullptr && ! pages->isEmpty())
+                        {
+                            const auto arcsVar = pages->getReference (0).getProperty ("arcs", juce::var());
+                            if (auto* arcs = arcsVar.getArray(); arcs != nullptr && ! arcs->isEmpty())
+                            {
+                                const auto& a = arcs->getReference (0);
+                                arcKept = (int) a.getProperty ("pitchMode", -1) == 2
+                                       && (bool) a.getProperty ("reversed", false);
+                            }
+                        }
+                        const auto slotsVar = saved.getProperty ("samples", juce::var());
+                        if (auto* slots = slotsVar.getArray(); slots != nullptr && ! slots->isEmpty())
+                            slotKept = (bool) slots->getReference (0).getProperty ("reversed", false);
+                    }
+                    check (arcKept, "the arc's pitch mode and reversal travel with the piece");
+                    check (slotKept, "the sample slot's reversal travels with the piece");
+
+                    // an old piece (no such keys) keeps the old defaults
+                    {
+                        const auto oldJson = "{\"pages\":[{\"duration\":8,\"nextArcId\":2,\"arcs\":["
+                                             "{\"id\":1,\"mode\":1,\"sampleId\":1,\"refFreq\":261.63,"
+                                             "\"points\":[{\"t\":0,\"f\":261.63},{\"t\":4,\"f\":523.25}]}]}]}";
+                        auto oldHolder = std::make_unique<MainComponent>();
+                        oldHolder->loadFromVar (juce::JSON::parse (oldJson));
+                        const auto oldSaved = oldHolder->pieceToVar();
+                        int oldPitchMode = -99;
+                        bool oldReversed = true;
+                        const auto pagesVar = oldSaved.getProperty ("pages", juce::var());
+                        if (auto* pages = pagesVar.getArray(); pages != nullptr && ! pages->isEmpty())
+                        {
+                            const auto arcsVar = pages->getReference (0).getProperty ("arcs", juce::var());
+                            if (auto* arcs = arcsVar.getArray(); arcs != nullptr && ! arcs->isEmpty())
+                            {
+                                const auto& a = arcs->getReference (0);
+                                oldPitchMode = (int) a.getProperty ("pitchMode", -1);
+                                oldReversed = (bool) a.getProperty ("reversed", false);
+                            }
+                        }
+                        check (oldPitchMode == -1 && ! oldReversed,
+                               "an old piece still loads with the old defaults",
+                               juce::String (oldPitchMode) + (oldReversed ? " reversed" : " forwards"));
+                    }
+
+                    // the render before and after the round trip: the same
+                    // piece, loaded into a fresh app
+                    const auto before = renderPiece (pieceVar, mcH7.samplePitchModeForTest());
+                    auto h7LoadHolder = std::make_unique<MainComponent>();
+                    auto& mcH7Load = *h7LoadHolder;
+                    mcH7Load.loadFromVar (juce::JSON::parse (juce::JSON::toString (saved, true)));
+                    const auto after = renderPiece (saved, mcH7Load.samplePitchModeForTest());
+                    const double diff = maxDiff (before, after);
+                    check (peakOf (before) > 0.01 && diff < 0.01,
+                           "a piece renders the same after a save and reload",
+                           "peak " + juce::String (peakOf (before), 4) + ", diff " + juce::String (diff, 6));
+
+                    // the persisted settings are live: the reversal and the
+                    // arc's own algorithm change the sound
+                    {
+                        const auto forward = renderPiece (makePiece (false, 2), 1);
+                        const auto varispeed = renderPiece (makePiece (true, 0), 1);
+                        check (maxDiff (before, forward) > 0.01,
+                               "the slot's reversal changes the render",
+                               juce::String (maxDiff (before, forward), 4));
+                        check (maxDiff (before, varispeed) > 0.01,
+                               "the arc's pitch mode changes the render",
+                               juce::String (maxDiff (before, varispeed), 4));
+                    }
                 }
 
                 mc.setSize(1280, 800);

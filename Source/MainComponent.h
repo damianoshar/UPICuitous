@@ -103,6 +103,10 @@ public:
         return -1;
     }
     double pageWarpForTest() const { return curPage().warp; }
+    // v1.33.4 (H7): the global pitch modes (they change the sound, so the
+    // selftest checks that they survive a save and a load)
+    int samplePitchModeForTest() const { return engine.getSamplePitchMode(); }
+    int livePitchModeForTest() const { return engine.getLivePitchMode(); }
     double playheadForTest() const { return playheadSec; }
     bool externalScrubActiveForTest() const { return externalScrubActive; }
     bool isPlayingForTest() const { return isPlaying.load (std::memory_order_relaxed); }

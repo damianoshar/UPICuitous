@@ -315,8 +315,9 @@ namespace upic
         // reversed: this LIVE arc plays the microphone backwards (the mic is
         // shared, so the direction belongs to the arc; a sample's direction
         // belongs to its slot).
-        // Both are session state, like the pitch modes and the grids: they
-        // are NOT written to the piece (the format is untouched).
+        // v1.33.4 (H7): both change the sound, so they travel with the piece
+        // and with the host state (they used to be dropped on save, so a
+        // reopened piece or session sounded different).
         int pitchMode = -1;
         bool reversed = false;
 
@@ -504,6 +505,10 @@ namespace upic
             if (stepDivisions > 0) o->setProperty("sd", stepDivisions);
             // v1.33: the frequency space the arc is played in
             if (space != 0) o->setProperty("sp", space);
+            // v1.33.4 (H7): the per-arc overrides change the sound, so they
+            // travel with the piece (and with the host state)
+            if (pitchMode >= 0) o->setProperty("pitchMode", pitchMode);
+            if (reversed) o->setProperty("reversed", true);
             juce::Array<juce::var> arr;
             for (auto& p : points)
             {
@@ -545,6 +550,10 @@ namespace upic
             // v1.33: the frequency space (absent in older pieces -> the
             // page's own range, which is the identity)
             a.space = juce::jlimit (0, 3, (int) v.getProperty ("sp", 0));
+            // v1.33.4 (H7): the per-arc overrides (absent in older pieces ->
+            // follow the tab's setting, play forward)
+            a.pitchMode = juce::jlimit (-1, 2, (int) v.getProperty ("pitchMode", -1));
+            a.reversed = (bool) v.getProperty ("reversed", false);
             if (auto* arr = v.getProperty("points", juce::var()).getArray())
                 for (auto& pv : *arr)
                 {
@@ -1116,10 +1125,11 @@ namespace upic
         // through it once it is in a slot: replace the pointer instead (the
         // old buffer stays alive while any snapshot still reads it).
         std::shared_ptr<const juce::AudioBuffer<float>> data; // 1..2 ch, seamless loop
-        // v1.19 (wave 17): the material plays backwards. Session state, like
-        // the pitch modes and the grid - the piece format is untouched (the
-        // idea in FUTURE_IDEAS.md says the file format is not part of this
-        // slice). The engine mirrors the read, so every pitch mode works.
+        // v1.19 (wave 17): the material plays backwards. v1.33.4 (H7): the
+        // direction changes the sound, so it travels with the piece and with
+        // the host state (it used to be dropped on save, so a reopened piece
+        // or session sounded different). The engine mirrors the read, so
+        // every pitch mode works.
         bool reversed = false;
 
         bool loaded() const
@@ -1138,7 +1148,9 @@ namespace upic
             o->setProperty("id", id);
             o->setProperty("name", name);
             o->setProperty("sampleRate", sampleRate);
-            // NB: "reversed" is session state and is deliberately not saved
+            // v1.33.4 (H7): the slot's direction changes the sound, so it
+            // travels with the piece (and with the host state)
+            if (reversed) o->setProperty("reversed", true);
             const int ch = juce::jmin(2, data != nullptr ? data->getNumChannels() : 0);
             const int n = data != nullptr ? data->getNumSamples() : 0;
             o->setProperty("channels", ch);
@@ -1161,6 +1173,9 @@ namespace upic
             s.name = v.getProperty("name", "").toString();
             s.sampleRate = limits::clampFinite((double) v.getProperty("sampleRate", 44100.0),
                                                1000.0, limits::kMaxSampleRate);
+            // v1.33.4 (H7): the slot's direction (absent in older pieces ->
+            // forwards)
+            s.reversed = (bool) v.getProperty ("reversed", false);
             const int ch = juce::jlimit(1, 2, (int) v.getProperty("channels", 1));
             // The declared frame count is clamped to the 60-second cap before
             // anything is allocated: a crafted "frames" value must not be able

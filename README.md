@@ -199,7 +199,11 @@ a MIDI input bus, so the host's notes and CCs reach the app as well.
 
 **Transport and IO** - Play/Stop with click-free fades, Loop, page
 sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
-(shared with the Python and web builds). Double-click Stop rewinds to the
+(shared with the Python and web builds). The piece carries everything that
+changes the sound - the arc's own pitch algorithm and its reversal, the
+sample slot's direction and the global pitch modes - so a reopened piece
+(or a reopened DAW session) sounds the same; older pieces without those
+fields still load, with the old defaults. Double-click Stop rewinds to the
 start. Clear asks first in an in-app warning and uses a red confirm
 button. Dragging the playhead while stopped now plays a short scrub
 preview. A Rev toggle runs the score backwards (a mirrored stroke sounds mirrored); a learned MIDI jog CC drives a signed, smoothed playhead (up to +/- 4x) in the app and the plugin.
@@ -353,7 +357,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 500 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 508 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -369,7 +373,8 @@ sieve checkbox end-to-end, the zone menu actions, the digitised wave page,
 the micro-time page, the toolbar's group flow, the hints sidebar, the
 button text fitting, the capture button's colours, the wavetable
 buttons' colours, the PM preset round trip, the WAV export, the piece
-saver and the MIDI device handling) and writes
+saver, the MIDI device handling and the sound-affecting settings that
+travel with a piece) and writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 20-check plugin smoke test and pluginval at strictness 5.
 

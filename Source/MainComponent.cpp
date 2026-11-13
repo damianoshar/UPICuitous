@@ -4575,6 +4575,11 @@ juce::var MainComponent::pieceToVar() const
     o->setProperty("liveGrainMs", liveGrainMs);
     o->setProperty("sieveOn", sieveOn);
     o->setProperty("sieveM", sieveM);
+    // v1.33.4 (H7): the global pitch modes change the sound, so they travel
+    // with the piece (and with the host state) - they used to be dropped on
+    // save, so a reopened piece or session sounded different
+    o->setProperty("samplePitchMode", engine.getSamplePitchMode());
+    o->setProperty("livePitchMode", engine.getLivePitchMode());
     juce::Array<juce::var> srArr;
     for (int r : sieveR) srArr.add(r);
     o->setProperty("sieveR", srArr);
@@ -4689,6 +4694,31 @@ void MainComponent::loadFromVar(const juce::var& v)
     scrubEngine.setScrubGrainMs(scrubGrainMs);
     scrubEngine.setSampleGrainMs(sampleGrainMs);
     scrubEngine.setLiveGrainMs(liveGrainMs);
+    // v1.33.4 (H7): the global pitch modes come back with the piece. Absent
+    // in an older piece -> the session keeps what it had (backward
+    // compatible), present -> the piece's mode wins.
+    {
+        bool changed = false;
+        const int samplePm = (int) v.getProperty("samplePitchMode", -1);
+        if (samplePm >= 0)
+        {
+            const int pm = juce::jlimit(0, 3, samplePm);
+            engine.setSamplePitchMode(pm);
+            scrubEngine.setSamplePitchMode(pm);
+            samplePitchBox.setSelectedId(pm + 1, juce::dontSendNotification);
+            score.sampleGranularTab = (pm == 1);
+            changed = true;
+        }
+        const int livePm = (int) v.getProperty("livePitchMode", -1);
+        if (livePm >= 0)
+        {
+            const int pm = juce::jlimit(0, 2, livePm);
+            engine.setLivePitchMode(pm);
+            livePitchBox.setSelectedId(pm + 1, juce::dontSendNotification);
+            changed = true;
+        }
+        if (changed) markModelChanged();  // the voices re-anchor -> fade across it
+    }
     sieveBtn.setToggleState(sieveOn, juce::dontSendNotification);
     sieveMEdit.setText(juce::String(sieveM), juce::dontSendNotification);
     {
