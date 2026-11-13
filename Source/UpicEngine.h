@@ -782,21 +782,63 @@ private:
 };
 
 //==============================================================================
-// Stems: render one WAV per voice (wavetable for synth arcs / sample slot for
-// sample-mode arcs) into outDir. Muted arcs and voices with no audible
-// material are skipped. Returns the files written. `samplePitchMode` mirrors
-// UpicEngine::setSamplePitchMode so stems match what the session hears.
-inline std::vector<juce::File> renderStems(const upic::Page& page,
-                                           const std::vector<upic::Waveform>& waves,
-                                           const std::vector<upic::Envelope>& envs,
-                                           const std::vector<upic::SampleSlot>& slots,
-                                           const juce::File& outDir,
-                                           const juce::String& prefix,
-                                           double sr, float masterGain,
-                                           int samplePitchMode = 0)
+// v1.33.4 (H11): write a WAV without ever destroying the previous one.
+//
+// The export used to delete the destination first (createOutputStream() appends
+// on Windows), so a failed export - a locked file, a full disk, a missing
+// folder - left the user with nothing at all. The render now goes to a
+// temporary sibling and replaces the target only once the whole file is on
+// disk. The result is reported: false means "nothing was written", and the
+// file that was there before is untouched.
+inline bool writeWavFile (const juce::File& target,
+                          const juce::AudioBuffer<float>& buf,
+                          double sr)
+{
+    if (target == juce::File() || sr <= 0.0 || buf.getNumChannels() < 1) return false;
+
+    juce::TemporaryFile temp (target);
+    auto out = temp.getFile().createOutputStream();
+    if (out == nullptr) return false;
+
+    juce::WavAudioFormat fmt;
+    std::unique_ptr<juce::AudioFormatWriter> w (
+        fmt.createWriterFor (out.release(), sr, (unsigned int) buf.getNumChannels(), 16, {}, 0));
+    if (w == nullptr) return false;
+
+    const bool wrote = w->writeFromAudioSampleBuffer (buf, 0, buf.getNumSamples());
+    w.reset(); // flushes and closes the file
+    if (! wrote) return false;
+
+    return temp.overwriteTargetFileWithTemporary();
+}
+
+//==============================================================================
+// The result of a stem export: the files that were really written, and how
+// many renders were attempted and failed (v1.33.4 / H11 - a failed render
+// must not be reported as a written file).
+struct StemExport
 {
     std::vector<juce::File> written;
-    if (page.arcs.empty() || sr <= 0.0 || prefix.isEmpty()) return written;
+    int attempted = 0;
+    int failed = 0;
+};
+
+// Stems: render one WAV per voice (wavetable for synth arcs / sample slot for
+// sample-mode arcs) into outDir. Muted arcs and voices with no audible
+// material are skipped. Returns the files that were really written and the
+// failures (see StemExport). `samplePitchMode` mirrors
+// UpicEngine::setSamplePitchMode so stems match what the session hears.
+inline StemExport renderStems(const upic::Page& page,
+                              const std::vector<upic::Waveform>& waves,
+                              const std::vector<upic::Envelope>& envs,
+                              const std::vector<upic::SampleSlot>& slots,
+                              const juce::File& outDir,
+                              const juce::String& prefix,
+                              double sr, float masterGain,
+                              int samplePitchMode = 0)
+{
+    StemExport result;
+    if (page.arcs.empty() || sr <= 0.0 || prefix.isEmpty()) return result;
 
     // mirror of engine slot lookup: is there any material for this slot id?
     auto slotUsable = [&](int sid) {
@@ -825,30 +867,26 @@ inline std::vector<juce::File> renderStems(const upic::Page& page,
             wIds.push_back(a.waveformId);
         }
     }
-    if (wIds.empty() && sIds.empty()) return written;
+    if (wIds.empty() && sIds.empty()) return result;
 
     outDir.createDirectory();
 
     const int total = (int) std::ceil(page.durationSec * sr);
     auto renderOne = [&](const upic::Page& one, const juce::File& f) {
+        ++result.attempted;
         juce::AudioBuffer<float> buf(2, juce::jmax(1, total));
         buf.clear();
         UpicEngine eng;
         eng.prepare(sr, 8192);
         eng.setSamplePitchMode(samplePitchMode);
         eng.renderPageOffline(one, waves, envs, slots, buf, sr, masterGain);
-        juce::WavAudioFormat fmt;
-        // createOutputStream() appends on Windows: delete first (fresh file)
-        f.deleteFile();
-        if (auto out = f.createOutputStream())
-        {
-            if (auto* w = fmt.createWriterFor(out.release(), sr, (unsigned int) 2, 16, {}, 0))
-            {
-                w->writeFromAudioSampleBuffer(buf, 0, buf.getNumSamples());
-                delete w;
-                written.push_back(f);
-            }
-        }
+        // v1.33.4 (H11): the render goes to a temporary sibling and replaces
+        // the target only when the whole file is on disk. A failed write
+        // leaves the previous stem alone and is not reported as written.
+        if (writeWavFile (f, buf, sr))
+            result.written.push_back (f);
+        else
+            ++result.failed;
     };
 
     for (int id : wIds)
@@ -867,6 +905,6 @@ inline std::vector<juce::File> renderStems(const upic::Page& page,
             if (! a.muted && a.mode == 1 && a.sampleId == id) one.arcs.push_back(a);
         renderOne(one, outDir.getChildFile(prefix + "_sample" + juce::String(id) + ".wav"));
     }
-    return written;
+    return result;
 }
 

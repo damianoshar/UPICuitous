@@ -1924,10 +1924,13 @@ public:
                             .getChildFile("upic_stems_test");
             dir.deleteRecursively();
             auto written = renderStems(pg, waves, envs, noSlots, dir, "stem", 44100.0, 0.8f);
-            check(written.size() == 2, "stems: one file per audible voice",
-                  juce::String((int) written.size()) + " files (expect 2)");
-            bool namesOk = false, sizesOk = ! written.empty();
-            for (auto& f : written)
+            check(written.written.size() == 2, "stems: one file per audible voice",
+                  juce::String((int) written.written.size()) + " files (expect 2)");
+            check(written.failed == 0 && written.attempted == 2,
+                  "stems: nothing failed",
+                  juce::String(written.failed) + "/" + juce::String(written.attempted));
+            bool namesOk = false, sizesOk = ! written.written.empty();
+            for (auto& f : written.written)
             {
                 namesOk = namesOk || f.getFileName().contains("wave1");
                 namesOk = namesOk || f.getFileName().contains("wave2");
@@ -1936,6 +1939,72 @@ public:
             check(namesOk, "stems: named by voice (stem_wave1/2)");
             check(sizesOk, "stems: files exist and non-empty");
             dir.deleteRecursively();
+
+            // v1.33.4 (H11): a stem export that cannot write is reported as
+            // failed, not as a written file. The output folder is a file, so
+            // every stem inside it cannot be created.
+            {
+                auto blocker = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                   .getChildFile("upic_stems_blocker.txt");
+                blocker.replaceWithText("not a folder");
+                auto bad = renderStems(pg, waves, envs, noSlots, blocker, "stem", 44100.0, 0.8f);
+                check(bad.written.empty() && bad.failed == 2 && bad.attempted == 2,
+                      "stems: a failed write is not reported as written",
+                      juce::String((int) bad.written.size()) + "/" + juce::String(bad.failed));
+                blocker.deleteFile();
+            }
+        }
+
+        // 10b. v1.33.4 (H11): the WAV export writes a playable file, and a
+        // failed export leaves the previous one alone (the old code deleted
+        // the destination before it knew whether the write could succeed).
+        {
+            auto target = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                              .getChildFile("upic_wav_export_test.wav");
+            target.deleteFile();
+
+            juce::AudioBuffer<float> buf(2, 4410);
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < buf.getNumSamples(); ++i)
+                    buf.setSample(ch, i, 0.5f * std::sin ((float) i * 0.05f));
+
+            const bool wrote = writeWavFile (target, buf, 44100.0);
+            bool readable = false;
+            if (wrote && target.existsAsFile())
+            {
+                juce::WavAudioFormat fmt;
+                std::unique_ptr<juce::FileInputStream> in (target.createInputStream());
+                std::unique_ptr<juce::AudioFormatReader> r (fmt.createReaderFor (in.release(), true));
+                if (r != nullptr)
+                {
+                    const int frames = (int) r->lengthInSamples;
+                    juce::AudioBuffer<float> back (2, frames);
+                    r->read (&back, 0, frames, 0, true, false);
+                    float peak = 0.0f;
+                    for (int ch = 0; ch < 2; ++ch)
+                        for (int i = 0; i < back.getNumSamples(); ++i)
+                            peak = std::max (peak, std::abs (back.getSample (ch, i)));
+                    readable = r->numChannels == 2 && r->sampleRate == 44100.0
+                            && r->lengthInSamples == 4410 && peak > 0.4f && peak <= 0.51f;
+                }
+            }
+            check(wrote && readable, "the WAV export writes a playable file",
+                  target.existsAsFile() ? juce::String((int) target.getSize()) : juce::String("no file"));
+
+            // the failure path: a read-only target cannot be replaced, so the
+            // export must fail - and the file that was there must survive.
+            const auto sizeBefore = target.getSize();
+            target.setReadOnly (true);
+            juce::AudioBuffer<float> other(2, 2205);
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < other.getNumSamples(); ++i)
+                    other.setSample (ch, i, 0.9f);
+            const bool failedWrite = writeWavFile (target, other, 44100.0);
+            target.setReadOnly (false);
+            const bool kept = target.existsAsFile() && target.getSize() == sizeBefore;
+            check(! failedWrite && kept, "a failed export keeps the previous WAV",
+                  juce::String((int) target.getSize()) + " vs " + juce::String((int) sizeBefore));
+            target.deleteFile();
         }
 
         // 11. magnetic snap helpers: stickiness, time grid, click-free stop ramp

@@ -2295,28 +2295,44 @@ void MainComponent::runGenerator(int kind)
 
 void MainComponent::exportStems()
 {
+    // v1.33.4 (H11): the chooser can stay open while the window is closed,
+    // so the callback carries a safe pointer instead of a raw `this`.
+    juce::Component::SafePointer<MainComponent> sp (this);
     auto fc = std::make_shared<juce::FileChooser>(
         "Export stems (one WAV per voice) -- choose a folder",
         juce::File::getSpecialLocation(juce::File::userDocumentsDirectory), "");
     fc->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-        [this, fc](const juce::FileChooser& c){
+        [sp, fc](const juce::FileChooser& c){
+            if (sp == nullptr) return;
             auto dir = c.getResult();
             if (dir == juce::File()) return;
             double sr = 44100.0;
-            if (auto* dev = deviceManager.getCurrentAudioDevice())
+            if (auto* dev = sp->deviceManager.getCurrentAudioDevice())
                 if (dev->getCurrentSampleRate() > 0) sr = dev->getCurrentSampleRate();
-            std::vector<juce::File> written;
+            StemExport res;
             {
-                juce::ScopedLock l(dataLock);
-                written = renderStems(curPage(), waveforms, envelopes, sampleSlots,
-                                      dir, "stem", sr, masterGain.load(),
-                                      engine.getSamplePitchMode());
+                juce::ScopedLock l(sp->dataLock);
+                res = renderStems(sp->curPage(), sp->waveforms, sp->envelopes, sp->sampleSlots,
+                                  dir, "stem", sr, sp->masterGain.load(),
+                                  sp->engine.getSamplePitchMode());
             }
-            if (written.empty())
-                flash("Stems: nothing to render (no audible arcs / voices in this page)");
+            // v1.33.4 (H11): only the files that were really written are
+            // counted, and a failed render is reported instead of being
+            // silently dropped (the old files are left alone).
+            if (res.written.empty())
+            {
+                if (res.failed > 0)
+                    sp->flash("Stems: the export failed (" + juce::String(res.failed)
+                              + " file(s) could not be written - the old ones were kept)");
+                else
+                    sp->flash("Stems: nothing to render (no audible arcs / voices in this page)");
+            }
             else
-                flash("Wrote " + juce::String((int) written.size()) + " stem file(s) to "
-                      + dir.getFullPathName());
+            {
+                sp->flash("Wrote " + juce::String((int) res.written.size()) + " stem file(s) to "
+                          + dir.getFullPathName()
+                          + (res.failed > 0 ? " - " + juce::String(res.failed) + " failed" : juce::String()));
+            }
         });
 }
 
@@ -4711,9 +4727,14 @@ juce::String MainComponent::pieceStateText()
 
 void MainComponent::saveFile()
 {
+    // v1.33.4 (H11): the chooser can stay open while the window is closed.
+    // The safe pointer is checked before the body runs, so the raw `this`
+    // below is only ever used while the component is alive.
+    juce::Component::SafePointer<MainComponent> sp (this);
     auto fc = std::make_shared<juce::FileChooser>("Save UPIC piece", juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("piece.upic.json"), "*.json");
     fc->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-        [this, fc](const juce::FileChooser& c){
+        [this, sp, fc](const juce::FileChooser& c){
+            if (sp == nullptr) return;
             auto f = c.getResult();
             if (f == juce::File()) return;
             juce::ScopedLock l(dataLock);
@@ -4723,9 +4744,13 @@ void MainComponent::saveFile()
 
 void MainComponent::loadFile()
 {
+    // v1.33.4 (H11): the safe pointer is checked before the body runs, so the
+    // raw `this` below is only ever used while the component is alive.
+    juce::Component::SafePointer<MainComponent> sp (this);
     auto fc = std::make_shared<juce::FileChooser>("Load UPIC piece", juce::File::getSpecialLocation(juce::File::userDocumentsDirectory), "*.json");
     fc->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-        [this, fc](const juce::FileChooser& c){
+        [this, sp, fc](const juce::FileChooser& c){
+            if (sp == nullptr) return;
             auto f = c.getResult();
             if (!f.existsAsFile()) return;
             // SECURITY (S-03): a piece is untrusted input. Refuse to read a
@@ -4762,12 +4787,16 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
 {
     if (slotIndex < 0 || slotIndex >= (int) sampleSlots.size()) return;
 
+    // v1.33.4 (H11): the safe pointer is checked before the body runs, so the
+    // raw `this` below is only ever used while the component is alive.
+    juce::Component::SafePointer<MainComponent> sp (this);
     auto fc = std::make_shared<juce::FileChooser>(
         "Load audio material (played + pitch-shifted along arcs)",
         juce::File::getSpecialLocation(juce::File::userHomeDirectory),
         "*.wav;*.flac;*.ogg;*.aiff;*.aif");
     fc->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-        [this, fc, slotIndex](const juce::FileChooser& c){
+        [this, sp, fc, slotIndex](const juce::FileChooser& c){
+            if (sp == nullptr) return;
             auto f = c.getResult();
             if (! f.existsAsFile()) return;
 
@@ -4941,35 +4970,37 @@ void MainComponent::applyPmPresetFile (const juce::File& f)
 
 void MainComponent::renderWav()
 {
+    // v1.33.4 (H11): the chooser can stay open while the window is closed,
+    // so the callback carries a safe pointer instead of a raw `this`.
+    juce::Component::SafePointer<MainComponent> sp (this);
     auto fc = std::make_shared<juce::FileChooser>("Render current page to WAV", juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("upic-page.wav"), "*.wav");
     fc->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-        [this, fc](const juce::FileChooser& c){
+        [sp, fc](const juce::FileChooser& c){
+            if (sp == nullptr) return;
             auto f = c.getResult();
             if (f == juce::File()) return;
             f = f.withFileExtension("wav");
             double sr = 44100.0;
-            if (auto* dev = deviceManager.getCurrentAudioDevice())
+            if (auto* dev = sp->deviceManager.getCurrentAudioDevice())
                 if (dev->getCurrentSampleRate() > 0) sr = dev->getCurrentSampleRate();
-            juce::ScopedLock l(dataLock);
-            int total = (int) std::ceil(curPage().durationSec * sr);
-            juce::AudioBuffer<float> buf(2, total);
-            buf.clear();
-            // v1.18: render with a local engine - the member engine belongs to
-            // the audio thread now (dataLock no longer serialises it).
-            UpicEngine offline;
-            offline.prepare(sr, 8192);
-            offline.renderPageOffline(curPage(), waveforms, envelopes, sampleSlots, buf, sr, masterGain.load());
-            juce::WavAudioFormat fmt;
-            // createOutputStream() appends on Windows: delete first (fresh file)
-            f.deleteFile();
-            if (auto out = f.createOutputStream())
+            bool ok = false;
             {
-                if (auto* w = fmt.createWriterFor(out.release(), sr, (unsigned int)2, 16, {}, 0))
-                {
-                    w->writeFromAudioSampleBuffer(buf, 0, total);
-                    delete w;
-                }
+                juce::ScopedLock l(sp->dataLock);
+                int total = (int) std::ceil (sp->curPage().durationSec * sr);
+                juce::AudioBuffer<float> buf(2, total);
+                buf.clear();
+                // v1.18: render with a local engine - the member engine belongs to
+                // the audio thread now (dataLock no longer serialises it).
+                UpicEngine offline;
+                offline.prepare(sr, 8192);
+                offline.renderPageOffline(sp->curPage(), sp->waveforms, sp->envelopes, sp->sampleSlots, buf, sr, sp->masterGain.load());
+                // v1.33.4 (H11): the render goes to a temporary sibling and
+                // replaces the target only when the whole file is on disk. A
+                // failed export no longer destroys the previous WAV.
+                ok = writeWavFile (f, buf, sr);
             }
+            sp->flash (ok ? ("Rendered " + f.getFileName())
+                           : ("Render failed - " + f.getFileName() + " was not written"));
         });
 }
 
