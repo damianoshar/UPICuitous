@@ -120,6 +120,10 @@ public:
     int samplePitchModeForTest() const { return engine.getSamplePitchMode(); }
     int livePitchModeForTest() const { return engine.getLivePitchMode(); }
     double playheadForTest() const { return playheadSec; }
+    // v1.33.4 (M24): the peak the input tap saw on a channel - the plugin
+    // smoke test checks that the host's right input channel reaches the app
+    // even when the host's output is mono.
+    float inputTapPeakForTest (int channel) const;
     bool externalScrubActiveForTest() const { return externalScrubActive; }
     bool isPlayingForTest() const { return isPlaying.load (std::memory_order_relaxed); }
     void injectOscMessageForTest (const juce::OSCMessage& m) { osc.handleMessageForTest (m); }
@@ -401,6 +405,12 @@ private:
     std::atomic<int> capStopReason{ 0 }; // 1 user, 2 full, 3 input lost, 4 device changed
     std::atomic<int> capPos{ 0 };
     std::atomic<int> numLiveInputs{ 0 };
+    // v1.33.4 (M24): how many channels are written out. The standalone app
+    // always writes two; a plugin host can ask for fewer (mono out). A host
+    // layout can also have more INPUT channels than output ones (stereo in,
+    // mono out), and the extra input channels may be read-only memory - so
+    // only the output channels are cleared and written.
+    std::atomic<int> outChannels{ 2 };
     int capMax = 0, capFinalCount = 0, capFinalReason = 0;
     double capRate = 44100.0;
     juce::AudioBuffer<float> capBuf;    // audio thread writes, message thread reads after handoff
@@ -691,6 +701,15 @@ public:
     // Host input-bus channel count (0/1/2); the wrapper calls this from
     // prepareToPlay and from each processBlock.
     void setPluginInputChannelCount(int numChannels);
+    // v1.33.4 (M24): how many channels the host wants written. A host layout
+    // can have more input channels than output ones (stereo in, mono out),
+    // and the extra input channels may be read-only memory - so only the
+    // output channels are cleared and written.
+    void setPluginOutputChannelCount(int numChannels)
+    {
+        if (! pluginMode_) return;
+        outChannels.store (juce::jlimit (1, 2, numChannels), std::memory_order_relaxed);
+    }
 
 private:
     void showAudioSettings();

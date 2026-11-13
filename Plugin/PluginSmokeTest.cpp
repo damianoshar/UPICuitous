@@ -194,6 +194,33 @@ int main()
                    "ch " + juce::String (activity.channel + 1) + " CC "
                        + juce::String (activity.number) + " = " + juce::String (activity.value));
         }
+        // 10) v1.33.4 (M24): the host's RIGHT input channel reaches the app
+        //     even when the host's output is mono. The old code passed only
+        //     the output bus's view to the component, so in a stereo-in /
+        //     mono-out layout the right input channel was never seen by the
+        //     input tap (the live arcs and the capture heard the left
+        //     channel only).
+        {
+            UpicuitousAudioProcessor proc2;
+            juce::AudioProcessor::BusesLayout layout;
+            layout.inputBuses.add (juce::AudioChannelSet::stereo());
+            layout.outputBuses.add (juce::AudioChannelSet::mono());
+            proc2.setBusesLayout (layout);
+            proc2.prepareToPlay (sr, blockSize);
+            auto& main2 = proc2.getMainComponent();
+
+            juce::AudioBuffer<float> buf2 (2, blockSize);
+            buf2.clear();
+            for (int i = 0; i < blockSize; ++i)
+                buf2.setSample (1, i, 0.5f); // only the RIGHT channel carries signal
+            juce::MidiBuffer midi2;
+            proc2.processBlock (buf2, midi2);
+            check (main2.inputTapPeakForTest (1) > 0.4f
+                   && main2.inputTapPeakForTest (0) < 0.01f,
+                   "the host's right input channel reaches the app (stereo in, mono out)",
+                   "L " + juce::String (main2.inputTapPeakForTest (0), 4)
+                     + " R " + juce::String (main2.inputTapPeakForTest (1), 4));
+        }
     }
 
     std::cout << (failures == 0 ? "ALL CHECKS PASSED"

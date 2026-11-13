@@ -146,6 +146,16 @@ public:
     void setSamplePitchMode(int mode) { samplePitchMode.store(juce::jlimit(0, 3, mode)); }
     int getSamplePitchMode() const { return samplePitchMode.load(std::memory_order_relaxed); }
 
+    // v1.33.4 (M24): the effective pitch algorithm of an arc - the arc's own
+    // override (v1.33.4 / H7), or the tab's setting. The DSP and the latency
+    // reporting share this rule: the old latency code consulted only the
+    // global setting, so a page whose arc overrides it (a vocoder arc on a
+    // granular page) reported the wrong latency to the host.
+    int effectiveMode (const upic::Arc& arc, int globalMode) const
+    {
+        return arc.pitchMode >= 0 ? arc.pitchMode : globalMode;
+    }
+
     // Realtime render: playhead in seconds (page-local), outputs stereo (same mono sum).
     // Cost model: each arc only touches its active sample range, with the
     // waveform/envelope lookups hoisted out of the per-sample loop.
@@ -603,7 +613,8 @@ private:
         const double arcDur = juce::jmax(1.0e-6, arcEnd - arcStart);
         const double ref = juce::jmax(1.0, arc.refFreq);
         // v1.21 (wave 19): the arc's own pitch mode, or the tab's setting
-        int mode = arc.pitchMode >= 0 ? arc.pitchMode : samplePitchModeApplied;
+        // v1.33.4 (M24): the same rule the latency reporting uses
+        int mode = effectiveMode (arc, samplePitchModeApplied);
         if (freeze) mode = 1; // granular grain-hold for a stable freeze
         const bool mirrored = smp.reversed != (rate < 0.0);
         const double step = rate * invSr;
@@ -753,9 +764,8 @@ private:
                        double rate = 1.0)
     {
         // the arc's own mode, or the tab's setting
-        const int mode = arc.pitchMode >= 0
-                            ? arc.pitchMode
-                            : livePitchMode.load(std::memory_order_relaxed);
+        // v1.33.4 (M24): the same rule the latency reporting uses
+        const int mode = effectiveMode (arc, livePitchMode.load(std::memory_order_relaxed));
         // the arc reads the reversed ring when it asks for it - or when the
         // global transport is reversing (v1.30: global reverse forces the
         // live input backwards too, independent of the per-arc Rev box)

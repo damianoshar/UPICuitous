@@ -338,7 +338,10 @@ The live shifters have an inherent delay - granular 220 ms, tape
 when every audible arc on the page is delayed (a live-only page); a page
 that mixes generator arcs with live arcs reports 0, because the score
 must stay sample-accurate. The status line shows the current value
-(`LAT 220ms`).
+(`LAT 220ms`). The delay follows the arc's own algorithm when it has one
+(a vocoder arc on a granular page reports the vocoder's delay), and the
+host's input bus is read whole - both channels reach the live arcs and
+the microphone recording, even when the host's output is mono.
 
 ## Layout
 
@@ -380,7 +383,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 539 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 541 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -400,10 +403,11 @@ saver, the MIDI device handling, the sound-affecting settings that
 travel with a piece, the export of a page with an acceleration, the piece
 format's limits at limit minus one, limit and limit plus one, the sample
 material's own sample rate, a failed load keeping the composition, the
-sample PCM surviving repeated saves, and the stems of a PM-only page) and
+sample PCM surviving repeated saves, the stems of a PM-only page, and the
+latency following an arc's own algorithm) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
-21-check plugin smoke test and pluginval at strictness 5.
+22-check plugin smoke test and pluginval at strictness 5.
 
 ## Xenakis notes
 

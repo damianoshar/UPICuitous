@@ -2529,13 +2529,21 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
 void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 {
     // Live input runs before the clear: the player buffer initially carries
-    // the input channels, and clearActiveBufferRegion() would wipe them.
+    // the input channels, and the clear would wipe them.
     const bool mon = tapLiveInput(info);
-    info.clearActiveBufferRegion();
+    // v1.33.4 (M24): only the OUTPUT channels are cleared and written. A
+    // host layout can have more input channels than output ones (stereo in,
+    // mono out), and the extra input channels may be read-only memory - the
+    // old clear (which wiped every channel of the view) wrote to them.
+    const int outCh = juce::jmin (outChannels.load (std::memory_order_relaxed),
+                                  info.buffer->getNumChannels());
+    for (int c = 0; c < outCh; ++c)
+        juce::FloatVectorOperations::clear (info.buffer->getWritePointer (c, info.startSample),
+                                            info.numSamples);
 
     const int n = info.numSamples;
     float* L = info.buffer->getWritePointer(0, info.startSample);
-    float* R = info.buffer->getNumChannels() > 1 ? info.buffer->getWritePointer(1, info.startSample) : nullptr;
+    float* R = outCh > 1 ? info.buffer->getWritePointer(1, info.startSample) : nullptr;
     const int scoreFadeN = juce::jmax(1, (int) std::lround(audioSampleRate * (double) dragSmoothMs.load(std::memory_order_relaxed) / 1000.0));
 
     if (mon) // monitor mix: live passthrough, independent of the transport
@@ -3573,6 +3581,22 @@ bool MainComponent::tapLiveInput(const juce::AudioSourceChannelInfo& info)
     return monitoring.load();
 }
 
+//==============================================================================
+// v1.33.4 (M24): the peak the input tap saw on a channel. The plugin smoke
+// test uses it to prove that the host's right input channel reaches the app
+// even when the host's output is mono (the old code passed only the output
+// bus's view, so the right input channel was never seen).
+float MainComponent::inputTapPeakForTest (int channel) const
+{
+    if (channel < 0 || channel >= inScratch.getNumChannels())
+        return 0.0f;
+
+    float peak = 0.0f;
+    for (int i = 0; i < inScratch.getNumSamples(); ++i)
+        peak = juce::jmax (peak, std::abs (inScratch.getSample (channel, i)));
+    return peak;
+}
+
 void MainComponent::handoffCapture()
 {
     capturing = false;
@@ -3784,7 +3808,11 @@ int MainComponent::liveLatencySamples() const
         double sec = 0.0;
         if (a.mode == 2) // live input
         {
-            switch (engine.getLivePitchMode())
+            // v1.33.4 (M24): the arc's own algorithm wins over the tab's
+            // setting - the same rule the DSP uses (UpicEngine::effectiveMode).
+            // The old code consulted only the global setting, so a page with
+            // a per-arc override reported the wrong latency to the host.
+            switch (engine.effectiveMode (a, engine.getLivePitchMode()))
             {
                 case 0:  sec = upic::GrainShifter::kLagSec; break;   // 220 ms
                 case 1:  sec = 0.5 * (upic::TapeShifter::kLagMinSec
@@ -3792,7 +3820,7 @@ int MainComponent::liveLatencySamples() const
                 default: sec = (double) upic::VocoderCore::kPrime / audioSampleRate; break; // ~21 ms
             }
         }
-        else if (a.mode == 1 && engine.getSamplePitchMode() == 2)
+        else if (a.mode == 1 && engine.effectiveMode (a, engine.getSamplePitchMode()) == 2)
         {
             sec = (double) upic::VocoderCore::kPrime / audioSampleRate; // the sample vocoder's prime
         }

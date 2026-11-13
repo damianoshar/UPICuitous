@@ -73,9 +73,8 @@ void UpicuitousAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // The host buffer follows the in-place convention: channel k carries input k
     // on entry and takes the render on exit - exactly like the device callback
     // buffer of the stand-alone app. So the component's input tap (monitor,
-    // capture, mode-2 arcs) and the render run unchanged; only the input channel
-    // count has to come from the host's bus layout.
-    main->setPluginInputChannelCount(juce::jmin(2, getTotalNumInputChannels()));
+    // capture, mode-2 arcs) and the render run unchanged; only the channel
+    // counts have to come from the host's bus layout.
 
     // v1.25 (wave 22): feed host MIDI into the same handler the stand-alone
     // app uses. Parameter binding (master gain / intensity) follows the latest
@@ -83,14 +82,35 @@ void UpicuitousAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     for (const auto m : midiMessages)
         main->injectMidiMessage(m.getMessage());
 
-    // limit the view to the main output bus: any extra input-only channels must
-    // not be written to
-    auto outBus = getBusBuffer(buffer, false, 0);
-    const int n = juce::jmin(buffer.getNumSamples(), outBus.getNumSamples());
-    if (n <= 0 || outBus.getNumChannels() <= 0)
+    // v1.33.4 (M24): the component gets the host buffer's MAIN BUS channels -
+    // the input channels AND the output channels. The old code passed only
+    // the output bus's view, so in a stereo-in / mono-out layout the output
+    // bus was one channel wide and the input tap never saw the right input
+    // channel (the live arcs and the capture heard the left channel only).
+    auto inBus  = getBusBuffer (buffer, true, 0);
+    auto outBus = getBusBuffer (buffer, false, 0);
+    const int numChannels = juce::jmax (inBus.getNumChannels(), outBus.getNumChannels());
+    const int n = juce::jmin (buffer.getNumSamples(), outBus.getNumSamples());
+    if (n <= 0 || numChannels <= 0)
         return;
 
-    juce::AudioSourceChannelInfo info(&outBus, 0, n);
+    // the input count comes from the host's main input bus (the tap reads at
+    // most two channels) ...
+    main->setPluginInputChannelCount (juce::jmin (2, inBus.getNumChannels()));
+    // ... and the output count tells the component which channels it may
+    // clear and write (the others may be read-only host memory).
+    main->setPluginOutputChannelCount (outBus.getNumChannels());
+
+    // a view over the first numChannels channels of the host buffer: JUCE's
+    // convention is that the input channels come first and the output
+    // channels overlap them.
+    std::vector<float*> chans;
+    chans.reserve ((size_t) numChannels);
+    for (int c = 0; c < numChannels; ++c)
+        chans.push_back (buffer.getWritePointer (c));
+    juce::AudioBuffer<float> view (chans.data(), numChannels, buffer.getNumSamples());
+
+    juce::AudioSourceChannelInfo info(&view, 0, n);
     main->getNextAudioBlock(info);
 }
 

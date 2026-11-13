@@ -4492,6 +4492,26 @@ public:
             check(mc.liveLatencySamples() == 0,
                   "latency: a mixed page reports 0 (the score must stay exact)",
                   juce::String(mc.liveLatencySamples()) + " samples");
+
+            // v1.33.4 (M24): the arc's OWN algorithm decides the reported
+            // delay - the old code consulted only the tab's global setting,
+            // so a page whose arc overrides it (a vocoder arc on a granular
+            // page) reported the wrong latency to the host.
+            {
+                const juce::String liveArcVocoder = "{\"id\":2,\"mode\":2,\"pitchMode\":2,\"points\":[{\"t\":0,\"f\":220},{\"t\":2,\"f\":220}]}";
+                pieceWith(liveArcVocoder);
+                const int lat = mc.liveLatencySamples();
+                const int wantVocoder = upic::VocoderCore::kPrime; // the vocoder's prime, in samples
+                check(lat == wantVocoder,
+                      "latency: a live arc's own algorithm decides the reported delay",
+                      juce::String(lat) + " samples (want " + juce::String(wantVocoder) + ")");
+                // without an override the tab's setting still decides
+                pieceWith(liveArc);
+                check(mc.liveLatencySamples() == wantGranular,
+                      "latency: without an override the tab's setting decides",
+                      juce::String(mc.liveLatencySamples()) + " samples (want "
+                          + juce::String(wantGranular) + ")");
+            }
         }
 
         // 20. wave 15: the realtime path renders from the published snapshot
