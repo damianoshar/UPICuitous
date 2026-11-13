@@ -67,12 +67,13 @@ longer needs a row of its own - the next group continues on the same line
 when there is room. A group wider than the line wraps inside itself, and
 its card follows it line by line, so no control is left on the bare
 background. The **level sliders** (intensity, duration, master) are
-one group, so they always sit together. The whole toolbar sits on a dark
-base panel, so the gaps between the cards and the unused end of a line
-are panel, not black holes. On a large screen the long
+one group, so they always sit together. The whole window - toolbar,
+score, editors and the tab strip - shares one dark surface, so the cards
+never sit on black or leave shadow-like patches. On a large screen the long
 explanations (the material's hint and the keyboard/shortcut list) move into
 their own **sidebar** on the right, where the spare space is; the **Hints**
-toggle in the strip above the canvas shows and hides it. No button cuts its
+toggle in the strip above the canvas shows and hides it, and the toolbar
+reflows at once with no leftover card fragments. No button cuts its
 own text off - every control is measured and gets at least the width its
 text needs. The **Capture** button is green, and turns red while it
 records; the wavetable's shape buttons wear the colour of the wave they

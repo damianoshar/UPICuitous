@@ -182,7 +182,7 @@ public:
     void paint(juce::Graphics& g) override
     {
         updateButtons();   // a preset applied elsewhere may have changed the count
-        g.fillAll(juce::Colour(0xff141419));
+        g.fillAll (upic::uiBackground());
         auto r = getLocalBounds().toFloat();
         g.setColour(juce::Colour(0xff8a8a99));
         g.setFont(11.0f);

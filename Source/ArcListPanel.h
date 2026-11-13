@@ -92,7 +92,7 @@ public:
     //--- painting --------------------------------------------------------
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour (0xff14141a));
+        g.fillAll (upic::uiBackground());
         g.setColour (juce::Colour (0xff24242c));
         g.drawRect (getLocalBounds(), 1);
 

@@ -130,6 +130,11 @@ namespace upic
         return cols[i % 16];
     }
 
+    // v1.33.3: one dark surface for the whole window. Pure black made the
+    // cards look like they left holes and shadows wherever the background
+    // showed through - in the toolbar, around the score and in the editors.
+    inline juce::Colour uiBackground() { return juce::Colour (0xff131720); }
+
     //---------------- the point lookups ----------------
     // The index of the first point whose key is >= the searched one, in a
     // point list that is sorted by that key. A binary search, because these

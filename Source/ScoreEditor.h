@@ -526,7 +526,7 @@ public:
     //==========================================================================
     void paint(juce::Graphics& g) override
     {
-        g.fillAll(juce::Colour(0xff101014));
+        g.fillAll (upic::uiBackground());
         auto r = plotArea();
 
         // frame

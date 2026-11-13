@@ -23,7 +23,7 @@ UpicuitousAudioProcessorEditor::~UpicuitousAudioProcessorEditor()
 //==============================================================================
 void UpicuitousAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff0b0b0e));
+    g.fillAll (upic::uiBackground());
 }
 
 void UpicuitousAudioProcessorEditor::resized()

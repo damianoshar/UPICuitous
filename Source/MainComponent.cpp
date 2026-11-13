@@ -3928,15 +3928,7 @@ void MainComponent::publishLatency()
 //==============================================================================
 void MainComponent::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff0b0b0e));
-    // v1.33.3: the toolbar's base panel. Without it the group cards are
-    // islands on the window's black background, so every card margin, group
-    // gap and unused line remainder reads as a black artefact.
-    if (! toolbarBounds.isEmpty())
-    {
-        g.setColour (juce::Colour (0xff131720));
-        g.fillRoundedRectangle (toolbarBounds.toFloat().reduced (0.5f), 7.0f);
-    }
+    g.fillAll (upic::uiBackground());
     // one subtle card per toolbar row, so the transport / voice / material /
     // groove groups read as separate blocks (each with a faint tint)
     static const juce::Colour fills[]   { juce::Colour (0xff1a1f2a), juce::Colour (0xff1a1a22),
@@ -4492,6 +4484,13 @@ void MainComponent::resized()
 
     // v1.30 (5.3 refactor): the overlay cards have their own method.
     layoutOverlays (s);
+
+    // v1.33.3: the toolbar cards are painted by this component, not by the
+    // controls. A layout change triggered from a toggle (Hints, Wave, Env)
+    // moves the controls but does not invalidate the card rectangles, so the
+    // old cards stayed behind until the window was resized. Repaint the whole
+    // component after every layout pass.
+    repaint();
 }
 
 void MainComponent::layoutOverlays (float s)
