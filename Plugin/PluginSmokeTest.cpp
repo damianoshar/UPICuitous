@@ -188,8 +188,10 @@ int main()
             hostMidi.addEvent (juce::MidiMessage::controllerEvent (3, 42, 99), 0);
             proc.processBlock (buf, hostMidi);
             const auto activity = main.midiHub().pollActivity();
+            // v1.33.4 (M20): the app uses the channel INDEX (0..15) - the
+            // host's MIDI channel 3 is the app's channel 2.
             check (activity.valid && activity.type == MidiHub::kTypeCc
-                   && activity.channel == 3 && activity.number == 42 && activity.value == 99,
+                   && activity.channel == 2 && activity.number == 42 && activity.value == 99,
                    "the host's MIDI reaches the app",
                    "ch " + juce::String (activity.channel + 1) + " CC "
                        + juce::String (activity.number) + " = " + juce::String (activity.value));

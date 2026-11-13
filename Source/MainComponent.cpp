@@ -3303,11 +3303,26 @@ void MainComponent::rebuildArcList()
 // v1.23 (wave 20): the MIDI input foundation - the learn and the parameters
 // the MIDI drives. Everything here runs on the message thread (the MIDI
 // callback only publishes the message).
+//
+// v1.33.4 (M20): the hub queues every message, so a note-on and its note-off
+// both arrive - they used to collapse into one "newest message" and a pair
+// could vanish before the poll. The messages are handled one after the
+// other, in the order they arrived.
 void MainComponent::handleMidi()
 {
-    const auto a = midi.pollActivity();
-    if (! a.valid) return;
+    bool any = false;
+    midi.pollActivities ([this, &any] (const MidiHub::Activity& a)
+    {
+        any = true;
+        handleMidiActivity (a);
+    });
 
+    if (any)
+        updateMidiLabels();
+}
+
+void MainComponent::handleMidiActivity (const MidiHub::Activity& a)
+{
     // the activity monitor
     juce::String what;
     if (a.type == MidiHub::kTypeCc)        what = "CC " + juce::String (a.number);
@@ -3316,7 +3331,9 @@ void MainComponent::handleMidi()
     else                                   what = "MIDI";
     midiActLab.setText (what + " = " + juce::String (a.value)
                         + "   ch " + juce::String (a.channel + 1)
-                        + (midi.isOpen() ? "   " + midi.openDeviceName() : juce::String()),
+                        + (midi.isOpen() ? "   " + midi.openDeviceName() : juce::String())
+                        + (midi.droppedCount() > 0
+                              ? "   " + juce::String (midi.droppedCount()) + " dropped" : juce::String()),
                         juce::dontSendNotification);
 
     // the learn: the next control message binds to the target
@@ -3341,7 +3358,6 @@ void MainComponent::handleMidi()
         // anything else (clock, pitch bend, ...) is ignored: the learn waits
         // for a CC or a note, and the button cancels it
     }
-    updateMidiLabels();
 
     // the bound parameters follow the MIDI (the MIDI wins while it is bound)
     const auto bg = midi.binding (MidiHub::Target::masterGain);
@@ -3457,11 +3473,10 @@ void MainComponent::updateExternalScrub (double nowMs)
 
 void MainComponent::injectMidiMessage (const juce::MidiMessage& m)
 {
-    int type = MidiHub::kTypeOther, number = 0, value = 0;
-    if (m.isController()) { type = MidiHub::kTypeCc; number = m.getControllerNumber(); value = m.getControllerValue(); }
-    else if (m.isNoteOn())  { type = MidiHub::kTypeNoteOn; number = m.getNoteNumber(); value = (int) m.getVelocity(); }
-    else if (m.isNoteOff()) { type = MidiHub::kTypeNoteOff; number = m.getNoteNumber(); value = 0; }
-    midi.injectForTest (type, m.getChannel(), number, value);
+    // v1.33.4 (M20): the hub does the work - it turns JUCE's channel (1..16)
+    // into the app's channel index (0..15) and queues the message, so a
+    // note-on and its note-off both arrive.
+    midi.injectMessage (m);
 }
 
 void MainComponent::updateMidiLabels()

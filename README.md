@@ -201,6 +201,9 @@ shows the last message (CC or note, value, channel, device) and has a
 move a control, and the parameter follows it. The bindings are a
 controller map - session state, not part of the piece. The VST3 declares
 a MIDI input bus, so the host's notes and CCs reach the app as well.
+Every message is queued, so a note and its release both arrive (they used
+to collapse into one "newest message"), and the channel is the MIDI
+channel index - channel 1 reads as 1 and channel 16 as 16.
 
 **Transport and IO** - Play/Stop with click-free fades, Loop, page
 sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
@@ -387,7 +390,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 547 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 555 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -409,7 +412,7 @@ format's limits at limit minus one, limit and limit plus one, the sample
 material's own sample rate, a failed load keeping the composition, the
 sample PCM surviving repeated saves, the stems of a PM-only page, the
 latency following an arc's own algorithm, and the file a chooser
-returns) and
+returns, the MIDI message queue and the MIDI channel labels) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.

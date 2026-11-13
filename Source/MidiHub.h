@@ -15,11 +15,20 @@
 // The MIDI scrub transport (the thing that will *use* this) is a later wave
 // (UPIC-28). This is the plumbing it needs.
 //
-// Threading: JUCE calls the MidiInput callback on its own thread, so the
-// callback must not touch the app. It only publishes the last message into
-// one atomic (the message packed into the low half, a counter in the high
-// half - one read, so the pair is always consistent) and the message thread
-// (the 30 Hz timer) picks it up. No locks, no message-queue flooding.
+// Threading: JUCE calls the MidiInput callback on its own thread, and in a
+// plugin the host's MIDI arrives on the audio thread - so there can be two
+// producers. Neither of them may block, allocate or touch the app: they
+// publish into a bounded, lock-free queue and into a "latest value" slot,
+// and the message thread (the 30 Hz timer) picks the messages up. No locks,
+// no message-queue flooding.
+//
+// v1.33.4 (M20): the hub used to keep only the NEWEST message, so a
+// note-on and its note-off could vanish before the poll, and the channel
+// was packed with "& 0xf" and then shown +1 - MIDI channel 1 read as 2 and
+// channel 16 as 1. Now every message is queued (a bounded ring, no locks)
+// and the app uses ONE channel convention: the channel INDEX, 0..15 (MIDI
+// channel 1 is 0). The change from JUCE's 1..16 happens once, at the
+// boundary.
 class MidiHub
 {
 public:
@@ -31,7 +40,7 @@ public:
     {
         bool valid = false;
         int type = 0;      // 0 = CC, 1 = note on, 2 = note off, 3 = other
-        int channel = 0;
+        int channel = 0;   // the channel INDEX: 0 = MIDI channel 1 ... 15 = channel 16
         int number = 0;    // the CC number or the note number
         int value = 0;
     };
@@ -41,7 +50,7 @@ public:
         bool bound = false;
         bool note = false;   // a note (on) instead of a CC
         int number = -1;      // the CC or the note number
-        int channel = -1;     // -1 = any channel
+        int channel = -1;     // -1 = any channel, otherwise the channel index (0..15)
     };
 
     MidiHub() = default;
@@ -126,31 +135,81 @@ public:
     juce::String openDeviceId() const { return openId; }
 
     //--- the activity (the message thread polls it) ----------------------
-    // Returns the newest message (and clears it). An empty one means
-    // nothing arrived.
+    //
+    // Every message that arrives is queued, so a note-on and its note-off
+    // both get through - they used to collapse into one "newest message"
+    // and a pair could vanish before the poll.
+    //
+    // The messages are handed over in the order they arrived. Each one
+    // carries a ticket - the counter that says when it arrived - so the
+    // order survives two producers publishing at the same time.
+    //
+    // A continuous control (a CC) is also kept in a "latest value" slot:
+    // when the queue is full the newest CC value still gets through, and
+    // that is the value a bound parameter needs.
+    void pollActivities (const std::function<void (const Activity&)>& handler)
+    {
+        uint64_t pending[MessageQueue::kCapacity + 2];
+        size_t n = 0;
+
+        uint64_t entry;
+        while (n < MessageQueue::kCapacity && queue.pop (entry))
+            pending[n++] = entry;
+
+        const auto cc = ccSlot.load (std::memory_order_acquire);
+        if (ticketOf (cc) != 0)
+            pending[n++] = cc;
+
+        // the order they arrived in (the queue is already nearly sorted)
+        for (size_t i = 1; i < n; ++i)
+        {
+            const auto item = pending[i];
+            size_t j = i;
+            while (j > 0 && isOlder (ticketOf (item), ticketOf (pending[j - 1])))
+            {
+                pending[j] = pending[j - 1];
+                --j;
+            }
+            pending[j] = item;
+        }
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto ticket = ticketOf (pending[i]);
+            if (! isNewer (ticket, lastDelivered))
+                continue;   // already delivered (the queue and the slot hold the same message)
+            lastDelivered = ticket;
+            handler (unpackMessage ((uint32_t) pending[i]));
+        }
+    }
+
+    // The newest message since the last poll (empty when nothing arrived).
+    // The app uses pollActivities; this is the simple form the tests use.
     Activity pollActivity()
     {
-        Activity a;
-        const auto packed = slot.load (std::memory_order_acquire);
-        const auto count = (uint32_t) (packed >> 32);
-        if (count == seenCount)
-            return a;
-        seenCount = count;
-
-        const uint32_t msg = (uint32_t) (packed & 0xffffffffu);
-        a.valid = true;
-        a.type      = (int) ((msg >> 28) & 0x3);
-        a.channel   = (int) ((msg >> 24) & 0xf);
-        a.number    = (int) ((msg >> 16) & 0xff);
-        a.value     = (int) ((msg >> 8)  & 0xff);
-        return a;
+        Activity newest;
+        pollActivities ([&newest] (const Activity& a) { newest = a; });
+        return newest;
     }
 
     // The number of messages that arrived (the monitor's "N messages").
-    uint32_t messageCount() const { return (uint32_t) (slot.load (std::memory_order_relaxed) >> 32); }
+    uint32_t messageCount() const
+    {
+        return ticketCounter.load (std::memory_order_relaxed) - 1;
+    }
+
+    // The number of messages the queue had to drop (it was full).
+    uint32_t droppedCount() const { return dropped.load (std::memory_order_relaxed); }
 
     //--- the learn ------------------------------------------------------
-    void startLearn (Target t) { learning = t; }
+    void startLearn (Target t)
+    {
+        learning = t;
+        // a message that is already waiting must not bind the learn - the
+        // user wants the control they move AFTER clicking Learn
+        clearPending();
+    }
+
     void cancelLearn() { learning = Target::none; }
     bool isLearning() const { return learning != Target::none; }
     Target learningTarget() const { return learning; }
@@ -189,10 +248,19 @@ public:
     }
 
     //--- the test hook --------------------------------------------------
-    // Injects a message as if it had come from the device.
+    // Injects a message as if it had come from the device. The channel is
+    // the app's channel index (0..15) - the same convention the binding
+    // and the monitor use.
     void injectForTest (int type, int channel, int number, int value)
     {
         publishRaw (type, channel, number, value);
+    }
+
+    // Injects a JUCE message the way the device and the plugin host do, so
+    // that the channel conversion is the one the app really uses.
+    void injectMessage (const juce::MidiMessage& m)
+    {
+        publish (m);
     }
 
     // The selftest replaces the device list and the opener, so that "the hub
@@ -210,6 +278,111 @@ public:
     static constexpr int kTypeCc = 0, kTypeNoteOn = 1, kTypeNoteOff = 2, kTypeOther = 3;
 
 private:
+    //--- the message queue ----------------------------------------------
+    //
+    // A bounded, lock-free queue: several producers (the MIDI thread and,
+    // in a plugin, the audio thread) and one consumer (the message thread).
+    // Every slot carries a sequence number, so a producer only publishes
+    // into a slot the consumer has already released.
+    //
+    // The ring never allocates and never blocks: when it is full the
+    // message is dropped and counted, and the app says so.
+    class MessageQueue
+    {
+    public:
+        static constexpr uint32_t kCapacity = 256;   // a power of two
+
+        MessageQueue()
+        {
+            // every slot starts with its own number: a producer may only
+            // publish into the slot whose sequence says "your turn"
+            for (uint32_t i = 0; i < kCapacity; ++i)
+                slots[i].sequence.store (i, std::memory_order_relaxed);
+        }
+
+        bool push (uint64_t entry)
+        {
+            uint64_t pos = writePos.load (std::memory_order_relaxed);
+
+            for (;;)
+            {
+                auto& s = slots[pos & (kCapacity - 1)];
+                const auto seq = s.sequence.load (std::memory_order_acquire);
+                const auto diff = (int64_t) seq - (int64_t) pos;
+
+                if (diff == 0)
+                {
+                    if (writePos.compare_exchange_weak (pos, pos + 1,
+                                                       std::memory_order_relaxed,
+                                                       std::memory_order_relaxed))
+                    {
+                        s.value = entry;
+                        s.sequence.store (pos + 1, std::memory_order_release);
+                        return true;
+                    }
+                    // the failed exchange has updated pos - try again
+                }
+                else if (diff < 0)
+                {
+                    return false;   // the ring is full
+                }
+                else
+                {
+                    pos = writePos.load (std::memory_order_relaxed);
+                }
+            }
+        }
+
+        bool pop (uint64_t& entry)
+        {
+            uint64_t pos = readPos.load (std::memory_order_relaxed);
+
+            for (;;)
+            {
+                auto& s = slots[pos & (kCapacity - 1)];
+                const auto seq = s.sequence.load (std::memory_order_acquire);
+                const auto diff = (int64_t) seq - (int64_t) (pos + 1);
+
+                if (diff == 0)
+                {
+                    if (readPos.compare_exchange_weak (pos, pos + 1,
+                                                      std::memory_order_relaxed,
+                                                      std::memory_order_relaxed))
+                    {
+                        entry = s.value;
+                        s.sequence.store (pos + kCapacity, std::memory_order_release);
+                        return true;
+                    }
+                }
+                else if (diff < 0)
+                {
+                    return false;   // nothing waiting
+                }
+                else
+                {
+                    pos = readPos.load (std::memory_order_relaxed);
+                }
+            }
+        }
+
+        void clear()
+        {
+            uint64_t entry;
+            while (pop (entry)) {}
+        }
+
+    private:
+        struct Slot
+        {
+            std::atomic<uint64_t> sequence { 0 };
+            uint64_t value = 0;
+        };
+
+        Slot slots[kCapacity];
+        std::atomic<uint64_t> writePos { 0 };
+        std::atomic<uint64_t> readPos { 0 };
+    };
+
     // JUCE 8 calls this on a high-priority thread: it must do nothing but
     // publish the message.
     struct Callback : public juce::MidiInputCallback
@@ -243,10 +416,12 @@ private:
         return opener (id, cb);
     }
 
-    // the packed message + a counter, in one atomic (so a reader always sees
-    // a consistent pair)
-    std::atomic<uint64_t> slot { 0 };
-    uint32_t seenCount = 0;
+    // The messages, the "latest value" slot and the tickets.
+    MessageQueue queue;
+    std::atomic<uint64_t> ccSlot { 0 };        // the newest CC: ticket + message
+    std::atomic<uint32_t> ticketCounter { 1 }; // the next ticket to hand out
+    std::atomic<uint32_t> dropped { 0 };       // the messages the queue had to drop
+    uint32_t lastDelivered = 0;                // the message thread only
 
     Target learning = Target::none;
     Binding bindings[4] = { Binding(), Binding(), Binding(), Binding() };
@@ -260,23 +435,83 @@ private:
         return -1;
     }
 
+    // The packed message: the type (2 bits), the channel index (4), the
+    // number (8) and the value (8).
+    static uint32_t packMessage (int type, int channel, int number, int value)
+    {
+        return ((uint32_t) (type & 0x3) << 28)
+             | ((uint32_t) (channel & 0xf) << 24)
+             | ((uint32_t) (number & 0xff) << 16)
+             | ((uint32_t) (value & 0xff) << 8);
+    }
+
+    static Activity unpackMessage (uint32_t msg)
+    {
+        Activity a;
+        a.valid = true;
+        a.type      = (int) ((msg >> 28) & 0x3);
+        a.channel   = (int) ((msg >> 24) & 0xf);
+        a.number    = (int) ((msg >> 16) & 0xff);
+        a.value     = (int) ((msg >> 8)  & 0xff);
+        return a;
+    }
+
+    static uint32_t ticketOf (uint64_t entry) { return (uint32_t) (entry >> 32); }
+
+    // The tickets count up and wrap around, so they are compared as signed
+    // differences (the usual serial-number arithmetic).
+    static bool isNewer (uint32_t a, uint32_t b) { return (int32_t) (a - b) > 0; }
+    static bool isOlder (uint32_t a, uint32_t b) { return (int32_t) (a - b) < 0; }
+
     void publish (const juce::MidiMessage& m)
     {
         int type = kTypeOther, number = 0, value = 0;
         if (m.isController()) { type = kTypeCc; number = m.getControllerNumber(); value = m.getControllerValue(); }
         else if (m.isNoteOn())  { type = kTypeNoteOn; number = m.getNoteNumber(); value = (int) m.getVelocity(); }
         else if (m.isNoteOff()) { type = kTypeNoteOff; number = m.getNoteNumber(); value = 0; }
-        publishRaw (type, m.getChannel(), number, value);
+        // JUCE's channels are 1..16; the app uses the channel index (0..15).
+        // This is the one place where the two conventions meet.
+        publishRaw (type, m.getChannel() - 1, number, value);
     }
 
     void publishRaw (int type, int channel, int number, int value)
     {
-        const uint32_t msg = (uint32_t) ((type & 0x3) << 28)
-                           | (uint32_t) ((channel & 0xf) << 24)
-                           | (uint32_t) ((number & 0xff) << 16)
-                           | (uint32_t) ((value & 0xff) << 8);
-        const auto count = (uint32_t) (slot.load (std::memory_order_relaxed) >> 32) + 1;
-        slot.store (((uint64_t) count << 32) | (uint64_t) msg, std::memory_order_release);
+        uint32_t ticket = ticketCounter.fetch_add (1, std::memory_order_relaxed);
+        if (ticket == 0)
+            ticket = ticketCounter.fetch_add (1, std::memory_order_relaxed);   // 0 means "none"
+
+        const auto msg = packMessage (type, channel, number, value);
+        const uint64_t entry = ((uint64_t) ticket << 32) | (uint64_t) msg;
+
+        if (! queue.push (entry))
+        {
+            dropped.fetch_add (1, std::memory_order_relaxed);
+        }
+
+        // a continuous control keeps its newest value even when the queue is
+        // full - that is the value a bound parameter needs
+        if (type == kTypeCc)
+        {
+            auto old = ccSlot.load (std::memory_order_relaxed);
+            for (;;)
+            {
+                if (! isNewer (ticket, ticketOf (old)))
+                    return;   // a newer CC is already in the slot
+                if (ccSlot.compare_exchange_weak (old, entry,
+                                                   std::memory_order_release,
+                                                   std::memory_order_relaxed))
+                    return;
+            }
+        }
+    }
+
+    // Throws away everything that is waiting - the learn starts here, and
+    // only a message that arrives after it may bind.
+    void clearPending()
+    {
+        queue.clear();
+        ccSlot.store (0, std::memory_order_release);
+        lastDelivered = ticketCounter.load (std::memory_order_relaxed) - 1;
     }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiHub)

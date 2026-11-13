@@ -5462,7 +5462,10 @@ public:
             auto* inten = dynamic_cast<juce::Slider*>(findByName(mc, "intenSlider"));
             check(bi.bound && bi.note && bi.number == 60
                   && inten != nullptr && std::abs(inten->getValue() - 64.0 / 127.0) < 0.02,
-                  "a learned note drives the draw intensity");
+                  "a learned note drives the draw intensity",
+                  "bound " + juce::String (bi.bound ? 1 : 0) + " note " + juce::String (bi.note ? 1 : 0)
+                    + " number " + juce::String (bi.number) + " channel " + juce::String (bi.channel)
+                    + " value " + juce::String (inten != nullptr ? inten->getValue() : -1.0, 3));
 
             // a real-time message must not steal or cancel the learn
             hub.startLearn(MidiHub::Target::masterGain);
@@ -5482,6 +5485,112 @@ public:
                 check(!hub.binding(MidiHub::Target::masterGain).bound
                       && std::abs(gain->getValue() - 0.5) < 1e-4,
                       "a cleared binding leaves the parameter alone");
+            }
+
+            // v1.33.4 (M20): the messages must not vanish between the polls.
+            // The hub used to keep only the newest message, so a note-on and
+            // its note-off collapsed into one and the pair was lost.
+            {
+                juce::Array<MidiHub::Activity> seen;
+                hub.injectForTest(MidiHub::kTypeNoteOn, 0, 60, 100);
+                hub.injectForTest(MidiHub::kTypeNoteOff, 0, 60, 0);
+                hub.pollActivities([&seen](const MidiHub::Activity& a) { seen.add(a); });
+                check(seen.size() == 2
+                      && seen[0].type == MidiHub::kTypeNoteOn && seen[0].value == 100
+                      && seen[1].type == MidiHub::kTypeNoteOff,
+                      "a note-on and its note-off both arrive (the pair does not vanish)",
+                      juce::String(seen.size()) + " message(s)");
+            }
+
+            // v1.33.4 (M20): ONE channel convention. JUCE's channels are
+            // 1..16; the app uses the channel index (0..15) and adds one
+            // when it shows it. The old code packed the channel with
+            // "& 0xf" and showed it +1, so channel 1 read as 2 and channel
+            // 16 as 1.
+            {
+                hub.startLearn(MidiHub::Target::masterGain);
+                hub.injectMessage(juce::MidiMessage::controllerEvent(1, 7, 100));
+                mc.timerCallback();
+                const auto b1 = hub.binding(MidiHub::Target::masterGain);
+                check(b1.bound && b1.channel == 0,
+                      "MIDI channel 1 is the app's channel 0",
+                      "channel " + juce::String(b1.channel));
+
+                hub.startLearn(MidiHub::Target::masterGain);
+                hub.injectMessage(juce::MidiMessage::controllerEvent(16, 7, 100));
+                mc.timerCallback();
+                const auto b16 = hub.binding(MidiHub::Target::masterGain);
+                check(b16.bound && b16.channel == 15,
+                      "MIDI channel 16 is the app's channel 15",
+                      "channel " + juce::String(b16.channel));
+                check(act != nullptr && act->getText().contains("ch 16"),
+                      "the monitor shows the real MIDI channel",
+                      act != nullptr ? act->getText() : juce::String());
+            }
+
+            // v1.33.4 (M20): the learn waits for the control the user moves
+            // AFTER clicking Learn - a message that is already waiting must
+            // not steal the learn.
+            {
+                hub.injectForTest(MidiHub::kTypeCc, 3, 11, 50);
+                hub.startLearn(MidiHub::Target::masterGain);
+                hub.injectForTest(MidiHub::kTypeCc, 4, 12, 60);
+                mc.timerCallback();
+                const auto b = hub.binding(MidiHub::Target::masterGain);
+                check(b.bound && b.number == 12 && b.channel == 4,
+                      "the learn binds the control the user moves after clicking Learn",
+                      "CC " + juce::String(b.number) + " channel " + juce::String(b.channel));
+            }
+
+            // v1.33.4 (M20): a flood of continuous controls must not lose the
+            // newest value - that is the value a bound parameter needs.
+            {
+                const int flood = 400;
+                for (int i = 0; i < flood; ++i)
+                    hub.injectForTest(MidiHub::kTypeCc, 0, 20, i % 128);
+                juce::Array<MidiHub::Activity> seen;
+                hub.pollActivities([&seen](const MidiHub::Activity& a) { seen.add(a); });
+                const auto newest = seen.size() > 0 ? seen.getLast() : MidiHub::Activity();
+                check(newest.valid && newest.number == 20 && newest.value == ((flood - 1) % 128),
+                      "the newest CC value survives a flood",
+                      "value " + juce::String(newest.value) + " of "
+                        + juce::String(seen.size()) + " message(s)");
+                check(hub.droppedCount() > 0,
+                      "the queue says how many messages it had to drop",
+                      juce::String(hub.droppedCount()) + " dropped");
+            }
+
+            // v1.33.4 (M20): two producers at once - the MIDI thread and (in
+            // a plugin) the audio thread. The queue must not lose a message
+            // and must keep each producer's order.
+            {
+                MidiHub twoProducers;
+                constexpr int perThread = 100;
+                std::thread t1([&twoProducers, perThread]
+                {
+                    for (int i = 0; i < perThread; ++i)
+                        twoProducers.injectForTest(MidiHub::kTypeCc, 0, 1, i);
+                });
+                std::thread t2([&twoProducers, perThread]
+                {
+                    for (int i = 0; i < perThread; ++i)
+                        twoProducers.injectForTest(MidiHub::kTypeCc, 0, 2, i);
+                });
+                t1.join();
+                t2.join();
+
+                int count1 = 0, count2 = 0, next1 = 0, next2 = 0;
+                bool ordered = true;
+                twoProducers.pollActivities([&](const MidiHub::Activity& a)
+                {
+                    if (a.number == 1) { if (a.value != next1) ordered = false; ++next1; ++count1; }
+                    else if (a.number == 2) { if (a.value != next2) ordered = false; ++next2; ++count2; }
+                });
+                check(count1 == perThread && count2 == perThread && ordered
+                      && twoProducers.droppedCount() == 0,
+                      "two producers at once: every message arrives, in order",
+                      juce::String(count1) + " + " + juce::String(count2) + ", "
+                        + juce::String(twoProducers.droppedCount()) + " dropped");
             }
 
             // v1.33.4 (H9): the MIDI input has to be *started* - JUCE drops

@@ -633,6 +633,7 @@ private:
     void updateRevBuffers();      // v1.20: (re)allocate the live reverse buffers
     void rebuildArcList();        // v1.21: rebuild the panel's rows from the model
     void handleMidi();            // v1.23: the MIDI messages (message thread)
+    void handleMidiActivity (const MidiHub::Activity&); // v1.33.4 (M20): one message
 
     // v1.29: the phone/MobMuPlat OSC scrub. The receiver parses the
     // messages and hands the scrub value over; the gesture itself (the
