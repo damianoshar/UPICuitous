@@ -352,7 +352,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 481 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 486 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -366,9 +366,9 @@ ambitus, the infrasonic-to-ultrasound range, the page's acceleration, the
 movable sieve zones, the quantised line, the per-zone stickiness, the
 sieve checkbox end-to-end, the zone menu actions, the digitised wave page,
 the micro-time page, the toolbar's group flow, the hints sidebar, the
-button text fitting, the capture button's colours and the wavetable
-buttons' colours) and writes the log to
-`%TEMP%\upic_selftest.txt`. The build script also runs the 15-check
+button text fitting, the capture button's colours, the wavetable
+buttons' colours and the PM preset round trip) and writes the log to
+`%TEMP%\upic_selftest.txt`. The build script also runs the 18-check
 plugin smoke test and pluginval at strictness 5.
 
 ## Xenakis notes

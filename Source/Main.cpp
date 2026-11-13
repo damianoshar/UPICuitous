@@ -4258,6 +4258,76 @@ public:
             }
         }
 
+        // 21c2. v1.33.4 (H12): the PM preset import/export used to build a
+        // stack-local FileChooser, which JUCE destroys together with the
+        // pending callback - the dialogs silently did nothing. The file work
+        // now lives in buildPmPresetText()/applyPmPresetFile(); this drives
+        // the same functions the dialogs call.
+        {
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize(1280, 800);
+            std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+                [&findByName](juce::Component& c, const juce::String& n) -> juce::Component* {
+                    if (c.getName() == n) return &c;
+                    for (int i = 0; i < c.getNumChildComponents(); ++i)
+                        if (auto* r = findByName(*c.getChildComponent(i), n)) return r;
+                    return nullptr;
+                };
+            mc.loadFromVar(juce::JSON::parse(
+                "{\"pages\":[{\"duration\":4,\"nextArcId\":4,\"arcs\":["
+                "{\"id\":1,\"mode\":3,\"pmRatio\":3.5,\"pmIndex\":4.5,\"pmFeedback\":0.25,\"pmOps\":2,"
+                "\"points\":[{\"t\":0,\"f\":220},{\"t\":2,\"f\":440}]},"
+                "{\"id\":2,\"mode\":3,\"pmRatio\":2.0,\"pmIndex\":1.0,\"pmFeedback\":0.0,\"pmOps\":2,"
+                "\"points\":[{\"t\":0,\"f\":330},{\"t\":2,\"f\":660}]},"
+                "{\"id\":3,\"mode\":0,\"waveformId\":0,\"envelopeId\":0,\"intensity\":0.8,"
+                "\"points\":[{\"t\":0,\"f\":220},{\"t\":2,\"f\":880}]}]}]}"));
+            auto* sc = dynamic_cast<ScoreEditor*>(findByName(mc, "score"));
+            check(sc != nullptr, "PM preset round-trip test setup");
+            if (sc != nullptr)
+            {
+                sc->setLayer(3);
+                sc->setSelectedArc(1);
+                const auto text = mc.buildPmPresetText();
+                check(text.contains("ratio=3.5") && text.contains("level=0.9")
+                      && text.contains("fb=0.25"),
+                      "the PM preset export carries the selected arc's values", text);
+
+                auto tmp = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                               .getChildFile("upic_pm_preset_test.preset");
+                check(tmp.replaceWithText(text), "the PM preset file is written");
+
+                sc->setSelectedArc(2);
+                mc.applyPmPresetFile(tmp);
+                tmp.deleteFile();
+
+                auto out = mc.pieceToVar();
+                auto* pagesArr = out.getProperty("pages", juce::var()).getArray();
+                auto* arcsArr = (pagesArr != nullptr && ! pagesArr->isEmpty())
+                                    ? pagesArr->getReference(0).getProperty("arcs", juce::var()).getArray()
+                                    : nullptr;
+                double ratio = -1.0, index = -1.0, feedback = -1.0;
+                if (arcsArr != nullptr)
+                    for (const auto& av : *arcsArr)
+                        if ((int) av.getProperty("id", -1) == 2)
+                        {
+                            ratio = (double) av.getProperty("pmRatio", -1.0);
+                            index = (double) av.getProperty("pmIndex", -1.0);
+                            feedback = (double) av.getProperty("pmFeedback", -1.0);
+                            break;
+                        }
+                check(std::abs(ratio - 3.5) < 1e-6 && std::abs(index - 4.5) < 1e-6
+                      && std::abs(feedback - 0.25) < 1e-6,
+                      "the PM preset import applies the preset's values",
+                      juce::String(ratio) + "/" + juce::String(index) + "/" + juce::String(feedback));
+
+                sc->setLayer(0);
+                sc->setSelectedArc(3);
+                check(mc.buildPmPresetText().isEmpty(),
+                      "the PM preset export refuses a non-PM arc");
+            }
+        }
+
         // 21d. v1.27: the bottom wavetable editor edits a shared wave. With a
         // selection it must fork a private copy instead of changing every arc
         // that names the same wave (the top dropdown still assigns normally).

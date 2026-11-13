@@ -648,6 +648,14 @@ public:
     juce::var pieceToVar() const;
     void loadFromVar(const juce::var& v);
 
+    // v1.33.4 (H12): the PM preset file operations, split out of the file
+    // dialogs so the selftest can drive them without a chooser.
+    // buildPmPresetText() returns the export text of the selected PM arc
+    // (empty when no PM arc is selected); applyPmPresetFile() reads a preset
+    // file and applies it to the selected PM arcs.
+    juce::String buildPmPresetText();
+    void applyPmPresetFile (const juce::File& f);
+
     // --- v1.11 VST3 plugin mode ---------------------------------------------
     bool isPluginMode() const noexcept { return pluginMode_; }
     // Host state: the same JSON text a saved .upic.json piece contains.

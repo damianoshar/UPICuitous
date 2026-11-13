@@ -44,11 +44,50 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    // v1.33.4 (H10): the lifetime-safe state load.
+    //
+    // A host can call setStateInformation from any thread, and it can destroy
+    // the processor before the message that carries the load has been
+    // delivered. The load therefore travels with a handle that is nulled when
+    // the component dies - never with a raw pointer.
+    //
+    // `handle` is a juce::Component::SafePointer<MainComponent>. The template
+    // keeps this header independent of MainComponent's definition, and both
+    // the direct load and the marshalled one go through the same code.
+    template <typename SafeHandle>
+    static void applyState (const SafeHandle& handle, const juce::var& v)
+    {
+        if (handle == nullptr)
+        {
+            juce::Logger::writeToLog ("UPICuitous: the host state arrived after the plugin was closed - ignored");
+            return;
+        }
+
+        try
+        {
+            handle->loadFromVar (v);
+        }
+        catch (const std::exception& e)
+        {
+            juce::Logger::writeToLog (juce::String ("UPICuitous: the host state was rejected - ") + e.what());
+        }
+        catch (...)
+        {
+            juce::Logger::writeToLog ("UPICuitous: the host state was rejected - ignored");
+        }
+    }
+
     // The processor owns the one UI/engine instance; the editor displays it.
     MainComponent& getMainComponent() noexcept { return *main; }
 
 private:
     std::unique_ptr<MainComponent> main;
+
+    // v1.33.4 (H10): the component publishes the host latency from its status
+    // timer. If the host destroys the processor on another thread, that timer
+    // can fire while the processor is being torn down - the flag stops the
+    // callback from touching a dying object.
+    std::atomic<bool> alive { true };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(UpicuitousAudioProcessor)
 };

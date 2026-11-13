@@ -15,10 +15,20 @@ UpicuitousAudioProcessor::UpicuitousAudioProcessor()
     // v1.16: the component knows what latency the current page needs (the
     // live path is delayed, the score paths are not) - it publishes it from
     // the message thread, and JUCE tells the host when the value changes.
-    main->onLatencyChanged = [this](int samples) { setHostLatency(samples); };
+    // v1.33.4 (H10): the callback checks the alive flag, so a timer tick
+    // that lands while the host is tearing the processor down cannot call
+    // into a dying object.
+    main->onLatencyChanged = [this](int samples)
+    {
+        if (alive.load (std::memory_order_relaxed))
+            setHostLatency (samples);
+    };
 }
 
-UpicuitousAudioProcessor::~UpicuitousAudioProcessor() = default;
+UpicuitousAudioProcessor::~UpicuitousAudioProcessor()
+{
+    alive.store (false, std::memory_order_relaxed);
+}
 
 //==============================================================================
 void UpicuitousAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
@@ -125,30 +135,25 @@ void UpicuitousAudioProcessor::setStateInformation(const void* data, int sizeInB
     // thread. JUCE calls setStateInformation there already; if some host
     // calls it from elsewhere, the load is marshalled instead of touching
     // the UI from a foreign thread.
-    auto* component = main.get();
+    //
+    // v1.33.4 (H10): the marshalled load used to capture a raw pointer to
+    // the component. If the host destroyed the processor before the message
+    // was delivered, the callback dereferenced freed memory. The handle is
+    // created while the component is alive and is nulled when it dies, so a
+    // late state blob is skipped instead of crashing.
+    juce::Component::SafePointer<MainComponent> safe (main.get());
+
     if (juce::MessageManager::getInstance() != nullptr
         && ! juce::MessageManager::getInstance()->isThisTheMessageThread())
     {
-        juce::MessageManager::getInstance()->callAsync ([component, v]
+        juce::MessageManager::getInstance()->callAsync ([safe, v]
         {
-            component->loadFromVar (v);
+            applyState (safe, v);
         });
         return;
     }
 
-    try
-    {
-        main->loadFromVar (v);
-    }
-    catch (const std::exception& e)
-    {
-        juce::Logger::writeToLog (juce::String ("UPICuitous: the host state was rejected - ")
-                                  + e.what());
-    }
-    catch (...)
-    {
-        juce::Logger::writeToLog ("UPICuitous: the host state was rejected - ignored");
-    }
+    applyState (safe, v);
 }
 
 //==============================================================================

@@ -1442,89 +1442,39 @@ void MainComponent::buildPmControls()
         pushVoice();
     };
     pmImportBtn.onClick = [this]{
-        juce::FileChooser fc ("Import PM preset", juce::File(), "*.preset");
-        fc.launchAsync (juce::FileBrowserComponent::openMode, [this] (const juce::FileChooser& c) {
-            auto f = c.getResult();
-            if (f == juce::File()) return;
-            std::ifstream in (f.getFullPathName().toStdString());
-            if (! in) { flash ("Could not read preset"); return; }
-            std::string s ((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-            auto getField = [&] (const std::string& key) -> std::string {
-                auto pos = s.find (key + "=");
-                if (pos == std::string::npos) return "";
-                auto end = s.find ("\n", pos);
-                return s.substr (pos + key.size() + 1, (end == std::string::npos ? s.size() : end) - (pos + key.size() + 1));
-            };
-            // SECURITY (S-03): std::stod accepts "nan" and "inf", and the
-            // engine's jlimit() passes NaN through unchanged - so a crafted
-            // preset could put a NaN into the PM parameters and from there
-            // into the audio thread. The parsed value is checked here.
-            auto parseFloat = [&] (const std::string& k, double d) {
-                if (k.empty()) return d;
-                try {
-                    const double v = std::stod (k);
-                    return std::isfinite (v) ? v : d;
-                } catch (...) { return d; }
-            };
-            std::string op1ratio, op1level, op1fb;
-            {
-                auto pos = s.find ("[op1]");
-                if (pos != std::string::npos) {
-                    auto next = s.find ("[", pos + 1);
-                    auto sec = s.substr (pos, next == std::string::npos ? s.size() - pos : next - pos);
-                    auto gr = [&] (const std::string& key) {
-                        auto p2 = sec.find (key + "=");
-                        if (p2 == std::string::npos) return std::string();
-                        auto e2 = sec.find ("\n", p2);
-                        return sec.substr (p2 + key.size() + 1, (e2 == std::string::npos ? sec.size() : e2) - (p2 + key.size() + 1));
-                    };
-                    op1ratio = gr ("ratio"); op1level = gr ("level"); op1fb = gr ("fb");
-                }
-            }
-            const double r   = parseFloat (op1ratio.empty() ? getField ("ratio") : op1ratio, 2.0);
-            const double lvl = parseFloat (op1level.empty() ? "0.8" : op1level, 0.8);
-            const double fb  = parseFloat (op1fb, 0.0);
-            const int envId  = (int) parseFloat (getField ("pmIndexEnv"), 0.0);
-            const juce::ScopedLock sl (dataLock);
-            const auto ids = score.getSelectedArcs();
-            for (auto& a : curPage().arcs)
-            {
-                if (! ids.empty() && std::find (ids.begin(), ids.end(), a.id) == ids.end()) continue;
-                if (a.mode != 3) continue;
-                a.pmRatio = upic::limits::clampFinite (r, 0.25, 16.0);
-                a.pmIndex = upic::limits::clampFinite (lvl * 5.0, 0.0, 100.0);
-                a.pmFeedback = upic::limits::clampFinite (fb, -1.0, 1.0);
-                a.pmIndexEnv = envId;
-            }
-            pmRatioSlider.setValue (upic::limits::clampFinite (r, 0.25, 16.0), juce::dontSendNotification);
-            pmIndexSlider.setValue (upic::limits::clampFinite (lvl * 5.0, 0.0, 100.0), juce::dontSendNotification);
-            { int ei = 1; for (size_t j = 0; j < envelopes.size(); ++j) if (envelopes[j].id == envId) { ei = (int) j + 2; break; } pmIndexEnvBox.setSelectedId (ei, juce::dontSendNotification); }
-            pmFeedbackSlider.setValue (upic::limits::clampFinite (fb, -1.0, 1.0), juce::dontSendNotification);
-            pushVoice();
-            publishModelSnapshot();
-            flash ("Imported PM preset");
+        // v1.33.4 (H12): the chooser has to outlive the asynchronous
+        // selection. A stack-local FileChooser is destroyed when this
+        // handler returns, and JUCE drops the pending callback with it
+        // (FileChooser::~FileChooser clears asyncCallback), so the import
+        // never ran at all. The shared_ptr in the lambda keeps the chooser
+        // alive until the callback has been delivered; the safe pointer
+        // covers the case that the window is gone before that happens.
+        juce::Component::SafePointer<MainComponent> sp (this);
+        auto fc = std::make_shared<juce::FileChooser> ("Import PM preset", juce::File(), "*.preset");
+        fc->launchAsync (juce::FileBrowserComponent::openMode
+                         | juce::FileBrowserComponent::canSelectFiles,
+                         [sp, fc] (const juce::FileChooser& c) {
+            if (sp == nullptr) return;
+            sp->applyPmPresetFile (c.getResult());
         });
     };
     pmExportBtn.onClick = [this]{
         if (score.getSelectedArcs().empty()) { flash ("Select a PM arc first"); return; }
-        const int id = score.getSelectedArc();
-        upic::Arc* aPtr = nullptr;
-        { const juce::ScopedLock sl (dataLock); for (auto& a : curPage().arcs) if (a.id == id) { aPtr = &a; break; } }
-        if (aPtr == nullptr || aPtr->mode != 3) { flash ("Selected arc is not PM"); return; }
-        std::ostringstream o;
-        o << "[preset]\nname=UPIC PM export\nmaster=0.8\ntune=440\n";
-        o << "[op0]\nenabled=1\nwave=0\nratio=1\nlevel=0.9\nfb=0\nenv=" << aPtr->pmIndexEnv << "\nsustain=0\nrelease=0\n";
-        o << "[op1]\nenabled=1\nwave=0\nratio=" << aPtr->pmRatio << "\nlevel=" << (aPtr->pmIndex / 5.0) << "\nfb=" << aPtr->pmFeedback << "\nenv=" << aPtr->pmIndexEnv << "\nsustain=0\nrelease=0\n";
-        o << "[matrix]\nm1_0=0.8\nout0=1.0\n";
-        o << "fb1=" << aPtr->pmFeedback << "\n";
-        const std::string text = o.str();
-        juce::FileChooser fc ("Export PM preset", juce::File(), "*.preset");
-        fc.launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles, [this, text] (const juce::FileChooser& c) {
+        const juce::String text = buildPmPresetText();
+        if (text.isEmpty()) { flash ("Selected arc is not PM"); return; }
+        // v1.33.4 (H12): the chooser has to outlive the asynchronous
+        // selection - see the import above.
+        juce::Component::SafePointer<MainComponent> sp (this);
+        auto fc = std::make_shared<juce::FileChooser> ("Export PM preset", juce::File(), "*.preset");
+        fc->launchAsync (juce::FileBrowserComponent::saveMode
+                         | juce::FileBrowserComponent::canSelectFiles,
+                         [sp, fc, text] (const juce::FileChooser& c) {
+            if (sp == nullptr) return;
             auto f = c.getResult();
             if (f == juce::File()) return;
             auto out = f.withFileExtension ("preset");
-            if (! out.replaceWithText (juce::String (text))) flash ("Export failed");
-            else flash ("Exported " + out.getFileName());
+            if (! out.replaceWithText (text)) sp->flash ("Export failed");
+            else sp->flash ("Exported " + out.getFileName());
         });
     };
 
@@ -4889,6 +4839,104 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
                 flash ("Could not load the audio file");
             }
         });
+}
+
+//==============================================================================
+// v1.33.4 (H12): the PM preset file operations, split out of the file
+// dialogs. The dialogs used to build a stack-local FileChooser, which was
+// destroyed when the button handler returned - JUCE drops the pending
+// callback with the chooser, so neither the import nor the export ever ran.
+// The file work lives here, so it can also be driven by the selftest.
+juce::String MainComponent::buildPmPresetText()
+{
+    const int id = score.getSelectedArc();
+    double ratio = 0.0, index = 0.0, fb = 0.0;
+    int envId = 0;
+    bool found = false;
+    {
+        const juce::ScopedLock sl (dataLock);
+        for (auto& a : curPage().arcs)
+            if (a.id == id && a.mode == 3)
+            {
+                ratio  = a.pmRatio;
+                index  = a.pmIndex;
+                fb     = a.pmFeedback;
+                envId  = a.pmIndexEnv;
+                found  = true;
+                break;
+            }
+    }
+    if (! found) return {};
+
+    std::ostringstream o;
+    o << "[preset]\nname=UPIC PM export\nmaster=0.8\ntune=440\n";
+    o << "[op0]\nenabled=1\nwave=0\nratio=1\nlevel=0.9\nfb=0\nenv=" << envId << "\nsustain=0\nrelease=0\n";
+    o << "[op1]\nenabled=1\nwave=0\nratio=" << ratio << "\nlevel=" << (index / 5.0) << "\nfb=" << fb << "\nenv=" << envId << "\nsustain=0\nrelease=0\n";
+    o << "[matrix]\nm1_0=0.8\nout0=1.0\n";
+    o << "fb1=" << fb << "\n";
+    return juce::String (o.str());
+}
+
+void MainComponent::applyPmPresetFile (const juce::File& f)
+{
+    if (f == juce::File()) return;
+    std::ifstream in (f.getFullPathName().toStdString());
+    if (! in) { flash ("Could not read preset"); return; }
+    std::string s ((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    auto getField = [&] (const std::string& key) -> std::string {
+        auto pos = s.find (key + "=");
+        if (pos == std::string::npos) return "";
+        auto end = s.find ("\n", pos);
+        return s.substr (pos + key.size() + 1, (end == std::string::npos ? s.size() : end) - (pos + key.size() + 1));
+    };
+    // SECURITY (S-03): std::stod accepts "nan" and "inf", and the
+    // engine's jlimit() passes NaN through unchanged - so a crafted
+    // preset could put a NaN into the PM parameters and from there
+    // into the audio thread. The parsed value is checked here.
+    auto parseFloat = [&] (const std::string& k, double d) {
+        if (k.empty()) return d;
+        try {
+            const double v = std::stod (k);
+            return std::isfinite (v) ? v : d;
+        } catch (...) { return d; }
+    };
+    std::string op1ratio, op1level, op1fb;
+    {
+        auto pos = s.find ("[op1]");
+        if (pos != std::string::npos) {
+            auto next = s.find ("[", pos + 1);
+            auto sec = s.substr (pos, next == std::string::npos ? s.size() - pos : next - pos);
+            auto gr = [&] (const std::string& key) {
+                auto p2 = sec.find (key + "=");
+                if (p2 == std::string::npos) return std::string();
+                auto e2 = sec.find ("\n", p2);
+                return sec.substr (p2 + key.size() + 1, (e2 == std::string::npos ? sec.size() : e2) - (p2 + key.size() + 1));
+            };
+            op1ratio = gr ("ratio"); op1level = gr ("level"); op1fb = gr ("fb");
+        }
+    }
+    const double r   = parseFloat (op1ratio.empty() ? getField ("ratio") : op1ratio, 2.0);
+    const double lvl = parseFloat (op1level.empty() ? "0.8" : op1level, 0.8);
+    const double fb  = parseFloat (op1fb, 0.0);
+    const int envId  = (int) parseFloat (getField ("pmIndexEnv"), 0.0);
+    const juce::ScopedLock sl (dataLock);
+    const auto ids = score.getSelectedArcs();
+    for (auto& a : curPage().arcs)
+    {
+        if (! ids.empty() && std::find (ids.begin(), ids.end(), a.id) == ids.end()) continue;
+        if (a.mode != 3) continue;
+        a.pmRatio = upic::limits::clampFinite (r, 0.25, 16.0);
+        a.pmIndex = upic::limits::clampFinite (lvl * 5.0, 0.0, 100.0);
+        a.pmFeedback = upic::limits::clampFinite (fb, -1.0, 1.0);
+        a.pmIndexEnv = envId;
+    }
+    pmRatioSlider.setValue (upic::limits::clampFinite (r, 0.25, 16.0), juce::dontSendNotification);
+    pmIndexSlider.setValue (upic::limits::clampFinite (lvl * 5.0, 0.0, 100.0), juce::dontSendNotification);
+    { int ei = 1; for (size_t j = 0; j < envelopes.size(); ++j) if (envelopes[j].id == envId) { ei = (int) j + 2; break; } pmIndexEnvBox.setSelectedId (ei, juce::dontSendNotification); }
+    pmFeedbackSlider.setValue (upic::limits::clampFinite (fb, -1.0, 1.0), juce::dontSendNotification);
+    pushVoice();
+    publishModelSnapshot();
+    flash ("Imported PM preset");
 }
 
 void MainComponent::renderWav()

@@ -151,6 +151,24 @@ int main()
             proc.processBlock(buf, midi); // audio must keep running without an editor
             check(true, "audio still processes after the editor is gone");
         }
+
+        // 8) v1.33.4 (H10): a state load that arrives after the processor is
+        //    gone must not touch the dead component. The marshalled load
+        //    (the one a host triggers from a foreign thread) carries a
+        //    handle that is nulled when the component dies - the old code
+        //    captured a raw pointer and dereferenced freed memory.
+        {
+            juce::Component::SafePointer<MainComponent> safe (nullptr);
+            {
+                UpicuitousAudioProcessor tmp;
+                tmp.prepareToPlay (sr, blockSize);
+                safe = &tmp.getMainComponent();
+                check (safe != nullptr, "the state handle follows the component");
+            }
+            check (safe == nullptr, "the state handle is cleared when the component dies");
+            UpicuitousAudioProcessor::applyState (safe, juce::JSON::parse ("{\"pages\":[]}"));
+            check (true, "a state load after the processor's death is skipped, not a crash");
+        }
     }
 
     std::cout << (failures == 0 ? "ALL CHECKS PASSED"
