@@ -203,8 +203,13 @@ sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
 changes the sound - the arc's own pitch algorithm and its reversal, the
 sample slot's direction and the global pitch modes - so a reopened piece
 (or a reopened DAW session) sounds the same; older pieces without those
-fields still load, with the old defaults. The WAV render and the stems
-cover the whole page: a page with an acceleration (Accel) needs more audio
+fields still load, with the old defaults. The piece format has one set of
+limits - 500 arcs per page, 100 pages, 1000 points per arc, 200 sieve zones
+- and the editor and the loader share them: the editor refuses what does
+not fit (and says so), and a piece that is over a limit is loaded truncated
+with a message naming what did not fit, so music is never lost silently.
+The WAV render and the stems cover the whole page: a page with an
+acceleration (Accel) needs more audio
 than it has score - a 30 s page at Accel 0.9 is 49.07 s of audio - and the
 file is that long, so the end of the page is no longer cut off. The export
 also uses the session's pitch algorithm and grain sizes, and it streams the
@@ -363,7 +368,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 513 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 524 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -380,7 +385,8 @@ the micro-time page, the toolbar's group flow, the hints sidebar, the
 button text fitting, the capture button's colours, the wavetable
 buttons' colours, the PM preset round trip, the WAV export, the piece
 saver, the MIDI device handling, the sound-affecting settings that
-travel with a piece and the export of a page with an acceleration) and
+travel with a piece, the export of a page with an acceleration and the
+piece format's limits at limit minus one, limit and limit plus one) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 20-check plugin smoke test and pluginval at strictness 5.

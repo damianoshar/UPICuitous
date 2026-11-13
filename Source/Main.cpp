@@ -3690,6 +3690,218 @@ public:
                     }
                 }
 
+                // --- v1.33.4 (H13): one set of limits, no silent loss ---
+                // The editor could create more arcs, pages, zones or points
+                // than the piece format holds, and the loader dropped the
+                // extra ones without a word: a 501-arc page came back as 500
+                // arcs. The editor now refuses what does not fit (and says
+                // so), and the loader says what it had to drop.
+                {
+                    std::function<juce::Component*(juce::Component&, const juce::String&)> findByNameH13 =
+                        [&findByNameH13](juce::Component& c, const juce::String& n) -> juce::Component* {
+                            if (c.getName() == n) return &c;
+                            for (int i = 0; i < c.getNumChildComponents(); ++i)
+                                if (auto* r = findByNameH13(*c.getChildComponent(i), n)) return r;
+                            return nullptr;
+                        };
+
+                    // a piece with n arcs on one page
+                    auto pieceWithArcs = [] (int n)
+                    {
+                        juce::String j = "{\"pages\":[{\"duration\":30,\"nextArcId\":";
+                        j += juce::String (n + 1);
+                        j += ",\"arcs\":[";
+                        for (int i = 0; i < n; ++i)
+                        {
+                            if (i > 0) j += ",";
+                            j += "{\"id\":" + juce::String (i + 1)
+                               + ",\"mode\":0,\"intensity\":0.8,"
+                                 "\"points\":[{\"t\":0,\"f\":220},{\"t\":1,\"f\":220}]}";
+                        }
+                        j += "]}]}";
+                        return j;
+                    };
+
+                    // the loader keeps everything up to the cap
+                    for (int n : { 499, 500 })
+                    {
+                        auto capHolder = std::make_unique<MainComponent>(true);
+                        auto& mcCap = *capHolder;
+                        mcCap.setSize (1280, 800);
+                        mcCap.loadFromVar (juce::JSON::parse (pieceWithArcs (n)));
+                        check (mcCap.arcCountForTest() == n
+                               && ! mcCap.flashMessageForTest().contains ("bigger than"),
+                               "a page with " + juce::String (n) + " arcs loads them all",
+                               juce::String (mcCap.arcCountForTest()) + " arcs"
+                                   + (mcCap.flashMessageForTest().isEmpty() ? juce::String()
+                                        : " (" + mcCap.flashMessageForTest() + ")"));
+                    }
+
+                    // one arc over the cap: the piece is truncated, but the
+                    // user is told - the music is not lost silently
+                    {
+                        auto capHolder = std::make_unique<MainComponent>(true);
+                        auto& mcCap = *capHolder;
+                        mcCap.setSize (1280, 800);
+                        mcCap.loadFromVar (juce::JSON::parse (pieceWithArcs (501)));
+                        const auto msg = mcCap.flashMessageForTest();
+                        check (mcCap.arcCountForTest() == upic::limits::kMaxArcsPerPage
+                               && msg.contains ("1 arc") && msg.contains ("bigger than"),
+                               "a page with 501 arcs says which arc did not fit",
+                               juce::String (mcCap.arcCountForTest()) + " arcs - " + msg);
+                    }
+
+                    // the editor refuses the arc that does not fit (and the
+                    // copy that does fit is still made)
+                    for (int n : { 499, 500 })
+                    {
+                        auto capHolder = std::make_unique<MainComponent>(true);
+                        auto& mcCap = *capHolder;
+                        mcCap.setSize (1280, 800);
+                        mcCap.loadFromVar (juce::JSON::parse (pieceWithArcs (n)));
+                        auto* sc = dynamic_cast<ScoreEditor*>(findByNameH13 (mcCap, "score"));
+                        if (sc == nullptr) { check (false, "the score canvas is there"); continue; }
+                        sc->setSelectedArcs ({ 1 });
+                        sc->duplicateSelected();
+                        const bool fits = n < upic::limits::kMaxArcsPerPage;
+                        const auto msg = mcCap.flashMessageForTest();
+                        check (mcCap.arcCountForTest() == (fits ? n + 1 : n)
+                               && (fits || msg.contains ("500 arcs")),
+                               fits ? "the duplicate fits while the page is under the cap"
+                                    : "the editor refuses the arc that does not fit",
+                               juce::String (mcCap.arcCountForTest()) + " arcs - " + msg);
+                    }
+
+                    // the generator stops at the cap too
+                    {
+                        auto capHolder = std::make_unique<MainComponent>(true);
+                        auto& mcCap = *capHolder;
+                        mcCap.setSize (1280, 800);
+                        mcCap.loadFromVar (juce::JSON::parse (pieceWithArcs (500)));
+                        auto* gen = dynamic_cast<juce::ComboBox*>(findByNameH13 (mcCap, "genBox"));
+                        if (gen != nullptr)
+                        {
+                            gen->setSelectedId (1, juce::dontSendNotification);
+                            gen->onChange();
+                        }
+                        check (mcCap.arcCountForTest() == upic::limits::kMaxArcsPerPage,
+                               "the generator stops at the arc cap",
+                               juce::String (mcCap.arcCountForTest()) + " arcs");
+                    }
+
+                    // the pages are capped too
+                    {
+                        auto pieceWithPages = [] (int n)
+                        {
+                            juce::String j = "{\"pages\":[";
+                            for (int i = 0; i < n; ++i)
+                            {
+                                if (i > 0) j += ",";
+                                j += "{\"duration\":30,\"nextArcId\":1,\"arcs\":[]}";
+                            }
+                            j += "]}";
+                            return j;
+                        };
+                        auto capHolder = std::make_unique<MainComponent>(true);
+                        auto& mcCap = *capHolder;
+                        mcCap.setSize (1280, 800);
+                        mcCap.loadFromVar (juce::JSON::parse (pieceWithPages (101)));
+                        const auto msg = mcCap.flashMessageForTest();
+                        check (mcCap.pageCountForTest() == upic::limits::kMaxPages
+                               && msg.contains ("1 page") && msg.contains ("bigger than"),
+                               "a piece with 101 pages says which page did not fit",
+                               juce::String (mcCap.pageCountForTest()) + " pages - " + msg);
+                    }
+
+                    // and the editor refuses the page that does not fit
+                    {
+                        auto capHolder = std::make_unique<MainComponent>(true);
+                        auto& mcCap = *capHolder;
+                        mcCap.setSize (1280, 800);
+                        juce::String j = "{\"pages\":[";
+                        for (int i = 0; i < upic::limits::kMaxPages; ++i)
+                        {
+                            if (i > 0) j += ",";
+                            j += "{\"duration\":30,\"nextArcId\":1,\"arcs\":[]}";
+                        }
+                        j += "]}";
+                        mcCap.loadFromVar (juce::JSON::parse (j));
+                        auto* addBtn = dynamic_cast<juce::TextButton*>(findByNameH13 (mcCap, "pageAddBtn"));
+                        if (addBtn != nullptr) addBtn->onClick();
+                        const auto msg = mcCap.flashMessageForTest();
+                        check (mcCap.pageCountForTest() == upic::limits::kMaxPages
+                               && msg.contains ("100 pages"),
+                               "the editor refuses the page that does not fit",
+                               juce::String (mcCap.pageCountForTest()) + " pages - " + msg);
+                    }
+
+                    // the points of an arc are capped too
+                    {
+                        auto pieceWithPoints = [] (int n)
+                        {
+                            juce::String j = "{\"pages\":[{\"duration\":30,\"nextArcId\":2,\"arcs\":["
+                                            "{\"id\":1,\"mode\":0,\"intensity\":0.8,\"points\":[";
+                            for (int i = 0; i < n; ++i)
+                            {
+                                if (i > 0) j += ",";
+                                j += "{\"t\":" + juce::String (i * 0.01, 4) + ",\"f\":220}";
+                            }
+                            j += "]}]}]}";
+                            return j;
+                        };
+                        const auto varAt = juce::JSON::parse (pieceWithPoints (1000));
+                        const auto* pagesAt = varAt.getProperty ("pages", juce::var()).getArray();
+                        const auto pgAt = pagesAt != nullptr
+                            ? upic::Page::fromVar (pagesAt->getReference (0)) : upic::Page();
+                        const auto varOver = juce::JSON::parse (pieceWithPoints (1001));
+                        const auto* pagesOver = varOver.getProperty ("pages", juce::var()).getArray();
+                        const auto pgOver = pagesOver != nullptr
+                            ? upic::Page::fromVar (pagesOver->getReference (0)) : upic::Page();
+                        const int atPts = pgAt.arcs.empty() ? -1 : (int) pgAt.arcs[0].points.size();
+                        const int overPts = pgOver.arcs.empty() ? -1 : (int) pgOver.arcs[0].points.size();
+                        check (atPts == 1000 && overPts == 1000,
+                               "an arc keeps 1000 points and drops the 1001st",
+                               juce::String (atPts) + "/" + juce::String (overPts));
+                        auto capHolder = std::make_unique<MainComponent>(true);
+                        auto& mcCap = *capHolder;
+                        mcCap.setSize (1280, 800);
+                        mcCap.loadFromVar (varOver);
+                        check (mcCap.flashMessageForTest().contains ("arc point"),
+                               "the loader says which arc point did not fit",
+                               mcCap.flashMessageForTest());
+                    }
+
+                    // the sieve zones are capped as well
+                    {
+                        auto pieceWithZones = [] (int n)
+                        {
+                            juce::String j = "{\"pages\":[{\"duration\":30,\"nextArcId\":1,\"nextZoneId\":"
+                                           + juce::String (n + 1) + ",\"arcs\":[],\"zones\":[";
+                            for (int i = 0; i < n; ++i)
+                            {
+                                if (i > 0) j += ",";
+                                j += "{\"id\":" + juce::String (i + 1)
+                                   + ",\"t0\":0,\"t1\":1,\"f0\":100,\"f1\":200}";
+                            }
+                            j += "]}]}";
+                            return j;
+                        };
+                        auto capHolder = std::make_unique<MainComponent>(true);
+                        auto& mcCap = *capHolder;
+                        mcCap.setSize (1280, 800);
+                        mcCap.loadFromVar (juce::JSON::parse (pieceWithZones (201)));
+                        const auto msgBefore = mcCap.flashMessageForTest();
+                        auto* sc = dynamic_cast<ScoreEditor*>(findByNameH13 (mcCap, "score"));
+                        const int zoneId = sc != nullptr ? sc->addZone (0.0, 1.0, 100.0, 200.0) : -1;
+                        const auto msgAfter = mcCap.flashMessageForTest();
+                        check (mcCap.zoneCountForTest() == upic::limits::kMaxSieveZones
+                               && zoneId < 0 && msgBefore.contains ("sieve zone")
+                               && msgAfter.contains ("200 sieve zones"),
+                               "the editor refuses the sieve zone that does not fit",
+                               juce::String (mcCap.zoneCountForTest()) + " zones - " + msgAfter);
+                    }
+                }
+
                 mc.setSize(1280, 800);
 
                 // --- v1.2 controls exist with sane bounds ---

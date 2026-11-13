@@ -103,6 +103,13 @@ public:
         return -1;
     }
     double pageWarpForTest() const { return curPage().warp; }
+    // v1.33.4 (H13): the page's arc count and the last status message, so
+    // the selftest can check that the editor refuses the arc that does not
+    // fit and that the loader says what it had to drop.
+    int arcCountForTest() const { return (int) curPage().arcs.size(); }
+    int zoneCountForTest() const { return (int) curPage().zones.size(); }
+    int pageCountForTest() const { return (int) pages.size(); }
+    juce::String flashMessageForTest() const { return flashMsg; }
     // v1.33.4 (H7): the global pitch modes (they change the sound, so the
     // selftest checks that they survive a save and a load)
     int samplePitchModeForTest() const { return engine.getSamplePitchMode(); }

@@ -535,6 +535,15 @@ void MainComponent::buildCombos()
 
     pageAddBtn.onClick = [this]{
         juce::ScopedLock l(dataLock);
+        // v1.33.4 (H13): the piece format caps the page count, so the page
+        // that does not fit is refused here instead of being dropped when
+        // the piece is loaded again.
+        if ((int) pages.size() >= upic::limits::kMaxPages)
+        {
+            flash ("A piece holds at most " + juce::String (upic::limits::kMaxPages)
+                   + " pages (the limit) - delete one before adding another");
+            return;
+        }
         upic::Page p; p.durationSec = curPage().durationSec;
         pages.insert(pages.begin() + currentPage + 1, p);
         currentPage++;
@@ -545,6 +554,13 @@ void MainComponent::buildCombos()
     };
     pageDupBtn.onClick = [this]{
         juce::ScopedLock l(dataLock);
+        // v1.33.4 (H13): the same page cap (see pageAddBtn).
+        if ((int) pages.size() >= upic::limits::kMaxPages)
+        {
+            flash ("A piece holds at most " + juce::String (upic::limits::kMaxPages)
+                   + " pages (the limit) - delete one before duplicating one");
+            return;
+        }
         pages.insert(pages.begin() + currentPage + 1, curPage());
         currentPage++;
         seekPlayhead(0.0);
@@ -1796,6 +1812,9 @@ void MainComponent::buildScoreArea()
         // intentionally no-op: releasing a drag does not start playback
     };
     score.onSelect = [this](int id){ syncControlsToArc(id); updateStatus(); };
+    // v1.33.4 (H13): the editor refuses an edit that the piece format
+    // cannot hold and says why.
+    score.onNotice = [this](const juce::String& m){ flash (m); };
     score.onArcEditingChanged = [this](bool editing){
         arcEditing.store(editing, std::memory_order_relaxed);
         if (! editing)
@@ -1948,6 +1967,11 @@ void MainComponent::refreshBoxes()
 {
     arcListDirty = true; // v1.21: the panel's rows follow the model
     pageBox.setName("pageBox");
+    // v1.33.4 (H13): the page buttons are named too, so the selftest can
+    // press them (the page count is capped by the piece format).
+    pageAddBtn.setName("pageAddBtn");
+    pageDupBtn.setName("pageDupBtn");
+    pageDelBtn.setName("pageDelBtn");
     pageBox.clear(juce::dontSendNotification);
     for (size_t i = 0; i < pages.size(); ++i)
         pageBox.addItem("Page " + juce::String((int)i + 1) + "  (" + juce::String(pages[i].arcs.size()) + " arcs)", (int)i + 1);
@@ -2251,6 +2275,7 @@ void MainComponent::runGenerator(int kind)
     std::vector<upic::Arc> gen;
     juce::String name = "generator";
     std::vector<int> created;
+    int added = 0, skipped = 0;
     {
         juce::ScopedLock l(dataLock);
         auto& pg = curPage();
@@ -2268,6 +2293,10 @@ void MainComponent::runGenerator(int kind)
         }
         for (auto& a : gen)
         {
+            // v1.33.4 (H13): the page's arc count is capped by the piece
+            // format, so the generator stops at the cap instead of writing
+            // arcs that the loader would drop on the next open.
+            if ((int) pg.arcs.size() >= upic::limits::kMaxArcsPerPage) { ++skipped; continue; }
             a.id = pg.nextArcId++;
             a.waveformId = selWave;
             a.envelopeId = selEnv;
@@ -2287,14 +2316,19 @@ void MainComponent::runGenerator(int kind)
             }
             created.push_back(a.id);
             pg.arcs.push_back(std::move(a));
+            ++added;
         }
         score.setSelectedArcs(created);
     }
     refreshBoxes();
     updateStatus();
     score.repaint();
-    flash(gen.empty() ? ("Generator produced no arcs (" + name + ")")
-                      : ("Generated " + juce::String((int) gen.size()) + " arcs -- " + name));
+    juce::String msg = gen.empty() ? ("Generator produced no arcs (" + name + ")")
+                                   : ("Generated " + juce::String(added) + " arcs -- " + name);
+    if (skipped > 0)
+        msg += " (" + juce::String(skipped) + " more did not fit: a page holds at most "
+               + juce::String (upic::limits::kMaxArcsPerPage) + " arcs)";
+    flash(msg);
 }
 
 void MainComponent::exportStems()
@@ -4619,11 +4653,22 @@ void MainComponent::loadFromVar(const juce::var& v)
     wantsStop.store(false);
     waveforms.clear(); envelopes.clear(); pages.clear();
     for (auto& s : sampleSlots) { s.name = juce::String(); s.data.reset(); s.sampleRate = 44100.0; }
+    // v1.33.4 (H13): the piece format caps the page, arc, zone and point
+    // counts. A piece over a cap used to lose the extra music silently on
+    // the next open; the user is told what did not make it in.
+    juce::String droppedMsg;
+    auto noteDrop = [&droppedMsg] (const juce::String& one, const juce::String& many, int n)
+    {
+        if (n > 0)
+            droppedMsg += (droppedMsg.isEmpty() ? "" : ", ") + juce::String(n) + " "
+                            + (n == 1 ? one : many);
+    };
     if (auto* arr = v.getProperty("samples", juce::var()).getArray())
     {
         // SECURITY (S-03): the decoded sample data of all the slots together
         // is capped, so a piece with many huge slots cannot exhaust memory.
         size_t totalSampleBytes = 0;
+        int stored = 0;
         for (auto& sv : *arr)
         {
             auto slot = upic::SampleSlot::fromVar(sv, 1);
@@ -4632,8 +4677,9 @@ void MainComponent::loadFromVar(const juce::var& v)
                                   * (size_t) slot.data->getNumChannels() * sizeof(float);
             if (totalSampleBytes > upic::limits::kMaxTotalSampleBytes) break;
             for (auto& s : sampleSlots)
-                if (s.id == slot.id) { s = std::move(slot); break; }
+                if (s.id == slot.id) { s = std::move(slot); ++stored; break; }
         }
+        noteDrop ("sample", "samples", (int) arr->size() - stored);
     }
     if (auto* arr = v.getProperty("waveforms", juce::var()).getArray())
     {
@@ -4643,6 +4689,7 @@ void MainComponent::loadFromVar(const juce::var& v)
             if ((int) waveforms.size() >= upic::limits::kMaxWaveforms) break;
             waveforms.push_back(upic::Waveform::fromVar(wv, i++));
         }
+        noteDrop ("wavetable", "wavetables", (int) arr->size() - (int) waveforms.size());
     }
     if (auto* arr = v.getProperty("envelopes", juce::var()).getArray())
     {
@@ -4652,13 +4699,39 @@ void MainComponent::loadFromVar(const juce::var& v)
             if ((int) envelopes.size() >= upic::limits::kMaxEnvelopes) break;
             envelopes.push_back(upic::Envelope::fromVar(ev, i++));
         }
+        noteDrop ("envelope", "envelopes", (int) arr->size() - (int) envelopes.size());
+        // the envelope's own points are capped too
+        for (int ei = 0; ei < (int) envelopes.size() && ei < (int) arr->size(); ++ei)
+            if (auto* ptsArr = arr->getReference(ei).getProperty("points", juce::var()).getArray())
+                noteDrop ("envelope point", "envelope points",
+                          (int) ptsArr->size() - (int) envelopes[(size_t) ei].points.size());
     }
     if (auto* arr = v.getProperty("pages", juce::var()).getArray())
+    {
         for (auto& pv : *arr)
         {
             if ((int) pages.size() >= upic::limits::kMaxPages) break;
             pages.push_back(upic::Page::fromVar(pv));
         }
+        noteDrop ("page", "pages", (int) arr->size() - (int) pages.size());
+        // the arcs, the sieve zones and the arc points of the pages that
+        // were loaded (the page's own parser caps them)
+        for (int pi = 0; pi < (int) pages.size(); ++pi)
+        {
+            const juce::var pageVar = arr->getReference(pi);
+            if (auto* arcsArr = pageVar.getProperty("arcs", juce::var()).getArray())
+            {
+                noteDrop ("arc", "arcs", (int) arcsArr->size() - (int) pages[(size_t) pi].arcs.size());
+                for (int ai = 0; ai < (int) pages[(size_t) pi].arcs.size(); ++ai)
+                    if (auto* ptsArr = arcsArr->getReference(ai).getProperty("points", juce::var()).getArray())
+                        noteDrop ("arc point", "arc points",
+                                  (int) ptsArr->size() - (int) pages[(size_t) pi].arcs[(size_t) ai].points.size());
+            }
+            if (auto* zonesArr = pageVar.getProperty("zones", juce::var()).getArray())
+                noteDrop ("sieve zone", "sieve zones",
+                          (int) zonesArr->size() - (int) pages[(size_t) pi].zones.size());
+        }
+    }
     if (waveforms.empty()) waveforms = upic::defaultWaveforms();
     if (envelopes.empty()) envelopes = upic::defaultEnvelopes();
     if (pages.empty()) pages.push_back(upic::Page());
@@ -4681,11 +4754,14 @@ void MainComponent::loadFromVar(const juce::var& v)
     sieveM = juce::jlimit(2, 120, (int) v.getProperty("sieveM", 12));
     sieveR.clear();
     if (auto* arr = v.getProperty("sieveR", juce::var()).getArray())
+    {
         for (auto& rv : *arr)
         {
             if ((int) sieveR.size() >= upic::limits::kMaxSieveRemainders) break;
             sieveR.push_back((((int) rv % sieveM) + sieveM) % sieveM);
         }
+        noteDrop ("sieve remainder", "sieve remainders", (int) arr->size() - (int) sieveR.size());
+    }
     // v1.33.2: an old settings file can carry an empty sieveR (the field was
     // allowed to be empty, and the placeholder made it look like 0,7). That
     // restored a sieve with no remainders, which is inert - the Sieve
@@ -4765,6 +4841,10 @@ void MainComponent::loadFromVar(const juce::var& v)
     // v1.18: the next audio block must already render the loaded piece (the
     // timer alone would be up to 33 ms late - and a host may not run it).
     publishModelSnapshot();
+    // v1.33.4 (H13): the piece was over one of the format's caps, so part of
+    // it did not make it in. Say so instead of losing the music silently.
+    if (! droppedMsg.isEmpty())
+        flash ("This piece is bigger than the app supports - not loaded: " + droppedMsg);
 }
 
 juce::String MainComponent::pieceStateText()

@@ -357,6 +357,17 @@ public:
                 for (auto& a : page->arcs)
                     if (a.id == id)
                     {
+                        // v1.33.4 (H13): the page's arc count is capped (the
+                        // piece format refuses more), so the copy that does
+                        // not fit is not made - the loader would drop it
+                        // silently on the next open.
+                        if ((int) page->arcs.size() + (int) copies.size()
+                                >= upic::limits::kMaxArcsPerPage)
+                        {
+                            notice ("This page already holds " + juce::String (upic::limits::kMaxArcsPerPage)
+                                    + " arcs (the limit) - delete one before duplicating");
+                            break;
+                        }
                         upic::Arc c = a;
                         c.id = page->nextArcId++;
                         for (auto& pt : c.points)
@@ -426,6 +437,13 @@ public:
     int addZone(double ta, double tb, double fa, double fb)
     {
         if (! page) return -1;
+        // v1.33.4 (H13): the page's zone count is capped by the piece format.
+        if (atZoneLimit())
+        {
+            notice ("This page already holds " + juce::String (upic::limits::kMaxSieveZones)
+                    + " sieve zones (the limit) - delete one before drawing another");
+            return -1;
+        }
         upic::SieveZone z;
         {
             const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
@@ -1310,6 +1328,10 @@ public:
 
     std::function<void(int)> onSelect;
     std::function<void(bool)> onArcEditingChanged;
+    // v1.33.4 (H13): a short message for the user - the editor refuses to
+    // create something the piece format cannot hold, and says so instead of
+    // letting the loader drop it later.
+    std::function<void(const juce::String&)> onNotice;
     // sample-duration snapping (granular mode)
     std::map<int,double> sampleDurations;
     bool sampleGranularTab = false;
@@ -2043,6 +2065,13 @@ private:
     void commitStroke()
     {
         if (!page || strokePts.size() < 2) return;
+        // v1.33.4 (H13): the page's arc count is capped by the piece format.
+        if (atArcLimit())
+        {
+            notice ("This page already holds " + juce::String (upic::limits::kMaxArcsPerPage)
+                    + " arcs (the limit) - delete one before drawing another");
+            return;
+        }
         const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
         // sort by x, convert to (t,f), drop duplicates in time
         std::sort(strokePts.begin(), strokePts.end(), [](auto& a, auto& b){ return a.pos.x < b.pos.x; });
@@ -2069,6 +2098,20 @@ private:
         }
         // simplify the raw freehand curve to a manageable control-point count
         upic::simplifyArcPoints(a.points, kSimplifyEps);
+        // v1.33.4 (H13): the piece format caps the points of an arc, so a
+        // very detailed stroke is thinned out evenly (the shape survives)
+        // instead of being cut off when the piece is loaded again.
+        if ((int) a.points.size() > upic::limits::kMaxPointsPerArc)
+        {
+            std::vector<upic::ArcPoint> thinned;
+            thinned.reserve ((size_t) upic::limits::kMaxPointsPerArc);
+            const int n = (int) a.points.size();
+            for (int i = 0; i < upic::limits::kMaxPointsPerArc; ++i)
+                thinned.push_back (a.points[(size_t) ((int) ((double) i * (n - 1) / (upic::limits::kMaxPointsPerArc - 1)) + 0.5)]);
+            a.points = std::move (thinned);
+            notice ("The stroke had more than " + juce::String (upic::limits::kMaxPointsPerArc)
+                    + " points (the limit) - it was thinned out");
+        }
         if (tool == SineStroke && a.points.size() > 3)
         {
             // fit a sine overlay: replace freq with sine between first/last freq
@@ -2098,6 +2141,13 @@ private:
     void commitLine(juce::Point<float> p0, juce::Point<float> p1, float press = 1.0f)
     {
         if (!page) return;
+        // v1.33.4 (H13): the page's arc count is capped by the piece format.
+        if (atArcLimit())
+        {
+            notice ("This page already holds " + juce::String (upic::limits::kMaxArcsPerPage)
+                    + " arcs (the limit) - delete one before drawing another");
+            return;
+        }
         const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
         double t0 = juce::jlimit(0.0, page->durationSec, xToTime(p0.x));
         double t1 = juce::jlimit(0.0, page->durationSec, xToTime(p1.x));
@@ -2136,5 +2186,21 @@ private:
     }
 
     void notify() { repaint(); if (onChange) onChange(); }
+
+    // v1.33.4 (H13): tell the user why an edit was refused.
+    void notice (const juce::String& m) { if (onNotice) onNotice (m); }
+
+    // v1.33.4 (H13): the page's arc count is capped by the piece format
+    // (kMaxArcsPerPage). The editor refuses the arc that does not fit, so
+    // the app never writes a piece it cannot read back.
+    bool atArcLimit() const
+    {
+        return page != nullptr && (int) page->arcs.size() >= upic::limits::kMaxArcsPerPage;
+    }
+
+    bool atZoneLimit() const
+    {
+        return page != nullptr && (int) page->zones.size() >= upic::limits::kMaxSieveZones;
+    }
 };
 
