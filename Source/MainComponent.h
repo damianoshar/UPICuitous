@@ -686,6 +686,11 @@ public:
     bool savePieceToFile (const juce::File& f,
                           juce::int64 maxBytes = (juce::int64) upic::limits::kMaxPieceBytes);
 
+    // v1.33.4 (M17): the same saver, but the destination can be a
+    // document-provider document (Android) - a URL that is not a local file.
+    bool savePieceToURL (const juce::URL& url,
+                         juce::int64 maxBytes = (juce::int64) upic::limits::kMaxPieceBytes);
+
     // v1.33.4 (H12): the PM preset file operations, split out of the file
     // dialogs so the selftest can drive them without a chooser.
     // buildPmPresetText() returns the export text of the selected PM arc

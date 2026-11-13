@@ -220,6 +220,10 @@ limits - 500 arcs per page, 100 pages, 1000 points per arc, 200 sieve zones
 - and the editor and the loader share them: the editor refuses what does
 not fit (and says so), and a piece that is over a limit is loaded truncated
 with a message naming what did not fit, so music is never lost silently.
+On Android the file chooser hands back a document-provider URL, not a
+path; the app works with that URL, so a piece, a sample or a preset picked
+from any provider (Downloads, Drive, a file manager) loads and saves
+instead of doing nothing.
 The WAV render and the stems cover the whole page: a page with an
 acceleration (Accel) needs more audio
 than it has score - a 30 s page at Accel 0.9 is 49.07 s of audio - and the
@@ -383,7 +387,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 541 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 547 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -403,8 +407,9 @@ saver, the MIDI device handling, the sound-affecting settings that
 travel with a piece, the export of a page with an acceleration, the piece
 format's limits at limit minus one, limit and limit plus one, the sample
 material's own sample rate, a failed load keeping the composition, the
-sample PCM surviving repeated saves, the stems of a PM-only page, and the
-latency following an arc's own algorithm) and
+sample PCM surviving repeated saves, the stems of a PM-only page, the
+latency following an arc's own algorithm, and the file a chooser
+returns) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.

@@ -5959,6 +5959,74 @@ public:
                    + juce::String (allowed, 0) + "x)");
         }
 
+        // 25. v1.33.4 (M17): the file a chooser returned. On Android the
+        //     picker hands back a document-provider URL (content://...), which
+        //     JUCE's getResults() throws away - so every picked file did
+        //     nothing at all. The URL is now what the app works with. These
+        //     checks cover the desktop half of that path (a local file URL);
+        //     the provider half needs a device.
+        {
+            const auto work = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                  .getChildFile ("upic_pick_test");
+            work.deleteRecursively();
+            work.createDirectory();
+            const auto src = work.getChildFile ("pick.txt");
+            src.replaceWithText ("hello picker");
+
+            // a local file URL is used in place - nothing is copied
+            upic::PickedFile picked;
+            juce::String error;
+            const bool readOk = upic::readPickedFile (juce::URL (src), picked,
+                                                      (juce::int64) upic::limits::kMaxPieceBytes,
+                                                      error);
+            check (readOk && picked.file == src && ! picked.isCopy,
+                   "a picked local file is read in place",
+                   error.isNotEmpty() ? error : (picked.file.getFileName() + " copy=" + (picked.isCopy ? "yes" : "no")));
+            check (readOk && picked.file.loadFileAsString() == "hello picker"
+                        && picked.name == "pick.txt",
+                   "a picked local file keeps its content and its name",
+                   picked.name);
+            picked.release();
+
+            // a file over the cap is refused with a message, not read
+            upic::PickedFile tooBig;
+            juce::String bigError;
+            const bool bigOk = upic::readPickedFile (juce::URL (src), tooBig, 4, bigError);
+            check (! bigOk && bigError.contains ("too large"),
+                   "a picked file over the cap is refused with a message",
+                   bigError);
+            tooBig.release();
+
+            // nothing chosen
+            upic::PickedFile none;
+            juce::String noneError;
+            const bool noneOk = upic::readPickedFile (juce::URL(), none, 1024, noneError);
+            check (! noneOk && noneError.contains ("No file"),
+                   "an empty pick is refused with a message",
+                   noneError);
+            none.release();
+
+            // writing to a picked local destination keeps the old file when
+            // the write fails, and replaces it atomically when it succeeds
+            const auto dst = work.getChildFile ("out.bin");
+            dst.replaceWithText ("old content");
+            juce::String writeError;
+            const bool wrote = upic::writePickedBytes (juce::URL (dst), "new", 3, writeError);
+            check (wrote && dst.loadFileAsString() == "new",
+                   "a picked local destination is written",
+                   writeError.isNotEmpty() ? writeError : dst.loadFileAsString());
+
+            // the extension of a local destination is forced (the old
+            // behaviour); a provider document keeps the name the user chose
+            const auto renamed = upic::pickedURLWithExtension (juce::URL (dst), "wav");
+            check (renamed.isLocalFile()
+                        && renamed.getLocalFile().getFileName() == "out.wav",
+                   "a picked local destination keeps the forced extension",
+                   renamed.getFileName());
+
+            work.deleteRecursively();
+        }
+
         log << "\n" << (failures == 0 ? "ALL CHECKS PASSED" : juce::String(failures) + " CHECK(S) FAILED") << "\n";
         juce::File::getSpecialLocation(juce::File::tempDirectory)
             .getChildFile("upic_selftest.txt").replaceWithText(log);

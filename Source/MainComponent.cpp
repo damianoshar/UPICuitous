@@ -1475,7 +1475,19 @@ void MainComponent::buildPmControls()
                          | juce::FileBrowserComponent::canSelectFiles,
                          [sp, fc] (const juce::FileChooser& c) {
             if (sp == nullptr) return;
-            sp->applyPmPresetFile (c.getResult());
+            // v1.33.4 (M17): the chooser can return a document-provider URL
+            // (Android) - getResult() drops it (it keeps only local files),
+            // so the import did nothing at all. The URL is read instead, and
+            // a provider document is copied into a local file first.
+            upic::PickedFile picked;
+            juce::String error;
+            if (! upic::readPickedFile (c.getURLResult(), picked,
+                                        (juce::int64) upic::limits::kMaxPieceBytes, error))
+            {
+                sp->flash (error);
+                return;
+            }
+            sp->applyPmPresetFile (picked.file);
         });
     };
     pmExportBtn.onClick = [this]{
@@ -1490,11 +1502,21 @@ void MainComponent::buildPmControls()
                          | juce::FileBrowserComponent::canSelectFiles,
                          [sp, fc, text] (const juce::FileChooser& c) {
             if (sp == nullptr) return;
-            auto f = c.getResult();
-            if (f == juce::File()) return;
-            auto out = f.withFileExtension ("preset");
-            if (! out.replaceWithText (text)) sp->flash ("Export failed");
-            else sp->flash ("Exported " + out.getFileName());
+            // v1.33.4 (M17): the destination can be a document-provider URL
+            // (Android) - getResult() would drop it and the export would do
+            // nothing. A local destination keeps the old behaviour (the
+            // extension is forced, the write goes through a temporary
+            // sibling); a provider document is written through its stream.
+            const auto url = upic::pickedURLWithExtension (c.getURLResult(), "preset");
+            if (! url.isWellFormed()) return;
+            juce::String error;
+            if (! upic::writePickedBytes (url, text.toRawUTF8(),
+                                          (size_t) text.getNumBytesAsUTF8(), error))
+            {
+                sp->flash (error);
+                return;
+            }
+            sp->flash ("Exported " + upic::pickedFileName (url));
         });
     };
 
@@ -2342,8 +2364,30 @@ void MainComponent::exportStems()
     fc->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
         [sp, fc](const juce::FileChooser& c){
             if (sp == nullptr) return;
-            auto dir = c.getResult();
-            if (dir == juce::File()) return;
+            // v1.33.4 (M17): the folder can be a document tree (Android).
+            // getResult() drops it (it keeps only local files), so the export
+            // did nothing at all. A provider folder cannot be written to
+            // directly: the stems are rendered into a local temporary folder
+            // and then copied into the chosen tree.
+            const auto url = c.getURLResult();
+            if (! url.isWellFormed()) return;
+            const bool isLocal = upic::isPlainFileURL (url);
+            juce::File dir;
+            if (isLocal)
+            {
+                dir = url.getLocalFile();
+            }
+            else
+            {
+                dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("upic_stems_export");
+                dir.deleteRecursively();
+                if (! dir.createDirectory())
+                {
+                    sp->flash ("Could not make a temporary folder for the stems");
+                    return;
+                }
+            }
             double sr = sp->exportSampleRate();
             StemExport res;
             {
@@ -2352,6 +2396,22 @@ void MainComponent::exportStems()
                                   dir, "stem", sr, sp->masterGain.load(),
                                   sp->engine.getSamplePitchMode(),
                                   sp->sampleGrainMs, sp->liveGrainMs);
+            }
+            // v1.33.4 (M17): the rendered stems are copied into the chosen
+            // document tree (a local folder holds them already).
+            int copied = 0;
+            juce::String copyError;
+            if (! isLocal)
+            {
+                for (auto& f : res.written)
+                {
+                    juce::String error;
+                    if (upic::writePickedFolderFile (f, url, f.getFileName(), error))
+                        ++copied;
+                    else
+                        copyError = error;
+                }
+                dir.deleteRecursively();
             }
             // v1.33.4 (H11): only the files that were really written are
             // counted, and a failed render is reported instead of being
@@ -2371,9 +2431,11 @@ void MainComponent::exportStems()
             else
             {
                 sp->flash("Wrote " + juce::String((int) res.written.size()) + " stem file(s) to "
-                          + dir.getFullPathName()
+                          + (isLocal ? dir.getFullPathName() : upic::pickedFileName (url))
                           + (res.failed > 0 ? " - " + juce::String(res.failed) + " failed" : juce::String())
-                          + (res.note.isEmpty() ? juce::String() : " - " + res.note));
+                          + (res.note.isEmpty() ? juce::String() : " - " + res.note)
+                          + (copyError.isEmpty() ? juce::String()
+                                                 : " - " + juce::String(copied) + " copied, " + copyError));
             }
         });
 }
@@ -4945,9 +5007,14 @@ void MainComponent::saveFile()
     fc->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
         [this, sp, fc](const juce::FileChooser& c){
             if (sp == nullptr) return;
-            auto f = c.getResult();
-            if (f == juce::File()) return;
-            savePieceToFile (f);
+            // v1.33.4 (M17): the destination can be a document-provider URL
+            // (Android) - getResult() would drop it and the save would do
+            // nothing. A local destination is written in place (through a
+            // temporary sibling); a provider document is written through its
+            // output stream.
+            const auto url = c.getURLResult();
+            if (! url.isWellFormed()) return;
+            savePieceToURL (url);
         });
 }
 
@@ -4964,6 +5031,15 @@ void MainComponent::saveFile()
 bool MainComponent::savePieceToFile (const juce::File& f, juce::int64 maxBytes)
 {
     if (f == juce::File()) return false;
+    return savePieceToURL (juce::URL (f), maxBytes);
+}
+
+// v1.33.4 (M17): the same saver, but the destination can also be a
+// document-provider document (Android). Such a document cannot take a
+// temporary sibling, so the piece is written through its output stream.
+bool MainComponent::savePieceToURL (const juce::URL& url, juce::int64 maxBytes)
+{
+    if (! url.isWellFormed()) return false;
 
     juce::String json;
     {
@@ -4986,30 +5062,14 @@ bool MainComponent::savePieceToFile (const juce::File& f, juce::int64 maxBytes)
         return false;
     }
 
-    juce::TemporaryFile temp (f);
+    juce::String error;
+    if (! upic::writePickedBytes (url, json.toRawUTF8(), (size_t) bytes, error))
     {
-        auto out = temp.getFile().createOutputStream();
-        if (out == nullptr)
-        {
-            flash ("Could not write " + f.getFileName());
-            return false;
-        }
-        // JUCE 8's write() reports success as a bool
-        const bool wrote = out->write (json.toRawUTF8(), (size_t) bytes);
-        out.reset();
-        if (! wrote)
-        {
-            flash ("Could not write " + f.getFileName());
-            return false;
-        }
-    }
-    if (! temp.overwriteTargetFileWithTemporary())
-    {
-        flash ("Could not write " + f.getFileName());
+        flash (error);
         return false;
     }
 
-    flash ("Saved " + f.getFileName());
+    flash ("Saved " + upic::pickedFileName (url));
     return true;
 }
 
@@ -5022,7 +5082,20 @@ void MainComponent::loadFile()
     fc->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
         [this, sp, fc](const juce::FileChooser& c){
             if (sp == nullptr) return;
-            auto f = c.getResult();
+            // v1.33.4 (M17): the chooser can return a document-provider URL
+            // (Android) - getResult() drops it (it keeps only local files),
+            // so the load did nothing at all. The URL is read instead, and a
+            // provider document is copied into a local file first (the copy
+            // is bounded by the piece cap).
+            upic::PickedFile picked;
+            juce::String error;
+            if (! upic::readPickedFile (c.getURLResult(), picked,
+                                        (juce::int64) upic::limits::kMaxPieceBytes, error))
+            {
+                sp->flash (error);
+                return;
+            }
+            const auto f = picked.file;
             if (!f.existsAsFile()) return;
             // SECURITY (S-03): a piece is untrusted input. Refuse to read a
             // file that is far bigger than any real piece, so a huge or
@@ -5082,8 +5155,23 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
     fc->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
         [this, sp, fc, slotIndex](const juce::FileChooser& c){
             if (sp == nullptr) return;
-            auto f = c.getResult();
-            if (! f.existsAsFile()) return;
+            // v1.33.4 (M17): the chooser can return a document-provider URL
+            // (Android) - getResult() drops it (it keeps only local files),
+            // so the import did nothing at all. The URL is read instead, and
+            // a provider document is copied into a local file first (the
+            // decoders need a file they can seek in).
+            upic::PickedFile picked;
+            juce::String error;
+            if (! upic::readPickedFile (c.getURLResult(), picked,
+                                        (juce::int64) upic::limits::kMaxTotalSampleBytes, error))
+            {
+                sp->flash (error);
+                return;
+            }
+            const auto f = picked.file;
+            const auto materialName = picked.name.isNotEmpty()
+                                        ? juce::File (picked.name).getFileNameWithoutExtension()
+                                        : f.getFileNameWithoutExtension();
 
             // SECURITY (S-03): the decode and the allocation are wrapped, so
             // a crafted file that exhausts the memory shows a message
@@ -5097,7 +5185,6 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
             // duration cap is counted at the file's own rate, and the
             // decoder's return value is checked.
             upic::LoadedSample loaded;
-            juce::String error;
             if (! upic::loadSampleFile (f, loaded, error))
             {
                 flash (error);
@@ -5111,7 +5198,7 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
                 // old pointer keep it alive until they are retired.
                 juce::ScopedLock l(dataLock);
                 auto& slot = sampleSlots[(size_t) slotIndex];
-                slot.name = f.getFileNameWithoutExtension();
+                slot.name = materialName;
                 slot.sampleRate = loaded.sampleRate;
                 slot.data = std::make_shared<const juce::AudioBuffer<float>>(std::move (loaded.data));
                 markModelChanged(); // v1.15: new material -> fade across it
@@ -5120,7 +5207,7 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
             if (! loaded.warning.isEmpty())
                 flash (loaded.warning);
             else
-                flash("Loaded \"" + f.getFileNameWithoutExtension() + "\" into slot "
+                flash("Loaded \"" + materialName + "\" into slot "
                   + juce::String(sampleSlots[(size_t) slotIndex].id));
              score.sampleDurations[sampleSlots[(size_t) slotIndex].id] = sampleSlots[(size_t) slotIndex].durationSec();
              score.sampleDurations[sampleSlots[(size_t) slotIndex].id] = sampleSlots[(size_t) slotIndex].durationSec();
@@ -5248,15 +5335,30 @@ void MainComponent::renderWav()
     fc->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
         [sp, fc](const juce::FileChooser& c){
             if (sp == nullptr) return;
-            auto f = c.getResult();
-            if (f == juce::File()) return;
-            f = f.withFileExtension("wav");
+            // v1.33.4 (M17): the destination can be a document-provider URL
+            // (Android) - getResult() would drop it and the render would do
+            // nothing. A local destination is rendered straight into the
+            // file; a provider document is rendered into a local temporary
+            // file and then copied into the chosen document.
+            const auto url = upic::pickedURLWithExtension (c.getURLResult(), "wav");
+            if (! url.isWellFormed()) return;
             // v1.33.4 (M23): the prepared rate - the device's rate in
             // standalone, the host's rate in a plugin (the device manager
             // knows nothing there, so the export used to be 44.1 kHz while
             // the session played at the host's rate).
             double sr = sp->exportSampleRate();
             bool ok = false;
+            juce::File temp;
+            const bool isLocal = upic::isPlainFileURL (url);
+            if (! isLocal)
+            {
+                temp = juce::File::createTempFile (".wav");
+                if (temp == juce::File())
+                {
+                    sp->flash ("Could not make a temporary file for the render");
+                    return;
+                }
+            }
             {
                 juce::ScopedLock l(sp->dataLock);
                 // v1.33.4 (H8): the page is rendered straight into the file,
@@ -5264,13 +5366,23 @@ void MainComponent::renderWav()
                 // needs (a warped page used to be cut off at the end) and the
                 // memory stays flat. The session's pitch algorithm and grain
                 // sizes come with it, so the file sounds like the session.
-                ok = writePageToWavFile (f, sp->curPage(), sp->waveforms, sp->envelopes,
+                ok = writePageToWavFile (isLocal ? url.getLocalFile() : temp,
+                                         sp->curPage(), sp->waveforms, sp->envelopes,
                                          sp->sampleSlots, sr, sp->masterGain.load(),
                                          sp->engine.getSamplePitchMode(),
                                          sp->sampleGrainMs, sp->liveGrainMs);
             }
-            sp->flash (ok ? ("Rendered " + f.getFileName())
-                           : ("Render failed - " + f.getFileName() + " was not written"));
+            if (ok && ! isLocal)
+            {
+                juce::String error;
+                ok = upic::copyLocalFileToPicked (temp, url, error);
+                if (! ok)
+                    sp->flash (error);
+            }
+            if (! isLocal)
+                temp.deleteFile();
+            sp->flash (ok ? ("Rendered " + upic::pickedFileName (url))
+                           : ("Render failed - " + upic::pickedFileName (url) + " was not written"));
         });
 }
 
