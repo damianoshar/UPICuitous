@@ -2318,7 +2318,8 @@ void MainComponent::exportStems()
                 juce::ScopedLock l(sp->dataLock);
                 res = renderStems(sp->curPage(), sp->waveforms, sp->envelopes, sp->sampleSlots,
                                   dir, "stem", sr, sp->masterGain.load(),
-                                  sp->engine.getSamplePitchMode());
+                                  sp->engine.getSamplePitchMode(),
+                                  sp->sampleGrainMs, sp->liveGrainMs);
             }
             // v1.33.4 (H11): only the files that were really written are
             // counted, and a failed render is reported instead of being
@@ -3036,18 +3037,28 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
             continue;
         }
 
-        const double remain = reverse ? audioPlayhead : (pg.durationSec - audioPlayhead);
-        // v1.33: the page's acceleration - the page's own time runs at a
-        // varying rate, so the transport's speed is the transport's rate
-        // times the page's rate at the playhead.
-        const double pageRate = pg.rateAt (audioPlayhead);
-        int chunk = (int) std::floor(remain * sr / (std::abs (rate) * pageRate));
+        // v1.33.4 (H8): the page's own time and the audio time are two
+        // views of the same page. The exact map - the same one the export
+        // uses - says how much audio the rest of the page needs and where
+        // the score lands after this block, so the sound and the playhead
+        // stay in step and a warped page is neither cut short nor run past
+        // its end.
+        const double a0 = pg.audioTimeAtScore (audioPlayhead);
+        const double remainAudio = reverse ? a0 : (pg.audioDurationSec() - a0);
+        const double absRate = juce::jmax (1.0e-6, std::abs (rate));
+        int chunk = (int) std::floor(remainAudio * sr / absRate);
         if (chunk < 1) chunk = 1;
         chunk = juce::jlimit(1, n - offset, chunk);
 
+        // the block's average rate, so the block's content matches the
+        // playhead exactly (without a warp it is exactly the old rate)
+        const double a1 = a0 + (double) chunk * rate / sr;
+        const double s1 = pg.scoreAtAudioTime (a1);
+        const double blockRate = rate * pg.averageRate (audioPlayhead, (double) chunk * rate / sr);
+
         engine.render(pg, audioPlayhead, snap.waveforms, snap.envelopes, snap.slots,
                       SL + offset, (SR != nullptr ? SR + offset : nullptr), chunk, 1.0f,
-                      rate * pageRate);
+                      blockRate);
 
         if (! snap.loopPage && ((reverse && audioPage == 0) || (! reverse && audioPage + 1 >= (int) snap.pages.size())))
         {
@@ -3062,7 +3073,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
             }
         }
 
-        audioPlayhead += (double) chunk * rate * pageRate / sr;
+        audioPlayhead = s1;
         offset += chunk;
     }
     publishPlayhead();
@@ -5087,18 +5098,15 @@ void MainComponent::renderWav()
             bool ok = false;
             {
                 juce::ScopedLock l(sp->dataLock);
-                int total = (int) std::ceil (sp->curPage().durationSec * sr);
-                juce::AudioBuffer<float> buf(2, total);
-                buf.clear();
-                // v1.18: render with a local engine - the member engine belongs to
-                // the audio thread now (dataLock no longer serialises it).
-                UpicEngine offline;
-                offline.prepare(sr, 8192);
-                offline.renderPageOffline(sp->curPage(), sp->waveforms, sp->envelopes, sp->sampleSlots, buf, sr, sp->masterGain.load());
-                // v1.33.4 (H11): the render goes to a temporary sibling and
-                // replaces the target only when the whole file is on disk. A
-                // failed export no longer destroys the previous WAV.
-                ok = writeWavFile (f, buf, sr);
+                // v1.33.4 (H8): the page is rendered straight into the file,
+                // block by block: the file is as long as the page's own time
+                // needs (a warped page used to be cut off at the end) and the
+                // memory stays flat. The session's pitch algorithm and grain
+                // sizes come with it, so the file sounds like the session.
+                ok = writePageToWavFile (f, sp->curPage(), sp->waveforms, sp->envelopes,
+                                         sp->sampleSlots, sr, sp->masterGain.load(),
+                                         sp->engine.getSamplePitchMode(),
+                                         sp->sampleGrainMs, sp->liveGrainMs);
             }
             sp->flash (ok ? ("Rendered " + f.getFileName())
                            : ("Render failed - " + f.getFileName() + " was not written"));

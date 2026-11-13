@@ -203,7 +203,13 @@ sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
 changes the sound - the arc's own pitch algorithm and its reversal, the
 sample slot's direction and the global pitch modes - so a reopened piece
 (or a reopened DAW session) sounds the same; older pieces without those
-fields still load, with the old defaults. Double-click Stop rewinds to the
+fields still load, with the old defaults. The WAV render and the stems
+cover the whole page: a page with an acceleration (Accel) needs more audio
+than it has score - a 30 s page at Accel 0.9 is 49.07 s of audio - and the
+file is that long, so the end of the page is no longer cut off. The export
+also uses the session's pitch algorithm and grain sizes, and it streams the
+render into the file, so a long page does not need the whole render in
+memory. Double-click Stop rewinds to the
 start. Clear asks first in an in-app warning and uses a red confirm
 button. Dragging the playhead while stopped now plays a short scrub
 preview. A Rev toggle runs the score backwards (a mirrored stroke sounds mirrored); a learned MIDI jog CC drives a signed, smoothed playhead (up to +/- 4x) in the app and the plugin.
@@ -357,7 +363,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 508 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 513 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -373,8 +379,9 @@ sieve checkbox end-to-end, the zone menu actions, the digitised wave page,
 the micro-time page, the toolbar's group flow, the hints sidebar, the
 button text fitting, the capture button's colours, the wavetable
 buttons' colours, the PM preset round trip, the WAV export, the piece
-saver, the MIDI device handling and the sound-affecting settings that
-travel with a piece) and writes
+saver, the MIDI device handling, the sound-affecting settings that
+travel with a piece and the export of a page with an acceleration) and
+writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 20-check plugin smoke test and pluginval at strictness 5.
 

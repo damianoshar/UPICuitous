@@ -1325,6 +1325,65 @@ namespace upic
             return 1.0 + warp * (2.0 * x - 1.0);
         }
 
+        //---------------- the page's time map (v1.33.4 / H8) ----------------
+        // The page's own time and the audio time are two views of the same
+        // page. The rate is linear in the score, so the map between them
+        // has a closed form:
+        //
+        //   rate(s) = (1 - w) + 2w s/D
+        //   a(s)    = D/(2w) ln((1 - w + 2w s/D)/(1 - w))
+        //   s(a)    = D/(2w) (1 - w) (e^(2w a/D) - 1)
+        //
+        // The playback and the export use the same map, so an export is as
+        // long as the page really needs and the sound lines up with what
+        // the user heard. Without it the export was given durationSec *
+        // sampleRate frames and cut the end of a warped page off: a 30 s
+        // page at warp 0.9 needs 49.07 s of audio, and an arc at 25-29 s
+        // exported as silence.
+        double audioDurationSec() const
+        {
+            if (durationSec <= 0.0) return 0.0;
+            if (std::abs (warp) < 1.0e-6) return durationSec;
+            const double w = juce::jlimit (-0.99, 0.99, warp);
+            return durationSec / (2.0 * w) * std::log ((1.0 + w) / (1.0 - w));
+        }
+
+        // The score position after that much audio.
+        double scoreAtAudioTime (double audioSec) const
+        {
+            if (durationSec <= 0.0) return 0.0;
+            if (std::abs (warp) < 1.0e-6) return audioSec;
+            const double w = juce::jlimit (-0.99, 0.99, warp);
+            const double e = std::exp (2.0 * w * audioSec / durationSec);
+            return durationSec / (2.0 * w) * (1.0 - w) * (e - 1.0);
+        }
+
+        // The audio time it takes to reach a score position.
+        double audioTimeAtScore (double scoreSec) const
+        {
+            if (durationSec <= 0.0) return 0.0;
+            if (std::abs (warp) < 1.0e-6) return scoreSec;
+            const double w = juce::jlimit (-0.99, 0.99, warp);
+            const double x = juce::jlimit (0.0, 1.0, scoreSec / durationSec);
+            return durationSec / (2.0 * w) * std::log ((1.0 - w + 2.0 * w * x) / (1.0 - w));
+        }
+
+        // The page's average rate over a block of audio that starts at the
+        // score position `scorePos` and runs for `audioSec` (negative when
+        // the transport runs backwards). Without a warp it is exactly 1, so
+        // an unwarped page behaves exactly as before; with a warp it is the
+        // average of the time map over the block, so the block's content
+        // and the playhead agree exactly. The playback and the export use
+        // this one function, so they share the same mapping.
+        double averageRate (double scorePos, double audioSec) const
+        {
+            if (durationSec <= 0.0 || audioSec == 0.0) return rateAt (scorePos);
+            if (std::abs (warp) < 1.0e-6) return 1.0;
+            const double a0 = audioTimeAtScore (scorePos);
+            const double s1 = scoreAtAudioTime (a0 + audioSec);
+            return (s1 - scorePos) / audioSec;
+        }
+
         // The range of one of the page's spaces.
         void spaceRange (int index, double& lo, double& hi) const
         {

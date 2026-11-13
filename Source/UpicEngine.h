@@ -345,6 +345,63 @@ public:
         }
     }
 
+    // v1.33.4 (H8): the offline render, in blocks.
+    //
+    // The export used to render the whole page into one buffer that was
+    // given durationSec * sampleRate frames - but the page's own time runs
+    // at a varying rate, so a warped page needs more audio than it has
+    // score and the end of the page was cut off (an arc at 25-29 s of a 30 s
+    // page exported as silence). The render now walks the page's own time
+    // with the page's exact time map (the same one the playback uses), so
+    // the page is covered whole, and it hands the caller one block at a
+    // time: the export streams the blocks into the file, so the memory
+    // stays flat whatever the page's length.
+    //
+    // `totalFrames` is how much audio the caller wants (the page's audio
+    // duration, in frames). The callback gets each block and returns false
+    // to stop the render (a write error).
+    template <typename BlockFn>
+    bool renderPageBlocks (const upic::Page& page,
+                           const std::vector<upic::Waveform>& waves,
+                           const std::vector<upic::Envelope>& envs,
+                           const std::vector<upic::SampleSlot>& slots,
+                           double sr, float masterGain,
+                           int totalFrames, BlockFn&& fn)
+    {
+        if (sr <= 0.0 || totalFrames <= 0) return false;
+        prepare (sr, 8192);
+
+        // the block size: small, so the export's timing matches a typical
+        // host block and the memory stays flat
+        const int blockSize = 512;
+        juce::AudioBuffer<float> block (2, blockSize);
+        int done = 0;
+        double scorePos = 0.0;
+
+        while (done < totalFrames)
+        {
+            const int n = juce::jmin (blockSize, totalFrames - done);
+            // the page's time map: the score position at the end of this
+            // block, and the block's average rate (so the block's content
+            // and the playhead agree). Without a warp the rate is exactly 1,
+            // so an unwarped page renders exactly as it always did.
+            const double a0 = page.audioTimeAtScore (scorePos);
+            const double a1 = a0 + (double) n / sr;
+            const double s1 = page.scoreAtAudioTime (a1);
+            const double avgRate = page.averageRate (scorePos, (double) n / sr);
+
+            block.clear();
+            render (page, scorePos, waves, envs, slots,
+                    block.getWritePointer (0), block.getWritePointer (1),
+                    n, masterGain, avgRate);
+            if (! fn (block, n)) return false;
+
+            scorePos = s1;
+            done += n;
+        }
+        return true;
+    }
+
     // Offline render of a whole page to a buffer (stereo interleaved in two buffers)
     void renderPageOffline(const upic::Page& page,
                            const std::vector<upic::Waveform>& waves,
@@ -353,14 +410,6 @@ public:
                            juce::AudioBuffer<float>& dest, double destSampleRate, float masterGain)
     {
         prepare(destSampleRate > 0 ? destSampleRate : 44100.0);
-        int total = dest.getNumSamples();
-        int block = 8192;
-        std::vector<float> L((size_t)block), R((size_t)block);
-        // v1.33: the page's own time (the warp moves it)
-        double warpPos = 0.0;
-        // local voice state so offline doesn't depend on realtime state
-        std::map<int,double> localPh;
-        auto saved = phases; phases.clear();
         // live input is realtime-only: offline voice reads nothing
         const float* savedLA = liveRingA;
         const float* savedLB = liveRingB;
@@ -370,26 +419,30 @@ public:
         liveRingA = nullptr; liveRingB = nullptr; liveRingSize = 0;
         liveWriteEnd = 0; liveActive = false;
 
-        for (int pos = 0; pos < total; pos += block)
-        {
-            int n = juce::jmin(block, total - pos);
-            // temporarily swap in local voice state
-            phases = localPh;
-            juce::FloatVectorOperations::clear(dest.getWritePointer(0) + pos, n);
-            if (dest.getNumChannels() > 1) juce::FloatVectorOperations::clear(dest.getWritePointer(1) + pos, n);
-            std::fill(L.begin(), L.begin() + n, 0.0f);
-            std::fill(R.begin(), R.begin() + n, 0.0f);
-            // v1.33: the page's acceleration. The offline render walks the
-            // page's own time, so it follows the same tempo sweep the
-            // transport does - a WAV export sounds like the session.
-            const double ph0 = warpPos;
-            const double rate = page.rateAt (ph0);
-            render(page, ph0, waves, envs, slots, L.data(), R.data(), n, masterGain, rate);
-            warpPos += (double) n * rate / sampleRate;
-            juce::FloatVectorOperations::copy(dest.getWritePointer(0) + pos, L.data(), n);
-            if (dest.getNumChannels() > 1) juce::FloatVectorOperations::copy(dest.getWritePointer(1) + pos, R.data(), n);
-            localPh = phases;
-        }
+        // the offline render must not disturb the realtime state
+        auto saved = phases; phases.clear();
+
+        const int total = dest.getNumSamples();
+        int pos = 0;
+        renderPageBlocks (page, waves, envs, slots,
+                          destSampleRate > 0 ? destSampleRate : 44100.0, masterGain, total,
+                          [&] (const juce::AudioBuffer<float>& block, int n)
+                          {
+                              // the render adds into the destination, so the
+                              // region it covers is cleared first
+                              juce::FloatVectorOperations::clear (dest.getWritePointer (0) + pos, n);
+                              juce::FloatVectorOperations::copy (dest.getWritePointer (0) + pos,
+                                                                 block.getReadPointer (0), n);
+                              if (dest.getNumChannels() > 1)
+                              {
+                                  juce::FloatVectorOperations::clear (dest.getWritePointer (1) + pos, n);
+                                  juce::FloatVectorOperations::copy (dest.getWritePointer (1) + pos,
+                                                                     block.getReadPointer (1), n);
+                              }
+                              pos += n;
+                              return true;
+                          });
+
         phases = saved;
         // sample voices are recreated on the next realtime contact (they may
         // hold vocoder state from this pass)
@@ -813,6 +866,65 @@ inline bool writeWavFile (const juce::File& target,
 }
 
 //==============================================================================
+// v1.33.4 (H8): the page rendered straight into a WAV file, block by block.
+//
+// The export used to render the whole page into one buffer and then wrote
+// it: the buffer was given durationSec * sampleRate frames, so the end of a
+// warped page was cut off (an arc at 25-29 s of a 30 s page exported as
+// silence), and a long page needed the whole render in memory (a 12 minute
+// page at 96 kHz is over half a gigabyte).
+//
+// Now the page is walked with the page's exact time map - the same map the
+// playback uses - and each block is written as it is rendered, so the file
+// is as long as the page really needs and the memory stays flat. The write
+// still goes to a temporary sibling and replaces the target only when the
+// whole file is on disk (as writeWavFile does).
+//
+// The session's settings come with it: the pitch algorithms and the grain
+// sizes, so the file sounds like the session (the export used the engine's
+// defaults).
+inline bool writePageToWavFile (const juce::File& target,
+                                const upic::Page& page,
+                                const std::vector<upic::Waveform>& waves,
+                                const std::vector<upic::Envelope>& envs,
+                                const std::vector<upic::SampleSlot>& slots,
+                                double sr, float masterGain,
+                                int samplePitchMode = 0,
+                                int sampleGrainMs = 0,
+                                int liveGrainMs = 0)
+{
+    if (target == juce::File() || sr <= 0.0 || page.durationSec <= 0.0) return false;
+
+    juce::TemporaryFile temp (target);
+    auto out = temp.getFile().createOutputStream();
+    if (out == nullptr) return false;
+
+    juce::WavAudioFormat fmt;
+    std::unique_ptr<juce::AudioFormatWriter> w (
+        fmt.createWriterFor (out.release(), sr, 2, 16, {}, 0));
+    if (w == nullptr) return false;
+
+    UpicEngine eng;
+    if (samplePitchMode >= 0) eng.setSamplePitchMode (samplePitchMode);
+    if (sampleGrainMs > 0) eng.setSampleGrainMs (sampleGrainMs);
+    if (liveGrainMs > 0) eng.setLiveGrainMs (liveGrainMs);
+
+    // the page's own time decides the length: a warped page needs more
+    // audio than it has score
+    const int frames = (int) std::ceil (page.audioDurationSec() * sr);
+    const bool ok = eng.renderPageBlocks (page, waves, envs, slots, sr, masterGain, frames,
+        [&] (const juce::AudioBuffer<float>& block, int n)
+        {
+            return w->writeFromAudioSampleBuffer (block, 0, n);
+        });
+
+    w.reset(); // flushes and closes the file (the WAV header is patched here)
+    if (! ok) return false;
+
+    return temp.overwriteTargetFileWithTemporary();
+}
+
+//==============================================================================
 // The result of a stem export: the files that were really written, and how
 // many renders were attempted and failed (v1.33.4 / H11 - a failed render
 // must not be reported as a written file).
@@ -827,7 +939,8 @@ struct StemExport
 // sample-mode arcs) into outDir. Muted arcs and voices with no audible
 // material are skipped. Returns the files that were really written and the
 // failures (see StemExport). `samplePitchMode` mirrors
-// UpicEngine::setSamplePitchMode so stems match what the session hears.
+// UpicEngine::setSamplePitchMode so stems match what the session hears, and
+// the grain sizes do the same (v1.33.4 / H8).
 inline StemExport renderStems(const upic::Page& page,
                               const std::vector<upic::Waveform>& waves,
                               const std::vector<upic::Envelope>& envs,
@@ -835,7 +948,9 @@ inline StemExport renderStems(const upic::Page& page,
                               const juce::File& outDir,
                               const juce::String& prefix,
                               double sr, float masterGain,
-                              int samplePitchMode = 0)
+                              int samplePitchMode = 0,
+                              int sampleGrainMs = 0,
+                              int liveGrainMs = 0)
 {
     StemExport result;
     if (page.arcs.empty() || sr <= 0.0 || prefix.isEmpty()) return result;
@@ -871,19 +986,13 @@ inline StemExport renderStems(const upic::Page& page,
 
     outDir.createDirectory();
 
-    const int total = (int) std::ceil(page.durationSec * sr);
     auto renderOne = [&](const upic::Page& one, const juce::File& f) {
         ++result.attempted;
-        juce::AudioBuffer<float> buf(2, juce::jmax(1, total));
-        buf.clear();
-        UpicEngine eng;
-        eng.prepare(sr, 8192);
-        eng.setSamplePitchMode(samplePitchMode);
-        eng.renderPageOffline(one, waves, envs, slots, buf, sr, masterGain);
-        // v1.33.4 (H11): the render goes to a temporary sibling and replaces
-        // the target only when the whole file is on disk. A failed write
-        // leaves the previous stem alone and is not reported as written.
-        if (writeWavFile (f, buf, sr))
+        // v1.33.4 (H8): the stem is rendered straight into the file, block
+        // by block, and it is as long as the page's own time needs (a warped
+        // page used to be cut off at the end)
+        if (writePageToWavFile (f, one, waves, envs, slots, sr, masterGain,
+                                samplePitchMode, sampleGrainMs, liveGrainMs))
             result.written.push_back (f);
         else
             ++result.failed;

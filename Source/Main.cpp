@@ -3562,6 +3562,134 @@ public:
                     }
                 }
 
+                // --- v1.33.4 (H8): the export must cover the whole page ---
+                // The export was given durationSec * sampleRate frames, but
+                // the page's own time runs at a varying rate, so a warped
+                // page needs more audio than it has score: the end of the
+                // page was cut off (an arc at 25-29 s of a 30 s page
+                // exported as silence). The page's time map is now shared by
+                // the playback and the export, and the export streams the
+                // render into the file.
+                {
+                    // the map itself: a 30 s page at warp 0.9 needs 49.07 s
+                    // of audio to play through (the review's probe)
+                    {
+                        upic::Page mapPg;
+                        mapPg.durationSec = 30.0;
+                        mapPg.warp = 0.9;
+                        const double dur = mapPg.audioDurationSec();
+                        check (std::abs (dur - 49.074) < 0.01
+                               && std::abs (mapPg.scoreAtAudioTime (dur) - 30.0) < 1.0e-3
+                               && std::abs (mapPg.audioTimeAtScore (30.0) - dur) < 1.0e-3,
+                               "the page's time map: a 30 s page at warp 0.9 needs 49.07 s of audio",
+                               juce::String (dur, 3) + " s");
+                    }
+
+                    // a 4 s page with an arc at the start and one at the end
+                    auto warpedPage = [] (double warp)
+                    {
+                        upic::Page pg;
+                        pg.durationSec = 4.0;
+                        pg.warp = warp;
+                        upic::Arc first;
+                        first.id = 1; first.mode = 0; first.intensity = 1.0f;
+                        first.points = { {0.0, 220.0}, {1.0, 220.0} };
+                        upic::Arc last;
+                        last.id = 2; last.mode = 0; last.intensity = 1.0f;
+                        last.points = { {3.0, 330.0}, {3.9, 330.0} };
+                        pg.arcs.push_back (first);
+                        pg.arcs.push_back (last);
+                        return pg;
+                    };
+
+                    // the export (the same path the WAV render uses) and the
+                    // file it wrote, read back
+                    auto exportPage = [] (const upic::Page& pg, const juce::File& file,
+                                                 juce::AudioBuffer<float>& out) -> bool
+                    {
+                        const auto waves = upic::defaultWaveforms();
+                        const auto envs = upic::defaultEnvelopes();
+                        std::vector<upic::SampleSlot> noSlots;
+                        const bool wrote = writePageToWavFile (file, pg, waves, envs, noSlots,
+                                                               44100.0, 0.8f);
+                        if (! wrote) return false;
+                        std::unique_ptr<juce::FileInputStream> in (file.createInputStream());
+                        juce::WavAudioFormat fmt;
+                        std::unique_ptr<juce::AudioFormatReader> reader (fmt.createReaderFor (in.release(), true));
+                        if (reader == nullptr) return false;
+                        out.setSize ((int) reader->numChannels, (int) reader->lengthInSamples);
+                        reader->read (&out, 0, (int) reader->lengthInSamples, 0, true, false);
+                        return true;
+                    };
+
+                    // the export of a warped page: the file is as long as the
+                    // page's own time needs, and the last arc is in it
+                    for (double warp : { 0.9, -0.9 })
+                    {
+                        const auto pg = warpedPage (warp);
+                        const juce::File f = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                                 .getChildFile ("upic_h8_warp.wav");
+                        f.deleteFile();
+                        juce::AudioBuffer<float> res;
+                        const bool wrote = exportPage (pg, f, res);
+                        const int expected = (int) std::ceil (pg.audioDurationSec() * 44100.0);
+                        double headPeak = 0.0, tailPeak = 0.0;
+                        if (res.getNumSamples() > 0)
+                        {
+                            const int headEnd = (int) (pg.audioTimeAtScore (1.0) * 44100.0);
+                            const int tailStart = (int) (pg.audioTimeAtScore (3.0) * 44100.0);
+                            for (int i = 0; i < juce::jmin (headEnd, res.getNumSamples()); ++i)
+                                headPeak = std::max (headPeak, std::abs ((double) res.getSample (0, i)));
+                            for (int i = tailStart; i < res.getNumSamples(); ++i)
+                                tailPeak = std::max (tailPeak, std::abs ((double) res.getSample (0, i)));
+                        }
+                        check (wrote && res.getNumSamples() == expected
+                               && headPeak > 0.01 && tailPeak > 0.01,
+                               "the WAV export covers the whole warped page (warp "
+                                   + juce::String (warp, 2) + ")",
+                               juce::String (res.getNumSamples()) + " / " + juce::String (expected)
+                                   + " frames, tail " + juce::String (tailPeak, 4));
+                        f.deleteFile();
+                    }
+
+                    // the playback walks the same page to its end, whatever
+                    // the host's block size is
+                    for (int blockSize : { 128, 512 })
+                    {
+                        auto mcHolder = std::make_unique<MainComponent>(true);
+                        auto& mcWarp = *mcHolder;
+                        mcWarp.setSize (1280, 800);
+                        mcWarp.prepareToPlay (512, 44100.0);
+                        const auto pg = warpedPage (0.9);
+                        // the page through the piece format (the UI path)
+                        mcWarp.loadFromVar (juce::JSON::parse (
+                            "{\"pages\":[{\"duration\":4,\"warp\":0.9,\"nextArcId\":3,\"arcs\":["
+                            "{\"id\":1,\"mode\":0,\"intensity\":1,\"points\":[{\"t\":0,\"f\":220},{\"t\":1,\"f\":220}]},"
+                            "{\"id\":2,\"mode\":0,\"intensity\":1,\"points\":[{\"t\":3,\"f\":330},{\"t\":3.9,\"f\":330}]}]}]}"));
+                        for (auto* c : mcWarp.getChildren())
+                            if (auto* b = dynamic_cast<juce::Button*>(c))
+                                if (b->getButtonText() == "Play") { b->onClick(); break; }
+
+                        juce::AudioBuffer<float> buf (2, blockSize);
+                        juce::AudioSourceChannelInfo info (&buf, 0, blockSize);
+                        const int tailStart = (int) (pg.audioTimeAtScore (3.0) * 44100.0);
+                        double tailPeak = 0.0;
+                        const int blocks = (int) std::ceil (pg.audioDurationSec() * 44100.0 / blockSize) + 4;
+                        for (int b = 0; b < blocks; ++b)
+                        {
+                            buf.clear();
+                            mcWarp.getNextAudioBlock (info);
+                            if (b * blockSize >= tailStart)
+                                for (int i = 0; i < blockSize; ++i)
+                                    tailPeak = std::max (tailPeak, std::abs ((double) buf.getSample (0, i)));
+                        }
+                        check (tailPeak > 0.01,
+                               "the playback walks a warped page to its end (" + juce::String (blockSize)
+                                   + " frame blocks)",
+                               "tail " + juce::String (tailPeak, 4));
+                    }
+                }
+
                 mc.setSize(1280, 800);
 
                 // --- v1.2 controls exist with sane bounds ---
