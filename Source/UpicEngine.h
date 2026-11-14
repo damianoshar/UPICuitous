@@ -1111,6 +1111,11 @@ inline bool writeWavFile (const juce::File& target,
 // The session's settings come with it: the pitch algorithms and the grain
 // sizes, so the file sounds like the session (the export used the engine's
 // defaults).
+//
+// v1.33.4 (M28): the export runs on a worker thread, so it can report its
+// progress and be cancelled: `progress` is called with the percentage done
+// and returns false to stop the render (the file that was there before is
+// then left alone - the write goes to a temporary sibling).
 inline bool writePageToWavFile (const juce::File& target,
                                 const upic::Page& page,
                                 const std::vector<upic::Waveform>& waves,
@@ -1119,7 +1124,8 @@ inline bool writePageToWavFile (const juce::File& target,
                                 double sr, float masterGain,
                                 int samplePitchMode = 0,
                                 int sampleGrainMs = 0,
-                                int liveGrainMs = 0)
+                                int liveGrainMs = 0,
+                                const std::function<bool (int percent)>& progress = {})
 {
     if (target == juce::File() || sr <= 0.0 || page.durationSec <= 0.0) return false;
 
@@ -1140,10 +1146,18 @@ inline bool writePageToWavFile (const juce::File& target,
     // the page's own time decides the length: a warped page needs more
     // audio than it has score
     const int frames = (int) std::ceil (page.audioDurationSec() * sr);
+    int done = 0;
     const bool ok = eng.renderPageBlocks (page, waves, envs, slots, sr, masterGain, frames,
         [&] (const juce::AudioBuffer<float>& block, int n)
         {
-            return w->writeFromAudioSampleBuffer (block, 0, n);
+            if (! w->writeFromAudioSampleBuffer (block, 0, n)) return false;
+            done += n;
+            if (progress)
+            {
+                const int pct = frames > 0 ? (int) (100.0 * (double) done / (double) frames) : 100;
+                if (! progress (juce::jlimit (0, 100, pct))) return false;
+            }
+            return true;
         });
 
     w.reset(); // flushes and closes the file (the WAV header is patched here)
@@ -1172,6 +1186,10 @@ struct StemExport
 // failures (see StemExport). `samplePitchMode` mirrors
 // UpicEngine::setSamplePitchMode so stems match what the session hears, and
 // the grain sizes do the same (v1.33.4 / H8).
+//
+// v1.33.4 (M28): the export runs on a worker thread, so it can report its
+// progress and be cancelled: `progress` is called with the percentage done
+// and returns false to stop (the files that were already written stay).
 inline StemExport renderStems(const upic::Page& page,
                               const std::vector<upic::Waveform>& waves,
                               const std::vector<upic::Envelope>& envs,
@@ -1181,7 +1199,8 @@ inline StemExport renderStems(const upic::Page& page,
                               double sr, float masterGain,
                               int samplePitchMode = 0,
                               int sampleGrainMs = 0,
-                              int liveGrainMs = 0)
+                              int liveGrainMs = 0,
+                              const std::function<bool (int percent)>& progress = {})
 {
     StemExport result;
     if (page.arcs.empty() || sr <= 0.0 || prefix.isEmpty()) return result;
@@ -1253,16 +1272,38 @@ inline StemExport renderStems(const upic::Page& page,
 
     outDir.createDirectory();
 
+    // v1.33.4 (M28): the progress runs over the voices, and the cancel stops
+    // the render (the files that were already written stay).
+    const int totalVoices = (int) (wIds.size() + sIds.size() + pmVoices.size());
+    int voicesDone = 0;
+    bool cancelled = false;
+
     auto renderOne = [&](const upic::Page& one, const juce::File& f) {
+        if (cancelled) return;
         ++result.attempted;
         // v1.33.4 (H8): the stem is rendered straight into the file, block
         // by block, and it is as long as the page's own time needs (a warped
         // page used to be cut off at the end)
-        if (writePageToWavFile (f, one, waves, envs, slots, sr, masterGain,
-                                samplePitchMode, sampleGrainMs, liveGrainMs))
-            result.written.push_back (f);
-        else
-            ++result.failed;
+        const bool ok = writePageToWavFile (f, one, waves, envs, slots, sr, masterGain,
+                                samplePitchMode, sampleGrainMs, liveGrainMs,
+                                [&] (int percent)
+                                {
+                                    if (! progress) return true;
+                                    const int overall = totalVoices > 0
+                                        ? (int) (100.0 * ((double) voicesDone
+                                                          + (double) percent / 100.0)
+                                                 / (double) totalVoices)
+                                        : 100;
+                                    if (! progress (juce::jlimit (0, 100, overall)))
+                                    {
+                                        cancelled = true;
+                                        return false;
+                                    }
+                                    return true;
+                                });
+        if (ok) result.written.push_back (f);
+        else if (! cancelled) ++result.failed;
+        ++voicesDone;
     };
 
     for (int id : wIds)

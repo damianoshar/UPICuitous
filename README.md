@@ -214,7 +214,11 @@ sequencer (SEQ), WAV render, per-voice stems, `.upic.json` save/load
 the wavetable voices, the sample slots and the PM voices (a PM-only page
 exports its stems too); the live arcs need the microphone, so they are not
 exported and the export says so. The export uses the session's own rate
-(the device's in standalone, the host's in a plugin). A file that is not a
+(the device's in standalone, the host's in a plugin). The long jobs - the
+WAV render, the stems, the sample import and the save - run on a worker
+thread, so the window stays alive while they work; the status line shows
+how far the job is, and **File -> Cancel the job** stops it (the file that
+was there before is kept). A file that is not a
 piece is
 refused with a message and the current piece is kept - a bad file can
 never wipe the unsaved work. The piece carries everything that
@@ -393,7 +397,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 563 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 569 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -416,9 +420,10 @@ material's own sample rate, a failed load keeping the composition, the
 sample PCM surviving repeated saves, the stems of a PM-only page, the
 latency following an arc's own algorithm, and the file a chooser
 returns, the MIDI message queue, the MIDI channel labels, the model
-snapshot that the status timer publishes, and the audio thread's
+snapshot that the status timer publishes, the audio thread's
 allocations (the render, the steady state, a reset and the vocoder's
-working memory) ) and
+working memory), and the long jobs (the worker thread, the cancel, and
+the export that writes its file) ) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.

@@ -759,6 +759,88 @@ public:
             }
         }
 
+        // 6a-5. v1.33.4 (M28): the long jobs - the render, the stems, the
+        //     decode, the save - run on a worker thread. They used to run in
+        //     the file chooser's callback: on the message thread, and mostly
+        //     while holding dataLock, so a long export froze the window and
+        //     held the audio thread up with it.
+        {
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize (1280, 800);
+
+            // The job runs on a worker thread: the message thread is free
+            // while it works. The worker waits for the test to let it go,
+            // so the check cannot pass by accident.
+            std::atomic<bool> workerStarted { false };
+            std::atomic<bool> releaseWorker { false };
+            std::atomic<bool> workerFinished { false };
+            mc.startJob ("selftest", [&] (MainComponent::Job& job)
+            {
+                workerStarted.store (true, std::memory_order_relaxed);
+                // the wait has a deadline of its own: if the job ever ran on
+                // the message thread, the test would end (slowly) instead of
+                // hanging for ever
+                const auto stopAt = juce::Time::getMillisecondCounter() + 5000;
+                while (! releaseWorker.load (std::memory_order_relaxed)
+                       && ! job.cancelled.load (std::memory_order_relaxed)
+                       && juce::Time::getMillisecondCounter() < stopAt)
+                    juce::Thread::sleep (1);
+                workerFinished.store (true, std::memory_order_relaxed);
+            }, nullptr);
+
+            auto deadline = juce::Time::getMillisecondCounter() + 5000;
+            while (! workerStarted.load (std::memory_order_relaxed)
+                   && juce::Time::getMillisecondCounter() < deadline)
+                juce::Thread::sleep (1);
+            check (workerStarted.load (std::memory_order_relaxed),
+                   "the job starts on a worker thread");
+            check (! workerFinished.load (std::memory_order_relaxed),
+                   "the message thread is free while the job runs");
+            releaseWorker.store (true, std::memory_order_relaxed);
+            deadline = juce::Time::getMillisecondCounter() + 5000;
+            while (! workerFinished.load (std::memory_order_relaxed)
+                   && juce::Time::getMillisecondCounter() < deadline)
+                juce::Thread::sleep (1);
+            check (workerFinished.load (std::memory_order_relaxed),
+                   "the job finishes");
+
+            // The cancel reaches the job: the worker sees the flag and
+            // stops.
+            std::atomic<bool> cancelSeen { false };
+            mc.startJob ("selftest cancel", [&] (MainComponent::Job& job)
+            {
+                while (! job.cancelled.load (std::memory_order_relaxed))
+                    juce::Thread::sleep (1);
+                cancelSeen.store (true, std::memory_order_relaxed);
+            }, nullptr);
+            deadline = juce::Time::getMillisecondCounter() + 5000;
+            while (mc.jobRunning() && juce::Time::getMillisecondCounter() < deadline)
+                juce::Thread::sleep (1);
+            mc.cancelJob();
+            deadline = juce::Time::getMillisecondCounter() + 5000;
+            while (! cancelSeen.load (std::memory_order_relaxed)
+                   && juce::Time::getMillisecondCounter() < deadline)
+                juce::Thread::sleep (1);
+            check (cancelSeen.load (std::memory_order_relaxed),
+                   "the running job can be cancelled");
+
+            // And the render really writes the file when it runs as a job.
+            const auto target = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                    .getChildFile ("upic_m28_export.wav");
+            target.deleteFile();
+            mc.exportPageAsJob (juce::URL (target));
+            deadline = juce::Time::getMillisecondCounter() + 120000;
+            while (mc.jobRunning() && juce::Time::getMillisecondCounter() < deadline)
+                juce::Thread::sleep (5);
+            check (! mc.jobRunning(), "the export job finishes");
+            check (target.existsAsFile() && target.getSize() > 1000,
+                   "the export job wrote the file",
+                   target.existsAsFile() ? juce::String (target.getSize()) + " bytes"
+                                         : juce::String ("no file"));
+            target.deleteFile();
+        }
+
         // 6b. live take -> sample slot (v1.4 capture path, headless)
         {
             juce::AudioBuffer<float> take(2, 48000);

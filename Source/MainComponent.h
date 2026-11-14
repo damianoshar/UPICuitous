@@ -1,6 +1,8 @@
 #pragma once
 #include <JuceHeader.h>
 #include <atomic>
+#include <functional>
+#include <thread>
 #include "UpicModel.h"
 #include "UpicEngine.h"
 #include "ModelSnapshot.h"
@@ -102,6 +104,76 @@ public:
     // back to 44.1 kHz and sound different from the session.
     double exportSampleRate() const { return audioSampleRate > 0.0 ? audioSampleRate : 44100.0; }
     std::atomic<int> timerTicks { 0 };  // diagnostics: how often the status timer ran
+
+    // --- v1.33.4 (M28): the long jobs off the message thread ---
+    //
+    // The sample decode, the base64 write and the whole-page render used to
+    // run in the file chooser's callback: on the message thread, and mostly
+    // while holding dataLock. A 120 s export at 96 kHz wants ~88 MiB of
+    // stereo floats and minutes of CPU - the window froze, the audio thread
+    // waited for the lock, and the app looked hung.
+    //
+    // The job now runs on a worker thread. The model is captured on the
+    // message thread (the sample audio is shared, so the copy is eight
+    // pointers), the worker never touches the component, and the report
+    // comes back on the message thread. The job reports its progress and
+    // can be cancelled.
+    struct Job
+    {
+        juce::String label;                    // what the status line says
+        std::atomic<bool> cancelled { false };
+        std::atomic<bool> done { false };      // the work is finished
+        std::atomic<int> progress { 0 };       // 0..100
+        bool ok = false;                       // the job's result (the report reads it)
+        juce::String message;                  // what the report says
+        std::function<void (Job&)> work;       // the heavy part (the worker thread)
+        std::function<void (Job&)> report;     // the result (the message thread)
+    };
+    using JobPtr = std::shared_ptr<Job>;
+
+    // starts a job on the worker thread (message thread). One at a time: a
+    // second job would fight the first over the disk.
+    void startJob (const juce::String& label,
+                   std::function<void (Job&)> work,
+                   std::function<void (Job&)> report);
+    void cancelJob();                                  // asks the running job to stop
+    bool jobRunning() const { return jobBusy.load (std::memory_order_relaxed); }
+    int jobProgress() const;
+    juce::String jobLabel() const;
+
+    // The model a render or an export works on: captured on the message
+    // thread (under the lock) and then never touched again.
+    struct ExportModel
+    {
+        upic::Page page;
+        std::vector<upic::Waveform> waves;
+        std::vector<upic::Envelope> envs;
+        std::vector<upic::SampleSlot> slots;
+        double sr = 44100.0;
+        float masterGain = 0.8f;
+        int samplePitchMode = 0, sampleGrainMs = 0, liveGrainMs = 0;
+    };
+    ExportModel captureExportModel() const;
+    // The page render as a job (the file chooser calls it, and so does the
+    // selftest). The destination can be a document-provider document too.
+    void exportPageAsJob (const juce::URL& target);
+    // The heavy work, on the calling thread (the worker thread in the app,
+    // the selftest's thread in the test). The progress callback is called
+    // with the percentage done and returns false to cancel the job.
+    static bool exportPageToFile (const juce::File& target, const ExportModel& model,
+                                  const std::function<bool (int percent)>& progress = {});
+    static StemExport exportStemsToDir (const juce::File& dir, const ExportModel& model,
+                                        const std::function<bool (int percent)>& progress = {});
+
+    // The sample decode, off the message thread: the file is decoded into
+    // the import, and the message thread installs it in the slot.
+    struct SampleImport
+    {
+        juce::String name;
+        upic::LoadedSample sample;
+    };
+    static bool decodeSampleFile (const juce::File& f, SampleImport& out, juce::String& error);
+    void installSample (int slotIndex, SampleImport&& import);   // message thread
 
     // v1.20 (wave 18): the live reverse - the frozen segment the shifter
     // reads (mirrored in time) and the state of the effect.
@@ -317,6 +389,13 @@ private:
     // thread renders from the snapshot it last took and never locks.
     SnapshotHandover<ModelSnapshot> snapshots;
     ModelSnapshot* liveSnapshot = nullptr;          // audio thread only
+
+    // --- v1.33.4 (M28): the worker thread ---
+    // The job that is running (the message thread reads it; the worker has
+    // its own copy) and the thread itself. One job at a time.
+    JobPtr activeJob;
+    std::thread worker;
+    std::atomic<bool> jobBusy { false };
     std::atomic<int> pageEpoch { 0 };               // message -> audio
     int seenPageEpoch = -1;                         // audio
     int audioPage = 0;                              // audio thread's page
@@ -707,6 +786,10 @@ public:
     void injectMidiMessage (const juce::MidiMessage&); // v1.25: plugin host MIDI bus
     // Piece (de)serialization — public so the selftest can round-trip them.
     juce::var pieceToVar() const;
+    // v1.33.4 (M28): the piece as a self-contained model, captured under the
+    // lock - the worker thread builds the JSON (and the base64 of the
+    // samples) from the copy, so the message thread is not held up by it.
+    upic::PieceModel capturePieceModel() const;
     // v1.33.4 (M25): the piece is parsed into a temporary model first and
     // replaces the current one only when it really is a piece. Returns false
     // when the var is not a piece - the current piece is then kept, so a

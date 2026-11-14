@@ -5,6 +5,16 @@
 #include <sstream>
 #include <iterator>
 
+namespace
+{
+    // The size of a piece, in words a person can read ("12 MB").
+    juce::String humanPieceSize (juce::int64 bytes)
+    {
+        return bytes >= 1024 * 1024 ? (juce::String ((int) (bytes / (1024 * 1024))) + " MB")
+                                    : (juce::String ((int) (bytes / 1024)) + " KB");
+    }
+}
+
 //==============================================================================
 MainComponent::MainComponent(bool pluginMode)
     : pluginMode_(pluginMode)
@@ -489,6 +499,13 @@ void MainComponent::buildLiveControls()
         m.addItem (5, "Audio settings...");
         m.addItem (6, "MIDI + OSC settings...");
         m.addItem (7, "Clear page...");
+        // v1.33.4 (M28): the long jobs (the render, the stems, the decode,
+        // the save) run on a worker thread, so they can be stopped.
+        if (jobRunning())
+        {
+            m.addSeparator();
+            m.addItem (8, "Cancel the job (" + jobLabel() + ")");
+        }
         // v1.31 (U3): the UPIC could transform a composition. The reverse is
         // already here (the Rev button); these are the pitch transforms.
         juce::PopupMenu transform;
@@ -516,6 +533,7 @@ void MainComponent::buildLiveControls()
                     case 5: sp->showAudioSettings(); break;
                     case 6: sp->showSettings(); break;
                     case 7: sp->showClearWarning(); break;
+                    case 8: sp->cancelJob(); break;   // v1.33.4 (M28)
                     default: sp->transformPage (r); break;
                 }
             });
@@ -1985,6 +2003,12 @@ void MainComponent::updateWaveButtonColours()
 MainComponent::~MainComponent()
 {
     stopOscReceiver();
+    // v1.33.4 (M28): the worker must be gone before the members it could
+    // touch are. It is asked to stop first - a render checks the flag
+    // between the blocks, so it ends at once.
+    if (activeJob) activeJob->cancelled.store (true);
+    if (worker.joinable()) worker.join();
+    activeJob.reset();
     // v1.18: stop the audio thread first (no callback can be in flight), then
     // hand back the snapshots it owned so the handover can free them here.
     shutdownAudio();
@@ -2297,6 +2321,80 @@ void MainComponent::flash(const juce::String& m)
     flashUntilMs = juce::Time::getMillisecondCounter() + 4000;
 }
 
+//==============================================================================
+// v1.33.4 (M28): the long jobs - the render, the stems, the decode, the
+// save - run on a worker thread, so the window stays alive and the audio
+// thread is not held up by them.
+//
+// The rules:
+//   - the model is captured on the message thread (under the lock) and the
+//     worker never touches the component again
+//   - the work checks the cancel flag between the blocks, and the progress
+//     is published as a percentage the status line shows
+//   - the report comes back on the message thread (the worker posts it), so
+//     the messages and the UI are only touched there
+void MainComponent::startJob (const juce::String& label,
+                              std::function<void (Job&)> work,
+                              std::function<void (Job&)> report)
+{
+    // one job at a time - a second one would fight the first over the disk
+    if (jobBusy.load (std::memory_order_relaxed))
+    {
+        flash ("Another job is still running (" + jobLabel() + ") - wait for it, or cancel it");
+        return;
+    }
+
+    // the previous job's thread is done (it cleared the flag), so it can go
+    if (worker.joinable()) worker.join();
+
+    auto job = std::make_shared<Job>();
+    job->label = label;
+    job->work = std::move (work);
+    job->report = std::move (report);
+    activeJob = job;
+    jobBusy.store (true, std::memory_order_relaxed);
+    flash (label + "...");
+
+    // the safe pointer: the window can be closed while the job runs
+    juce::Component::SafePointer<MainComponent> sp (this);
+    worker = std::thread ([sp, job]
+    {
+        if (job->work)
+        {
+            try { job->work (*job); }
+            catch (...) { job->ok = false; }
+        }
+        // the job is done - the next one may start (the report is only a
+        // message, it does not block anything)
+        job->done.store (true, std::memory_order_relaxed);
+        if (sp != nullptr) sp->jobBusy.store (false, std::memory_order_relaxed);
+        // the report belongs to the message thread
+        juce::MessageManager::callAsync ([sp, job]
+        {
+            if (sp == nullptr) return;
+            if (sp->activeJob == job) sp->activeJob.reset();
+            if (job->report) job->report (*job);
+        });
+    });
+}
+
+void MainComponent::cancelJob()
+{
+    if (! jobBusy.load (std::memory_order_relaxed)) return;
+    if (activeJob) activeJob->cancelled.store (true, std::memory_order_relaxed);
+    flash ("Cancelling " + jobLabel() + "...");
+}
+
+int MainComponent::jobProgress() const
+{
+    return activeJob ? activeJob->progress.load (std::memory_order_relaxed) : 0;
+}
+
+juce::String MainComponent::jobLabel() const
+{
+    return activeJob ? activeJob->label : juce::String();
+}
+
 void MainComponent::pushSieve()
 {
     sieveOn = sieveBtn.getToggleState();
@@ -2384,6 +2482,47 @@ void MainComponent::runGenerator(int kind)
     flash(msg);
 }
 
+//==============================================================================
+// v1.33.4 (M28): the export's model - captured on the message thread, under
+// the lock, so the worker thread never touches the component again.
+MainComponent::ExportModel MainComponent::captureExportModel() const
+{
+    ExportModel m;
+    {
+        const juce::ScopedLock l (dataLock);
+        m.page  = curPage();
+        m.waves = waveforms;
+        m.envs  = envelopes;
+        m.slots = sampleSlots;
+    }
+    m.sr = exportSampleRate();
+    m.masterGain = masterGain.load();
+    m.samplePitchMode = engine.getSamplePitchMode();
+    m.sampleGrainMs = sampleGrainMs;
+    m.liveGrainMs = liveGrainMs;
+    return m;
+}
+
+// The heavy work, on the calling thread (the worker in the app, the
+// selftest's thread in the test). The progress callback is called with the
+// percentage done and returns false to cancel the job - a cancelled export
+// leaves the file that was there before alone.
+bool MainComponent::exportPageToFile (const juce::File& target, const ExportModel& model,
+                                      const std::function<bool (int percent)>& progress)
+{
+    return writePageToWavFile (target, model.page, model.waves, model.envs, model.slots,
+                               model.sr, model.masterGain, model.samplePitchMode,
+                               model.sampleGrainMs, model.liveGrainMs, progress);
+}
+
+StemExport MainComponent::exportStemsToDir (const juce::File& dir, const ExportModel& model,
+                                            const std::function<bool (int percent)>& progress)
+{
+    return renderStems (model.page, model.waves, model.envs, model.slots, dir, "stem",
+                        model.sr, model.masterGain, model.samplePitchMode,
+                        model.sampleGrainMs, model.liveGrainMs, progress);
+}
+
 void MainComponent::exportStems()
 {
     // v1.33.4 (H11): the chooser can stay open while the window is closed,
@@ -2419,55 +2558,70 @@ void MainComponent::exportStems()
                     return;
                 }
             }
-            double sr = sp->exportSampleRate();
-            StemExport res;
-            {
-                juce::ScopedLock l(sp->dataLock);
-                res = renderStems(sp->curPage(), sp->waveforms, sp->envelopes, sp->sampleSlots,
-                                  dir, "stem", sr, sp->masterGain.load(),
-                                  sp->engine.getSamplePitchMode(),
-                                  sp->sampleGrainMs, sp->liveGrainMs);
-            }
-            // v1.33.4 (M17): the rendered stems are copied into the chosen
-            // document tree (a local folder holds them already).
-            int copied = 0;
-            juce::String copyError;
-            if (! isLocal)
-            {
-                for (auto& f : res.written)
+            // v1.33.4 (M28): the render runs on a worker thread, so the
+            // window stays alive and the audio thread is not held up by it.
+            // The model is captured here, under the lock.
+            auto model = std::make_shared<ExportModel> (sp->captureExportModel());
+            sp->startJob ("Rendering the stems",
+                [model, dir, url, isLocal] (Job& job)
                 {
-                    juce::String error;
-                    if (upic::writePickedFolderFile (f, url, f.getFileName(), error))
-                        ++copied;
+                    const StemExport res = exportStemsToDir (dir, *model,
+                        [&job] (int percent)
+                        {
+                            job.progress.store (juce::jlimit (0, 100, percent),
+                                               std::memory_order_relaxed);
+                            return ! job.cancelled.load (std::memory_order_relaxed);
+                        });
+
+                    // v1.33.4 (M17): the rendered stems are copied into the
+                    // chosen document tree (a local folder holds them already).
+                    int copied = 0;
+                    juce::String copyError;
+                    if (! isLocal)
+                    {
+                        for (auto& f : res.written)
+                        {
+                            juce::String error;
+                            if (upic::writePickedFolderFile (f, url, f.getFileName(), error))
+                                ++copied;
+                            else
+                                copyError = error;
+                        }
+                        dir.deleteRecursively();
+                    }
+
+                    // v1.33.4 (H11): only the files that were really written
+                    // are counted, and a failed render is reported instead of
+                    // being silently dropped (the old files are left alone).
+                    // v1.33.4 (M23): what was left out (the live arcs) is
+                    // said out loud, so a PM-only page is not mistaken for an
+                    // empty score.
+                    job.ok = ! res.written.empty() && res.failed == 0;
+                    if (job.cancelled.load (std::memory_order_relaxed))
+                    {
+                        job.message = "Stems: cancelled";
+                    }
+                    else if (res.written.empty())
+                    {
+                        if (res.failed > 0)
+                            job.message = "Stems: the export failed (" + juce::String(res.failed)
+                                          + " file(s) could not be written - the old ones were kept)";
+                        else if (! res.note.isEmpty())
+                            job.message = "Stems: " + res.note;
+                        else
+                            job.message = "Stems: nothing to render (no audible arcs / voices in this page)";
+                    }
                     else
-                        copyError = error;
-                }
-                dir.deleteRecursively();
-            }
-            // v1.33.4 (H11): only the files that were really written are
-            // counted, and a failed render is reported instead of being
-            // silently dropped (the old files are left alone).
-            // v1.33.4 (M23): what was left out (the live arcs) is said out
-            // loud, so a PM-only page is not mistaken for an empty score.
-            if (res.written.empty())
-            {
-                if (res.failed > 0)
-                    sp->flash("Stems: the export failed (" + juce::String(res.failed)
-                              + " file(s) could not be written - the old ones were kept)");
-                else if (! res.note.isEmpty())
-                    sp->flash("Stems: " + res.note);
-                else
-                    sp->flash("Stems: nothing to render (no audible arcs / voices in this page)");
-            }
-            else
-            {
-                sp->flash("Wrote " + juce::String((int) res.written.size()) + " stem file(s) to "
-                          + (isLocal ? dir.getFullPathName() : upic::pickedFileName (url))
-                          + (res.failed > 0 ? " - " + juce::String(res.failed) + " failed" : juce::String())
-                          + (res.note.isEmpty() ? juce::String() : " - " + res.note)
-                          + (copyError.isEmpty() ? juce::String()
-                                                 : " - " + juce::String(copied) + " copied, " + copyError));
-            }
+                    {
+                        job.message = "Wrote " + juce::String((int) res.written.size()) + " stem file(s) to "
+                                    + (isLocal ? dir.getFullPathName() : upic::pickedFileName (url))
+                                    + (res.failed > 0 ? " - " + juce::String(res.failed) + " failed" : juce::String())
+                                    + (res.note.isEmpty() ? juce::String() : " - " + res.note)
+                                    + (copyError.isEmpty() ? juce::String()
+                                                           : " - " + juce::String(copied) + " copied, " + copyError);
+                    }
+                },
+                [sp] (Job& job) { sp->flash (job.message); });
         });
 }
 
@@ -4100,7 +4254,15 @@ void MainComponent::timerCallback()
     const int latSamples = liveLatencySamples();
 
     juce::String s;
-    if (juce::Time::getMillisecondCounter() < flashUntilMs)
+    // v1.33.4 (M28): a running job has the first word - the user must see
+    // that the app is working and how far it is.
+    if (jobRunning())
+    {
+        s = jobLabel() + " " + juce::String (jobProgress()) + "%"
+            + (activeJob && activeJob->cancelled.load (std::memory_order_relaxed)
+                   ? " (cancelling...)" : " (File -> Cancel the job)");
+    }
+    else if (juce::Time::getMillisecondCounter() < flashUntilMs)
     {
         s = flashMsg; // transient feedback (file dialogs overwrite status otherwise)
     }
@@ -4830,45 +4992,48 @@ void MainComponent::layoutOverlays (float s)
     }
 }
 
+//==============================================================================
+// v1.33.4 (M28): the piece as a self-contained model.
+//
+// The saver used to build the JSON - and with it the base64 of every sample
+// - on the message thread, while holding the model lock: a 30 MB piece froze
+// the window for a moment, and the audio thread waited for the lock. The
+// model is captured on the message thread instead (a copy: the sample audio
+// is shared, so the copy is eight pointers), and the worker builds the JSON
+// from the copy.
+upic::PieceModel MainComponent::capturePieceModel() const
+{
+    upic::PieceModel m;
+    {
+        const juce::ScopedLock l (dataLock);
+        m.waveforms = waveforms;
+        m.envelopes = envelopes;
+        m.sampleSlots = sampleSlots;
+        m.pages = pages;
+        m.currentPage = currentPage;
+    }
+    m.seqPages = seqPages;
+    m.recordPressure = recordPressure;
+    m.scrubAudition = scrubAudition;
+    m.muteWhileDragging = muteWhileDragging.load();
+    m.dragSmoothMs = dragSmoothMs.load();
+    m.scrubGrainMs = scrubGrainMs;
+    m.sampleGrainMs = sampleGrainMs;
+    m.liveGrainMs = liveGrainMs;
+    m.sieveOn = sieveOn;
+    m.sieveM = sieveM;
+    m.sieveR = sieveR;
+    m.stickiness = stickiness;
+    m.timeGrid = timeGrid;
+    m.masterGain = masterGain.load();
+    m.samplePitchMode = engine.getSamplePitchMode();
+    m.livePitchMode = engine.getLivePitchMode();
+    return m;
+}
+
 juce::var MainComponent::pieceToVar() const
 {
-    auto* o = new juce::DynamicObject();
-    o->setProperty("app", "UPICuitous");
-    o->setProperty("version", 1);
-    o->setProperty("master", masterGain.load());
-    o->setProperty("currentPage", currentPage);
-    // v1.1 (absent in older / Python-written files -> defaults applied)
-    o->setProperty("seqPages", seqPages);
-    o->setProperty("recordPressure", recordPressure);
-    o->setProperty("scrubAudition", scrubAudition);
-    o->setProperty("muteWhileDragging", muteWhileDragging.load());
-    o->setProperty("dragSmoothMs", dragSmoothMs.load());
-    o->setProperty("scrubGrainMs", scrubGrainMs);
-    o->setProperty("sampleGrainMs", sampleGrainMs);
-    o->setProperty("liveGrainMs", liveGrainMs);
-    o->setProperty("sieveOn", sieveOn);
-    o->setProperty("sieveM", sieveM);
-    // v1.33.4 (H7): the global pitch modes change the sound, so they travel
-    // with the piece (and with the host state) - they used to be dropped on
-    // save, so a reopened piece or session sounded different
-    o->setProperty("samplePitchMode", engine.getSamplePitchMode());
-    o->setProperty("livePitchMode", engine.getLivePitchMode());
-    juce::Array<juce::var> srArr;
-    for (int r : sieveR) srArr.add(r);
-    o->setProperty("sieveR", srArr);
-    // v1.2 (same rule: defaults keep old files working unchanged)
-    o->setProperty("stickiness", stickiness);
-    o->setProperty("timeGrid", timeGrid);
-    juce::Array<juce::var> wa, ea, pa, sa;
-    for (auto& w : waveforms) wa.add(w.toVar());
-    for (auto& e : envelopes) ea.add(e.toVar());
-    for (auto& s : sampleSlots) if (s.loaded()) sa.add(s.toVar());
-    for (auto& p : pages) pa.add(p.toVar());
-    o->setProperty("waveforms", wa);
-    o->setProperty("envelopes", ea);
-    o->setProperty("samples", sa);
-    o->setProperty("pages", pa);
-    return juce::var(o);
+    return upic::pieceToVar (capturePieceModel());
 }
 
 bool MainComponent::loadFromVar(const juce::var& v)
@@ -5126,7 +5291,8 @@ bool MainComponent::loadFromVar(const juce::var& v)
 
 juce::String MainComponent::pieceStateText()
 {
-    juce::ScopedLock l(dataLock);
+    // v1.33.4 (M28): pieceToVar() captures the model under the lock and the
+    // JSON is built from the copy, so the lock is only held for the capture.
     return juce::JSON::toString(pieceToVar(), false);
 }
 
@@ -5147,7 +5313,37 @@ void MainComponent::saveFile()
             // output stream.
             const auto url = c.getURLResult();
             if (! url.isWellFormed()) return;
-            savePieceToURL (url);
+            // v1.33.4 (M28): the save runs on a worker thread - the samples
+            // become base64 and the JSON is built there, so a big piece does
+            // not freeze the window. The model is captured here, under the
+            // lock.
+            auto model = std::make_shared<upic::PieceModel> (sp->capturePieceModel());
+            const juce::int64 maxBytes = (juce::int64) upic::limits::kMaxPieceBytes;
+            sp->startJob ("Saving the piece",
+                [model, url, maxBytes] (Job& job)
+                {
+                    const juce::String json = juce::JSON::toString (upic::pieceToVar (*model), true);
+                    const juce::int64 bytes = (juce::int64) json.getNumBytesAsUTF8();
+                    if (bytes > maxBytes)
+                    {
+                        job.ok = false;
+                        job.message = "Piece too large to save ("
+                                    + humanPieceSize (bytes) + ", the limit is "
+                                    + humanPieceSize (maxBytes) + ") - shorten the capture or the sample, "
+                                    + "or export the audio to a WAV instead";
+                        return;
+                    }
+                    juce::String error;
+                    if (! upic::writePickedBytes (url, json.toRawUTF8(), (size_t) bytes, error))
+                    {
+                        job.ok = false;
+                        job.message = error;
+                        return;
+                    }
+                    job.ok = true;
+                    job.message = "Saved " + upic::pickedFileName (url);
+                },
+                [sp] (Job& job) { sp->flash (job.message); });
         });
 }
 
@@ -5174,11 +5370,12 @@ bool MainComponent::savePieceToURL (const juce::URL& url, juce::int64 maxBytes)
 {
     if (! url.isWellFormed()) return false;
 
-    juce::String json;
-    {
-        juce::ScopedLock l (dataLock);
-        json = juce::JSON::toString (pieceToVar(), true);
-    }
+    // v1.33.4 (M28): the model is captured under the lock and the JSON is
+    // built from the copy - the samples become base64, and that is the heavy
+    // part. The window's own save path runs this on a worker thread; this
+    // one is the synchronous form the selftest drives.
+    const auto model = capturePieceModel();
+    const juce::String json = juce::JSON::toString (upic::pieceToVar (model), true);
 
     const juce::int64 bytes = (juce::int64) json.getNumBytesAsUTF8();
     auto humanSize = [] (juce::int64 b) -> juce::String
@@ -5274,6 +5471,69 @@ void MainComponent::loadFile()
         });
 }
 
+//==============================================================================
+// v1.33.4 (M28): the decode, off the message thread.
+//
+// The decoder read the whole file and made it seamless on the message
+// thread: a 30 s WAV froze the window for a second. The decode now runs on
+// the worker thread and the message thread installs the result in the slot.
+bool MainComponent::decodeSampleFile (const juce::File& f, SampleImport& out, juce::String& error)
+{
+    // SECURITY (S-03): the decode and the allocation are wrapped, so a
+    // crafted file that exhausts the memory shows a message instead of
+    // taking the app down.
+    try
+    {
+        // v1.33.4 (M19): the material keeps the file's own rate. The old
+        // code clamped the rate to 96 kHz and kept the frames, so a
+        // 192 kHz file was played at half speed. A file above the app's
+        // ceiling is refused with a message instead of being retuned, the
+        // duration cap is counted at the file's own rate, and the
+        // decoder's return value is checked.
+        upic::LoadedSample loaded;
+        if (! upic::loadSampleFile (f, loaded, error))
+            return false;
+        out.sample = std::move (loaded);
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        error = std::string ("Could not load the audio file: ") + e.what();
+        return false;
+    }
+    catch (...)
+    {
+        error = "Could not load the audio file";
+        return false;
+    }
+}
+
+// The install, on the message thread: the model is read by the audio thread,
+// so it is mutated under the lock.
+void MainComponent::installSample (int slotIndex, SampleImport&& import)
+{
+    if (slotIndex < 0 || slotIndex >= (int) sampleSlots.size()) return;
+    {
+        // model is read by the audio thread -> mutate under the lock.
+        // v1.18: the buffer is immutable + shared, so the pointer is
+        // replaced instead of written; snapshots that still hold the
+        // old pointer keep it alive until they are retired.
+        juce::ScopedLock l (dataLock);
+        auto& slot = sampleSlots[(size_t) slotIndex];
+        slot.name = import.name;
+        slot.sampleRate = import.sample.sampleRate;
+        slot.data = std::make_shared<const juce::AudioBuffer<float>>(std::move (import.sample.data));
+        markModelChanged(); // v1.15: new material -> fade across it
+        publishModelSnapshot(); // the next block must see it (no timer needed)
+    }
+    score.sampleDurations[sampleSlots[(size_t) slotIndex].id] = sampleSlots[(size_t) slotIndex].durationSec();
+    selSlot = slotIndex;
+    refreshBoxes();
+    updateSampleView();
+    pushVoice();
+    repaint();
+}
+
 void MainComponent::loadSampleIntoSlot(int slotIndex)
 {
     if (slotIndex < 0 || slotIndex >= (int) sampleSlots.size()) return;
@@ -5306,58 +5566,32 @@ void MainComponent::loadSampleIntoSlot(int slotIndex)
                                         ? juce::File (picked.name).getFileNameWithoutExtension()
                                         : f.getFileNameWithoutExtension();
 
-            // SECURITY (S-03): the decode and the allocation are wrapped, so
-            // a crafted file that exhausts the memory shows a message
-            // instead of taking the app down.
-            try
-            {
-            // v1.33.4 (M19): the material keeps the file's own rate. The old
-            // code clamped the rate to 96 kHz and kept the frames, so a
-            // 192 kHz file was played at half speed. A file above the app's
-            // ceiling is refused with a message instead of being retuned, the
-            // duration cap is counted at the file's own rate, and the
-            // decoder's return value is checked.
-            upic::LoadedSample loaded;
-            if (! upic::loadSampleFile (f, loaded, error))
-            {
-                flash (error);
-                return;
-            }
-
-            {
-                // model is read by the audio thread -> mutate under the lock.
-                // v1.18: the buffer is immutable + shared, so the pointer is
-                // replaced instead of written; snapshots that still hold the
-                // old pointer keep it alive until they are retired.
-                juce::ScopedLock l(dataLock);
-                auto& slot = sampleSlots[(size_t) slotIndex];
-                slot.name = materialName;
-                slot.sampleRate = loaded.sampleRate;
-                slot.data = std::make_shared<const juce::AudioBuffer<float>>(std::move (loaded.data));
-                markModelChanged(); // v1.15: new material -> fade across it
-                publishModelSnapshot(); // the next block must see it (no timer needed)
-            }
-            if (! loaded.warning.isEmpty())
-                flash (loaded.warning);
-            else
-                flash("Loaded \"" + materialName + "\" into slot "
-                  + juce::String(sampleSlots[(size_t) slotIndex].id));
-             score.sampleDurations[sampleSlots[(size_t) slotIndex].id] = sampleSlots[(size_t) slotIndex].durationSec();
-             score.sampleDurations[sampleSlots[(size_t) slotIndex].id] = sampleSlots[(size_t) slotIndex].durationSec();
-            selSlot = slotIndex;
-            refreshBoxes();
-            updateSampleView();
-            pushVoice();
-            repaint();
-            }
-            catch (const std::exception& e)
-            {
-                flash (std::string ("Could not load the audio file: ") + e.what());
-            }
-            catch (...)
-            {
-                flash ("Could not load the audio file");
-            }
+            // v1.33.4 (M28): the decode runs on a worker thread, so the
+            // window stays alive while a long file is decoded.
+            auto imported = std::make_shared<SampleImport>();
+            sp->startJob ("Decoding \"" + materialName + "\"",
+                [f, materialName, imported] (Job& job)
+                {
+                    juce::String err;
+                    const bool ok = decodeSampleFile (f, *imported, err);
+                    imported->name = materialName;
+                    job.ok = ok;
+                    job.message = ok ? imported->sample.warning : err;
+                },
+                [sp, slotIndex, imported, materialName] (Job& job)
+                {
+                    if (! job.ok)
+                    {
+                        sp->flash (job.message.isNotEmpty() ? job.message
+                                                           : "Could not load the audio file");
+                        return;
+                    }
+                    sp->installSample (slotIndex, std::move (*imported));
+                    sp->flash (job.message.isNotEmpty()
+                                ? job.message
+                                : ("Loaded \"" + materialName + "\" into slot "
+                                   + juce::String (sp->sampleSlots[(size_t) slotIndex].id)));
+                });
         });
 }
 
@@ -5459,6 +5693,69 @@ void MainComponent::applyPmPresetFile (const juce::File& f)
     flash ("Imported PM preset");
 }
 
+//==============================================================================
+// v1.33.4 (M28): the page render as a job.
+//
+// The file chooser calls this, and so does the selftest (the report needs a
+// message loop, but the file is written either way). The destination can be
+// a document-provider document (Android): it is rendered into a local
+// temporary file and then copied into the chosen document.
+void MainComponent::exportPageAsJob (const juce::URL& url)
+{
+    if (! url.isWellFormed()) return;
+    const bool isLocal = upic::isPlainFileURL (url);
+    juce::File temp;
+    if (! isLocal)
+    {
+        temp = juce::File::createTempFile (".wav");
+        if (temp == juce::File())
+        {
+            flash ("Could not make a temporary file for the render");
+            return;
+        }
+    }
+
+    // the model is captured here, under the lock - the worker never touches
+    // the component again
+    auto model = std::make_shared<ExportModel> (captureExportModel());
+    juce::Component::SafePointer<MainComponent> sp (this);
+    startJob ("Rendering the page",
+        [model, url, isLocal, temp] (Job& job)
+        {
+            // v1.33.4 (H8): the page is rendered straight into the file,
+            // block by block: the file is as long as the page's own time
+            // needs (a warped page used to be cut off at the end) and the
+            // memory stays flat. The session's pitch algorithm and grain
+            // sizes come with it, so the file sounds like the session.
+            const juce::File target = isLocal ? url.getLocalFile() : temp;
+            const bool rendered = exportPageToFile (target, *model,
+                [&job] (int percent)
+                {
+                    job.progress.store (juce::jlimit (0, 100, percent),
+                                       std::memory_order_relaxed);
+                    return ! job.cancelled.load (std::memory_order_relaxed);
+                });
+
+            bool ok = rendered;
+            juce::String error;
+            if (ok && ! isLocal)
+                ok = upic::copyLocalFileToPicked (temp, url, error);
+            if (! isLocal)
+                temp.deleteFile();
+
+            job.ok = ok;
+            if (job.cancelled.load (std::memory_order_relaxed))
+                job.message = "Render cancelled - " + upic::pickedFileName (url) + " was not written";
+            else if (ok)
+                job.message = "Rendered " + upic::pickedFileName (url);
+            else
+                job.message = error.isNotEmpty()
+                    ? error
+                    : ("Render failed - " + upic::pickedFileName (url) + " was not written");
+        },
+        [sp] (Job& job) { if (sp != nullptr) sp->flash (job.message); });
+}
+
 void MainComponent::renderWav()
 {
     // v1.33.4 (H11): the chooser can stay open while the window is closed,
@@ -5475,47 +5772,9 @@ void MainComponent::renderWav()
             // file and then copied into the chosen document.
             const auto url = upic::pickedURLWithExtension (c.getURLResult(), "wav");
             if (! url.isWellFormed()) return;
-            // v1.33.4 (M23): the prepared rate - the device's rate in
-            // standalone, the host's rate in a plugin (the device manager
-            // knows nothing there, so the export used to be 44.1 kHz while
-            // the session played at the host's rate).
-            double sr = sp->exportSampleRate();
-            bool ok = false;
-            juce::File temp;
-            const bool isLocal = upic::isPlainFileURL (url);
-            if (! isLocal)
-            {
-                temp = juce::File::createTempFile (".wav");
-                if (temp == juce::File())
-                {
-                    sp->flash ("Could not make a temporary file for the render");
-                    return;
-                }
-            }
-            {
-                juce::ScopedLock l(sp->dataLock);
-                // v1.33.4 (H8): the page is rendered straight into the file,
-                // block by block: the file is as long as the page's own time
-                // needs (a warped page used to be cut off at the end) and the
-                // memory stays flat. The session's pitch algorithm and grain
-                // sizes come with it, so the file sounds like the session.
-                ok = writePageToWavFile (isLocal ? url.getLocalFile() : temp,
-                                         sp->curPage(), sp->waveforms, sp->envelopes,
-                                         sp->sampleSlots, sr, sp->masterGain.load(),
-                                         sp->engine.getSamplePitchMode(),
-                                         sp->sampleGrainMs, sp->liveGrainMs);
-            }
-            if (ok && ! isLocal)
-            {
-                juce::String error;
-                ok = upic::copyLocalFileToPicked (temp, url, error);
-                if (! ok)
-                    sp->flash (error);
-            }
-            if (! isLocal)
-                temp.deleteFile();
-            sp->flash (ok ? ("Rendered " + upic::pickedFileName (url))
-                           : ("Render failed - " + upic::pickedFileName (url) + " was not written"));
+            // v1.33.4 (M28): the render runs on a worker thread, so the
+            // window stays alive and the audio thread is not held up by it.
+            sp->exportPageAsJob (url);
         });
 }
 
