@@ -146,6 +146,19 @@ public:
         return f;
     }
 
+    // v1.33.4 (U6-C): the cursor-based pitch. The render walks the samples
+    // of a block in order, so the arc's segment can be followed instead of
+    // searched for every sample.
+    static inline double arcPitch (const upic::Arc& arc, double t,
+                                   upic::Page::SpaceMap map,
+                                   upic::Arc::PitchCursor& cursor)
+    {
+        double f = map.apply (arc.freqAt (t, cursor));
+        if (arc.stepDivisions > 0)
+            f = upic::applyTemperament (f, arc.stepDivisions, upic::kDefaultRefFreq);
+        return f;
+    }
+
     // Time scale for a sample voice. Mode 1 (granular stretch) uses the same
     // arc-length mapping in normal playback and scrub; mode 2 (phase vocoder)
     // only maps onto the arc in the scrub preview. Mode 3 (granular no
@@ -325,12 +338,18 @@ public:
                                       juce::jlimit (0.0,20.0,arc.pmI3), } ;
                 const upic::Waveform* carW = findWave (waves, arc.waveformId);
 
+                // v1.33.4 (U6-C): the cursors. The loop walks the samples in
+                // order, so the arc's segment and the two envelopes' segments
+                // can be followed instead of searched for every sample.
+                upic::Arc::PitchCursor pc;
+                upic::SegmentCursor ec, iec;
+
                 for (int n = i0; n <= i1; ++n)
                 {
                     const double t = playhead + (double) n * step;
-                    const double cFreq = juce::jlimit (upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map));
-                    const float env = e != nullptr ? e->valueAt (arc.lifeAt (t)) : 1.0f;
-                    const float idxE = (idxEnv != nullptr ? idxEnv->valueAt (arc.lifeAt (t)) : 1.0f);
+                    const double cFreq = juce::jlimit (upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
+                    const float env = e != nullptr ? e->valueAt (arc.lifeAt (t), ec) : 1.0f;
+                    const float idxE = (idxEnv != nullptr ? idxEnv->valueAt (arc.lifeAt (t), iec) : 1.0f);
                     const float edge = edgeFade (t, arcStart, arcEnd);
 
                     // advance topology (serial): top modulator ... -> carrier
@@ -360,7 +379,7 @@ public:
                     // 2-op legacy single-mod path unused when ops==2? keep for compat:
 
 
-                    scratch[(size_t) n] += osc * env * edge * (float) arc.intensity * arc.intensityAt (t);
+                    scratch[(size_t) n] += osc * env * edge * (float) arc.intensity * arc.intensityAt (t, pc);
                 }
                 continue;
             }
@@ -371,14 +390,19 @@ public:
 
             double& ph = phaseFor (arc.id); // 0..1, kept across blocks for continuity
 
+            // v1.33.4 (U6-C): the cursors - the arc's segment and the
+            // envelope's segment are followed, not searched.
+            upic::Arc::PitchCursor pc;
+            upic::SegmentCursor ec;
+
             for (int n = i0; n <= i1; ++n)
             {
                 const double t = playhead + (double) n * step;
 
-                float env = e != nullptr ? e->valueAt(arc.lifeAt(t)) : 1.0f;
+                float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
                 const float edge = edgeFade(t, arcStart, arcEnd);
 
-                float freq = (float) juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map));
+                float freq = (float) juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
 
                 // v1.31 (U1): the polyagogy - the arc's own wave can also
                 // be a control signal. The curve is read at its own rate
@@ -406,7 +430,7 @@ public:
                 ph += freq * invSr;
                 if (ph >= 1.0) ph -= std::floor(ph);
 
-                scratch[(size_t) n] += osc * env * edge * intensity * arc.intensityAt(t);
+                scratch[(size_t) n] += osc * env * edge * intensity * arc.intensityAt(t, pc);
             }
         }
 
@@ -900,14 +924,19 @@ private:
                                    : sampleGrainMs.load(std::memory_order_relaxed);
         v.grain.setHop(juce::jmax(0.005, (double) grainMs / 1000.0));
 
+        // v1.33.4 (U6-C): the cursors - the arc's segment and the envelope's
+        // segment are followed, not searched.
+        upic::Arc::PitchCursor pc;
+        upic::SegmentCursor ec;
+
         for (int n = i0; n <= i1; ++n)
         {
             const double t = playhead + (double) n * step;
 
-            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map));
+            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
             const double ratio = juce::jlimit(1.0 / 16.0, 16.0, freq / ref);
 
-            const float env = e != nullptr ? e->valueAt(arc.lifeAt(t)) : 1.0f;
+            const float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
             const float edge = edgeFade(t, arcStart, arcEnd);
 
             float s;
@@ -953,7 +982,7 @@ private:
                 if (v.pos < 0.0) v.pos += matDur;
             }
 
-            scratch[(size_t) n] += s * env * edge * arc.intensity * arc.intensityAt(t);
+            scratch[(size_t) n] += s * env * edge * arc.intensity * arc.intensityAt(t, pc);
         }
     }
 
@@ -1013,15 +1042,20 @@ private:
             ls.prepareVocoderMemory (sampleRate);
         ls.setGrainMs((double) liveGrainMs.load(std::memory_order_relaxed));
 
+        // v1.33.4 (U6-C): the cursors - the arc's segment and the envelope's
+        // segment are followed, not searched.
+        upic::Arc::PitchCursor pc;
+        upic::SegmentCursor ec;
+
         for (int n = i0; n <= i1; ++n)
         {
             const double t = playhead + (double) n * (rate * invSr);
 
-            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map));
+            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
             const double ratio = juce::jlimit(upic::kLiveMinRatio,
                                               upic::kLiveMaxRatio, freq / ref);
 
-            const float env = e != nullptr ? e->valueAt(arc.lifeAt(t)) : 1.0f;
+            const float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
             const float edge = edgeFade(t, arcStart, arcEnd);
 
             // v1.14: the live ring is filled per block, so the write head

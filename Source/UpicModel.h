@@ -165,6 +165,50 @@ namespace upic
         return lo;
     }
 
+    //---------------- the cursor lookups (v1.33.4, U6 option C) ------
+    // The render walks the samples of a block in order, so the time moves
+    // monotonically - forwards, or backwards when the transport is
+    // reversed. The segment can therefore be FOLLOWED instead of searched:
+    // the cursor is placed once (one binary search) and then only moves as
+    // the time moves, which makes the per-sample cost O(1) instead of
+    // O(log n).
+    //
+    // The cursor is a plain index into the point list it was made for: the
+    // list must not change while the cursor is used, and the cursor must
+    // not be shared between two lists.
+    struct SegmentCursor
+    {
+        size_t index = 1;    // the segment's upper point (the lower one is index-1)
+        bool placed = false; // the binary search has not run yet
+    };
+
+    // Moves the cursor to the segment that holds the key. The key may move
+    // in either direction (the transport can be reversed); the cursor
+    // follows it. The result is the same index findSegment() would return:
+    // the first point whose key is >= the searched one.
+    template <typename PointType, typename KeyType, typename KeyGetter>
+    inline size_t followSegment (const std::vector<PointType>& points,
+                                  KeyType key, KeyGetter keyOf,
+                                  SegmentCursor& cursor)
+    {
+        const size_t n = points.size();
+        if (n == 0) return 0;
+        if (! cursor.placed)
+        {
+            cursor.index = findSegment (points, key, keyOf);
+            cursor.placed = true;
+            return cursor.index;
+        }
+        // the time moved forwards: skip the segments that are behind it
+        while (cursor.index < n && keyOf (points[cursor.index]) < key)
+            ++cursor.index;
+        // the time moved backwards: step back over the segments that are
+        // still ahead of it
+        while (cursor.index > 0 && keyOf (points[cursor.index - 1]) >= key)
+            --cursor.index;
+        return cursor.index;
+    }
+
     //---------------- Waveform ----------------
     struct Waveform
     {
@@ -253,13 +297,23 @@ namespace upic
 
         float valueAt(float t) const
         {
+            SegmentCursor c;
+            return valueAt (t, c);
+        }
+        // v1.33.4 (U6-C): the cursor-based envelope lookup. The arc's life
+        // position moves monotonically while the render walks the samples,
+        // so the segment can be followed instead of searched.
+        float valueAt(float t, SegmentCursor& cursor) const
+        {
             if (points.empty()) return 1.0f;
             t = juce::jlimit(0.0f, 1.0f, t);
             if (t <= points.front().x) return points.front().y;
             if (t >= points.back().x)  return points.back().y;
             // The points are sorted by x, so the segment is found with a
             // binary search instead of a linear scan (this runs per sample).
-            const size_t i = findSegment (points, t, [] (const EnvPoint& p) { return p.x; });
+            const size_t i = followSegment (points, t,
+                                           [] (const EnvPoint& p) { return p.x; },
+                                           cursor);
             const size_t i0 = i - 1, i1 = i;
             float x0 = points[i0].x, y0 = points[i0].y;
             float x1 = points[i1].x, y1 = points[i1].y;
@@ -450,25 +504,55 @@ namespace upic
                                            0.0, kMaxPageSeconds);
         }
 
+        // v1.33.4 (U6-C): the cursor for the arc's own lookups. It follows
+        // the segment as the time moves and keeps the segment's endpoints -
+        // and their log2, which the pitch interpolation needs - so the
+        // per-sample work is a lerp instead of a binary search plus two
+        // log2 calls.
+        struct PitchCursor
+        {
+            SegmentCursor seg;
+            size_t cachedIndex = (size_t) -1;  // the segment the cache is for
+            double t0 = 0.0, t1 = 0.0;
+            double l0 = 0.0, l1 = 0.0;         // the log2 of the endpoints
+            float  i0 = 1.0f, i1 = 1.0f;        // the endpoints' pressure
+        };
+
+        // Moves the cursor to the segment that holds t and refreshes the
+        // cached endpoints (they only change when the cursor moves).
+        void seekCursor (double t, PitchCursor& c) const
+        {
+            const size_t i = followSegment (points, t,
+                                           [] (const ArcPoint& p) { return p.t; },
+                                           c.seg);
+            if (i == c.cachedIndex) return;
+            c.cachedIndex = i;
+            if (i == 0 || i >= points.size()) return;   // guarded by the callers
+            const size_t i0 = i - 1, i1 = i;
+            c.t0 = points[i0].t; c.t1 = points[i1].t;
+            c.l0 = std::log2 (juce::jmax (1.0, points[i0].freq));
+            c.l1 = std::log2 (juce::jmax (1.0, points[i1].freq));
+            c.i0 = points[i0].i;   c.i1 = points[i1].i;
+        }
+
         // log-domain interpolation so glissandi sound linear in pitch
         double freqAt(double t) const
+        {
+            PitchCursor c;
+            return freqAt (t, c);
+        }
+        // v1.33.4 (U6-C): the cursor-based pitch. The caller walks the
+        // samples in order, so the cursor can follow the segment instead of
+        // searching for it again for every sample.
+        double freqAt(double t, PitchCursor& c) const
         {
             if (points.empty()) return 440.0;
             if (t <= points.front().t) return points.front().freq;
             if (t >= points.back().t)  return points.back().freq;
-            // The points are sorted by t, so the segment is found with a
-            // binary search instead of a linear scan: this runs per sample
-            // on the audio thread, and a crafted piece with a thousand
-            // points per arc would otherwise cost a thousand comparisons
-            // for every sample.
-            const size_t i = findSegment (points, t, [] (const ArcPoint& p) { return p.t; });
-            const size_t i0 = i - 1, i1 = i;
-            double t0 = points[i0].t, f0 = points[i0].freq;
-            double t1 = points[i1].t, f1 = points[i1].freq;
-            if (t1 <= t0) return f1;
-            double f = (t - t0) / (t1 - t0);
-            double l0 = std::log2(juce::jmax(1.0, f0)), l1 = std::log2(juce::jmax(1.0, f1));
-            return std::pow(2.0, l0 + (l1 - l0) * f);
+            seekCursor (t, c);
+            if (c.t1 <= c.t0) return points[c.cachedIndex].freq;
+            double f = (t - c.t0) / (c.t1 - c.t0);
+            return std::pow (2.0, c.l0 + (c.l1 - c.l0) * f);
         }
         // 0..1 over arc lifetime
         float lifeAt(double t) const
@@ -480,17 +564,20 @@ namespace upic
         // per-point pressure intensity curve (linear, 1.0 where no pressure)
         float intensityAt(double t) const
         {
+            PitchCursor c;
+            return intensityAt (t, c);
+        }
+        // v1.33.4 (U6-C): the cursor-based intensity - the same segment as
+        // the pitch, so it shares the cursor.
+        float intensityAt(double t, PitchCursor& c) const
+        {
             if (points.empty()) return 1.0f;
             if (t <= points.front().t) return points.front().i;
             if (t >= points.back().t)  return points.back().i;
-            // binary search, like freqAt() above
-            const size_t i = findSegment (points, t, [] (const ArcPoint& p) { return p.t; });
-            const size_t i0 = i - 1, i1 = i;
-            double t0 = points[i0].t, t1 = points[i1].t;
-            if (t1 <= t0) return points[i1].i;
-            float a = points[i0].i, b = points[i1].i;
-            float f = (float) ((t - t0) / (t1 - t0));
-            return a + (b - a) * f;
+            seekCursor (t, c);
+            if (c.t1 <= c.t0) return c.i1;
+            float f = (float) ((t - c.t0) / (c.t1 - c.t0));
+            return c.i0 + (c.i1 - c.i0) * f;
         }
 
         juce::var toVar() const

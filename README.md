@@ -255,6 +255,17 @@ the envelopes are keyed by their id, so a piece that carries the same id
 twice (or an id that was never meant to be one) is renumbered on the way
 in, and the next id is derived from the arcs that are there - a duplicate
 id can no longer make the selection and the delete hit the wrong arc.
+
+**The render path** - the audio thread walks the samples of a block in
+order, so the arc's segment and the envelope's segment are *followed*
+with a cursor instead of being searched for every sample. The pitch
+interpolation keeps the segment's endpoints (and their log2), so a
+sample costs a lerp instead of a binary search and two logarithms. The
+worst case the piece limits allow - 500 arcs sounding at the same time -
+now costs 7.4 ms per 512-sample block at 48 kHz (69% of the block
+budget; it was 16.4 ms, 154%), and the points per arc barely matter
+any more (1000 points per arc cost 2% more, not 60%). The selftest
+measures this every run and fails if the render path slows down.
 On Android the file chooser hands back a document-provider URL, not a
 path; the app works with that URL, so a piece, a sample or a preset picked
 from any provider (Downloads, Drive, a file manager) loads and saves
@@ -448,7 +459,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 655 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 662 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -483,9 +494,10 @@ step, and the stroke on the canvas), the recovery snapshot (the
 snapshot, the sidecar with the audio, the reuse of the unchanged audio,
 the read-back and the broken snapshot), the host transport follow (the
 choice of the clock, the start, the stop and the position), the drawing
-on a micro-time page (the arc, its points and their spread) and the MIDI
+on a micro-time page (the arc, its points and their spread), the MIDI
 scrub transport (the note jog, the backwards jog, the speed that goes
-back and the host that yields) ) and
+back and the host that yields) and the cursor render path (the pitch,
+the intensity and the envelope, forwards and backwards) ) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.

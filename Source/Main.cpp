@@ -1560,6 +1560,81 @@ public:
             }
         }
 
+        // 6a-14. v1.33.4 (U6, option C): the cursor render path. The render
+        //     walks the samples of a block in order, so the arc's segment and
+        //     the envelope's segment can be followed instead of searched for
+        //     every sample. The cursor must give exactly the same answers as
+        //     the binary search - forwards, backwards (the transport can be
+        //     reversed) and across the segment boundaries.
+        {
+            upic::Arc a;
+            for (int k = 0; k < 40; ++k)
+                // a wiggly curve: a straight line in the log domain would
+                // hide a wrong segment (the interpolation would land on the
+                // same line anyway)
+                a.points.push_back ({ (double) k * 0.25,
+                                      100.0 * std::pow (2.0, (double) (k % 7)
+                                                        + 0.5 * std::sin ((double) k)),
+                                      (float) (k % 5) / 4.0f });
+
+            // forwards
+            {
+                upic::Arc::PitchCursor c;
+                double worstF = 0.0, worstI = 0.0;
+                for (int k = 0; k <= 1000; ++k)
+                {
+                    const double t = 0.01 + (double) k * 0.0099;
+                    worstF = juce::jmax (worstF, std::abs (a.freqAt (t, c) - a.freqAt (t)));
+                    worstI = juce::jmax (worstI, std::abs ((double) a.intensityAt (t, c)
+                                                           - (double) a.intensityAt (t)));
+                }
+                check (worstF < 1e-9, "the cursor's pitch is the searched pitch",
+                       juce::String (worstF));
+                check (worstI < 1e-6, "the cursor's intensity is the searched intensity",
+                       juce::String (worstI));
+            }
+
+            // backwards - the transport can be reversed, so the cursor has to
+            // walk the segments back
+            {
+                upic::Arc::PitchCursor c;
+                double worstF = 0.0, worstI = 0.0;
+                for (int k = 1000; k >= 0; --k)
+                {
+                    const double t = 0.01 + (double) k * 0.0099;
+                    worstF = juce::jmax (worstF, std::abs (a.freqAt (t, c) - a.freqAt (t)));
+                    worstI = juce::jmax (worstI, std::abs ((double) a.intensityAt (t, c)
+                                                           - (double) a.intensityAt (t)));
+                }
+                check (worstF < 1e-9, "the cursor's pitch follows the segment backwards too",
+                       juce::String (worstF));
+                check (worstI < 1e-6, "the cursor's intensity follows the segment backwards too",
+                       juce::String (worstI));
+            }
+
+            // the envelope's own lookup
+            {
+                upic::Envelope e;
+                e.points = { { 0.0f, 0.0f }, { 0.3f, 1.0f }, { 0.7f, 0.4f }, { 1.0f, 0.0f } };
+                float worst = 0.0f;
+                for (int pass = 0; pass < 2; ++pass)
+                {
+                    upic::SegmentCursor c;
+                    worst = 0.0f;
+                    for (int k = 0; k <= 1000; ++k)
+                    {
+                        const int kk = (pass == 0) ? k : 1000 - k;
+                        const float x = (float) kk / 1000.0f;
+                        worst = juce::jmax (worst, std::abs (e.valueAt (x, c) - e.valueAt (x)));
+                    }
+                    check (worst < 1e-6f,
+                           pass == 0 ? "the cursor's envelope is the searched envelope"
+                                     : "the envelope's cursor follows the segment backwards too",
+                           juce::String (worst, 8));
+                }
+            }
+        }
+
         // 6b. live take -> sample slot (v1.4 capture path, headless)
         {
             juce::AudioBuffer<float> take(2, 48000);
@@ -7034,61 +7109,68 @@ public:
         // audio thread must not be handed more than a few times the block
         // budget, or the app stutters.
         //
-        // Measured on the release build (48 kHz, 512-sample blocks):
+        // Measured on the release build (48 kHz, 512-sample blocks), before
+        // and after the cursor render path (v1.33.4, U6 option C):
         //   500 arcs x  20 points -> 16.4 ms/block  (154% of the budget)
+        //                                           -> 7.6 ms/block  (71%)
         //   500 arcs x 1000 points -> 26.1 ms/block  (244%)
-        //  2024 arcs x  20 points -> 65.8 ms/block  (616%)
-        //  2024 arcs x 1000 points -> 104.3 ms/block (978%)
-        // The arc COUNT is the dominant term (the per-arc work), not the
-        // point count. The threshold is deliberately loose: it catches a
-        // real slowdown of the render path, not a slow machine.
+        //                                           -> 9.6 ms/block  (90%)
+        // The cursor follows the arc's segment instead of searching for it
+        // in every sample, so the point count barely costs anything now -
+        // the arc count is the term that matters.
+        //
+        // The threshold is deliberately loose: it catches a real slowdown of
+        // the render path, not a slow machine.
         {
             const int sr = 48000, blk = 512;
             const int arcs = upic::limits::kMaxArcsPerPage;
-            const int pts = 20;
-            upic::Page pg;
-            pg.durationSec = 10.0;
-            for (int i = 0; i < arcs; ++i)
-            {
-                upic::Arc a;
-                a.id = i + 1;
-                for (int k = 0; k < pts; ++k)
-                    a.points.push_back ({ (double) k / (double) pts * pg.durationSec,
-                                         100.0 * std::pow (2.0, (double) (k % 40) / 12.0) });
-                pg.arcs.push_back (a);
-            }
             auto waves = upic::defaultWaveforms();
             auto envs  = upic::defaultEnvelopes();
             std::vector<upic::SampleSlot> noSlots;
-            UpicEngine e; e.prepare (sr, blk);
-            juce::AudioBuffer<float> buf (2, blk);
-            e.render (pg, 0.0, waves, envs, noSlots, buf.getWritePointer(0),
-                      buf.getWritePointer(1), blk, 0.8f, 1.0, false);
-            const auto t0 = juce::Time::getHighResolutionTicks();
-            const int blocks = 20;
-            for (int b = 0; b < blocks; ++b)
-                e.render (pg, (double) b * blk / sr, waves, envs, noSlots,
-                          buf.getWritePointer(0), buf.getWritePointer(1), blk, 0.8f, 1.0, false);
-            const double secs = (double) (juce::Time::getHighResolutionTicks() - t0)
-                                 / (double) juce::Time::getHighResolutionTicksPerSecond();
-            const double usPerBlock = secs * 1e6 / blocks;
-            const double budgetUs = blk * 1e6 / sr;
-            log << "BENCH  " << arcs << " simultaneous arcs: "
-                << juce::String (usPerBlock / 1000.0, 2) << " ms/block ("
-                << juce::String (usPerBlock / budgetUs * 100.0, 0) << "% of the "
-                << juce::String (budgetUs / 1000.0, 2) << " ms budget)\n";
-            // the debug build is ~3x slower, so it gets a looser threshold;
-            // both are far above the measured baseline, which is what the
-            // check is for: catching a real slowdown of the render path.
-            #if JUCE_DEBUG
-                const double allowed = 12.0;
-            #else
-                const double allowed = 5.0;
-            #endif
-            check (usPerBlock < budgetUs * allowed,
-                   "the worst-case page stays within the realtime budget",
-                   juce::String (usPerBlock / budgetUs, 2) + "x (allowed "
-                   + juce::String (allowed, 0) + "x)");
+
+            for (int pts : { 20, 1000 })
+            {
+                upic::Page pg;
+                pg.durationSec = 10.0;
+                for (int i = 0; i < arcs; ++i)
+                {
+                    upic::Arc a;
+                    a.id = i + 1;
+                    for (int k = 0; k < pts; ++k)
+                        a.points.push_back ({ (double) k / (double) pts * pg.durationSec,
+                                             100.0 * std::pow (2.0, (double) (k % 40) / 12.0) });
+                    pg.arcs.push_back (a);
+                }
+                UpicEngine e; e.prepare (sr, blk);
+                juce::AudioBuffer<float> buf (2, blk);
+                e.render (pg, 0.0, waves, envs, noSlots, buf.getWritePointer(0),
+                          buf.getWritePointer(1), blk, 0.8f, 1.0, false);
+                const auto t0 = juce::Time::getHighResolutionTicks();
+                const int blocks = 20;
+                for (int b = 0; b < blocks; ++b)
+                    e.render (pg, (double) b * blk / sr, waves, envs, noSlots,
+                              buf.getWritePointer(0), buf.getWritePointer(1), blk, 0.8f, 1.0, false);
+                const double secs = (double) (juce::Time::getHighResolutionTicks() - t0)
+                                     / (double) juce::Time::getHighResolutionTicksPerSecond();
+                const double usPerBlock = secs * 1e6 / blocks;
+                const double budgetUs = blk * 1e6 / sr;
+                log << "BENCH  " << arcs << " simultaneous arcs x " << pts << " points: "
+                    << juce::String (usPerBlock / 1000.0, 2) << " ms/block ("
+                    << juce::String (usPerBlock / budgetUs * 100.0, 0) << "% of the "
+                    << juce::String (budgetUs / 1000.0, 2) << " ms budget)\n";
+                // the debug build is ~3x slower, so it gets a looser threshold;
+                // both are far above the measured baseline, which is what the
+                // check is for: catching a real slowdown of the render path.
+                #if JUCE_DEBUG
+                    const double allowed = 12.0;
+                #else
+                    const double allowed = 5.0;
+                #endif
+                check (usPerBlock < budgetUs * allowed,
+                       "the worst-case page stays within the realtime budget",
+                       juce::String (usPerBlock / budgetUs, 2) + "x (allowed "
+                       + juce::String (allowed, 0) + "x)");
+            }
         }
 
         // 25. v1.33.4 (M17): the file a chooser returned. On Android the
