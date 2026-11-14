@@ -2043,6 +2043,21 @@ private:
         return juce::jlimit(ambitusLo(), ambitusHi(), upic::sieveQuantizeHz(raw, m, R));
     }
 
+    // v1.33.4 (L12): the page's time resolution. The minimum spacing between
+    // two points of a stroke used to be a fixed 15 ms (and a line 50 ms), so
+    // on a micro-time page (the shortest page the app allows is 5 ms) a
+    // stroke kept a single point and the arc was dropped. The thresholds
+    // scale with the page: a long page keeps the old values, a short one
+    // gets a finer resolution. The stroke sampler (3 px) already bounds the
+    // point count, and the piece format caps the points per arc anyway.
+    double pageTimeResolution() const
+    {
+        const double dur = page != nullptr ? page->durationSec : 30.0;
+        return juce::jmax (0.0, dur / 500.0);   // 500 steps over the page
+    }
+    double minPointSpacingSec() const { return juce::jmin (0.015, pageTimeResolution()); }
+    double minLineLengthSec() const { return juce::jmin (0.05, pageTimeResolution()); }
+
     // v1.33: the quantisers, applied to a finished stroke or a finished line.
     //
     // The sieve (and the chromatic snap, and a zone's own sieve) quantise
@@ -2080,10 +2095,11 @@ private:
         // merge the points that landed on the same time
         std::vector<upic::ArcPoint> merged;
         std::vector<bool> mergedMag;
+        const double minSpacing = minPointSpacingSec();
         double lastT = -1.0e9;
         for (size_t i = 0; i < sorted.size(); ++i)
         {
-            if (sorted[i].t <= lastT + 0.015) continue;
+            if (sorted[i].t <= lastT + minSpacing) continue;
             merged.push_back (sorted[i]);
             mergedMag.push_back (sortedMag[i]);
             lastT = sorted[i].t;
@@ -2149,10 +2165,11 @@ private:
             a.pmOps = curPmOps;
         }
         double lastT = -1;
+        const double minSpacing = minPointSpacingSec();
         for (auto& q : strokePts)
         {
             double t = juce::jlimit(0.0, page->durationSec, xToTime(q.pos.x));
-            if (t <= lastT + 0.015) continue; // min spacing 15ms
+            if (t <= lastT + minSpacing) continue;   // the min spacing scales with the page
             double f = yToFreq(q.pos.y);
             a.points.push_back({ t, f, q.press });
             lastT = t;
@@ -2212,7 +2229,7 @@ private:
         const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
         double t0 = juce::jlimit(0.0, page->durationSec, xToTime(p0.x));
         double t1 = juce::jlimit(0.0, page->durationSec, xToTime(p1.x));
-        if (std::abs(t1 - t0) < 0.05) return;
+        if (std::abs(t1 - t0) < minLineLengthSec()) return;
         if (t1 < t0) { std::swap(t0, t1); std::swap(p0, p1); }
         upic::Arc a; a.id = page->nextArcId++;
         a.waveformId = curWave; a.envelopeId = curEnv; a.intensity = curInten;

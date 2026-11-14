@@ -1385,6 +1385,73 @@ public:
             }
         }
 
+        // 6a-12. v1.33.4 (L12): drawing on a micro-time page. The review:
+        //     "the stroke sampler and the quantiser dedup enforce a 15 ms
+        //     minimum point spacing, so a 5 ms page keeps one point and the
+        //     arc is dropped".
+        {
+            std::function<juce::Component*(juce::Component&, const juce::String&)> findByNameL12 =
+                [&findByNameL12](juce::Component& c, const juce::String& n) -> juce::Component* {
+                    if (c.getName() == n) return &c;
+                    for (int i = 0; i < c.getNumChildComponents(); ++i)
+                        if (auto* r = findByNameL12(*c.getChildComponent(i), n)) return r;
+                    return nullptr;
+                };
+
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize (1280, 800);
+            // the shortest page the app allows: 5 ms
+            mc.loadFromVar (juce::JSON::parse ("{\"pages\":[{\"duration\":0.005,\"arcs\":[]}]}"));
+
+            auto* sc = dynamic_cast<ScoreEditor*> (findByNameL12 (mc, "score"));
+            check (sc != nullptr, "the canvas is there for the micro-time test");
+            if (sc != nullptr)
+            {
+                sc->setTool (ScoreEditor::Draw);
+                const auto b = sc->getLocalBounds().toFloat();
+                // the stroke stays above the pitch-centre line (that band is
+                // the playhead's scrub target)
+                const auto p0 = juce::Point<float> (b.getX() + b.getWidth() * 0.25f,
+                                                    b.getY() + b.getHeight() * 0.22f);
+                const auto p1 = juce::Point<float> (b.getX() + b.getWidth() * 0.60f,
+                                                    b.getY() + b.getHeight() * 0.30f);
+                const auto now = juce::Time::getCurrentTime();
+                const auto src = juce::Desktop::getInstance().getMainMouseSource();
+                juce::MouseEvent down (src, p0, juce::ModifierKeys(), 1.0f,
+                                       0.0f, 0.0f, 0.0f, 0.0f, sc, sc, now, p0, now, 1, false);
+                sc->mouseDown (down);
+                juce::MouseEvent drag (src, p1, juce::ModifierKeys(), 1.0f,
+                                       0.0f, 0.0f, 0.0f, 0.0f, sc, sc, now, p0, now, 1, true);
+                sc->mouseDrag (drag);
+                sc->mouseUp (drag);
+
+                const auto piece = mc.pieceToVar();
+                auto* pages = piece.getProperty ("pages", juce::var()).getArray();
+                auto* arcs = pages != nullptr && pages->size() > 0
+                                ? pages->getReference (0).getProperty ("arcs", juce::var()).getArray()
+                                : nullptr;
+                check (arcs != nullptr && arcs->size() == 1,
+                       "a stroke on a 5 ms page still makes an arc",
+                       arcs != nullptr ? juce::String (arcs->size()) : juce::String ("no arcs"));
+                if (arcs != nullptr && arcs->size() == 1)
+                {
+                    auto* pts = arcs->getReference (0).getProperty ("points", juce::var()).getArray();
+                    check (pts != nullptr && pts->size() >= 2,
+                           "the micro-time arc keeps its points",
+                           pts != nullptr ? juce::String (pts->size()) : juce::String ("none"));
+                    if (pts != nullptr && pts->size() >= 2)
+                    {
+                        const double t0 = (double) pts->getReference (0).getProperty ("t", 0.0);
+                        const double t1 = (double) pts->getReference (pts->size() - 1)
+                                                .getProperty ("t", 0.0);
+                        check (t1 > t0, "the points of the micro-time arc are spread out",
+                               juce::String (t0, 5) + " .. " + juce::String (t1, 5));
+                    }
+                }
+            }
+        }
+
         // 6b. live take -> sample slot (v1.4 capture path, headless)
         {
             juce::AudioBuffer<float> take(2, 48000);

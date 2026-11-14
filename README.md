@@ -287,7 +287,11 @@ a selection and to every arc of the page otherwise:
 **Page duration** - the page's clock, from **5 ms** to **12 minutes**
 (the UPIC's own range: a drawing could sit in micro-time as well as in
 macro-time). The Dur slider's travel is skewed so 30 s sits in the
-middle, and the value box takes an exact number.
+middle, and the value box takes an exact number. The drawing works on
+a micro-time page too: the minimum distance between two points of a
+stroke scales with the page (15 ms on a long page, a fraction of a
+millisecond on a 5 ms one), so a short page keeps the whole curve
+instead of collapsing it into a single point.
 
 **The discrete frequency space** - the UPIC's frequency space could be the
 continuum, where a diagonal line is a glissando, or *discrete*, with equal
@@ -431,7 +435,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 638 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 642 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -464,8 +468,9 @@ sample rate and the scrub tail), the unsaved-changes flag, the undo
 stack (the step, the restore, the redo, the branch, the drag that is one
 step, and the stroke on the canvas), the recovery snapshot (the
 snapshot, the sidecar with the audio, the reuse of the unchanged audio,
-the read-back and the broken snapshot) and the host transport follow (the
-choice of the clock, the start, the stop and the position) ) and
+the read-back and the broken snapshot), the host transport follow (the
+choice of the clock, the start, the stop and the position) and the
+drawing on a micro-time page (the arc, its points and their spread) ) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.
