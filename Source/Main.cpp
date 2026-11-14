@@ -943,6 +943,67 @@ public:
             }
         }
 
+        // 6a-7. v1.33.4 (L14): two values cross the thread boundary. The
+        //     sample rate (the device's prepareToPlay writes it, the audio
+        //     thread reads it) and the scrub tail (the slider writes it, the
+        //     audio thread reads it) were plain variables: a data race, and
+        //     a torn read of the rate is possible.
+        {
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize (1280, 800);
+
+            // the device's rate is the rate the app uses
+            mc.prepareToPlay (512, 48000.0);
+            check (mc.getAudioSampleRate() == 48000.0,
+                   "the prepared sample rate is the device's rate",
+                   juce::String (mc.getAudioSampleRate(), 1));
+            check (mc.exportSampleRate() == 48000.0,
+                   "the export uses the prepared rate",
+                   juce::String (mc.exportSampleRate(), 1));
+
+            // the audio thread reads the rate ONCE per block, and it is the
+            // prepared one
+            juce::AudioBuffer<float> out (2, 512);
+            juce::AudioSourceChannelInfo info (&out, 0, out.getNumSamples());
+            mc.getNextAudioBlock (info);
+            check (mc.lastBlockRate() == 48000,
+                   "the audio block uses the prepared rate",
+                   juce::String (mc.lastBlockRate()));
+
+            // and it follows the rate when the device changes it
+            mc.prepareToPlay (512, 96000.0);
+            mc.getNextAudioBlock (info);
+            check (mc.lastBlockRate() == 96000,
+                   "the audio block follows the rate when it changes",
+                   juce::String (mc.lastBlockRate()));
+
+            // the tail: the slider writes it, the audio thread reads it
+            juce::Slider* tail = nullptr;
+            for (int i = 0; i < mc.getNumChildComponents() && tail == nullptr; ++i)
+                if (auto* s = dynamic_cast<juce::Slider*> (mc.getChildComponent (i)))
+                    if (s->getName() == "scrubTailSlider") tail = s;
+            check (tail != nullptr, "the scrub tail slider is there");
+            if (tail != nullptr)
+            {
+                // sendNotificationSync: the slider's callback runs at once
+                // (the selftest has no message loop)
+                tail->setValue (250.0, juce::sendNotificationSync);
+                check (mc.scrubTailMsValue() == 250,
+                       "the slider writes the tail the audio thread reads",
+                       juce::String (mc.scrubTailMsValue()));
+                // the audio thread reads it while it is being written
+                for (int i = 0; i < 8; ++i)
+                {
+                    tail->setValue (100.0 + i * 10.0, juce::sendNotificationSync);
+                    mc.getNextAudioBlock (info);
+                }
+                check (mc.scrubTailMsValue() >= 100 && mc.scrubTailMsValue() <= 180,
+                       "the tail survives being written while the audio runs",
+                       juce::String (mc.scrubTailMsValue()));
+            }
+        }
+
         // 6b. live take -> sample slot (v1.4 capture path, headless)
         {
             juce::AudioBuffer<float> take(2, 48000);

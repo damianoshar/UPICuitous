@@ -45,7 +45,8 @@ public:
     // caller can fade it when the block cannot be rendered).
     // v1.18 (wave 15): the render comes from the lock-free snapshot, so the
     // audio thread never takes dataLock any more.
-    void renderScoreBlock(const ModelSnapshot& snap, float* left, float* right, int numSamples);
+    void renderScoreBlock(const ModelSnapshot& snap, float* left, float* right, int numSamples,
+                          double sampleRate);
 
     // v1.30 (5.3 refactor): the parts of the audio block that were inlined
     // in getNextAudioBlock() are their own methods. They all run on the
@@ -60,6 +61,10 @@ public:
         float* freezeR = nullptr;
         int numSamples = 0;
         bool playingAtStart = false;
+        // v1.33.4 (L14): the sample rate, read once per block (it crosses
+        // the thread boundary: the device writes it, the audio thread
+        // reads it).
+        double sr = 44100.0;
     };
 
     void mixMonitorInput (float* left, float* right, int numSamples);
@@ -67,7 +72,8 @@ public:
                          int fadeSamples, bool rendered, bool modelChanged);
     void mixMasterGain (float* left, float* right, const float* scoreLeft,
                         const float* scoreRight, int numSamples);
-    void applyStopFade (float* left, float* right, int numSamples, bool stopping);
+    void applyStopFade (float* left, float* right, int numSamples, bool stopping,
+                        double sampleRate);
     void renderScrubPreview (const ModelSnapshot& snap, AudioBlock& block, double previewGain);
     void renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& block, double freezeGain);
 
@@ -97,12 +103,16 @@ public:
     int liveLatencySamples() const;
     void publishLatency();      // hand the current latency to the host
     int publishedLatency = -1;   // the value last handed to the host
-    double getAudioSampleRate() const { return audioSampleRate; }
+    double getAudioSampleRate() const { return audioSampleRate(); }
+    // v1.33.4 (L14): the rate the audio thread used in the last block (the
+    // selftest watches it) and the tail length the slider wrote.
+    int lastBlockRate() const { return lastBlockRateHz.load (std::memory_order_relaxed); }
+    int scrubTailMsValue() const { return scrubTailMs.load (std::memory_order_relaxed); }
     // v1.33.4 (M23): the rate the exports use. The prepared rate is the
     // device's rate in standalone and the HOST's rate in a plugin - the
     // device manager knows nothing in a plugin, so the export used to fall
     // back to 44.1 kHz and sound different from the session.
-    double exportSampleRate() const { return audioSampleRate > 0.0 ? audioSampleRate : 44100.0; }
+    double exportSampleRate() const { const double sr = audioSampleRate(); return sr > 0.0 ? sr : 44100.0; }
     std::atomic<int> timerTicks { 0 };  // diagnostics: how often the status timer ran
 
     // --- v1.33.4 (M28): the long jobs off the message thread ---
@@ -333,7 +343,15 @@ private:
     juce::CriticalSection dataLock;   // message-thread model lock; the audio
                                       // thread never takes it (v1.18)
     double playheadSec = 0.0;         // message thread's view (ScoreEditor)
-    double audioSampleRate = 44100.0; // from prepareToPlay (device may differ)
+    // v1.33.4 (L14): the sample rate crosses the thread boundary - the
+    // device's prepareToPlay writes it, the audio thread reads it. A plain
+    // double was a data race: a torn read is possible, and it is undefined
+    // behaviour. It is kept as an atomic count of frames per second: an int
+    // is lock-free on every platform, a double is not on a 32-bit one.
+    std::atomic<int> audioSampleRateHz { 44100 };
+    double audioSampleRate() const { return (double) audioSampleRateHz.load (std::memory_order_relaxed); }
+    // the rate the last audio block used (a diagnostic, v1.33.4 / L14)
+    std::atomic<int> lastBlockRateHz { 0 };
     double audioPlayRate = 1.0;     // audio-thread view of the direction
     int    seenDirChangeSerial = 0;
     int    dirFadeOutRemaining = 0;
@@ -376,7 +394,10 @@ private:
     double lastScrubT = 0.0;
     double lastScrubMs = 0.0;
     int scrubCrossMs = 20;
-    int scrubTailMs = 30;
+    // v1.33.4 (L14): the tail length is written by the slider (the message
+    // thread) and read by the audio thread (the freeze fade). A plain int
+    // was a data race.
+    std::atomic<int> scrubTailMs { 30 };
     int scrubGrainMs = 40;                 // freeze-hold grain size
     int sampleGrainMs = 40;                // granular playback grain size
     int liveGrainMs = 40;                  // v1.30: granular grain size for LIVE arcs

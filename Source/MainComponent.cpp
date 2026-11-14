@@ -169,14 +169,17 @@ void MainComponent::buildTransportControls()
     scrubCrossSlider.setTextValueSuffix(" ms");
     scrubTailSlider.setTextValueSuffix(" ms");
     scrubLenSlider.setRange(20.0, 1000.0, 1.0);
-    scrubLenSlider.setValue(scrubPreviewLen * 1000.0 / audioSampleRate, juce::dontSendNotification);
-    scrubLenSlider.onValueChange = [this]{ scrubPreviewLen = juce::jmax(64, (int)(audioSampleRate * scrubLenSlider.getValue() / 1000.0)); };
+    scrubLenSlider.setValue(scrubPreviewLen * 1000.0 / audioSampleRate(), juce::dontSendNotification);
+    scrubLenSlider.onValueChange = [this]{ scrubPreviewLen = juce::jmax(64, (int)(audioSampleRate() * scrubLenSlider.getValue() / 1000.0)); };
     scrubCrossSlider.setRange(0.0, 1000.0, 1.0);
     scrubCrossSlider.setValue((double) scrubCrossMs, juce::dontSendNotification);
     scrubCrossSlider.onValueChange = [this]{ scrubCrossMs = (int) scrubCrossSlider.getValue(); };
     scrubTailSlider.setRange(0.0, 1000.0, 1.0);
-    scrubTailSlider.setValue((double) scrubTailMs, juce::dontSendNotification);
-    scrubTailSlider.onValueChange = [this]{ scrubTailMs = (int) scrubTailSlider.getValue(); };
+    // v1.33.4 (L14): the tail length is written here (the message thread)
+    // and read by the audio thread (the freeze fade) - it is atomic.
+    scrubTailSlider.setName ("scrubTailSlider");
+    scrubTailSlider.setValue((double) scrubTailMs.load (std::memory_order_relaxed), juce::dontSendNotification);
+    scrubTailSlider.onValueChange = [this]{ scrubTailMs.store ((int) scrubTailSlider.getValue(), std::memory_order_relaxed); };
     scrubGrainSlider.setTextValueSuffix(" ms");
     scrubGrainSlider.setRange(5.0, 500.0, 1.0);
     scrubGrainSlider.setValue((double) scrubGrainMs, juce::dontSendNotification);
@@ -1852,7 +1855,8 @@ void MainComponent::buildScoreArea()
     };
     score.onScrubFreezeStop = [this](){
         if (scrubFreezeActive.load(std::memory_order_relaxed))
-            scrubFreezeStopAtMs.store(juce::Time::getMillisecondCounterHiRes() + scrubTailMs,
+            scrubFreezeStopAtMs.store(juce::Time::getMillisecondCounterHiRes()
+                                     + (double) scrubTailMs.load (std::memory_order_relaxed),
                                      std::memory_order_relaxed);
     };
     score.onScrubFreezeCancel = [this](){
@@ -2787,16 +2791,19 @@ void MainComponent::prepareAudioBuffers (int samplesPerBlockExpected)
 //==============================================================================
 void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
 {
-    audioSampleRate = sampleRate > 0 ? sampleRate : 44100.0;
-    engine.prepare(audioSampleRate, samplesPerBlockExpected);
-    scrubEngine.prepare(audioSampleRate, samplesPerBlockExpected);
+    // v1.33.4 (L14): the rate crosses the thread boundary, so it is an
+    // atomic count of frames per second (the audio thread reads it).
+    audioSampleRateHz.store ((int) std::lround (sampleRate > 0.0 ? sampleRate : 44100.0),
+                             std::memory_order_relaxed);
+    engine.prepare(audioSampleRate(), samplesPerBlockExpected);
+    scrubEngine.prepare(audioSampleRate(), samplesPerBlockExpected);
     scrubEngine.setScrubPreview(true);
     // v1.33.4 (M21): the voice pools exist now, so the vocoder's working
     // memory can be prepared - the mode may have been chosen before the
     // device started (a piece that carries its own pitch modes)
     prepareVocodersIfNeeded (engine.getSamplePitchMode(), engine.getLivePitchMode());
-    scrubPreviewLen = juce::jmax(256, (int) (audioSampleRate * 0.05)); // ~50 ms
-    liveRingSize = juce::jmax(1024, (int) (audioSampleRate * kLiveRingSec));
+    scrubPreviewLen = juce::jmax(256, (int) (audioSampleRate() * 0.05)); // ~50 ms
+    liveRingSize = juce::jmax(1024, (int) (audioSampleRate() * kLiveRingSec));
     liveRingA.assign((size_t) liveRingSize, 0.0f);
     liveRingB.assign((size_t) liveRingSize, 0.0f);
     liveWritePos = 0;
@@ -2806,16 +2813,16 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
     // N frames - so the message thread never reallocates them while the
     // audio thread may be reading.
     {
-        const int maxFrames = juce::jmax(1024, (int) std::lround(2.0 * audioSampleRate));
+        const int maxFrames = juce::jmax(1024, (int) std::lround(2.0 * audioSampleRate()));
         for (auto& b : revBuf)
         {
             b.setSize(2, maxFrames, false, false, true);
             b.clear();
         }
-        revBufFrames.store(juce::jmax(1024, (int) std::lround(revBufSec * audioSampleRate)));
+        revBufFrames.store(juce::jmax(1024, (int) std::lround(revBufSec * audioSampleRate())));
         revRestart.store(true, std::memory_order_relaxed);
     }
-    stopFadeTotal = juce::jmax(1, (int) std::ceil(kStopFadeSec * audioSampleRate));
+    stopFadeTotal = juce::jmax(1, (int) std::ceil(kStopFadeSec * audioSampleRate()));
     stopFadePos = 0;
     wantsStop.store(false);
     // v1.33.4 (M21): the score and freeze buffers are sized here, on the
@@ -2850,7 +2857,11 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     const int n = info.numSamples;
     float* L = info.buffer->getWritePointer(0, info.startSample);
     float* R = outCh > 1 ? info.buffer->getWritePointer(1, info.startSample) : nullptr;
-    const int scoreFadeN = juce::jmax(1, (int) std::lround(audioSampleRate * (double) dragSmoothMs.load(std::memory_order_relaxed) / 1000.0));
+    // v1.33.4 (L14): the rate crosses the thread boundary, so it is read
+    // ONCE per block (a relaxed atomic load) and handed down.
+    const double sr = audioSampleRate();
+    lastBlockRateHz.store ((int) std::lround (sr), std::memory_order_relaxed);
+    const int scoreFadeN = juce::jmax(1, (int) std::lround(sr * (double) dragSmoothMs.load(std::memory_order_relaxed) / 1000.0));
 
     if (mon) // monitor mix: live passthrough, independent of the transport
         mixMonitorInput (L, R, n);
@@ -2954,6 +2965,7 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             // v1.28: scrub audition (short preview while dragging the playhead)
             // and the freeze sustain (the click without a drag)
             AudioBlock block { L, R, SL, SR, FL, FR, n, playingAtStart };
+            block.sr = sr;   // v1.33.4 (L14): the rate, read once per block
             renderScrubPreview (*snap, block, previewGain);
             renderScrubFreeze (*snap, block, freezeGain);
 
@@ -2965,7 +2977,7 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             if (playingAtStart)
             {
                 rendered = true;
-                renderScoreBlock(*snap, SL, SR, n);
+                renderScoreBlock(*snap, SL, SR, n, sr);
                 // v1.25 (wave 22): direction-change crossfade. Applied on top of
                 // the rendered score; the scoreGain path is forced to 1.0 so it
                 // does not double-ramp.
@@ -3026,7 +3038,7 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 
     // Click-free manual stop: keep rendering the page for kStopFadeSec while
     // the output ramps to silence, then halt (playhead keeps its position).
-    applyStopFade (L, R, n, stopping);
+    applyStopFade (L, R, n, stopping, sr);
 }
 
 //==============================================================================
@@ -3126,7 +3138,7 @@ void MainComponent::renderScrubPreview (const ModelSnapshot& snap, AudioBlock& b
                         b.scoreL, (b.scoreR != nullptr ? b.scoreR : b.scoreL),
                         chunk, 1.0f, rate);
 
-    const int fade = juce::jmin (chunk / 4, (int) (audioSampleRate * 0.005));
+    const int fade = juce::jmin (chunk / 4, (int) (b.sr * 0.005));
     for (int i = 0; i < chunk; ++i)
     {
         float g = 1.0f;
@@ -3147,7 +3159,7 @@ void MainComponent::renderScrubPreview (const ModelSnapshot& snap, AudioBlock& b
             b.outR[i] += (b.scoreR != nullptr ? b.scoreR[i] : b.scoreL[i]) * mg;
     }
 
-    scrubPreviewPlayhead.store (ph + (double) chunk * rate / audioSampleRate, std::memory_order_relaxed);
+    scrubPreviewPlayhead.store (ph + (double) chunk * rate / b.sr, std::memory_order_relaxed);
     const int left = remaining - chunk;
     scrubPreviewRemaining.store (left, std::memory_order_relaxed);
     if (left <= 0) scrubPreviewActive.store (false, std::memory_order_relaxed);
@@ -3183,7 +3195,10 @@ void MainComponent::renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& b,
     if (stopAt > 0.0)
     {
         const double rem = stopAt - nowMs;
-        gain = (float) juce::jlimit (0.0, 1.0, rem / juce::jmax (1, scrubTailMs));
+        // v1.33.4 (L14): the tail length is written by the slider (the
+        // message thread) and read here (the audio thread) - it is atomic.
+        const int tailMs = scrubTailMs.load (std::memory_order_relaxed);
+        gain = (float) juce::jlimit (0.0, 1.0, rem / juce::jmax (1, tailMs));
     }
 
     const float mg = masterGain.load(std::memory_order_relaxed) * gain * (float) freezeGain;
@@ -3195,13 +3210,13 @@ void MainComponent::renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& b,
     }
 }
 
-void MainComponent::applyStopFade (float* L, float* R, int n, bool stopping){
+void MainComponent::applyStopFade (float* L, float* R, int n, bool stopping, double sr){
     if (stopping && isPlaying.load(std::memory_order_relaxed))
     {
         for (int i = 0; i < n; ++i)
         {
-            const double rSec = (double) juce::jmax(0, stopFadeTotal - stopFadePos) / audioSampleRate;
-            const float g = (float) upic::stopFadeGain(rSec, (double) stopFadeTotal / audioSampleRate);
+            const double rSec = (double) juce::jmax(0, stopFadeTotal - stopFadePos) / sr;
+            const float g = (float) upic::stopFadeGain(rSec, (double) stopFadeTotal / sr);
             L[i] *= g;
             if (R != nullptr) R[i] *= g;
             ++stopFadePos;
@@ -3230,9 +3245,11 @@ void MainComponent::applyStopFade (float* L, float* R, int n, bool stopping){
 // fades it, so a block that cannot be rendered is a dip instead of a click.
 // v1.18 (wave 15): renders from an immutable snapshot; the audio thread never
 // takes dataLock and never touches the message thread's model.
-void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float* SR, int n)
+void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float* SR, int n, double sr)
 {
-    const double sr = audioSampleRate;
+    // v1.33.4 (L14): the rate is handed down from the callback, which read
+    // it once for the block (it crosses the thread boundary, so it is
+    // atomic).
 
     // v1.5: publish the live input ring view for mode-2 (live input) arcs
     const int revFrames = revBufFrames.load(std::memory_order_relaxed);
@@ -3465,7 +3482,7 @@ void MainComponent::updateRevBuffers()
     // audio thread reads, and the restart flag makes it reset its state. The
     // buffers themselves are allocated once (at the maximum duration), so
     // nothing is reallocated while the audio thread may be reading them.
-    revBufFrames.store(juce::jmax(1024, (int) std::lround(revBufSec * audioSampleRate)));
+    revBufFrames.store(juce::jmax(1024, (int) std::lround(revBufSec * audioSampleRate())));
     revRestart.store(true, std::memory_order_relaxed);
 }
 
@@ -3773,6 +3790,10 @@ void MainComponent::refreshMidiDevices()
 
 bool MainComponent::tapLiveInput(const juce::AudioSourceChannelInfo& info)
 {
+    // v1.33.4 (L14): the rate crosses the thread boundary, so it is read
+    // once here (a relaxed atomic load) and used from there on.
+    const double sr = audioSampleRate();
+
     if (capAbortPending.exchange(false)) // device restarted mid-take: drop it
     {
         capDiscard = true;
@@ -3847,14 +3868,14 @@ bool MainComponent::tapLiveInput(const juce::AudioSourceChannelInfo& info)
             // the playback starts after the shifter's lag, so the first read
             // is already inside the segment (every live shifter reads behind
             // the head)
-            revPlayHead = juce::jmin(D - 1, (int) std::lround(0.25 * audioSampleRate));
+            revPlayHead = juce::jmin(D - 1, (int) std::lround(0.25 * sr));
         }
         if (D > 0 && revBuf[revCapIdx].getNumSamples() >= D)
         {
             auto& cap = revBuf[revCapIdx];
             const float* s0 = inScratch.getReadPointer(0);
             const float* s1 = inScratch.getReadPointer(1);
-            const int fadeN = juce::jmax(1, (int) std::lround(0.005 * audioSampleRate));
+            const int fadeN = juce::jmax(1, (int) std::lround(0.005 * sr));
             for (int i = 0; i < n; ++i)
             {
                 revCapHead = (revCapHead - 1 + D) % D;
@@ -3873,7 +3894,7 @@ bool MainComponent::tapLiveInput(const juce::AudioSourceChannelInfo& info)
                     // (nothing is copied, so there is no spike in the audio
                     // thread)
                     revPlayIdx = revCapIdx;
-                    revPlayHead = juce::jmin(D - 1, (int) std::lround(0.25 * audioSampleRate));
+                    revPlayHead = juce::jmin(D - 1, (int) std::lround(0.25 * sr));
                     revCapIdx = 1 - revCapIdx;
                     revCapHead = D - 1;
                     revCapCount = 0;
@@ -3943,7 +3964,7 @@ void MainComponent::requestCaptureStop(int reason)
 void MainComponent::startCapture()
 {
     if (capturing.load()) return;
-    const double rate = audioSampleRate > 0.0 ? audioSampleRate : 44100.0;
+    const double rate = audioSampleRate() > 0.0 ? audioSampleRate() : 44100.0;
     // v1.33.4 (M19): the take keeps the device rate, so a device above the
     // app's ceiling is refused: the material would not survive a save and a
     // load (the loader keeps the rate it is given).
@@ -4142,16 +4163,16 @@ int MainComponent::liveLatencySamples() const
                 case 0:  sec = upic::GrainShifter::kLagSec; break;   // 220 ms
                 case 1:  sec = 0.5 * (upic::TapeShifter::kLagMinSec
                                     + upic::TapeShifter::kLagMaxSec); break; // 120 ms (the window's middle)
-                default: sec = (double) upic::VocoderCore::kPrime / audioSampleRate; break; // ~21 ms
+                default: sec = (double) upic::VocoderCore::kPrime / audioSampleRate(); break; // ~21 ms
             }
         }
         else if (a.mode == 1 && engine.effectiveMode (a, engine.getSamplePitchMode()) == 2)
         {
-            sec = (double) upic::VocoderCore::kPrime / audioSampleRate; // the sample vocoder's prime
+            sec = (double) upic::VocoderCore::kPrime / audioSampleRate(); // the sample vocoder's prime
         }
 
         if (sec <= 0.0) anyZeroDelay = true;
-        else maxDelayed = juce::jmax(maxDelayed, (int) std::ceil(sec * audioSampleRate));
+        else maxDelayed = juce::jmax(maxDelayed, (int) std::ceil(sec * audioSampleRate()));
     }
 
     if (! anyArc || anyZeroDelay) return 0;
@@ -4278,7 +4299,7 @@ void MainComponent::timerCallback()
         if (stickiness < 0.999) s += " | STICK " + juce::String((int) std::round(stickiness * 100)) + "%";
         if (numLiveInputs.load() > 0) s += " | IN";
         if (latSamples > 0)
-            s += " | LAT " + juce::String((int) std::round(latSamples / audioSampleRate * 1000.0)) + "ms";
+            s += " | LAT " + juce::String((int) std::round(latSamples / audioSampleRate() * 1000.0)) + "ms";
         if (monitoring.load()) s += " | MON";
         if (osc.isListening()) s += " | OSC " + juce::String (osc.getPort());
         if (osc.isMulticastListening()) s += " | MCAST";

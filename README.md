@@ -402,7 +402,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 581 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 588 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -428,9 +428,10 @@ returns, the MIDI message queue, the MIDI channel labels, the model
 snapshot that the status timer publishes, the audio thread's
 allocations (the render, the steady state, a reset and the vocoder's
 working memory), the long jobs (the worker thread, the cancel, and
-the export that writes its file), and the ids of a loaded piece (the
+the export that writes its file), the ids of a loaded piece (the
 duplicate arc ids, the impossible ones, the derived next id and the
-material references) ) and
+material references), and the values that cross the thread boundary (the
+sample rate and the scrub tail) ) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.
