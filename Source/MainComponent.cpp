@@ -3692,14 +3692,23 @@ void MainComponent::handleMidiActivity (const MidiHub::Activity& a)
     const auto bs = midi.binding (MidiHub::Target::scrub);
     if (midi.matches (bs, a))
     {
-        // relative jog: centre (64) = no motion; values above = positive,
-        // below = negative. Scale to +/- 4x.
-        int v = a.value - 64;
+        // v1.33.4 (H4, UPIC-28): the jog. A CC uses its value, a note uses
+        // its velocity, and both read it as an offset from the centre (64):
+        // above = forward, below = backward, the distance = the speed (up to
+        // +/- 4x). Forward produces the pitches as they are, backward plays
+        // the material in reverse - the playhead is signed.
+        int v = a.value - 64;   // the CC's value, the note's velocity
         double vel = (double) v / 16.0; // 64 -> 4.0
         if (vel > 4.0) vel = 4.0;
         if (vel < -4.0) vel = -4.0;
         scrubTarget = vel;
         scrubActive = true;
+    }
+    else if (bs.bound && bs.note && a.type == MidiHub::kTypeNoteOff
+             && a.number == bs.number)
+    {
+        // the note's release ends the jog (the transport stops with it)
+        scrubTarget = 0.0;
     }
     // transport binding: a learned note/CC toggles play/stop
     const auto bt = midi.binding (MidiHub::Target::transport);
@@ -3714,13 +3723,22 @@ void MainComponent::handleMidiActivity (const MidiHub::Activity& a)
     else if (! bt.bound)
     {
         // no transport binding: fall back to any note (the original behaviour)
+        //
+        // v1.33.4 (H4): a note that is bound to the scrub target is NOT a
+        // play button - it moves the playhead. It must not also start (or
+        // stop) the transport.
+        const bool isScrubNote = bs.bound && bs.note
+                                 && a.type == MidiHub::kTypeNoteOn
+                                 && midi.matches (bs, a);
         if (a.type == MidiHub::kTypeNoteOn)
         {
-            if (! isPlaying.load (std::memory_order_relaxed)) startPlayback();
+            if (! isScrubNote && ! isPlaying.load (std::memory_order_relaxed)) startPlayback();
         }
         else if (a.type == MidiHub::kTypeNoteOff)
         {
-            if (isPlaying.load (std::memory_order_relaxed)) stopPlayback();
+            // the release of a scrub note does not stop the transport
+            const bool scrubNoteOff = bs.bound && bs.note && a.number == bs.number;
+            if (! scrubNoteOff && isPlaying.load (std::memory_order_relaxed)) stopPlayback();
         }
     }
 }
@@ -4262,35 +4280,7 @@ void MainComponent::timerCallback()
     updateExternalScrub (juce::Time::getMillisecondCounterHiRes());
     // v1.25 (wave 22): scrub smoothing. The jog target decays; the smoothed
     // velocity drives the playhead. Hysteresis keeps a resting jog at zero.
-    {
-        scrubVelocity = scrubVelocity * kScrubSmoothOld + scrubTarget * kScrubSmoothNew;
-        scrubTarget *= kScrubTargetDecay;
-        if (std::abs(scrubVelocity) < kScrubHysteresis) scrubVelocity = 0.0;
-        if (std::abs(scrubTarget)  < (kScrubHysteresis * 0.4)) scrubTarget  = 0.0;
-        if (scrubActive)
-        {
-            const double v = juce::jlimit(-4.0, 4.0, scrubVelocity);
-            if (std::abs(v) > 0.05)
-            {
-                if (! isPlaying.load(std::memory_order_relaxed))
-                {
-                    prevPlayRate.store(playRate.load(std::memory_order_relaxed), std::memory_order_relaxed);
-                    startPlayback();
-                }
-                if (v != playRate.load(std::memory_order_relaxed))
-                {
-                    prevPlayRate.store(playRate.load(std::memory_order_relaxed), std::memory_order_relaxed);
-                    playRate.store(v, std::memory_order_relaxed);
-                    dirChangeSerial.fetch_add(1, std::memory_order_relaxed);
-                }
-            }
-            else if (isPlaying.load(std::memory_order_relaxed))
-            {
-                scrubActive = false;
-                stopPlayback();
-            }
-        }
-    }
+    updateMidiScrub();
     // v1.18 (wave 15): publish the immutable model the audio thread renders
     // from.
     //
@@ -4346,8 +4336,10 @@ void MainComponent::timerCallback()
              : " | " + juce::String((int) curPage().zones.size()) + " zone(s)");
         if (seqPages) s += " | SEQ";
         // v1.33.4 (H3): the host's clock - the user has to see which clock
-        // the transport runs on.
-        if (followHostTransport.load (std::memory_order_relaxed)) s += " | HOST";
+        // the transport runs on. v1.33.4 (H4): the MIDI jog has the
+        // transport while it runs, so it says so instead.
+        if (scrubActive) s += " | SCRUB";
+        else if (followHostTransport.load (std::memory_order_relaxed)) s += " | HOST";
         if (recordPressure) s += " | PRESS";
         if (timeGrid > 0) s += " | GRID " + juce::String(timeGrid, 0) + "/s";
         if (stickiness < 0.999) s += " | STICK " + juce::String((int) std::round(stickiness * 100)) + "%";
@@ -6067,6 +6059,12 @@ void MainComponent::applyHostTransport()
     if (! followHostTransport.load (std::memory_order_relaxed)) return;
     if (! hostTransportKnown.load (std::memory_order_relaxed)) return;
 
+    // v1.33.4 (H4, UPIC-28): the MIDI jog has the transport while it runs -
+    // the host's transport must not fight it over the playhead (the design
+    // note for the scrub transport: the two need a mode switch, and this is
+    // it: the user's own hand wins over the host).
+    if (scrubActive) return;
+
     const bool hostPlaying = hostTransportPlaying.load (std::memory_order_relaxed);
     const bool appPlaying = isPlaying.load (std::memory_order_relaxed)
                          || wantsStop.load (std::memory_order_relaxed);
@@ -6103,6 +6101,56 @@ void MainComponent::applyHostTransport()
     // really moved (a locate in the DAW).
     if (hostPlaying && dur > 0.0 && std::abs (target - displayPlayhead()) > 0.25)
         seekPlayhead (target);
+}
+
+//==============================================================================
+// v1.33.4 (H4, UPIC-28): the MIDI jog. A CC bound to "Scrub" is a signed
+// jog: the value around the centre (64) sets the speed (up to +/- 4x) and
+// the target decays, so the jog winds down when the control comes back to
+// the centre. The smoothed speed drives the transport's own speed - the
+// playhead moves forwards or backwards, and the material is read in the
+// matching direction (the sample slots play backwards at a negative rate).
+//
+// The jog takes the transport's speed over while it runs, so it has to put
+// it back when it ends: otherwise the next playback would still run at the
+// jog's speed.
+void MainComponent::updateMidiScrub()
+{
+    scrubVelocity = scrubVelocity * kScrubSmoothOld + scrubTarget * kScrubSmoothNew;
+    scrubTarget *= kScrubTargetDecay;
+    if (std::abs(scrubVelocity) < kScrubHysteresis) scrubVelocity = 0.0;
+    if (std::abs(scrubTarget)  < (kScrubHysteresis * 0.4)) scrubTarget  = 0.0;
+    if (! scrubActive) return;
+
+    const double v = juce::jlimit (-4.0, 4.0, scrubVelocity);
+    if (std::abs(v) > 0.05)
+    {
+        if (! isPlaying.load (std::memory_order_relaxed))
+        {
+            prevPlayRate.store (playRate.load (std::memory_order_relaxed), std::memory_order_relaxed);
+            startPlayback();
+        }
+        if (v != playRate.load (std::memory_order_relaxed))
+        {
+            prevPlayRate.store (playRate.load (std::memory_order_relaxed), std::memory_order_relaxed);
+            playRate.store (v, std::memory_order_relaxed);
+            dirChangeSerial.fetch_add (1, std::memory_order_relaxed);
+        }
+    }
+    else if (isPlaying.load (std::memory_order_relaxed))
+    {
+        // the jog is over: the transport stops and the speed goes back to the
+        // app's own (the Rev toggle's speed), so the next playback is normal
+        scrubActive = false;
+        const double base = basePlayRate();
+        if (playRate.load (std::memory_order_relaxed) != base)
+        {
+            prevPlayRate.store (playRate.load (std::memory_order_relaxed), std::memory_order_relaxed);
+            playRate.store (base, std::memory_order_relaxed);
+            dirChangeSerial.fetch_add (1, std::memory_order_relaxed);
+        }
+        stopPlayback();
+    }
 }
 
 void MainComponent::loadFile()

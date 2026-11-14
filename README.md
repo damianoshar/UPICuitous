@@ -207,8 +207,9 @@ algorithm).
 **MIDI in** - the **MIDI + OSC settings** overlay (the toolbar Settings
 button or the menu) lists the MIDI inputs (`None` when there is none),
 shows the last message (CC or note, value, channel, device) and has a
-**Learn** row for the master gain and the draw intensity: press Learn,
-move a control, and the parameter follows it. The bindings are a
+**Learn** row for the master gain, the draw intensity, the **scrub** and
+the **transport**: press Learn, move a control, and the parameter follows
+it. The bindings are a
 controller map - session state, not part of the piece. The VST3 declares
 a MIDI input bus, so the host's notes and CCs reach the app as well.
 Every message is queued, so a note and its release both arrive (they used
@@ -268,6 +269,18 @@ memory. Double-click Stop rewinds to the
 start. Clear asks first in an in-app warning and uses a red confirm
 button. Dragging the playhead while stopped now plays a short scrub
 preview. A Rev toggle runs the score backwards (a mirrored stroke sounds mirrored); a learned MIDI jog CC drives a signed, smoothed playhead (up to +/- 4x) in the app and the plugin.
+
+**The MIDI scrub transport** - the control learned to **Scrub** moves the
+signed playhead. A **CC** reads its value as an offset from the centre
+(64): above the centre the playhead runs forwards, below it backwards,
+and the distance is the speed (up to +/- 4x). A **note** works the same
+way with its velocity, and the note's release ends the jog. Backwards is
+the signed part: the sample slots are read in reverse and the live input
+becomes a reversed delay, so the score sounds mirrored. The jog takes the
+transport's speed over while it runs and puts it back when it ends, so the
+next playback is normal. In the plugin the jog wins over the host's
+transport while it runs - the two must not fight over the playhead (the
+status line says `SCRUB` while the jog is running).
 
 **Transforming the page** - the UPIC could transpose, reverse and invert a
 composition. The File menu's **Transform the page...** submenu carries the
@@ -435,7 +448,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 642 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 655 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -469,8 +482,10 @@ stack (the step, the restore, the redo, the branch, the drag that is one
 step, and the stroke on the canvas), the recovery snapshot (the
 snapshot, the sidecar with the audio, the reuse of the unchanged audio,
 the read-back and the broken snapshot), the host transport follow (the
-choice of the clock, the start, the stop and the position) and the
-drawing on a micro-time page (the arc, its points and their spread) ) and
+choice of the clock, the start, the stop and the position), the drawing
+on a micro-time page (the arc, its points and their spread) and the MIDI
+scrub transport (the note jog, the backwards jog, the speed that goes
+back and the host that yields) ) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.

@@ -898,6 +898,13 @@ private:
     void rebuildArcList();        // v1.21: rebuild the panel's rows from the model
     void handleMidi();            // v1.23: the MIDI messages (message thread)
     void handleMidiActivity (const MidiHub::Activity&); // v1.33.4 (M20): one message
+    // v1.33.4 (H4): the MIDI jog's smoothing and the speed it drives. The
+    // status timer calls it; the selftest calls it too (there is no message
+    // loop there).
+    void updateMidiScrub();
+    // v1.33.4 (H4): the speed the transport runs at when no MIDI jog has it
+    // (the Rev toggle's own speed).
+    double basePlayRate() const { return revPlayBtn.getToggleState() ? -1.0 : 1.0; }
 
     // v1.29: the phone/MobMuPlat OSC scrub. The receiver parses the
     // messages and hands the scrub value over; the gesture itself (the
@@ -947,6 +954,21 @@ public:
         saveFile (std::move (onDone));
     }
     void injectMidiMessage (const juce::MidiMessage&); // v1.25: plugin host MIDI bus
+    // v1.33.4 (H4): the MIDI scrub transport (UPIC-28). A CC bound to "Scrub"
+    // is a signed jog (the value around the centre 64 sets the speed, up to
+    // +/- 4x); a NOTE bound to "Scrub" is an absolute position: the note's
+    // number picks a spot on the page and the playhead moves there (the
+    // playhead is signed - the note can move it backwards). The jog puts the
+    // transport's speed back when it ends, so the next playback is not stuck
+    // at the jog's speed, and the host's transport yields while the jog runs
+    // (the two must not fight over the playhead).
+    //
+    // The selftest drives the MIDI handling without a message loop (the
+    // status timer never ticks there), so these two hooks are public.
+    void pollMidiForTest() { handleMidi(); }
+    void updateMidiScrubForTest() { updateMidiScrub(); }
+    bool midiScrubRunning() const { return scrubActive; }
+    double playRateForTest() const { return playRate.load (std::memory_order_relaxed); }
     // Piece (de)serialization — public so the selftest can round-trip them.
     juce::var pieceToVar() const;
     // v1.33.4 (M28): the piece as a self-contained model, captured under the

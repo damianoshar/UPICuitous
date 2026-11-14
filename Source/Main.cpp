@@ -1452,6 +1452,114 @@ public:
             }
         }
 
+        // 6a-13. v1.33.4 (H4, UPIC-28): the MIDI scrub transport. The
+        //     roadmap: "a CC/notes move a signed playhead".
+        {
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize (1280, 800);
+            mc.loadFromVar (juce::JSON::parse ("{\"pages\":[{\"duration\":10,\"arcs\":[]}]}"));
+
+            // a NOTE bound to "Scrub" is a signed jog too: its velocity
+            // around the centre (64) sets the speed and the direction
+            {
+                MidiHub::Binding b;
+                b.bound = true; b.note = true; b.number = 64; b.channel = 0;
+                mc.midiHub().setBinding (MidiHub::Target::scrub, b);
+            }
+            mc.injectMidiMessage (juce::MidiMessage::noteOn (1, 64, 100.0f / 127.0f));
+            mc.pollMidiForTest();
+            check (mc.midiScrubRunning(), "the note starts the jog");
+            mc.updateMidiScrubForTest();
+            check (std::abs (mc.playRateForTest() - 1.0) > 0.1,
+                   "the note drives the transport's speed",
+                   juce::String (mc.playRateForTest(), 3));
+            check (mc.isPlayingForTest(), "the jog starts the transport");
+
+            // and the note's release does not stop it right away: the note
+            // moves the playhead, it is not a play button
+            mc.injectMidiMessage (juce::MidiMessage::noteOff (1, 64));
+            mc.pollMidiForTest();
+            check (mc.isPlayingForTest(),
+                   "the release of a scrub note does not stop the transport");
+
+            // a note can move the playhead backwards too (it is signed): a
+            // low velocity scrubs backwards
+            mc.injectMidiMessage (juce::MidiMessage::noteOn (1, 64, 20.0f / 127.0f));
+            mc.pollMidiForTest();
+            mc.updateMidiScrubForTest();
+            check (mc.playRateForTest() < 0.0,
+                   "a scrub note moves the playhead backwards as well",
+                   juce::String (mc.playRateForTest(), 3));
+
+            // the release ends the jog and the speed goes back to normal
+            mc.injectMidiMessage (juce::MidiMessage::noteOff (1, 64));
+            mc.pollMidiForTest();
+            for (int i = 0; i < 40; ++i)
+                mc.updateMidiScrubForTest();
+            check (! mc.midiScrubRunning(),
+                   "the jog ends when the note is released");
+            check (std::abs (mc.playRateForTest() - 1.0) < 1e-6,
+                   "the transport's speed is back to normal",
+                   juce::String (mc.playRateForTest(), 3));
+
+            // a CC bound to "Scrub" is the signed jog: the value around the
+            // centre sets the speed, and the speed goes back when the jog ends
+            {
+                MidiHub::Binding b;
+                b.bound = true; b.note = false; b.number = 7; b.channel = 0;
+                mc.midiHub().setBinding (MidiHub::Target::scrub, b);
+            }
+            mc.injectMidiMessage (juce::MidiMessage::controllerEvent (1, 7, 127));
+            mc.pollMidiForTest();
+            check (mc.midiScrubRunning(), "the jog is running");
+            // a relative CC (a jog wheel) keeps sending its value, so the jog
+            // runs at the control's speed
+            for (int i = 0; i < 10; ++i)
+            {
+                mc.injectMidiMessage (juce::MidiMessage::controllerEvent (1, 7, 127));
+                mc.pollMidiForTest();
+                mc.updateMidiScrubForTest();
+            }
+            check (mc.playRateForTest() > 1.0,
+                   "the jog drives the transport's speed",
+                   juce::String (mc.playRateForTest(), 3));
+
+            // the control comes back to the centre: the jog winds down
+            for (int i = 0; i < 40; ++i)
+            {
+                mc.injectMidiMessage (juce::MidiMessage::controllerEvent (1, 7, 64));
+                mc.pollMidiForTest();
+                mc.updateMidiScrubForTest();
+            }
+            check (! mc.midiScrubRunning(),
+                   "the jog ends when the control comes back to the centre");
+            check (std::abs (mc.playRateForTest() - 1.0) < 1e-6,
+                   "the transport's speed is back to normal",
+                   juce::String (mc.playRateForTest(), 3));
+            // the host's transport yields to the jog: the two must not fight
+            // over the playhead (the design note for UPIC-28)
+            {
+                auto mc2Holder = std::make_unique<MainComponent>();
+                auto& mc2 = *mc2Holder;
+                mc2.setSize (1280, 800);
+                mc2.loadFromVar (juce::JSON::parse ("{\"pages\":[{\"duration\":10,\"arcs\":[]}]}"));
+                MidiHub::Binding b;
+                b.bound = true; b.note = false; b.number = 7; b.channel = 0;
+                mc2.midiHub().setBinding (MidiHub::Target::scrub, b);
+                mc2.injectMidiMessage (juce::MidiMessage::controllerEvent (1, 7, 127));
+                mc2.pollMidiForTest();
+                mc2.updateMidiScrubForTest();
+                check (mc2.midiScrubRunning() && mc2.isPlayingForTest(),
+                       "the jog starts the transport");
+                mc2.setFollowHostTransport (true);
+                mc2.setHostTransport (true, false, 0.0);   // the host says "stopped"
+                mc2.applyHostTransport();
+                check (! mc2.stopPendingForTest(),
+                       "the host's transport does not stop a running jog");
+            }
+        }
+
         // 6b. live take -> sample slot (v1.4 capture path, headless)
         {
             juce::AudioBuffer<float> take(2, 48000);
