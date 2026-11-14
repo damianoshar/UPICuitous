@@ -93,6 +93,8 @@ add_library( ${BINARY_NAME}
     SHARED
 
     "../../../Source/Main.cpp"
+    "../../../Source/SelfTest.cpp"
+    "../../../Source/SelfTest.h"
     "../../../Source/MainComponent.cpp"
     "../../../Source/MainComponent.h"
     "../../../Source/EnvelopeEditor.h"
@@ -2561,6 +2563,7 @@ add_library( ${BINARY_NAME}
 )
 
 set_source_files_properties(
+    "../../../Source/SelfTest.h"
     "../../../Source/MainComponent.h"
     "../../../Source/EnvelopeEditor.h"
     "../../../Source/ScoreEditor.h"

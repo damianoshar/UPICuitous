@@ -8,6 +8,8 @@
   <MAINGROUP id="mGr001" name="UPICuitous">
     <GROUP id="{9C2A51B4-6E01-4E7C-9D3A-1F0A7B2C4D5E}" name="Source">
       <FILE id="mNcpp1" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
+      <FILE id="sTst9" name="SelfTest.cpp" compile="1" resource="0" file="Source/SelfTest.cpp"/>
+      <FILE id="sTstH8" name="SelfTest.h" compile="0" resource="0" file="Source/SelfTest.h"/>
       <FILE id="mCcpp2" name="MainComponent.cpp" compile="1" resource="0"
             file="Source/MainComponent.cpp"/>
       <FILE id="mChdr3" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
