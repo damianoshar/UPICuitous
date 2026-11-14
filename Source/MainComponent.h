@@ -85,11 +85,25 @@ public:
     // says "the model changed". The status timer used to deep-copy every
     // page, arc, waveform and envelope 30 times a second, even while
     // nothing changed; now it copies only when the revision moved.
-    void markModelChanged()
+    //
+    // v1.33.4 (L15): it also marks the piece as "not saved". The app asks
+    // before it closes when the piece differs from what was last written.
+    // `affectsPiece` is false for the changes that are not part of the piece
+    // (the loop toggle), so they do not make the app ask to save.
+    void markModelChanged (bool affectsPiece = true)
     {
         modelEpoch.fetch_add(1, std::memory_order_relaxed);
         modelRevision.fetch_add(1, std::memory_order_relaxed);
+        if (affectsPiece)
+            pieceDirty.store (true, std::memory_order_relaxed);
     }
+
+    // v1.33.4 (L15): the unsaved-changes flag. The standalone window asks
+    // before it closes when the piece has unsaved changes (the review:
+    // "application close directly calls quit() - an accidental closing needs
+    // a recovery path").
+    bool pieceHasUnsavedChanges() const { return pieceDirty.load (std::memory_order_relaxed); }
+    void markPieceSaved() { pieceDirty.store (false, std::memory_order_relaxed); }
 
     // v1.33.4 (M22): how many model snapshots were published (the timer
     // publishes only when the model changed). The selftest watches it.
@@ -357,6 +371,8 @@ private:
     int    dirFadeOutRemaining = 0;
     int    dirFadeInRemaining  = 0;
     std::atomic<bool> isPlaying { false };
+    // v1.33.4 (L15): the piece differs from what was last written
+    std::atomic<bool> pieceDirty { false };
     std::atomic<double> playRate { 1.0 };   // +1 forward, -1 backward
     std::atomic<double> prevPlayRate { 1.0 };
     std::atomic<int>    dirChangeSerial { 0 };
@@ -792,7 +808,11 @@ private:
     void flash(const juce::String& m); // transient status message (4s)
     void startPlayback(), stopPlayback(bool fromAudio = false);
     void renderWav();
-    void saveFile(), loadFile();
+    // v1.33.4 (L15): the save with a file chooser. `onDone` is called with
+    // the result - true when the piece really was written. The window uses
+    // it: it only closes when the save happened (a cancelled chooser must
+    // not throw the work away).
+    void saveFile (std::function<void (bool saved)> onDone = {}), loadFile();
     void ensureLiveInputFor(std::function<void(bool)> done);
     void requestLiveInput(std::function<void(bool)> done);
     bool enableDeviceInputs();
@@ -804,6 +824,13 @@ private:
     juce::String takeName();
 
 public:
+    // v1.33.4 (L15): the save with a file chooser, for the window's
+    // unsaved-changes prompt: the app closes only when the piece really was
+    // written (a cancelled chooser leaves the window open).
+    void savePieceWithDialog (std::function<void (bool saved)> onDone)
+    {
+        saveFile (std::move (onDone));
+    }
     void injectMidiMessage (const juce::MidiMessage&); // v1.25: plugin host MIDI bus
     // Piece (de)serialization — public so the selftest can round-trip them.
     juce::var pieceToVar() const;

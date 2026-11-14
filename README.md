@@ -221,7 +221,11 @@ how far the job is, and **File -> Cancel the job** stops it (the file that
 was there before is kept). A file that is not a
 piece is
 refused with a message and the current piece is kept - a bad file can
-never wipe the unsaved work. The piece carries everything that
+never wipe the unsaved work. The app knows when the piece differs from
+what was last written: closing the window then asks - **Save** (the piece
+is written and the app closes), **Discard** (the changes are thrown away)
+or **Cancel** (the app stays open) - so an accidental close cannot throw
+the work away. The piece carries everything that
 changes the sound - the arc's own pitch algorithm and its reversal, the
 sample slot's direction and the global pitch modes - so a reopened piece
 (or a reopened DAW session) sounds the same; older pieces without those
@@ -402,7 +406,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 588 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 596 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -430,8 +434,8 @@ allocations (the render, the steady state, a reset and the vocoder's
 working memory), the long jobs (the worker thread, the cancel, and
 the export that writes its file), the ids of a loaded piece (the
 duplicate arc ids, the impossible ones, the derived next id and the
-material references), and the values that cross the thread boundary (the
-sample rate and the scrub tail) ) and
+material references), the values that cross the thread boundary (the
+sample rate and the scrub tail) and the unsaved-changes flag ) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.

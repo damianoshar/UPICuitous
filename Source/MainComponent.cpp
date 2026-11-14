@@ -127,7 +127,7 @@ void MainComponent::buildTransportControls()
     // v1.33.4 (M22): the loop and the page sequencer are part of the model
     // the audio thread renders from, so they have to mark it as changed -
     // the status timer publishes the snapshot only when the revision moved.
-    loopBtn.onClick = [this]{ loopPage = loopBtn.getToggleState(); markModelChanged(); };
+    loopBtn.onClick = [this]{ loopPage = loopBtn.getToggleState(); markModelChanged (false); };
     seqBtn.onClick = [this]{ seqPages = seqBtn.getToggleState(); markModelChanged(); };
     revPlayBtn.onClick = [this]{
         const bool rev = revPlayBtn.getToggleState();
@@ -5354,6 +5354,11 @@ bool MainComponent::loadFromVar(const juce::var& v)
         flash ("This piece is bigger than the app supports - not loaded: " + droppedMsg);
     } // the settings scope
 
+    // v1.33.4 (L15): the loaded piece is what the file holds, so there is
+    // nothing to save yet (the app must not ask to save a piece that was
+    // just opened).
+    markPieceSaved();
+
     return true;
 }
 
@@ -5364,7 +5369,7 @@ juce::String MainComponent::pieceStateText()
     return juce::JSON::toString(pieceToVar(), false);
 }
 
-void MainComponent::saveFile()
+void MainComponent::saveFile (std::function<void (bool)> onDone)
 {
     // v1.33.4 (H11): the chooser can stay open while the window is closed.
     // The safe pointer is checked before the body runs, so the raw `this`
@@ -5372,7 +5377,7 @@ void MainComponent::saveFile()
     juce::Component::SafePointer<MainComponent> sp (this);
     auto fc = std::make_shared<juce::FileChooser>("Save UPIC piece", juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("piece.upic.json"), "*.json");
     fc->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-        [this, sp, fc](const juce::FileChooser& c){
+        [this, sp, fc, onDone](const juce::FileChooser& c){
             if (sp == nullptr) return;
             // v1.33.4 (M17): the destination can be a document-provider URL
             // (Android) - getResult() would drop it and the save would do
@@ -5380,13 +5385,23 @@ void MainComponent::saveFile()
             // temporary sibling); a provider document is written through its
             // output stream.
             const auto url = c.getURLResult();
-            if (! url.isWellFormed()) return;
+            if (! url.isWellFormed())
+            {
+                // the chooser was cancelled: the piece is still unsaved
+                if (onDone) onDone (false);
+                return;
+            }
             // v1.33.4 (M28): the save runs on a worker thread - the samples
             // become base64 and the JSON is built there, so a big piece does
             // not freeze the window. The model is captured here, under the
             // lock.
             auto model = std::make_shared<upic::PieceModel> (sp->capturePieceModel());
             const juce::int64 maxBytes = (juce::int64) upic::limits::kMaxPieceBytes;
+            // v1.33.4 (L15): the revision the saved piece came from. If the
+            // model moved on while the worker was writing, the piece on the
+            // disk is already older than what is on the screen - the app
+            // must still ask to save.
+            const juce::uint64 savedRevision = sp->modelRevision.load (std::memory_order_relaxed);
             sp->startJob ("Saving the piece",
                 [model, url, maxBytes] (Job& job)
                 {
@@ -5411,7 +5426,16 @@ void MainComponent::saveFile()
                     job.ok = true;
                     job.message = "Saved " + upic::pickedFileName (url);
                 },
-                [sp] (Job& job) { sp->flash (job.message); });
+                [sp, onDone, savedRevision] (Job& job)
+                {
+                    sp->flash (job.message);
+                    // v1.33.4 (L15): the piece is on the disk now, so there
+                    // is nothing to ask about when the app closes - unless
+                    // the model moved on while the worker was writing.
+                    if (job.ok && sp->modelRevision.load (std::memory_order_relaxed) == savedRevision)
+                        sp->markPieceSaved();
+                    if (onDone) onDone (job.ok);
+                });
         });
 }
 
@@ -5468,6 +5492,9 @@ bool MainComponent::savePieceToURL (const juce::URL& url, juce::int64 maxBytes)
     }
 
     flash ("Saved " + upic::pickedFileName (url));
+    // v1.33.4 (L15): the piece is on the disk now, so there is nothing to
+    // ask about when the app closes.
+    markPieceSaved();
     return true;
 }
 

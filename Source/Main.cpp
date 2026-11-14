@@ -74,7 +74,15 @@ public:
         mainWindow.reset(new MainWindow(getApplicationName()));
     }
     void shutdown() override { mainWindow = nullptr; }
-    void systemRequestedQuit() override { quit(); }
+    void systemRequestedQuit() override
+    {
+        // v1.33.4 (L15): the piece may have changes that are not saved. The
+        // app asks before it closes - an accidental close must not throw the
+        // work away (the review: "application close directly calls quit()").
+        if (mainWindow != nullptr && ! mainWindow->askBeforeClosing())
+            return;   // the window closes the app itself when the answer is known
+        quit();
+    }
     void anotherInstanceStarted(const juce::String&) override {}
 
     // Headless verification: no window, no audio device, no screen capture.
@@ -1002,6 +1010,53 @@ public:
                        "the tail survives being written while the audio runs",
                        juce::String (mc.scrubTailMsValue()));
             }
+        }
+
+        // 6a-8. v1.33.4 (L15, part 1): the unsaved-changes flag. The review:
+        //     "application close directly calls quit() - an accidental closing
+        //     needs a recovery path". The standalone app now asks before it
+        //     closes when the piece differs from what was last written.
+        {
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize (1280, 800);
+            check (! mc.pieceHasUnsavedChanges(),
+                   "a fresh piece has nothing to save");
+
+            // an edit marks the piece
+            mc.markModelChanged();
+            check (mc.pieceHasUnsavedChanges(),
+                   "an edit marks the piece as unsaved");
+
+            // a save clears it
+            mc.markPieceSaved();
+            check (! mc.pieceHasUnsavedChanges(),
+                   "the save clears the unsaved flag");
+
+            // and an edit after the save marks it again
+            mc.markModelChanged();
+            check (mc.pieceHasUnsavedChanges(),
+                   "an edit after the save marks the piece again");
+
+            // a loaded piece is what the file holds: there is nothing to save
+            const juce::String json =
+                "{\"pages\":[{\"duration\":10,\"arcs\":[]}]}";
+            check (mc.loadFromVar (juce::JSON::parse (json)),
+                   "the piece loads");
+            check (! mc.pieceHasUnsavedChanges(),
+                   "a loaded piece has nothing to save");
+
+            // and a piece that was really written has nothing to save either
+            mc.markModelChanged();
+            auto file = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("upic_piece_unsaved_test.json");
+            file.deleteFile();
+            const bool saved = mc.savePieceToFile (file);
+            check (saved && file.existsAsFile(),
+                   "the piece is written to the disk");
+            check (! mc.pieceHasUnsavedChanges(),
+                   "a written piece has nothing to save");
+            file.deleteFile();
         }
 
         // 6b. live take -> sample slot (v1.4 capture path, headless)
@@ -6672,6 +6727,54 @@ public:
         void closeButtonPressed() override
         {
             JUCEApplication::getInstance()->systemRequestedQuit();
+        }
+
+        // v1.33.4 (L15): the unsaved-changes prompt.
+        //
+        // It returns true when the app may close right away, and false when
+        // the answer is pending: the save is a job (M28), so it cannot be
+        // waited for - the window closes the app itself when the piece
+        // really was written.
+        bool askBeforeClosing()
+        {
+            auto* comp = getContentComponent();
+            auto* mc = dynamic_cast<MainComponent*> (comp);
+            if (mc == nullptr || ! mc->pieceHasUnsavedChanges())
+                return true;
+
+            juce::Component::SafePointer<MainComponent> safeMc (mc);
+            auto options = juce::MessageBoxOptions()
+                .withIconType (juce::MessageBoxIconType::WarningIcon)
+                .withTitle ("Unsaved changes")
+                .withMessage ("The piece has changes that are not saved. "
+                              "Save them before closing?")
+                .withButton ("Save")
+                .withButton ("Discard")
+                .withButton ("Cancel")
+                .withAssociatedComponent (this);
+
+            juce::AlertWindow::showAsync (options, [safeMc] (int buttonId)
+            {
+                if (safeMc == nullptr) return;
+                if (buttonId == 1)   // Save
+                {
+                    safeMc->savePieceWithDialog ([safeMc] (bool saved)
+                    {
+                        // the app closes only when the piece was written and
+                        // nothing changed since - a cancelled chooser, or an
+                        // edit made while the save was running, leaves the
+                        // window open (the work is not thrown away)
+                        if (saved && safeMc != nullptr && ! safeMc->pieceHasUnsavedChanges())
+                            JUCEApplication::getInstance()->quit();
+                    });
+                }
+                else if (buttonId == 2)   // Discard
+                {
+                    JUCEApplication::getInstance()->quit();
+                }
+                // 0 = Cancel: the app stays open
+            });
+            return false;
         }
     private:
 #if JUCE_ANDROID
