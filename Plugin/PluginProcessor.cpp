@@ -82,6 +82,38 @@ void UpicuitousAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     for (const auto m : midiMessages)
         main->injectMidiMessage(m.getMessage());
 
+    // v1.33.4 (H3): the host's transport. The host's playhead is read here
+    // (the audio callback is where the host hands it over) and pushed into
+    // the component as plain numbers - the component acts on them on the
+    // message thread, so the audio thread never touches the UI.
+    //
+    // A host that does not offer a playhead says so ("known" = false) and
+    // the app keeps its own transport.
+    {
+        auto* playHead = getPlayHead();
+        if (playHead != nullptr)
+        {
+            if (const auto pos = playHead->getPosition())
+            {
+                // the host may leave the time unset (it knows the position
+                // in samples but not in seconds) - then the position is 0
+                double sec = 0.0;
+                if (const auto t = pos->getTimeInSeconds())
+                    sec = *t;
+                main->setHostTransport (true, pos->getIsPlaying(), sec);
+            }
+            else
+            {
+                // the host has a playhead but no position for this block
+                main->setHostTransport (false, false, 0.0);
+            }
+        }
+        else
+        {
+            main->setHostTransport (false, false, 0.0);
+        }
+    }
+
     // v1.33.4 (M24): the component gets the host buffer's MAIN BUS channels -
     // the input channels AND the output channels. The old code passed only
     // the output bus's view, so in a stereo-in / mono-out layout the output

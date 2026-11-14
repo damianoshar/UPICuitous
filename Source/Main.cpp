@@ -1331,6 +1331,60 @@ public:
             dir.deleteRecursively();
         }
 
+        // 6a-11. v1.33.4 (H3): the host transport follow. The review: "the
+        //     DAW's transport does not drive the app, so the plugin can
+        //     drift from the host" and "offer a clear internal/host clock
+        //     choice".
+        {
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize (1280, 800);
+            mc.loadFromVar (juce::JSON::parse (
+                "{\"pages\":[{\"duration\":10,\"arcs\":[]}]}"));
+
+            check (! mc.isFollowingHostTransport(),
+                   "the app's own clock is the default");
+
+            // the mode is off: the host's transport changes nothing
+            mc.setHostTransport (true, true, 3.0);
+            mc.applyHostTransport();
+            check (! mc.isPlayingForTest(),
+                   "with the app's own clock the host's transport is ignored");
+            check (std::abs (mc.playheadForTest()) < 1e-6,
+                   "and the playhead does not move either",
+                   juce::String (mc.playheadForTest(), 3));
+
+            // the host's clock: the host plays, the app plays
+            mc.setFollowHostTransport (true);
+            check (mc.isFollowingHostTransport(),
+                   "the host's clock can be chosen");
+            mc.setHostTransport (true, true, 3.0);
+            mc.applyHostTransport();
+            check (mc.isPlayingForTest(),
+                   "the host's transport starts the app");
+            check (std::abs (mc.playheadForTest() - 3.0) < 0.01,
+                   "the app starts where the host is",
+                   juce::String (mc.playheadForTest(), 3));
+
+            // the host stops, the app stops (the fade-out, as usual)
+            mc.setHostTransport (true, false, 3.0);
+            mc.applyHostTransport();
+            check (mc.stopPendingForTest(),
+                   "the host's transport stops the app");
+
+            // a host without a playhead leaves the app alone
+            {
+                auto mc2Holder = std::make_unique<MainComponent>();
+                auto& mc2 = *mc2Holder;
+                mc2.setSize (1280, 800);
+                mc2.setFollowHostTransport (true);
+                mc2.setHostTransport (false, false, 0.0);
+                mc2.applyHostTransport();
+                check (! mc2.isPlayingForTest(),
+                       "a host without a playhead does not start the app");
+            }
+        }
+
         // 6b. live take -> sample slot (v1.4 capture path, headless)
         {
             juce::AudioBuffer<float> take(2, 48000);

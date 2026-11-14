@@ -381,6 +381,16 @@ must stay sample-accurate. The status line shows the current value
 host's input bus is read whole - both channels reach the live arcs and
 the microphone recording, even when the host's output is mono.
 
+**The host's clock** - the plugin can follow the DAW's transport instead
+of running on its own: **File -> Follow the host transport** (the status
+line shows `HOST` when it is on). The host's transport then starts and
+stops the app, and the host's position is where the app's playhead is -
+the page loops under the host's transport, so the drawing repeats for as
+long as the DAW plays. The choice is the user's, because the two clocks
+are different things: the app's own clock plays the drawing as it is,
+the host's clock keeps it in time with the song. A host that does not
+offer a playhead changes nothing - the app keeps its own transport.
+
 ## Layout
 
 ```
@@ -421,7 +431,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 630 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 638 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -452,9 +462,10 @@ duplicate arc ids, the impossible ones, the derived next id and the
 material references), the values that cross the thread boundary (the
 sample rate and the scrub tail), the unsaved-changes flag, the undo
 stack (the step, the restore, the redo, the branch, the drag that is one
-step, and the stroke on the canvas) and the recovery snapshot (the
+step, and the stroke on the canvas), the recovery snapshot (the
 snapshot, the sidecar with the audio, the reuse of the unchanged audio,
-the read-back and the broken snapshot) ) and
+the read-back and the broken snapshot) and the host transport follow (the
+choice of the clock, the start, the stop and the position) ) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.

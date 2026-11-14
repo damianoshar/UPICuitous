@@ -105,6 +105,35 @@ public:
     bool pieceHasUnsavedChanges() const { return pieceDirty.load (std::memory_order_relaxed); }
     void markPieceSaved() { pieceDirty.store (false, std::memory_order_relaxed); }
 
+    // --- v1.33.4 (H3): the host transport follow ---
+    //
+    // The review: "the DAW's transport does not drive the app, so the plugin
+    // can drift from the host" and "offer a clear internal/host clock
+    // choice".
+    //
+    // The plugin reads the host's playhead in its audio callback and pushes
+    // the values here as plain numbers - the component acts on them on the
+    // message thread (the audio thread must not touch the UI). The values
+    // cross the thread boundary, so they are atomic (the same rule as the
+    // sample rate and the scrub tail).
+    //
+    // The mode is off by default: the app keeps its own clock, and the user
+    // chooses the host's clock in the File menu.
+    std::atomic<bool> hostTransportKnown { false };    // the host gave us a playhead
+    std::atomic<bool> hostTransportPlaying { false };
+    std::atomic<double> hostTransportPosSec { 0.0 };
+    std::atomic<bool> followHostTransport { false };
+
+public:
+    bool isFollowingHostTransport() const { return followHostTransport.load (std::memory_order_relaxed); }
+    void setFollowHostTransport (bool on);
+    // the plugin pushes the host's transport here (the audio thread): it only
+    // stores plain numbers, it never touches the UI
+    void setHostTransport (bool known, bool playing, double posSec);
+    // the message thread acts on the host's transport (the status timer)
+    void applyHostTransport();
+
+public:
     // --- v1.33.4 (L15, part 2): the undo stack ---
     //
     // The review: "core editing directly mutates vectors ... drawing,
@@ -302,6 +331,9 @@ public:
     float inputTapPeakForTest (int channel) const;
     bool externalScrubActiveForTest() const { return externalScrubActive; }
     bool isPlayingForTest() const { return isPlaying.load (std::memory_order_relaxed); }
+    // v1.33.4 (H3): the stop the app asked for is still running (the
+    // fade-out) - the audio thread is the one that ends it.
+    bool stopPendingForTest() const { return wantsStop.load (std::memory_order_relaxed); }
     void injectOscMessageForTest (const juce::OSCMessage& m) { osc.handleMessageForTest (m); }
     void updateExternalScrubForTest (double nowMs) { updateExternalScrub (nowMs); }
 

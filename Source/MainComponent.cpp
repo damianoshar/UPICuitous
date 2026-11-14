@@ -509,6 +509,13 @@ void MainComponent::buildLiveControls()
             m.addItem (9, "Undo " + undoLabel());
             if (canRedo()) m.addItem (10, "Redo " + redoLabel());
         }
+        // v1.33.4 (H3): the host's clock. The choice is the user's: the app's
+        // own transport, or the DAW's (the plugin only - the stand-alone app
+        // has no host to follow).
+        if (pluginMode_)
+            m.addItem (11, isFollowingHostTransport()
+                              ? "Follow the host transport: on"
+                              : "Follow the host transport: off");
         // v1.33.4 (M28): the long jobs (the render, the stems, the decode,
         // the save) run on a worker thread, so they can be stopped.
         if (jobRunning())
@@ -546,6 +553,8 @@ void MainComponent::buildLiveControls()
                     case 8: sp->cancelJob(); break;   // v1.33.4 (M28)
                     case 9: sp->undo(); break;        // v1.33.4 (L15)
                     case 10: sp->redo(); break;       // v1.33.4 (L15)
+                    case 11: sp->setFollowHostTransport (! sp->isFollowingHostTransport());
+                             break;                    // v1.33.4 (H3)
                     default: sp->transformPage (r); break;
                 }
             });
@@ -4336,6 +4345,9 @@ void MainComponent::timerCallback()
           + (curPage().zones.empty() ? juce::String()
              : " | " + juce::String((int) curPage().zones.size()) + " zone(s)");
         if (seqPages) s += " | SEQ";
+        // v1.33.4 (H3): the host's clock - the user has to see which clock
+        // the transport runs on.
+        if (followHostTransport.load (std::memory_order_relaxed)) s += " | HOST";
         if (recordPressure) s += " | PRESS";
         if (timeGrid > 0) s += " | GRID " + juce::String(timeGrid, 0) + "/s";
         if (stickiness < 0.999) s += " | STICK " + juce::String((int) std::round(stickiness * 100)) + "%";
@@ -4388,6 +4400,9 @@ void MainComponent::timerCallback()
     // at most every 30 s, and only when the piece has unsaved changes and
     // the model moved since the last snapshot.
     maybeWriteRecoverySnapshot();
+
+    // v1.33.4 (H3): the host's transport drives the app when the mode is on
+    applyHostTransport();
 }
 
 void MainComponent::publishLatency()
@@ -6015,6 +6030,79 @@ void MainComponent::offerRecovery()
             deleteRecoverySnapshot (dir);
         }
     });
+}
+
+//==============================================================================
+// v1.33.4 (H3): the host transport follow.
+//
+// The plugin pushes the host's transport into the atomics (the audio thread
+// reads the host's playhead), and the app follows it when the mode is on:
+// the host's transport starts and stops the app, and the host's position is
+// where the app's playhead is.
+//
+// The host's time is the page's time: the page loops under the host's
+// transport (the host's clock is the master, so the drawing repeats for as
+// long as the host plays).
+void MainComponent::setHostTransport (bool known, bool playing, double posSec)
+{
+    // the audio thread: plain numbers only, no UI, no locks
+    hostTransportKnown.store (known, std::memory_order_relaxed);
+    hostTransportPlaying.store (playing, std::memory_order_relaxed);
+    hostTransportPosSec.store (posSec, std::memory_order_relaxed);
+}
+
+void MainComponent::setFollowHostTransport (bool on)
+{
+    followHostTransport.store (on, std::memory_order_relaxed);
+    if (on)
+        flash ("The transport now follows the host");
+    else
+        flash ("The transport is the app's own again");
+}
+
+void MainComponent::applyHostTransport()
+{
+    // off (the app's own clock), or the host has no playhead (many hosts do
+    // not offer one) - then nothing happens
+    if (! followHostTransport.load (std::memory_order_relaxed)) return;
+    if (! hostTransportKnown.load (std::memory_order_relaxed)) return;
+
+    const bool hostPlaying = hostTransportPlaying.load (std::memory_order_relaxed);
+    const bool appPlaying = isPlaying.load (std::memory_order_relaxed)
+                         || wantsStop.load (std::memory_order_relaxed);
+
+    // the host's position, inside the current page (the page loops under the
+    // host's transport)
+    const double dur = curPage().durationSec;
+    const double hostPos = hostTransportPosSec.load (std::memory_order_relaxed);
+    double target = hostPos;
+    if (dur > 0.0)
+    {
+        target = std::fmod (hostPos, dur);
+        if (target < 0.0) target += dur;
+    }
+
+    if (hostPlaying && ! appPlaying)
+    {
+        // the host starts: the app starts where the host is
+        if (dur > 0.0) seekPlayhead (target);
+        startPlayback();
+        return;
+    }
+
+    if (! hostPlaying && appPlaying)
+    {
+        // the host stops: the app stops with it (the fade-out, as usual)
+        stopPlayback();
+        return;
+    }
+
+    // both are running: the app follows the host's position. A small
+    // difference is the timer's own jitter - the app's playhead runs on its
+    // own clock between the seeks, so it is only pulled back when the host
+    // really moved (a locate in the DAW).
+    if (hostPlaying && dur > 0.0 && std::abs (target - displayPlayhead()) > 0.25)
+        seekPlayhead (target);
 }
 
 void MainComponent::loadFile()
