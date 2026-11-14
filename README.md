@@ -232,7 +232,15 @@ never wipe the unsaved work. The app knows when the piece differs from
 what was last written: closing the window then asks - **Save** (the piece
 is written and the app closes), **Discard** (the changes are thrown away)
 or **Cancel** (the app stays open) - so an accidental close cannot throw
-the work away. The piece carries everything that
+the work away. If the app dies anyway (a crash, a killed process), the
+work is not lost either: while the piece has unsaved changes the app
+keeps a **recovery snapshot** in its own data folder, and the next start
+asks whether to open it. The snapshot is a small piece file (the pages)
+plus the audio in sidecar files - a sidecar is only written when the
+audio really changed, so the snapshots do not carry the material again
+and again. Saving the piece or throwing it away removes the snapshot;
+the plugin keeps no snapshot (the host holds the piece). The piece
+carries everything that
 changes the sound - the arc's own pitch algorithm and its reversal, the
 sample slot's direction and the global pitch modes - so a reopened piece
 (or a reopened DAW session) sounds the same; older pieces without those
@@ -413,7 +421,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 616 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 630 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -442,9 +450,11 @@ working memory), the long jobs (the worker thread, the cancel, and
 the export that writes its file), the ids of a loaded piece (the
 duplicate arc ids, the impossible ones, the derived next id and the
 material references), the values that cross the thread boundary (the
-sample rate and the scrub tail), the unsaved-changes flag and the undo
+sample rate and the scrub tail), the unsaved-changes flag, the undo
 stack (the step, the restore, the redo, the branch, the drag that is one
-step, and the stroke on the canvas) ) and
+step, and the stroke on the canvas) and the recovery snapshot (the
+snapshot, the sidecar with the audio, the reuse of the unchanged audio,
+the read-back and the broken snapshot) ) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.

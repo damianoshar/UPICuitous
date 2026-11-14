@@ -1157,7 +1157,43 @@ namespace upic
                        ? (double) data->getNumSamples() / sampleRate : 0.0;
         }
 
+        // v1.33.4 (L15, part 3): the slot's audio as the PCM16 bytes the
+        // piece's base64 carries. The recovery snapshot writes these bytes
+        // to a sidecar file, so the unchanged audio is not embedded again
+        // and again - and the same conversion is used everywhere, so the
+        // recovered audio is bit-identical to the saved one.
+        juce::MemoryBlock toPcm16() const
+        {
+            juce::MemoryBlock mb;
+            const int ch = juce::jmin(2, data != nullptr ? data->getNumChannels() : 0);
+            const int n = data != nullptr ? data->getNumSamples() : 0;
+            if (n <= 0 || ch <= 0)
+                return mb;
+            mb.setSize ((size_t) n * (size_t) ch * sizeof (short));
+            auto* dst = static_cast<short*>(mb.getData());
+            for (int i = 0; i < n; ++i)
+                for (int c = 0; c < ch; ++c)
+                {
+                    // v1.33.4 (M26): the value is ROUNDED to the nearest
+                    // step (the old code truncated, so every save/load
+                    // cycle lost a step of level) and scaled with the same
+                    // number the decoder divides by.
+                    const double v = (double) data->getSample(c, i) * (double) kPcmScale;
+                    *dst++ = (short) juce::jlimit (-32767.0, 32767.0, std::round (v));
+                }
+            return mb;
+        }
+
         juce::var toVar() const
+        {
+            return toVar (true);
+        }
+
+        // v1.33.4 (L15, part 3): with includeAudio = false the slot carries
+        // no audio - the recovery snapshot keeps the audio in a sidecar
+        // file, so the piece JSON stays small and the audio is not
+        // re-encoded for every snapshot.
+        juce::var toVar (bool includeAudio) const
         {
             auto* o = new juce::DynamicObject();
             o->setProperty("id", id);
@@ -1170,20 +1206,9 @@ namespace upic
             const int n = data != nullptr ? data->getNumSamples() : 0;
             o->setProperty("channels", ch);
             o->setProperty("frames", n);
-            if (n > 0 && ch > 0)
+            if (includeAudio && n > 0 && ch > 0)
             {
-                juce::MemoryBlock mb((size_t) n * (size_t) ch * sizeof(short));
-                auto* dst = static_cast<short*>(mb.getData());
-                for (int i = 0; i < n; ++i)
-                    for (int c = 0; c < ch; ++c)
-                    {
-                        // v1.33.4 (M26): the value is ROUNDED to the nearest
-                        // step (the old code truncated, so every save/load
-                        // cycle lost a step of level) and scaled with the same
-                        // number the decoder divides by.
-                        const double v = (double) data->getSample(c, i) * (double) kPcmScale;
-                        *dst++ = (short) juce::jlimit (-32767.0, 32767.0, std::round (v));
-                    }
+                const auto mb = toPcm16();
                 o->setProperty("data", juce::Base64::toBase64(mb.getData(), mb.getSize()));
             }
             return juce::var(o);
@@ -2122,7 +2147,11 @@ namespace upic
     // The piece as a var. The samples become base64 here, and that is the
     // heavy part of a save - so the caller can run this on a worker thread
     // (v1.33.4 / M28).
-    inline juce::var pieceToVar (const PieceModel& m)
+    //
+    // v1.33.4 (L15, part 3): the piece without the sample audio. The
+    // recovery snapshot keeps the audio in a sidecar file, so the piece JSON
+    // stays small and the unchanged audio is not embedded again and again.
+    inline juce::var pieceToVar (const PieceModel& m, bool includeSampleAudio)
     {
         auto* o = new juce::DynamicObject();
         o->setProperty("app", "UPICuitous");
@@ -2153,12 +2182,18 @@ namespace upic
         juce::Array<juce::var> wa, ea, pa, sa;
         for (auto& w : m.waveforms) wa.add (w.toVar());
         for (auto& e : m.envelopes) ea.add (e.toVar());
-        for (auto& s : m.sampleSlots) if (s.loaded()) sa.add (s.toVar());
+        for (auto& s : m.sampleSlots) if (s.loaded()) sa.add (s.toVar (includeSampleAudio));
         for (auto& p : m.pages) pa.add (p.toVar());
         o->setProperty("waveforms", wa);
         o->setProperty("envelopes", ea);
         o->setProperty("samples", sa);
         o->setProperty("pages", pa);
         return juce::var (o);
+    }
+
+    // The piece with the audio in it (the normal one).
+    inline juce::var pieceToVar (const PieceModel& m)
+    {
+        return pieceToVar (m, true);
     }
 }

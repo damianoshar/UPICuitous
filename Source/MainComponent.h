@@ -172,6 +172,10 @@ public:
         std::atomic<bool> done { false };      // the work is finished
         std::atomic<int> progress { 0 };       // 0..100
         bool ok = false;                       // the job's result (the report reads it)
+        // v1.33.4 (L15, part 3): a silent job does not take over the status
+        // line and does not flash a message - the recovery snapshot runs
+        // every half minute and must not keep interrupting the user.
+        bool silent = false;
         juce::String message;                  // what the report says
         std::function<void (Job&)> work;       // the heavy part (the worker thread)
         std::function<void (Job&)> report;     // the result (the message thread)
@@ -182,11 +186,43 @@ public:
     // second job would fight the first over the disk.
     void startJob (const juce::String& label,
                    std::function<void (Job&)> work,
-                   std::function<void (Job&)> report);
+                   std::function<void (Job&)> report,
+                   bool announce = true);
     void cancelJob();                                  // asks the running job to stop
     bool jobRunning() const { return jobBusy.load (std::memory_order_relaxed); }
     int jobProgress() const;
     juce::String jobLabel() const;
+
+    // --- v1.33.4 (L15, part 3): the crash recovery ---
+    //
+    // The review asked for "recovery snapshots without embedding unchanged
+    // audio repeatedly". The snapshot is a small piece JSON (the pages) plus
+    // the audio in sidecar files: a sidecar is only written when the audio
+    // really changed, so the repeated snapshots carry the pages, not the
+    // material.
+    //
+    // The snapshot is written while the piece has unsaved changes (on the
+    // worker thread, like the other long jobs) and it is offered at the next
+    // start - the app asks whether to recover it.
+    static juce::File recoveryDirectory();
+    // writes the snapshot (the worker thread): the piece JSON and the
+    // sidecars of the samples that changed
+    static bool writeRecoverySnapshot (const juce::File& dir, const upic::PieceModel& model,
+                                       juce::String& error);
+    // reads it back (the message thread): the piece, with the audio put
+    // back where the loader expects it
+    static bool readRecoverySnapshot (const juce::File& dir, juce::var& pieceOut, juce::String& error);
+    // throws it away (the piece was saved, or the user did not want it)
+    static void deleteRecoverySnapshot (const juce::File& dir);
+    // the message thread
+    void offerRecovery();
+    void maybeWriteRecoverySnapshot();
+    // v1.33.4 (L15, part 3): the selftest must not write into the user's
+    // own data folder, so it turns the snapshot off for its components.
+    static void setRecoveryAllowed (bool allowed)
+    {
+        recoveryAllowed.store (allowed, std::memory_order_relaxed);
+    }
 
     // The model a render or an export works on: captured on the message
     // thread (under the lock) and then never touched again.
@@ -413,6 +449,13 @@ private:
     // memory it holds (the oldest steps go first).
     static constexpr int kMaxUndoSteps = 50;
     static constexpr juce::int64 kMaxUndoBytes = 64ll * 1024 * 1024;
+    // --- v1.33.4 (L15, part 3): the crash recovery ---
+    // when the last recovery snapshot was written, and the model revision it
+    // was written from (a snapshot is only worth writing when something
+    // changed since the last one)
+    juce::uint64 lastRecoveryMs = 0;
+    juce::uint64 lastRecoveryRevision = 0;
+    inline static std::atomic<bool> recoveryAllowed { true };
     std::atomic<double> playRate { 1.0 };   // +1 forward, -1 backward
     std::atomic<double> prevPlayRate { 1.0 };
     std::atomic<int>    dirChangeSerial { 0 };

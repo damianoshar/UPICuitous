@@ -72,6 +72,21 @@ public:
             return;
         }
         mainWindow.reset(new MainWindow(getApplicationName()));
+
+        // v1.33.4 (L15, part 3): the crash recovery. The snapshot of the
+        // last session is offered when the app did not close cleanly - the
+        // offer waits for the window to be up (the message manager runs it
+        // after the constructor).
+        if (mainWindow != nullptr)
+        {
+            juce::Component::SafePointer<MainComponent> safeMc (
+                dynamic_cast<MainComponent*> (mainWindow->getContentComponent()));
+            juce::MessageManager::callAsync ([safeMc]
+            {
+                if (safeMc != nullptr)
+                    safeMc->offerRecovery();
+            });
+        }
     }
     void shutdown() override { mainWindow = nullptr; }
     void systemRequestedQuit() override
@@ -92,6 +107,10 @@ public:
     {
         juce::String log;
         int failures = 0;
+        // v1.33.4 (L15, part 3): the selftest must not write a recovery
+        // snapshot into the user's own data folder (the app would offer it
+        // at the next start)
+        MainComponent::setRecoveryAllowed (false);
         auto check = [&](bool ok, const juce::String& name, const juce::String& detail = {})
         {
             log << (ok ? "PASS  " : "FAIL  ") << name;
@@ -1183,6 +1202,133 @@ public:
                            "the undone piece counts as unsaved");
                 }
             }
+        }
+
+        // 6a-10. v1.33.4 (L15, part 3): the crash recovery. The review:
+        //     "save recovery snapshots without embedding unchanged audio
+        //     repeatedly". The snapshot is a small piece JSON (the pages) plus
+        //     the audio in sidecar files: a sidecar is only written when the
+        //     audio really changed.
+        {
+            const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("upic_recovery_test");
+            dir.deleteRecursively();
+
+            // a piece with one arc and a little audio
+            upic::PieceModel model;
+            {
+                upic::Page p;
+                p.durationSec = 10.0;
+                upic::Arc a;
+                a.id = 1;
+                a.points = { { 0.0, 220.0 }, { 4.0, 880.0 } };
+                p.arcs.push_back (a);
+                model.pages.push_back (p);
+            }
+            {
+                juce::AudioBuffer<float> buf (2, 1000);
+                for (int i = 0; i < 1000; ++i)
+                    for (int c = 0; c < 2; ++c)
+                        buf.setSample (c, i, 0.25f * std::sin ((float) i * 0.01f));
+                upic::SampleSlot slot;
+                slot.id = 1;
+                slot.name = "take.wav";
+                slot.sampleRate = 48000.0;
+                slot.data = std::make_shared<const juce::AudioBuffer<float>> (buf);
+                model.sampleSlots.push_back (slot);
+            }
+
+            juce::String error;
+            check (MainComponent::writeRecoverySnapshot (dir, model, error),
+                   "the recovery snapshot is written", error);
+
+            const auto pieceFile = dir.getChildFile ("piece.json");
+            check (pieceFile.existsAsFile(), "the snapshot has its piece file");
+
+            // the piece JSON does NOT carry the audio: the audio is in a
+            // sidecar, so the unchanged audio is not embedded again and again
+            const auto snapshotJson = pieceFile.loadFileAsString();
+            auto snapshotVar = juce::JSON::parse (snapshotJson);
+            auto* snapSamples = snapshotVar.getProperty ("samples", juce::var()).getArray();
+            check (snapSamples != nullptr && snapSamples->size() == 1,
+                   "the snapshot knows the one sample");
+            const auto snapName = snapSamples != nullptr && snapSamples->size() == 1
+                                    ? (*snapSamples)[0].getDynamicObject()
+                                        ->getProperty ("recoveryFile").toString()
+                                    : juce::String();
+            check (snapName.isNotEmpty(), "the snapshot points at the audio file",
+                   snapName);
+            check (snapSamples != nullptr && snapSamples->size() == 1
+                   && (*snapSamples)[0].getDynamicObject()
+                        ->getProperty ("data").toString().isEmpty(),
+                   "the snapshot's piece file does not embed the audio");
+            const auto sidecar = dir.getChildFile (snapName);
+            check (sidecar.existsAsFile(), "the audio is in its own file", snapName);
+
+            // it reads back: the piece and the audio are both there
+            juce::var recovered;
+            check (MainComponent::readRecoverySnapshot (dir, recovered, error),
+                   "the recovery snapshot reads back", error);
+            {
+                auto* pages = recovered.getProperty ("pages", juce::var()).getArray();
+                auto* arcs = pages != nullptr && pages->size() > 0
+                                ? (*pages)[0].getProperty ("arcs", juce::var()).getArray()
+                                : nullptr;
+                check (arcs != nullptr && arcs->size() == 1,
+                       "the recovered piece has its arc");
+                // the audio comes back exactly as it was
+                const auto pcm = model.sampleSlots[0].toPcm16();
+                auto* recSamples = recovered.getProperty ("samples", juce::var()).getArray();
+                const auto recData = recSamples != nullptr && recSamples->size() == 1
+                                        ? (*recSamples)[0].getDynamicObject()
+                                            ->getProperty ("data").toString()
+                                        : juce::String();
+                check (recData == juce::Base64::toBase64 (pcm.getData(), pcm.getSize()),
+                       "the recovered audio is the same audio");
+            }
+
+            // the unchanged audio is not written again: the sidecar is
+            // marked read-only, and the second snapshot still succeeds
+            sidecar.setReadOnly (true);
+            upic::PieceModel model2 = model;
+            model2.pages[0].arcs[0].points[1].freq = 990.0;   // the pages changed
+            check (MainComponent::writeRecoverySnapshot (dir, model2, error),
+                   "the second snapshot is written", error);
+            sidecar.setReadOnly (false);
+            {
+                juce::var recovered2;
+                MainComponent::readRecoverySnapshot (dir, recovered2, error);
+                auto* pages = recovered2.getProperty ("pages", juce::var()).getArray();
+                auto* arcs = pages != nullptr && pages->size() > 0
+                                ? (*pages)[0].getProperty ("arcs", juce::var()).getArray()
+                                : nullptr;
+                check (arcs != nullptr && arcs->size() == 1,
+                       "the second snapshot has the arc");
+                auto* pts = arcs != nullptr && arcs->size() > 0
+                                ? (*arcs)[0].getProperty ("points", juce::var()).getArray()
+                                : nullptr;
+                check (pts != nullptr && pts->size() == 2
+                       && static_cast<double> ((*pts)[1].getProperty ("f", 0.0)) == 990.0,
+                       "the second snapshot has the new curve");
+            }
+
+            // a broken snapshot is refused (and thrown away, so it cannot
+            // ask again and again)
+            {
+                juce::File broken = dir.getChildFile ("piece.json");
+                broken.replaceWithText ("this is not a piece");
+                juce::var nope;
+                check (! MainComponent::readRecoverySnapshot (dir, nope, error),
+                       "a broken recovery snapshot is refused", error);
+            }
+
+            // a snapshot that lost its audio is refused too
+            {
+                MainComponent::deleteRecoverySnapshot (dir);
+                check (! MainComponent::readRecoverySnapshot (dir, recovered, error),
+                       "there is nothing to recover after the cleanup", error);
+            }
+            dir.deleteRecursively();
         }
 
         // 6b. live take -> sample slot (v1.4 capture path, headless)
@@ -6896,6 +7042,10 @@ public:
                 }
                 else if (buttonId == 2)   // Discard
                 {
+                    // v1.33.4 (L15, part 3): the work is thrown away on
+                    // purpose, so the recovery snapshot must not offer it
+                    // again at the next start
+                    MainComponent::deleteRecoverySnapshot (MainComponent::recoveryDirectory());
                     JUCEApplication::getInstance()->quit();
                 }
                 // 0 = Cancel: the app stays open
