@@ -42,6 +42,14 @@ namespace upic
         // rejected.
         constexpr size_t kMaxPieceBytes = (kMaxTotalSampleBytes / 3u) * 2u;
 
+        // --- the ids ---
+        // The arcs, the sieve zones, the wavetables and the envelopes are
+        // keyed by their id (the selection, the drag map, the arc list and
+        // the material references all use it). An id outside this range is
+        // not an id: a huge one overflows the "next id" counter and a
+        // negative one is not an id at all.
+        constexpr int kMaxItemId = 1000000;
+
         // --- the arrays in a piece ---
         constexpr int kMaxPages = 100;
         constexpr int kMaxArcsPerPage = 500;

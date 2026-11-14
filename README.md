@@ -230,6 +230,11 @@ limits - 500 arcs per page, 100 pages, 1000 points per arc, 200 sieve zones
 - and the editor and the loader share them: the editor refuses what does
 not fit (and says so), and a piece that is over a limit is loaded truncated
 with a message naming what did not fit, so music is never lost silently.
+The ids are checked as well: the arcs, the sieve zones, the wavetables and
+the envelopes are keyed by their id, so a piece that carries the same id
+twice (or an id that was never meant to be one) is renumbered on the way
+in, and the next id is derived from the arcs that are there - a duplicate
+id can no longer make the selection and the delete hit the wrong arc.
 On Android the file chooser hands back a document-provider URL, not a
 path; the app works with that URL, so a piece, a sample or a preset picked
 from any provider (Downloads, Drive, a file manager) loads and saves
@@ -397,7 +402,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 569 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 581 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -422,8 +427,10 @@ latency following an arc's own algorithm, and the file a chooser
 returns, the MIDI message queue, the MIDI channel labels, the model
 snapshot that the status timer publishes, the audio thread's
 allocations (the render, the steady state, a reset and the vocoder's
-working memory), and the long jobs (the worker thread, the cancel, and
-the export that writes its file) ) and
+working memory), the long jobs (the worker thread, the cancel, and
+the export that writes its file), and the ids of a loaded piece (the
+duplicate arc ids, the impossible ones, the derived next id and the
+material references) ) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <algorithm>
 #include <memory>
+#include <set>
 #include "PieceLimits.h"
 
 //==============================================================================
@@ -1717,6 +1718,59 @@ namespace upic
         return w;
     }
 
+    //================ the ids of a loaded piece (L13) ==================
+    //
+    // The arcs, the sieve zones, the wavetables and the envelopes are keyed
+    // by their id: the selection, the drag map, the arc list and the
+    // material references all use it. A file could carry the same id twice
+    // (two arcs with id 7) or an id that was never meant to be one (0, a
+    // negative number, a huge number). Then the selection and the delete
+    // hit the wrong arc, and the "next id" - taken from the file - could
+    // collide with an arc that is already there.
+    //
+    // The ids are checked when a piece is loaded: the FIRST item of an id
+    // keeps it (so the arcs that point at the material keep pointing at the
+    // same thing), a duplicate or an impossible id gets a free one, and the
+    // counter of the next id is derived from the items that are there.
+    template <typename T>
+    inline int uniquifyIds (std::vector<T>& items, int minId = 0)
+    {
+        std::set<int> used;
+        for (auto& it : items)
+            if (it.id >= minId && it.id <= limits::kMaxItemId)
+                used.insert (it.id);
+
+        std::set<int> seen;
+        int nextFree = minId;
+        int changed = 0;
+        for (auto& it : items)
+        {
+            const bool valid = (it.id >= minId && it.id <= limits::kMaxItemId);
+            if (valid && seen.count (it.id) == 0)
+            {
+                seen.insert (it.id);
+                continue;      // the first one keeps the id
+            }
+            // a duplicate, or an id that was never meant to be one: it gets
+            // a free id (the first one that nothing else uses)
+            while (used.count (nextFree) > 0) ++nextFree;
+            it.id = nextFree;
+            used.insert (nextFree);
+            seen.insert (nextFree);
+            ++nextFree;
+            ++changed;
+        }
+        return changed;
+    }
+
+    // Does the list carry an item with this id?
+    template <typename T>
+    inline bool hasId (const std::vector<T>& items, int id)
+    {
+        for (auto& it : items) if (it.id == id) return true;
+        return false;
+    }
+
     //---------------- Page ----------------
     struct Page
     {
@@ -1923,34 +1977,54 @@ namespace upic
             if (warp != 0.0) o->setProperty("warp", warp);
             return juce::var(o);
         }
-        static Page fromVar(const juce::var& v)
+        static Page fromVar(const juce::var& v, int* renamedIds = nullptr)
         {
             Page p;
             p.durationSec = limits::clampFinite((double) v.getProperty("duration", 30.0),
                                               kMinPageSeconds, kMaxPageSeconds);
             p.tempoBpm    = limits::clampFinite((double) v.getProperty("tempo", 120.0), 20.0, 400.0);
-            p.nextArcId = (int) v.getProperty("nextArcId", 1);
+            // v1.33.4 (L13): the file's own "next id" is only a suggestion -
+            // it is checked against the arcs that are there (and against the
+            // range an id can have) further down.
+            const int fileNextArcId = (int) v.getProperty("nextArcId", 1);
             if (auto* arr = v.getProperty("arcs", juce::var()).getArray())
                 for (auto& av : *arr)
                 {
                     if ((int) p.arcs.size() >= limits::kMaxArcsPerPage) break;
                     p.arcs.push_back(Arc::fromVar(av));
                 }
-            // Files written by other tools may not carry nextArcId: make sure the
-            // next generated id can never collide with an id already in use
-            // (a collision would make select/delete hit the wrong arc).
+            // v1.33.4 (L13): the arc ids are the key of the per-arc maps (the
+            // selection, the drag map, the arc list). A file with two arcs
+            // carrying the same id made the selection and the delete hit the
+            // wrong arc, so the ids are made unique here - the first arc of
+            // an id keeps it, a duplicate or an impossible id gets a free
+            // one.
+            int renamed = uniquifyIds (p.arcs, 1);
+            // The next id is derived from the arcs that are there: a file
+            // could hand out an id that is already in use, or one so large
+            // that the counter overflowed. The file's value is still used
+            // when it is sane and higher (the ids it handed out earlier may
+            // still be in the user's notes).
+            p.nextArcId = 1;
             for (auto& a : p.arcs)
                 p.nextArcId = juce::jmax(p.nextArcId, a.id + 1);
+            if (fileNextArcId > p.nextArcId && fileNextArcId <= limits::kMaxItemId)
+                p.nextArcId = fileNextArcId;
             // zones absent in old / Python-written files -> no zones, as before
-            p.nextZoneId = (int) v.getProperty("nextZoneId", 1);
+            const int fileNextZoneId = (int) v.getProperty("nextZoneId", 1);
             if (auto* zarr = v.getProperty("zones", juce::var()).getArray())
                 for (auto& zv : *zarr)
                 {
                     if ((int) p.zones.size() >= limits::kMaxSieveZones) break;
                     p.zones.push_back(SieveZone::fromVar(zv));
                 }
+            renamed += uniquifyIds (p.zones, 1);
+            p.nextZoneId = 1;
             for (auto& z : p.zones)
                 p.nextZoneId = juce::jmax(p.nextZoneId, z.id + 1);
+            if (fileNextZoneId > p.nextZoneId && fileNextZoneId <= limits::kMaxItemId)
+                p.nextZoneId = fileNextZoneId;
+            if (renamedIds != nullptr) *renamedIds += renamed;
             // v1.33: the ambitus and the four spaces (absent in old pieces ->
             // the whole canvas range, and the page's own space)
             p.pitchLo = limits::clampFinite((double) v.getProperty("ambLo", kDefaultPitchLo),

@@ -841,6 +841,108 @@ public:
             target.deleteFile();
         }
 
+        // 6a-6. v1.33.4 (L13): the ids of a loaded piece are checked. The
+        //     arcs, the sieve zones, the wavetables and the envelopes are
+        //     keyed by their id, so a file with two arcs carrying the same
+        //     id made the selection and the delete hit the wrong arc, and
+        //     the "next id" - taken from the file - could collide with an
+        //     arc that was already there (or overflow).
+        {
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize (1280, 800);
+
+            // two arcs with the same id, one with no id at all, and a
+            // "nextArcId" that would overflow the counter
+            const juce::String json =
+                "{\"pages\":[{\"duration\":10,\"nextArcId\":2147483647,\"arcs\":["
+                "{\"id\":7,\"mode\":0,\"intensity\":1,\"points\":[{\"t\":0,\"f\":220},{\"t\":5,\"f\":440}]},"
+                "{\"id\":7,\"mode\":0,\"intensity\":1,\"points\":[{\"t\":0,\"f\":330},{\"t\":5,\"f\":550}]},"
+                "{\"id\":0,\"mode\":0,\"intensity\":1,\"points\":[{\"t\":0,\"f\":110},{\"t\":5,\"f\":220}]}"
+                "]}]}";
+            check (mc.loadFromVar (juce::JSON::parse (json)),
+                   "a piece with duplicate ids loads");
+
+            const auto loaded = mc.pieceToVar();
+            auto* pagesArr = loaded.getProperty ("pages", juce::var()).getArray();
+            auto* arcsArr = pagesArr != nullptr
+                              ? pagesArr->getReference (0).getProperty ("arcs", juce::var()).getArray()
+                              : nullptr;
+            check (arcsArr != nullptr && arcsArr->size() == 3,
+                   "the three arcs are loaded");
+            std::vector<int> ids;
+            juce::String idList;
+            if (arcsArr != nullptr)
+                for (auto& av : *arcsArr)
+                {
+                    ids.push_back ((int) av.getProperty ("id", 0));
+                    idList += (idList.isEmpty() ? "" : ",") + juce::String (ids.back());
+                }
+            bool unique = ids.size() == 3;
+            for (size_t i = 0; i < ids.size() && unique; ++i)
+                for (size_t j = i + 1; j < ids.size(); ++j)
+                    if (ids[i] == ids[j]) unique = false;
+            check (unique, "the duplicate arc ids are made unique", idList);
+            check (std::find (ids.begin(), ids.end(), 7) != ids.end(),
+                   "the first arc keeps its id", idList);
+            check (std::find (ids.begin(), ids.end(), 0) == ids.end(),
+                   "an impossible arc id is replaced", idList);
+            // the next id is derived: it can never collide with an arc that
+            // is there, and the huge value from the file is ignored
+            const int nextId = pagesArr != nullptr
+                                 ? (int) pagesArr->getReference (0).getProperty ("nextArcId", 0)
+                                 : -1;
+            check (nextId > 0 && nextId <= upic::limits::kMaxItemId
+                   && std::find (ids.begin(), ids.end(), nextId) == ids.end(),
+                   "the next arc id is derived from the arcs that are there",
+                   "nextArcId=" + juce::String (nextId));
+
+            // the wavetables, the envelopes and the arcs' references to them
+            {
+                const juce::String json2 =
+                    "{\"waveforms\":[{\"id\":3,\"name\":\"A\"},{\"id\":3,\"name\":\"B\"}],"
+                    "\"envelopes\":[{\"id\":1,\"name\":\"E1\"},{\"id\":1,\"name\":\"E2\"}],"
+                    "\"pages\":[{\"duration\":10,\"arcs\":["
+                    "{\"id\":1,\"mode\":0,\"waveformId\":99,\"envelopeId\":99,\"pmIndexEnv\":42,"
+                    "\"points\":[{\"t\":0,\"f\":220},{\"t\":5,\"f\":440}]}]}]}";
+                check (mc.loadFromVar (juce::JSON::parse (json2)),
+                       "a piece with broken material references loads");
+
+                const auto out2 = mc.pieceToVar();
+                auto* wavesArr = out2.getProperty ("waveforms", juce::var()).getArray();
+                auto* envsArr  = out2.getProperty ("envelopes", juce::var()).getArray();
+                auto* pages2   = out2.getProperty ("pages", juce::var()).getArray();
+                auto* arcs2    = pages2 != nullptr
+                                   ? pages2->getReference (0).getProperty ("arcs", juce::var()).getArray()
+                                   : nullptr;
+                const int waveId0 = wavesArr != nullptr ? (int) wavesArr->getReference (0).getProperty ("id", 0) : -1;
+                const int waveId1 = (wavesArr != nullptr && wavesArr->size() > 1)
+                                      ? (int) wavesArr->getReference (1).getProperty ("id", 0) : -1;
+                const int envId0  = envsArr != nullptr ? (int) envsArr->getReference (0).getProperty ("id", 0) : -1;
+                const int envId1  = (envsArr != nullptr && envsArr->size() > 1)
+                                      ? (int) envsArr->getReference (1).getProperty ("id", 0) : -1;
+                check (wavesArr != nullptr && wavesArr->size() == 2 && waveId0 != waveId1,
+                       "the duplicate wavetable ids are made unique",
+                       juce::String (waveId0) + "," + juce::String (waveId1));
+                check (envsArr != nullptr && envsArr->size() == 2 && envId0 != envId1,
+                       "the duplicate envelope ids are made unique",
+                       juce::String (envId0) + "," + juce::String (envId1));
+
+                const int arcWave  = arcs2 != nullptr ? (int) arcs2->getReference (0).getProperty ("waveformId", -1) : -2;
+                const int arcEnv   = arcs2 != nullptr ? (int) arcs2->getReference (0).getProperty ("envelopeId", -1) : -2;
+                const int arcPmEnv = arcs2 != nullptr ? (int) arcs2->getReference (0).getProperty ("pmIndexEnv", -1) : -2;
+                check (arcWave == waveId0,
+                       "an arc that points at a missing wavetable is put back onto one that exists",
+                       "arc " + juce::String (arcWave) + ", wavetable " + juce::String (waveId0));
+                check (arcEnv == envId0,
+                       "an arc that points at a missing envelope is put back onto one that exists",
+                       "arc " + juce::String (arcEnv) + ", envelope " + juce::String (envId0));
+                check (arcPmEnv == 0,
+                       "an arc that points at a missing PM envelope falls back to its own",
+                       "pmIndexEnv=" + juce::String (arcPmEnv));
+            }
+        }
+
         // 6b. live take -> sample slot (v1.4 capture path, headless)
         {
             juce::AudioBuffer<float> take(2, 48000);

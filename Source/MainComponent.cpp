@@ -5065,6 +5065,10 @@ bool MainComponent::loadFromVar(const juce::var& v)
     // counts. A piece over a cap used to lose the extra music silently on
     // the next open; the user is told what did not make it in.
     juce::String droppedMsg;
+    // v1.33.4 (L13): how many ids had to be changed (a duplicate or an
+    // impossible one) and how many material references pointed at nothing.
+    int renamed = 0;
+    int fixedRefs = 0;
     auto noteDrop = [&droppedMsg] (const juce::String& one, const juce::String& many, int n)
     {
         if (n > 0)
@@ -5092,7 +5096,14 @@ bool MainComponent::loadFromVar(const juce::var& v)
                                   * (size_t) slot.data->getNumChannels() * sizeof(float);
             if (totalSampleBytes > upic::limits::kMaxTotalSampleBytes) break;
             for (auto& s : newSlots)
-                if (s.id == slot.id) { s = std::move(slot); ++stored; break; }
+                if (s.id == slot.id)
+                {
+                    // the first entry for a slot id wins (a file that
+                    // carries the same slot twice must not overwrite the
+                    // first one)
+                    if (s.data == nullptr) { s = std::move(slot); ++stored; }
+                    break;
+                }
         }
         noteDrop ("sample", "samples", (int) arr->size() - stored);
         noteDrop ("sample frame", "sample frames", droppedFrames);
@@ -5127,7 +5138,11 @@ bool MainComponent::loadFromVar(const juce::var& v)
         for (auto& pv : *arr)
         {
             if ((int) newPages.size() >= upic::limits::kMaxPages) break;
-            newPages.push_back(upic::Page::fromVar(pv));
+            // v1.33.4 (L13): the page's parser checks the arc and zone ids
+            // (a duplicate id made the selection and the delete hit the
+            // wrong arc) and derives the next id from the arcs that are
+            // there. `renamed` counts what it had to change.
+            newPages.push_back(upic::Page::fromVar(pv, &renamed));
         }
         noteDrop ("page", "pages", (int) arr->size() - (int) newPages.size());
         // the arcs, the sieve zones and the arc points of the pages that
@@ -5151,6 +5166,38 @@ bool MainComponent::loadFromVar(const juce::var& v)
     if (newWaves.empty()) newWaves = upic::defaultWaveforms();
     if (newEnvelopes.empty()) newEnvelopes = upic::defaultEnvelopes();
     if (newPages.empty()) newPages.push_back(upic::Page());
+
+    // v1.33.4 (L13): the wavetables and the envelopes are keyed by their id
+    // too - two wavetables with the same id made the arc list show the
+    // wrong name, and the editor's controls edited the wrong one. The first
+    // item of an id keeps it (so the arcs that point at the material keep
+    // pointing at the same thing), a duplicate gets a free id.
+    renamed += upic::uniquifyIds (newWaves);
+    renamed += upic::uniquifyIds (newEnvelopes);
+
+    // and the arcs' references to the material are checked: a piece can
+    // point at a wavetable or an envelope that is not there (the arc then
+    // showed an empty material and played the wrong thing), so the
+    // reference is put back onto material that exists.
+    for (auto& pg : newPages)
+        for (auto& a : pg.arcs)
+        {
+            if (! newWaves.empty() && ! upic::hasId (newWaves, a.waveformId))
+            { a.waveformId = newWaves.front().id; ++fixedRefs; }
+            if (! newEnvelopes.empty() && ! upic::hasId (newEnvelopes, a.envelopeId))
+            { a.envelopeId = newEnvelopes.front().id; ++fixedRefs; }
+            // 0 is the "no envelope of its own" marker for the PM index
+            if (a.pmIndexEnv != 0 && ! upic::hasId (newEnvelopes, a.pmIndexEnv))
+            { a.pmIndexEnv = 0; ++fixedRefs; }
+        }
+    if (renamed > 0)
+        droppedMsg += (droppedMsg.isEmpty() ? "" : ", ") + juce::String(renamed)
+                    + (renamed == 1 ? " item had a duplicate id and has been renumbered"
+                                    : " items had duplicate ids and have been renumbered");
+    if (fixedRefs > 0)
+        droppedMsg += (droppedMsg.isEmpty() ? "" : ", ") + juce::String(fixedRefs)
+                    + (fixedRefs == 1 ? " arc pointed at material that was not there"
+                                      : " arcs pointed at material that was not there");
 
     // --- the piece is good: swap it in ---
     {
