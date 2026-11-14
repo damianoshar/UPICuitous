@@ -31,28 +31,87 @@ class UpicEngine
 public:
     UpicEngine() = default;
 
+    // The largest block a host may send (the same limit the score buffers
+    // use). The accumulation buffer is sized for it in prepare(), so the
+    // audio thread never grows it.
+    static constexpr int kMaxBlockSize = 8192;
+
     void prepare(double sampleRate_, int blockSize = 0)
     {
         sampleRate = sampleRate_ > 0 ? sampleRate_ : 44100.0;
-        phases.clear();
-        sampleVoices.clear();
-        liveShift.clear();
-        if (blockSize > 0) scratch.resize((size_t) blockSize);
+        // v1.33.4 (M21): the pools are emptied here (the message thread), and
+        // their storage is reserved once, so the audio thread never grows
+        // them. The voices keep their buffers: a slot that is taken again
+        // reuses the vocoder memory it already has.
+        releasePhaseSlots();
+        releaseSampleSlots();
+        releaseLiveSlots();
+        releasePmSlots();
+        if (blockSize > 0)
+        {
+            // v1.33.4 (M21): the accumulation buffer is sized here (the
+            // message thread), for the largest block a host may send, so the
+            // audio thread never grows it
+            const int n = juce::jmax (blockSize, kMaxBlockSize);
+            if (scratch.capacity() < (size_t) n) scratch.reserve ((size_t) n);
+            if (scratch.size() < (size_t) n) scratch.resize ((size_t) n);
+        }
+        // v1.33.4 (M21): the first slots of the voice pools are built here,
+        // on the message thread. A sample voice and a live voice hold the
+        // vocoder's buffers, and a std::vector allocates a little
+        // bookkeeping block of its own in a debug build - so the audio
+        // thread must not be the one that constructs them.
+        phases.reserve (kPoolCapacity);
+        sampleVoices.reserve (kPoolCapacity);
+        liveShift.reserve (kPoolCapacity);
+        pmVoices.reserve (kPoolCapacity);
+        if (sampleVoices.size() < (size_t) kPrebuiltVoices) sampleVoices.resize ((size_t) kPrebuiltVoices);
+        if (liveShift.size() < (size_t) kPrebuiltVoices) liveShift.resize ((size_t) kPrebuiltVoices);
+    }
+
+    // v1.33.4 (M21): the vocoder's working memory (~50 KB per voice plus
+    // the FFT engine) is prepared here, on the message thread, before the
+    // page that needs it starts. The audio thread only reads it: an
+    // allocation there can block, and a blocked audio thread is a dropout.
+    //
+    // `voices` is how many slots to prepare - the caller knows how many arcs
+    // the page has. The audio thread hands the slots out in order, so the
+    // first N arcs to sound are the ones that find a prepared voice.
+    void prepareSampleVocoderMemory (int voices)
+    {
+        const int n = juce::jmin (voices, (int) sampleVoices.size());
+        for (int i = 0; i < n; ++i)
+            sampleVoices[(size_t) i].voice.prepareVocoderMemory (sampleRate);
+    }
+    void prepareLiveVocoderMemory (int voices)
+    {
+        const int n = juce::jmin (voices, (int) liveShift.size());
+        for (int i = 0; i < n; ++i)
+            liveShift[(size_t) i].shifter.prepareVocoderMemory (sampleRate);
     }
 
     // v1.15: the oscillator phase is free-running state - clearing it makes
     // every arc jump back to phase 0 mid-flight, which is a click. Only the
     // material/ring readers (sample + live voices) have to re-anchor, because
     // the material or the input window changed under them.
-    void reset() { sampleVoices.clear(); liveShift.clear(); pmVoices.clear(); }
+    void reset() { releaseSampleSlots(); releaseLiveSlots(); releasePmSlots(); }
     // v1.20: drop the live voices only (they re-anchor on their next
     // contact) - the oscillator phases keep running (v1.15).
-    void resetLiveVoices() { liveShift.clear(); }
+    void resetLiveVoices() { releaseLiveSlots(); }
     // v1.28: carry oscillator phases from another engine (used to smooth the
     // scrub-preview -> freeze transition). Sample/PM voices are NOT copied;
     // they re-anchor at the freeze position.
-    void copyOscillatorPhasesFrom(const UpicEngine& other) { phases = other.phases; }
-    void noteOffArc(int arcId) { phases.erase(arcId); sampleVoices.erase(arcId); liveShift.erase(arcId); }
+    void copyOscillatorPhasesFrom(const UpicEngine& other)
+    {
+        // v1.33.4 (M21): the phase slots are copied, not the map's nodes
+        phases = other.phases;
+    }
+    void noteOffArc(int arcId)
+    {
+        releasePhaseSlot (arcId);
+        releaseSampleSlot (arcId);
+        releaseLiveSlot (arcId);
+    }
     void setScrubPreview(bool on) { scrubPreview = on; }
     // Shared with the material view so its time bar uses the same tape
     // position as the audio engine (pitch-scaled, not ratio * elapsed).
@@ -176,7 +235,7 @@ public:
         if (pitchMode != livePitchModeApplied)
         {
             livePitchModeApplied = pitchMode;
-            liveShift.clear();
+            releaseLiveSlots(); // v1.33.4 (M21): mark them free, do not free them
         }
 
         // same for the sample pitch mode (varispeed / granular / vocoder)
@@ -184,7 +243,7 @@ public:
         if (smpMode != samplePitchModeApplied)
         {
             samplePitchModeApplied = smpMode;
-            sampleVoices.clear();
+            releaseSampleSlots(); // v1.33.4 (M21): mark them free, do not free them
         }
 
         const double invSr = 1.0 / sampleRate;
@@ -247,7 +306,12 @@ public:
                 const int ops = (arc.pmOps == 4) ? 4 : 2;
                 const upic::Envelope* idxEnv = (arc.pmIndexEnv > 0)
                     ? findEnv (envs, arc.pmIndexEnv) : e;
-                PmVoice& v = pmVoices[arc.id];
+                // v1.33.4 (M21): the PM voice comes from the pool - no map
+                // node is allocated in the audio thread
+                PmSlot* pslot = pmSlotFor (pmVoices, arc.id);
+                if (pslot == nullptr) pslot = acquirePmSlot (arc.id);
+                if (pslot == nullptr) continue; // the pool is full (impossible in practice)
+                PmVoice& v = pslot->voice;
                 if (! v.prepared) { v.prepare (sampleRate); v.prepared = true; v.ops = ops; }
                 const double fb = juce::jlimit (0.0, 1.0, arc.pmFeedback);
                 // per-stage ratios (ops>=2: carrier uses pmRatio for stage 1)
@@ -305,7 +369,7 @@ public:
             const upic::Waveform* w = findWave(waves, arc.waveformId);
             if (w == nullptr) continue;
 
-            double& ph = phases[arc.id]; // 0..1, kept across blocks for continuity
+            double& ph = phaseFor (arc.id); // 0..1, kept across blocks for continuity
 
             for (int n = i0; n <= i1; ++n)
             {
@@ -430,7 +494,9 @@ public:
         liveWriteEnd = 0; liveActive = false;
 
         // the offline render must not disturb the realtime state
-        auto saved = phases; phases.clear();
+        // v1.33.4 (M21): the phase slots are saved and released (not
+        // destroyed), so the offline pass cannot touch the realtime voices
+        auto saved = phases; releasePhaseSlots();
 
         const int total = dest.getNumSamples();
         int pos = 0;
@@ -456,18 +522,44 @@ public:
         phases = saved;
         // sample voices are recreated on the next realtime contact (they may
         // hold vocoder state from this pass)
-        sampleVoices.clear();
+        // v1.33.4 (M21): the slots are released, not destroyed - a voice
+        // keeps its buffers, so the next voice that takes the slot does not
+        // have to allocate them again
+        releaseSampleSlots();
+        releaseLiveSlots();
         liveRingA = savedLA; liveRingB = savedLB; liveRingSize = savedLSize;
         liveWriteEnd = savedLWrite; liveActive = savedLActive;
     }
 
 private:
     double sampleRate = 44100.0;
-    std::map<int,double> phases;
-    std::map<int, upic::SampleVoice> sampleVoices; // mode-1 voice state per arc
+
+    // v1.33.4 (M21): the voices live in fixed pools, not in std::map. A map
+    // allocates a node for every voice - in the audio thread - and frees it
+    // again on a reset. The pool's storage is reserved once, in prepare()
+    // (the message thread), and a reset only marks the slots free, so the
+    // audio thread neither allocates nor frees.
+    //
+    // The cap is the piece format's arc cap (H13): a page cannot hold more
+    // arcs than that, so the pool cannot run out.
+    static constexpr int kPoolCapacity = 512;
+
+    // How many slots of the voice pools are built in prepare() (the message
+    // thread). A page with more arcs than this grows the pool while it
+    // renders - which allocates nothing in a release build, because the
+    // pool's storage is reserved.
+    static constexpr int kPrebuiltVoices = 64;
+
+    struct PhaseSlot { int id = -1; double phase = 0.0; };
     struct PmVoice { double carPhase = 0.0, modPhase = 0.0, prevModOut = 0.0; double ph[4] = {}; double prev[4] = {}; int ops = 2; bool prepared = false; void prepare(double){} };
-    std::map<int, PmVoice> pmVoices; // mode-3 PM voice state per arc
-    std::vector<float> scratch; // per-block accumulation, grows only
+    struct SampleSlot { int id = -1; upic::SampleVoice voice; };
+    struct PmSlot { int id = -1; PmVoice voice; };
+    struct LiveSlot { int id = -1; upic::LiveShifter shifter; };
+
+    std::vector<PhaseSlot> phases;
+    std::vector<SampleSlot> sampleVoices; // mode-1 voice state per arc
+    std::vector<PmSlot> pmVoices; // mode-3 PM voice state per arc
+    std::vector<float> scratch; // per-block accumulation, reserved in prepare()
 
     // live input view (published each block by the host; audio thread only)
     const float* liveRingA = nullptr;
@@ -481,7 +573,7 @@ private:
     int revRingSize = 0;
     long long revWriteEnd = 0;
     bool revActive = false;
-    std::map<int, upic::LiveShifter> liveShift; // live-mode voice state per arc
+    std::vector<LiveSlot> liveShift; // live-mode voice state per arc
     std::atomic<int> livePitchMode { 0 }; // written by the message thread
     int livePitchModeApplied = 0;         // audio thread: mode of the live voices
     std::atomic<int> samplePitchMode { 0 }; // written by the message thread
@@ -490,6 +582,108 @@ private:
     std::atomic<int> sampleGrainMs { 40 };  // granular grain size (normal playback)
     std::atomic<int> scrubGrainMs { 40 };   // granular grain size while freeze-holding
     std::atomic<int> liveGrainMs { 40 };    // granular grain size for LIVE arcs
+
+    // ---- v1.33.4 (M21): the voice pools ----
+    //
+    // Every helper below only marks slots free or hands out a slot that is
+    // already there. Nothing in them allocates: the pool's storage was
+    // reserved in prepare() (the message thread), and a slot keeps its
+    // buffers when it is released.
+
+    static PhaseSlot* phaseSlotFor (std::vector<PhaseSlot>& pool, int id)
+    {
+        for (auto& s : pool) if (s.id == id) return &s;
+        return nullptr;
+    }
+    static SampleSlot* sampleSlotFor (std::vector<SampleSlot>& pool, int id)
+    {
+        for (auto& s : pool) if (s.id == id) return &s;
+        return nullptr;
+    }
+    static PmSlot* pmSlotFor (std::vector<PmSlot>& pool, int id)
+    {
+        for (auto& s : pool) if (s.id == id) return &s;
+        return nullptr;
+    }
+    static LiveSlot* liveSlotFor (std::vector<LiveSlot>& pool, int id)
+    {
+        for (auto& s : pool) if (s.id == id) return &s;
+        return nullptr;
+    }
+
+    // The phase of an arc, creating the slot if the arc is new. The slot's
+    // phase is free-running state (v1.15), so it survives a reset.
+    double& phaseFor (int id)
+    {
+        if (auto* s = phaseSlotFor (phases, id)) return s->phase;
+        // a free slot first - the pool only grows when every slot is taken
+        for (auto& s : phases)
+            if (s.id < 0) { s.id = id; s.phase = 0.0; return s.phase; }
+        if (phases.size() < (size_t) kPoolCapacity)
+        {
+            phases.emplace_back();
+            auto& s = phases.back();
+            s.id = id; s.phase = 0.0;
+            return s.phase;
+        }
+        // the pool is full (more arcs than the piece format allows): fall
+        // back to a scratch phase so the arc still sounds
+        overflowPhase = 0.0;
+        return overflowPhase;
+    }
+
+    void releasePhaseSlots() { for (auto& s : phases) s.id = -1; }
+    void releasePhaseSlot (int id)
+    {
+        if (auto* s = phaseSlotFor (phases, id)) s->id = -1;
+    }
+    void releaseSampleSlots() { for (auto& s : sampleVoices) s.id = -1; }
+    void releaseSampleSlot (int id)
+    {
+        if (auto* s = sampleSlotFor (sampleVoices, id)) s->id = -1;
+    }
+    void releaseLiveSlots() { for (auto& s : liveShift) s.id = -1; }
+    void releaseLiveSlot (int id)
+    {
+        if (auto* s = liveSlotFor (liveShift, id)) s->id = -1;
+    }
+    void releasePmSlots() { for (auto& s : pmVoices) s.id = -1; }
+
+    // Take a free slot for an arc, or make a new one. The pool's storage is
+    // reserved, so this does not allocate (unless the pool is full, which
+    // the piece format's arc cap rules out).
+    SampleSlot* acquireSampleSlot (int id)
+    {
+        for (auto& s : sampleVoices)
+            if (s.id < 0) { s.id = id; return &s; }
+        if (sampleVoices.size() >= (size_t) kPoolCapacity) return nullptr;
+        sampleVoices.emplace_back();
+        auto& s = sampleVoices.back();
+        s.id = id;
+        return &s;
+    }
+    LiveSlot* acquireLiveSlot (int id)
+    {
+        for (auto& s : liveShift)
+            if (s.id < 0) { s.id = id; return &s; }
+        if (liveShift.size() >= (size_t) kPoolCapacity) return nullptr;
+        liveShift.emplace_back();
+        auto& s = liveShift.back();
+        s.id = id;
+        return &s;
+    }
+    PmSlot* acquirePmSlot (int id)
+    {
+        for (auto& s : pmVoices)
+            if (s.id < 0) { s.id = id; return &s; }
+        if (pmVoices.size() >= (size_t) kPoolCapacity) return nullptr;
+        pmVoices.emplace_back();
+        auto& s = pmVoices.back();
+        s.id = id;
+        return &s;
+    }
+
+    double overflowPhase = 0.0; // the fallback when the phase pool is full
 
     static float edgeFade(double t, double arcStart, double arcEnd)
     {
@@ -624,9 +818,14 @@ private:
         // onto the arc in the scrub preview. Direction is handled by the
         // mirrored read.
         const double timeScale = sampleArcTimeScale(mode, scrubPreview, rate, matDur, arcDur);
-        auto it = sampleVoices.find(arc.id);
-        if (it == sampleVoices.end())
+        // v1.33.4 (M21): the voice comes from the pool - no map node is
+        // allocated in the audio thread
+        SampleSlot* slot = sampleSlotFor (sampleVoices, arc.id);
+        const bool freshVoice = (slot == nullptr);
+        if (freshVoice)
         {
+            slot = acquireSampleSlot (arc.id);
+            if (slot == nullptr) return; // the pool is full (impossible in practice)
             // voice created on first contact (fresh after seek/reset): anchor
             // at the arc's start - varispeed at the integrated pitch-scaled
             // position, granular (stretch) at the arc progress, granular
@@ -634,8 +833,10 @@ private:
             // the scrub preview maps the vocoder onto the arc too
             const double t0 = playhead + (double) i0 * step;
             const double elapsed = juce::jmax(0.0, t0 - arcStart);
-            upic::SampleVoice v;
-            v.prepare(sampleRate);
+            upic::SampleVoice& v = slot->voice;
+            // v1.33.4 (M21): the vocoder's ~50 KB of working memory is only
+            // allocated when the arc really plays through the vocoder
+            v.prepare(sampleRate, mode == 2);
             const double progress = juce::jlimit(0.0, 1.0, elapsed / arcDur);
             double anchorPos;
             if (mode == 0)
@@ -673,21 +874,27 @@ private:
                 }
                 v.vocInPos = pp;
             }
-            it = sampleVoices.emplace(arc.id, std::move(v)).first;
         }
-        else if (it->second.lastMode != mode)
+        else if (slot->voice.lastMode != mode)
         {
             // v1.21: the arc's own mode changed - the voice's shifter state
             // (the grain taps, the vocoder's overlap-add) belongs to the old
             // algorithm, so it has to re-anchor
-            it->second.lastMode = mode;
-            it->second.grain = {};
-            it->second.voc = {};
-            it->second.grain.prepare(upic::GrainCore::kHopSec, 1.0 / sampleRate);
-            it->second.voc.prepare(sampleRate);
-            it->second.reset(it->second.pos);
+            slot->voice.grain = {};
+            // v1.33.4 (M21): reset() clears the vocoder's state without
+            // freeing its buffers; the old "voc = {}" freed them and the
+            // prepare() below allocated them again - in the audio thread
+            slot->voice.voc.reset();
+            slot->voice.grain.prepare(upic::GrainCore::kHopSec, 1.0 / sampleRate);
+            // v1.33.4 (M21): the vocoder's working memory is normally already
+            // there (the message thread prepared it before the page started);
+            // this call only covers the case where it is not
+            if (mode == 2)
+                slot->voice.prepareVocoderMemory (sampleRate);
+            slot->voice.reset(slot->voice.pos);
+            slot->voice.lastMode = mode;
         }
-        auto& v = it->second;
+        auto& v = slot->voice;
         v.grain.setTimeScale(timeScale);
         const int grainMs = freeze ? scrubGrainMs.load(std::memory_order_relaxed)
                                    : sampleGrainMs.load(std::memory_order_relaxed);
@@ -782,17 +989,28 @@ private:
         const double arcStart = arc.startTime(), arcEnd = arc.endTime();
         const double ref = juce::jmax(1.0, arc.refFreq);
 
-        auto it = liveShift.find(arc.id);
-        if (it == liveShift.end())
+        // v1.33.4 (M21): the live voice comes from the pool - no map node is
+        // allocated in the audio thread
+        LiveSlot* slot = liveSlotFor (liveShift, arc.id);
+        if (slot == nullptr)
         {
-            upic::LiveShifter ls;
-            ls.prepare(sampleRate);
+            slot = acquireLiveSlot (arc.id);
+            if (slot == nullptr) return; // the pool is full (impossible in practice)
+            upic::LiveShifter& ls = slot->shifter;
+            // v1.33.4 (M21): the vocoder's working memory is only allocated
+            // when the arc really plays through the vocoder
+            ls.prepare(sampleRate, mode == 2);
             ls.setMode((upic::LiveShifter::Mode) mode);
             ls.reset(ringEnd);
-            it = liveShift.emplace(arc.id, std::move(ls)).first;
         }
-        auto& ls = it->second;
+        auto& ls = slot->shifter;
         ls.setMode((upic::LiveShifter::Mode) mode); // the arc's own mode wins
+        // v1.33.4 (M21): the arc switched to the vocoder - its working
+        // memory is normally already there (the message thread prepared it
+        // before the page started); this call only covers the case where it
+        // is not
+        if (mode == 2)
+            ls.prepareVocoderMemory (sampleRate);
         ls.setGrainMs((double) liveGrainMs.load(std::memory_order_relaxed));
 
         for (int n = i0; n <= i1; ++n)

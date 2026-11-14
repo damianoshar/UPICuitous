@@ -1,8 +1,10 @@
 #pragma once
 #include <juce_dsp/juce_dsp.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 //==============================================================================
@@ -309,6 +311,40 @@ private:
 };
 
 //==============================================================================
+// A one-word atomic state that can still be moved.
+//
+// C++17's std::atomic has no move constructor (it arrived in C++20), so a
+// class that holds one has no move constructor either - and the voice pools
+// move their slots around when they grow. The state is spelled out here.
+class AtomicState
+{
+public:
+    AtomicState() = default;
+    AtomicState (const AtomicState&) = delete;
+    AtomicState& operator= (const AtomicState&) = delete;
+    AtomicState (AtomicState&& other) noexcept
+        : value (other.value.load (std::memory_order_relaxed)) {}
+    AtomicState& operator= (AtomicState&& other) noexcept
+    {
+        value.store (other.value.load (std::memory_order_relaxed), std::memory_order_relaxed);
+        return *this;
+    }
+
+    int load() const { return value.load (std::memory_order_acquire); }
+    void store(int v) { value.store (v, std::memory_order_release); }
+    // the compare-and-swap that decides who prepares the memory
+    bool compareExchange (int& expected, int desired)
+    {
+        return value.compare_exchange_strong (expected, desired,
+                                              std::memory_order_acq_rel,
+                                              std::memory_order_acquire);
+    }
+
+private:
+    std::atomic<int> value { 0 };
+};
+
+//==============================================================================
 // Phase-vocoder core (see the file header). One input sample per call, the
 // stream advancing at 1x; the returned sample is time-aligned (after the
 // priming described in the header).
@@ -323,28 +359,63 @@ public:
     void prepare(double sampleRate_)
     {
         sampleRate = sampleRate_ > 0.0 ? sampleRate_ : 44100.0;
-
-        if ((int) window.size() != kFftSize)
-        {
-            window.resize((size_t) kFftSize);
-            for (int n = 0; n < kFftSize; ++n)
-                window[(size_t) n] = (float) (0.5 - 0.5 * std::cos(2.0 * kPi * n / kFftSize));
-            fftData.assign((size_t) 2 * kFftSize, 0.0f);
-            inFifo.assign((size_t) 2 * kFftSize, 0.0f);
-            ola.assign((size_t) 4 * kFftSize, 0.0f);
-            lastPhase.assign((size_t) (kFftSize / 2 + 1), 0.0f);
-            sumPhase.assign((size_t) (kFftSize / 2 + 1), 0.0);
-            synMag.assign((size_t) (kFftSize / 2 + 1), 0.0f);
-            synFreq.assign((size_t) (kFftSize / 2 + 1), 0.0);
-        }
+        prepareMemory (sampleRate);
         clearState();
+    }
+
+    // v1.33.4 (M21): the working memory (~50 KB of buffers plus the FFT
+    // engine) is prepared OFF the audio thread - the message thread calls
+    // this before the page that needs the vocoder starts (see
+    // UpicEngine::prepareSampleVocoderMemory). An allocation in the audio
+    // thread can block, and a blocked audio thread is a dropout.
+    //
+    // The state machine keeps the two apart:
+    //   0 - no memory yet
+    //   1 - someone is preparing it right now
+    //   2 - it is there and can be used
+    // Whoever wins the compare-and-swap does the work; the other one just
+    // waits for the result (and reads silence for that block, if it was
+    // the audio thread). So the buffers are never filled twice at once.
+    bool prepareMemory (double sampleRate_)
+    {
+        sampleRate = sampleRate_ > 0.0 ? sampleRate_ : 44100.0;
+
+        int expected = 0;
+        if (! memState.compareExchange (expected, 1))
+            return expected == 2; // ready already, or the other one is on it
+
+        window.resize ((size_t) kFftSize);
+        for (int n = 0; n < kFftSize; ++n)
+            window[(size_t) n] = (float) (0.5 - 0.5 * std::cos (2.0 * kPi * n / kFftSize));
+        fftData.assign ((size_t) 2 * kFftSize, 0.0f);
+        inFifo.assign ((size_t) 2 * kFftSize, 0.0f);
+        ola.assign ((size_t) 4 * kFftSize, 0.0f);
+        lastPhase.assign ((size_t) (kFftSize / 2 + 1), 0.0f);
+        sumPhase.assign ((size_t) (kFftSize / 2 + 1), 0.0);
+        synMag.assign ((size_t) (kFftSize / 2 + 1), 0.0f);
+        synFreq.assign ((size_t) (kFftSize / 2 + 1), 0.0);
+        // v1.33.4 (M21): the FFT engine is created here, not in the
+        // constructor - a vocoder that is never prepared must not cost
+        // an allocation (the voice pools are built on the audio thread's
+        // first contact, and an allocation there is a glitch).
+        if (fft == nullptr)
+            fft = std::make_unique<juce::dsp::FFT> (kFftOrder);
+
+        memState.store (2);
+        clearState();
+        return true;
     }
 
     void reset() { clearState(); }
 
+    // v1.33.4 (M21): is the vocoder's working memory there? The buffers are
+    // ~50 KB, so they are only allocated when the vocoder is actually used -
+    // a voice that plays granular or varispeed never pays for them.
+    bool isPrepared() const { return memState.load() == 2; }
+
     float next(float in, double ratio)
     {
-        if (ola.empty()) return 0.0f;
+        if (! isPrepared()) return 0.0f;
 
         inFifo[inFifoPos % inFifo.size()] = in;
         ++inFifoPos;
@@ -379,7 +450,9 @@ private:
         tailComplete = -1.0;
         readPos = 0.0;
         started = false;
-        if (! ola.empty())
+        // the buffers are only touched when the memory is really there: the
+        // message thread may be filling them right now (v1.33.4 / M21)
+        if (isPrepared())
         {
             std::fill(ola.begin(), ola.end(), 0.0f);
             std::fill(inFifo.begin(), inFifo.end(), 0.0f);
@@ -403,7 +476,7 @@ private:
         for (std::size_t n = 0; n < cap; ++n)
             fftData[n] = window[n] * inFifo[(base + n) % fifoSz];
 
-        fft.performRealOnlyForwardTransform(fftData.data(), true);
+        fft->performRealOnlyForwardTransform(fftData.data(), true);
 
         // ---- analysis: magnitude + true frequency (Hz) per bin ----
         const double expctPerHop = 2.0 * kPi * (double) kHop / (double) kFftSize;
@@ -449,7 +522,7 @@ private:
             fftData[(size_t) (2 * k + 1)] = mag * (float) std::sin(ph);
         }
 
-        fft.performRealOnlyInverseTransform(fftData.data());
+        fft->performRealOnlyInverseTransform(fftData.data());
 
         // integer-hop overlap-add (analysis x synthesis Hann -> rows sum 1.5).
         // The last hop's rows are the ones this frame writes FIRST (three
@@ -487,7 +560,11 @@ private:
         return ola[(size_t) a] * (1.0f - fr) + ola[b] * fr;
     }
 
-    juce::dsp::FFT fft { kFftOrder };
+    // v1.33.4 (M21): the FFT engine is created in prepareMemory(), not in the
+    // constructor, so a vocoder that is never prepared costs nothing.
+    std::unique_ptr<juce::dsp::FFT> fft;
+    // v1.33.4 (M21): 0 = no memory, 1 = being prepared, 2 = ready
+    AtomicState memState;
     double sampleRate = 44100.0;
     std::vector<float> window, fftData;      // analysis window, real FFT scratch
     std::vector<float> inFifo;               // sliding input window
@@ -515,6 +592,13 @@ public:
         core.prepare(sampleRate);
     }
 
+    // v1.33.4 (M21): the working memory, prepared off the audio thread
+    bool prepareMemory (double sampleRate_)
+    {
+        sampleRate = sampleRate_ > 0.0 ? sampleRate_ : 44100.0;
+        return core.prepareMemory (sampleRate);
+    }
+
     void reset(std::int64_t)
     {
         core.reset();
@@ -537,6 +621,9 @@ public:
         return core.next(in, ratio);
     }
 
+    // v1.33.4 (M21): is the vocoder's working memory there?
+    bool isPrepared() const { return core.isPrepared(); }
+
 private:
     double sampleRate = 44100.0;
     VocoderCore core;
@@ -553,12 +640,23 @@ private:
 //==============================================================================
 struct SampleVoice
 {
-    void prepare(double sampleRate_)
+    // v1.33.4 (M21): `needVocoder` - the vocoder's working memory is ~50 KB
+    // per voice, so it is only allocated when the arc actually plays through
+    // the vocoder. A granular or varispeed arc never pays for it (and the
+    // audio thread never allocates it).
+    void prepare(double sampleRate_, bool needVocoder = true)
     {
         const double sr = sampleRate_ > 0.0 ? sampleRate_ : 44100.0;
         grain.prepare(GrainCore::kHopSec, 1.0 / sr); // material seconds
-        voc.prepare(sr);
+        if (needVocoder) voc.prepareMemory (sr);
     }
+
+    // v1.33.4 (M21): the message thread prepares the vocoder's working
+    // memory before the page starts, so the audio thread never allocates it
+    bool prepareVocoderMemory (double sampleRate_) { return voc.prepareMemory (sampleRate_); }
+
+    // v1.33.4 (M21): is the vocoder's working memory there?
+    bool vocoderPrepared() const { return voc.isPrepared(); }
 
     void reset(double anchorSec)
     {
@@ -584,12 +682,20 @@ class LiveShifter
 public:
     enum class Mode { granular = 0, tape = 1, vocoder = 2 };
 
-    void prepare(double sampleRate_)
+    void prepare(double sampleRate_, bool needVocoder = true)
     {
         grain.prepare(sampleRate_);
         tape.prepare(sampleRate_);
-        vocoder.prepare(sampleRate_);
+        if (needVocoder) vocoder.prepareMemory (sampleRate_);
     }
+
+    // v1.33.4 (M21): the message thread prepares the vocoder's working
+    // memory before the page starts, so the audio thread never allocates it
+    bool prepareVocoderMemory (double sampleRate_) { return vocoder.prepareMemory (sampleRate_); }
+
+    // v1.33.4 (M21): is the vocoder's working memory there? The engine
+    // prepares it when an arc switches to the vocoder algorithm.
+    bool vocoderPrepared() const { return vocoder.isPrepared(); }
 
     void reset(std::int64_t writeEnd)
     {

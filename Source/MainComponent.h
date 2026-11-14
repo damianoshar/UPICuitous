@@ -31,6 +31,14 @@ public:
     void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override;
     void releaseResources() override;
 
+    // v1.33.4 (M21): the largest block a host may send. The score and freeze
+    // buffers are preallocated for it, so the audio callback never grows
+    // them (a malloc on the audio thread).
+    static constexpr int kMaxAudioBlock = 8192;
+
+    // v1.33.4 (M21): size the audio buffers on the message thread.
+    void prepareAudioBuffers (int samplesPerBlockExpected);
+
     // v1.15: the score render for one block (into its own buffer, so the
     // caller can fade it when the block cannot be rendered).
     // v1.18 (wave 15): the render comes from the lock-free snapshot, so the
@@ -643,6 +651,9 @@ private:
     void refreshScoreBinding();
     void updateStatus();
     void publishModelSnapshot();      // v1.18: message -> audio handover
+    // v1.33.4 (M21): prepare the vocoder's working memory for the page, on
+    // the message thread, before the audio thread can need it
+    void prepareVocodersIfNeeded (int sampleMode, int liveMode);
     void seekPlayhead(double t);      // message: move the audio playhead
     void bumpPageEpoch();             // message: the audio adopts the page
     void requestEngineReset();        // message: drop voices on the next block

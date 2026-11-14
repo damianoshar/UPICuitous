@@ -649,9 +649,13 @@ namespace upic
         double shift = 0.0;  // the space's centre, in octaves from the ambitus's
     };
 
-    inline const std::vector<FreqSpacePreset>& freqSpacePresets()
+    // v1.33.4 (M21): the presets are a compile-time constant array, not a
+    // lazily-initialised std::vector. Page::spaceMap() runs on the audio
+    // thread, and the first call to a function-local static would build the
+    // vector there - a malloc on the audio thread.
+    inline const std::array<FreqSpacePreset, 7>& freqSpacePresets()
     {
-        static const std::vector<FreqSpacePreset> p = {
+        static constexpr std::array<FreqSpacePreset, 7> p = {{
             { "The page's range",      1.0,  0.0 },
             { "Half the range",        0.5,  0.0 },
             { "Double the range",      2.0,  0.0 },
@@ -659,7 +663,7 @@ namespace upic
             { "An octave down",        1.0, -1.0 },
             { "Half, an octave up",    0.5,  1.0 },
             { "Double, an octave down", 2.0, -1.0 },
-        };
+        }};
         return p;
     }
 

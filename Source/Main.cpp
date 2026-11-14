@@ -2,6 +2,60 @@
 #include "MainComponent.h"
 #include "AndroidBars.h"
 
+//==============================================================================
+// v1.33.4 (M21): an allocation counter for the selftest.
+//
+// The audio thread must not allocate: a malloc there can block (and a
+// blocked audio thread is a dropout), and freeing a buffer there can stall
+// the whole thread. The counter counts the allocations that happen while it
+// is armed, so the selftest can prove that a render does not allocate.
+//
+// The counter is thread-local: the app has other threads (the message
+// thread, the audio device thread), and their allocations would drown out
+// the one the selftest is looking for.
+//
+// The replacement operators are the plain ones - the app's memory comes from
+// malloc/free. The over-aligned forms are left to the C++ runtime: they are
+// a matched pair there, and mixing them with a plain malloc would be a
+// mismatched free.
+namespace
+{
+    thread_local int allocCount = 0;   // the calling thread's allocations
+    thread_local bool allocCounting = false;
+}
+
+void* operator new (std::size_t n)
+{
+    if (allocCounting) ++allocCount;
+    void* p = std::malloc (n != 0 ? n : 1);
+    if (p == nullptr) throw std::bad_alloc();
+    return p;
+}
+void* operator new[] (std::size_t n)
+{
+    if (allocCounting) ++allocCount;
+    return ::operator new (n);
+}
+
+void operator delete (void* p) noexcept { std::free (p); }
+void operator delete[] (void* p) noexcept { std::free (p); }
+void operator delete (void* p, std::size_t) noexcept { std::free (p); }
+void operator delete[] (void* p, std::size_t) noexcept { std::free (p); }
+
+void* operator new (std::size_t n, const std::nothrow_t&) noexcept
+{
+    if (allocCounting) ++allocCount;
+    return std::malloc (n != 0 ? n : 1);
+}
+void* operator new[] (std::size_t n, const std::nothrow_t&) noexcept
+{
+    if (allocCounting) ++allocCount;
+    return std::malloc (n != 0 ? n : 1);
+}
+
+void operator delete (void* p, const std::nothrow_t&) noexcept { std::free (p); }
+void operator delete[] (void* p, const std::nothrow_t&) noexcept { std::free (p); }
+
 class UpicApplication : public juce::JUCEApplication
 {
 public:
@@ -592,6 +646,117 @@ public:
             check (envFlat != nullptr && mc.modelSnapshotPublishCount() > beforeEnv,
                    "an envelope edit reaches the audio thread",
                    juce::String (mc.modelSnapshotPublishCount() - beforeEnv) + " publish(es)");
+        }
+
+        // 6a-4. v1.33.4 (M21): the audio thread must not allocate. A malloc
+        //     there can block, and a blocked audio thread is a dropout; a
+        //     free there can stall the whole thread. The score and freeze
+        //     buffers, the engine's scratch and the voice pools are all
+        //     sized before the render.
+        {
+            const double sr = 44100.0;
+            const int blk = 512;
+
+            auto waves = upic::defaultWaveforms();
+            upic::Envelope flat; flat.presetFlat();
+            std::vector<upic::Envelope> envs { flat };
+
+            // a page with an oscillator, a sample, a PM and a live arc
+            upic::Page pg; pg.durationSec = 10.0;
+            upic::Arc osc; osc.id = 1; osc.mode = 0; osc.refFreq = 220.0; osc.intensity = 1.0f;
+            osc.points = { { 0.0, 220.0 }, { 10.0, 220.0 } };
+            upic::Arc smp; smp.id = 2; smp.mode = 1; smp.sampleId = 1; smp.refFreq = 220.0; smp.intensity = 1.0f;
+            smp.points = { { 0.0, 220.0 }, { 10.0, 220.0 } };
+            upic::Arc pm; pm.id = 3; pm.mode = 3; pm.refFreq = 220.0; pm.intensity = 1.0f;
+            pm.points = { { 0.0, 220.0 }, { 10.0, 220.0 } };
+            upic::Arc live; live.id = 4; live.mode = 2; live.refFreq = 220.0; live.intensity = 1.0f;
+            live.points = { { 0.0, 220.0 }, { 10.0, 220.0 } };
+            pg.arcs = { osc, smp, pm, live };
+
+            // the material
+            upic::SampleSlot slot; slot.id = 1; slot.name = "sine220"; slot.sampleRate = sr;
+            {
+                juce::AudioBuffer<float> buf (1, 44100);
+                for (int i = 0; i < 44100; ++i)
+                    buf.setSample (0, i, 0.5f * (float) std::sin (
+                        juce::MathConstants<double>::pi * 2.0 * 220.0 * i / 44100.0));
+                slot.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
+            }
+            std::vector<upic::SampleSlot> slots { slot };
+
+            // the live input ring
+            std::vector<float> ring ((size_t) sr * 2, 0.0f);
+            for (size_t i = 0; i < ring.size(); ++i)
+                ring[i] = 0.2f * (float) std::sin (
+                    juce::MathConstants<double>::pi * 2.0 * 100.0 * (double) i / sr);
+
+            UpicEngine e; e.prepare (sr, blk);
+            e.setLiveInput (ring.data(), nullptr, (int) ring.size(), (long long) ring.size(), true);
+            e.setSamplePitchMode (1);  // granular - the usual path
+            e.setLivePitchMode (0);    // granular - the usual path
+
+            std::vector<float> out ((size_t) blk, 0.0f);
+
+            // The first block creates the voices (the pools are already
+            // there), so it must not allocate either.
+            allocCount = 0; allocCounting = true;
+            e.render (pg, 0.0, waves, envs, slots, out.data(), nullptr, blk, 1.0f);
+            allocCounting = false;
+            const int firstBlock = allocCount;
+            check (firstBlock == 0,
+                   "the audio thread does not allocate while it renders",
+                   juce::String (firstBlock) + " allocation(s) in the first block");
+
+            // and the steady state (the voices exist now) must not either
+            allocCount = 0; allocCounting = true;
+            for (int b = 0; b < 8; ++b)
+                e.render (pg, (double) b * blk / sr, waves, envs, slots, out.data(), nullptr, blk, 1.0f);
+            allocCounting = false;
+            const int steady = allocCount;
+            check (steady == 0,
+                   "the audio thread does not allocate in the steady state",
+                   juce::String (steady) + " allocation(s) in 8 blocks");
+
+            // a reset (a seek, a page change) must not free the voices
+            allocCount = 0; allocCounting = true;
+            e.reset();
+            e.render (pg, 0.0, waves, envs, slots, out.data(), nullptr, blk, 1.0f);
+            allocCounting = false;
+            const int afterReset = allocCount;
+            check (afterReset == 0,
+                   "a reset does not allocate or free in the audio thread",
+                   juce::String (afterReset) + " allocation(s) after a reset");
+
+            // The vocoder's working memory (~50 KB per voice plus the FFT
+            // engine) is prepared on the message thread - that is what
+            // prepareSampleVocoderMemory is for - so an arc that plays
+            // through the vocoder must not allocate in the audio thread
+            // either.
+            {
+                UpicEngine ev; ev.prepare (sr, blk);
+                ev.setLiveInput (ring.data(), nullptr, (int) ring.size(), (long long) ring.size(), true);
+                ev.setSamplePitchMode (2);  // phase vocoder
+                ev.setLivePitchMode (2);    // phase vocoder
+                ev.prepareSampleVocoderMemory (4);
+                ev.prepareLiveVocoderMemory (4);
+
+                allocCount = 0; allocCounting = true;
+                ev.render (pg, 0.0, waves, envs, slots, out.data(), nullptr, blk, 1.0f);
+                allocCounting = false;
+                const int vocFirst = allocCount;
+                check (vocFirst == 0,
+                       "the audio thread does not allocate for the vocoder",
+                       juce::String (vocFirst) + " allocation(s) in the first vocoder block");
+
+                allocCount = 0; allocCounting = true;
+                for (int b = 0; b < 4; ++b)
+                    ev.render (pg, (double) b * blk / sr, waves, envs, slots, out.data(), nullptr, blk, 1.0f);
+                allocCounting = false;
+                const int vocSteady = allocCount;
+                check (vocSteady == 0,
+                       "the vocoder does not allocate in the steady state",
+                       juce::String (vocSteady) + " allocation(s) in 4 vocoder blocks");
+            }
         }
 
         // 6b. live take -> sample slot (v1.4 capture path, headless)

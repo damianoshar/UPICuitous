@@ -372,7 +372,11 @@ void MainComponent::buildLiveControls()
                             "(like the Sample tab); Tape (varispeed) reads the mic faster "
                             "than it arrives, so it keeps an octave up/down.");
     livePitchBox.onChange = [this]{
-        engine.setLivePitchMode(livePitchBox.getSelectedId() - 1);
+        const int pm = livePitchBox.getSelectedId() - 1;
+        // v1.33.4 (M21): the vocoder's working memory is prepared BEFORE the
+        // audio thread can see the new mode
+        prepareVocodersIfNeeded (engine.getSamplePitchMode(), pm);
+        engine.setLivePitchMode(pm);
         markModelChanged(); // v1.15: the live voices re-anchor -> fade across it
         flash("Live pitch: " + livePitchBox.getText());
     };
@@ -1660,6 +1664,9 @@ void MainComponent::buildSampleControls()
                               "slot's length and shifts pitch only.");
     samplePitchBox.onChange = [this]{
         const int pm = samplePitchBox.getSelectedId() - 1;
+        // v1.33.4 (M21): the vocoder's working memory is prepared BEFORE the
+        // audio thread can see the new mode
+        prepareVocodersIfNeeded (pm, engine.getLivePitchMode());
         engine.setSamplePitchMode(pm);
         scrubEngine.setSamplePitchMode(pm);
         score.sampleGranularTab = (samplePitchBox.getSelectedId() == 2);
@@ -2469,8 +2476,45 @@ void MainComponent::updateStatus() {}
 //==============================================================================
 // v1.18 (wave 15): snapshot publication + the small message <-> audio
 // signals. All of these are called on the message thread.
+void MainComponent::prepareVocodersIfNeeded (int sampleMode, int liveMode)
+{
+    // v1.33.4 (M21): the vocoder's working memory is ~50 KB per voice plus
+    // the FFT engine. It is prepared here, on the message thread, before the
+    // page that needs it reaches the audio thread - an allocation in the
+    // audio thread can block, and a blocked audio thread is a dropout.
+    //
+    // The message thread knows which arcs could use the vocoder: the tab's
+    // setting, or the arc's own override (v1.33.4 / H7).
+    bool needSample = false, needLive = false;
+    int arcs = 0;
+    // the model is the message thread's own (the audio thread reads the
+    // snapshot, not these pages), so no lock is needed here - and taking it
+    // would deadlock: publishModelSnapshot() is called with the lock held
+    if (! pages.empty())
+    {
+        const auto& page = pages[(size_t) juce::jlimit (0, (int) pages.size() - 1, currentPage)];
+        for (auto& a : page.arcs)
+        {
+            if (a.muted) continue;
+            ++arcs;
+            if (a.mode == 1 && engine.effectiveMode (a, sampleMode) == 2) needSample = true;
+            else if (a.mode == 2 && engine.effectiveMode (a, liveMode) == 2) needLive = true;
+        }
+    }
+    if (! needSample && ! needLive) return;
+    // the audio thread hands the voice slots out in order, so the first N
+    // arcs to sound are the ones that find a prepared voice
+    engine.prepareSampleVocoderMemory (needSample ? arcs : 0);
+    engine.prepareLiveVocoderMemory (needLive ? arcs : 0);
+    scrubEngine.prepareSampleVocoderMemory (needSample ? arcs : 0);
+    scrubEngine.prepareLiveVocoderMemory (needLive ? arcs : 0);
+}
+
 void MainComponent::publishModelSnapshot()
 {
+    // v1.33.4 (M21): the vocoder's memory is prepared before the snapshot
+    // goes out, so an arc that plays through the vocoder finds it there
+    prepareVocodersIfNeeded (engine.getSamplePitchMode(), engine.getLivePitchMode());
     auto* snap = new ModelSnapshot();
     snap->waveforms = waveforms;
     snap->envelopes = envelopes;
@@ -2576,12 +2620,27 @@ void MainComponent::stopPlayback(bool fromAudio)
 }
 
 //==============================================================================
+// v1.33.4 (M21): the audio buffers are sized on the message thread, for the
+// largest block a host may send. They used to be grown inside the audio
+// callback - a malloc on the audio thread.
+void MainComponent::prepareAudioBuffers (int samplesPerBlockExpected)
+{
+    const int n = juce::jmax (kMaxAudioBlock, samplesPerBlockExpected);
+    scoreBuf.setSize (2, n, false, false, true);
+    freezeBuf.setSize (2, n, false, false, true);
+}
+
+//==============================================================================
 void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
 {
     audioSampleRate = sampleRate > 0 ? sampleRate : 44100.0;
     engine.prepare(audioSampleRate, samplesPerBlockExpected);
     scrubEngine.prepare(audioSampleRate, samplesPerBlockExpected);
     scrubEngine.setScrubPreview(true);
+    // v1.33.4 (M21): the voice pools exist now, so the vocoder's working
+    // memory can be prepared - the mode may have been chosen before the
+    // device started (a piece that carries its own pitch modes)
+    prepareVocodersIfNeeded (engine.getSamplePitchMode(), engine.getLivePitchMode());
     scrubPreviewLen = juce::jmax(256, (int) (audioSampleRate * 0.05)); // ~50 ms
     liveRingSize = juce::jmax(1024, (int) (audioSampleRate * kLiveRingSec));
     liveRingA.assign((size_t) liveRingSize, 0.0f);
@@ -2605,9 +2664,11 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
     stopFadeTotal = juce::jmax(1, (int) std::ceil(kStopFadeSec * audioSampleRate));
     stopFadePos = 0;
     wantsStop.store(false);
-    // v1.15: the click-free state starts clean, and the score buffer is
-    // sized for the host's block (it only grows if the host sends more)
-    scoreBuf.setSize(2, juce::jmax(1024, samplesPerBlockExpected), false, false, true);
+    // v1.33.4 (M21): the score and freeze buffers are sized here, on the
+    // message thread, for the LARGEST block a host may send. They used to
+    // be grown inside the audio callback, which is a malloc on the audio
+    // thread (a glitch waiting to happen).
+    prepareAudioBuffers (samplesPerBlockExpected);
     scoreGain = 1.0f;
     scoreTail = 0.0f;
     masterSmoothed = masterGain.load();
@@ -2644,6 +2705,10 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     // be rendered (the UI thread holds the model lock) can be faded out
     // instead of cut. A hard cut from the previous block's last sample to
     // zero is a click - and it happens whatever the host's buffer size is.
+    //
+    // v1.33.4 (M21): the buffers are preallocated for the largest block a
+    // host may send (prepareAudioBuffers), so this only grows them for a
+    // host that breaks the VST3 block-size limit - never in the normal case.
     if (scoreBuf.getNumChannels() < 2 || scoreBuf.getNumSamples() < n)
         scoreBuf.setSize(2, n, false, false, true);
     scoreBuf.clear();
@@ -4989,19 +5054,26 @@ bool MainComponent::loadFromVar(const juce::var& v)
     {
         bool changed = false;
         const int samplePm = (int) v.getProperty("samplePitchMode", -1);
+        const int livePm = (int) v.getProperty("livePitchMode", -1);
+        const int sampleMode = samplePm >= 0 ? juce::jlimit(0, 3, samplePm)
+                                             : engine.getSamplePitchMode();
+        const int liveMode = livePm >= 0 ? juce::jlimit(0, 2, livePm)
+                                         : engine.getLivePitchMode();
+        // v1.33.4 (M21): the vocoder's working memory is prepared BEFORE the
+        // audio thread can see the new modes
+        prepareVocodersIfNeeded (sampleMode, liveMode);
         if (samplePm >= 0)
         {
-            const int pm = juce::jlimit(0, 3, samplePm);
+            const int pm = sampleMode;
             engine.setSamplePitchMode(pm);
             scrubEngine.setSamplePitchMode(pm);
             samplePitchBox.setSelectedId(pm + 1, juce::dontSendNotification);
             score.sampleGranularTab = (pm == 1);
             changed = true;
         }
-        const int livePm = (int) v.getProperty("livePitchMode", -1);
         if (livePm >= 0)
         {
-            const int pm = juce::jlimit(0, 2, livePm);
+            const int pm = liveMode;
             engine.setLivePitchMode(pm);
             livePitchBox.setSelectedId(pm + 1, juce::dontSendNotification);
             changed = true;
