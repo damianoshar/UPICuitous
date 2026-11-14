@@ -1,7 +1,7 @@
 # UPICuitous - Implementation Plan for Gap Analysis & Security Review
 
 **Based on:** `GAP_ANALYSIS.md` and `SECURITY-REVIEW.md`  
-**Current state:** v0.28.0 on `main` (commit `a399473`)  
+**Current state:** v0.28.1 on `main`  
 **Branch:** `feature/phase1-security-hardening` (8 commits ahead of `main`)  
 **Last validation:** 363/363 selftest PASS, VST3 build + 15-check smoke PASS, pluginval strictness 5 PASS, Android Debug/Release build PASS
 

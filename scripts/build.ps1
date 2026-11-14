@@ -11,13 +11,17 @@
         .\scripts\build.ps1 -SkipApp            # plugin only
         .\scripts\build.ps1 -SkipPlugin         # app only
 
-    -Version writes the version into Plugin/CMakeLists.txt, Source/Main.cpp
-    and UPICuitous.jucer (the .jucer version feeds the Android manifest and
-    the generated IDE projects - see docs/android-build.md).
+    -Version writes the version into every place that carries one: the root
+    CMakeLists, Plugin/CMakeLists.txt, Source/Main.cpp, UPICuitous.jucer
+    (the .jucer version feeds the Android manifest and the generated IDE
+    projects - see docs/android-build.md), the Android manifest and the
+    generated Android CMakeLists, and the Projucer's own exporters. The
+    .jucer is the source of truth; every build checks that the others
+    still agree with it.
 
-    It never touches Builds/Android/* - the Android project is Projucer-
-    generated plus the NDK line that scripts/fix_android.ps1 owns (the
-    Android APK is built in Android Studio).
+    It only writes the *version* into the Android project - the rest of it
+    is Projucer-generated plus the NDK line that scripts/fix_android.ps1
+    owns (the Android APK is built in Android Studio).
 #>
 [CmdletBinding()]
 param(
@@ -66,21 +70,160 @@ function Find-CMake {
     return "cmake"
 }
 
-# --------------------------------------------------- plugin version bump ---
+# ------------------------------------------------------- the version bump ---
+# The version has one home: the .jucer (the project file) is the source of
+# truth, and every other place that carries a version is written from it:
+#
+#   - the root CMakeLists (the stand-alone app's own build)
+#   - Plugin/CMakeLists.txt (the VST3)
+#   - Source/Main.cpp (the app's getApplicationVersion())
+#   - the Android manifest and the generated Android CMakeLists
+#   - the Projucer's own exporters (the VS resources, the Linux makefile,
+#     the macOS plist) - they are only rewritten when the project is resaved
+#     in the Projucer, so the bump patches them here
+#
+# A drift check runs at the start of every build, so a hand edit that breaks
+# the sync is reported instead of shipping.
+function Write-TextFile([string] $path, [string] $text) {
+    # UTF-8 without BOM, so the em dashes in the comments survive
+    [IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Get-VersionHex([string] $v) {
+    $parts = $v -split '\.'
+    if ($parts.Count -lt 3) { return "0x0" }
+    # (major << 16) + (minor << 8) + patch - the form the Projucer writes
+    return "0x{0:X}" -f (([int]$parts[0] -shl 16) + ([int]$parts[1] -shl 8) + [int]$parts[2])
+}
+
+function Get-ProjectVersion {
+    $jucer = Join-Path $root "UPICuitous.jucer"
+    if (-not (Test-Path $jucer)) { return $null }
+    $m = [regex]::Match([IO.File]::ReadAllText($jucer, [Text.Encoding]::UTF8),
+                         '<JUCERPROJECT\b[^>]*?\sversion="(\d+\.\d+\.\d+)"')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return $null
+}
+
+function Sync-AndroidVersion([string] $v) {
+    # the Android manifest and the generated CMakeLists carry the version of
+    # the project - the Projucer writes them when the project is resaved
+    $hex = Get-VersionHex $v
+    $manifest = Join-Path $root "Builds\Android\app\src\main\AndroidManifest.xml"
+    if (Test-Path $manifest) {
+        $text = [IO.File]::ReadAllText($manifest, [Text.Encoding]::UTF8)
+        $new = [regex]::Replace($text, 'android:versionName="[^"]+"', "android:versionName=`"$v`"")
+        if ($new -ne $text) {
+            Write-TextFile $manifest $new
+            Write-Host "    the Android manifest version -> $v" -ForegroundColor Cyan
+        }
+    }
+    $cm = Join-Path $root "Builds\Android\app\CMakeLists.txt"
+    if (Test-Path $cm) {
+        $text = [IO.File]::ReadAllText($cm, [Text.Encoding]::UTF8)
+        $new = [regex]::Replace($text, '-DJUCE_APP_VERSION=[^]]+\]\]', "-DJUCE_APP_VERSION=$v]]")
+        $new = [regex]::Replace($new, '-DJUCE_APP_VERSION_HEX=[^]]+\]\]', "-DJUCE_APP_VERSION_HEX=$hex]]")
+        if ($new -ne $text) {
+            Write-TextFile $cm $new
+            Write-Host "    the Android CMakeLists version -> $v ($hex)" -ForegroundColor Cyan
+        }
+    }
+}
+
+function Get-GeneratedVersionFiles {
+    # the Projucer's exporters (they are only rewritten when the project is
+    # resaved in the Projucer, so a version bump patches them here)
+    $files = @()
+    $files += Get-ChildItem (Join-Path $root "Builds") -Recurse -Filter "*resources.rc" -ErrorAction SilentlyContinue
+    $files += Get-ChildItem (Join-Path $root "Builds") -Recurse -Filter "*.vcxproj" -ErrorAction SilentlyContinue
+    $mk = Join-Path $root "Builds\LinuxMakefile\Makefile"
+    if (Test-Path $mk) { $files += Get-Item $mk }
+    $plist = Join-Path $root "Builds\MacOSX\Info-App.plist"
+    if (Test-Path $plist) { $files += Get-Item $plist }
+    return $files
+}
+
+function Sync-GeneratedExporters([string] $v) {
+    # the Projucer's exporters (the VS version resources, the VS projects, the
+    # Linux makefile and the macOS plist) - a resave in the Projucer would
+    # rewrite them, but a version bump should not leave the tree with two
+    # versions in it
+    $parts = $v -split '\.'
+    $fileVersion = "$($parts[0]),$($parts[1]),$($parts[2]),0"
+    $hex = Get-VersionHex $v
+    $changed = 0
+
+    foreach ($f in (Get-GeneratedVersionFiles)) {
+        $text = [IO.File]::ReadAllText($f.FullName, [Text.Encoding]::UTF8)
+        $new = $text
+        # the Visual Studio version resource
+        $new = [regex]::Replace($new, '(?m)^FILEVERSION\s+\d+,\d+,\d+,\d+', "FILEVERSION  $fileVersion")
+        $new = [regex]::Replace($new, '(?m)^PRODUCTVERSION\s+\d+,\d+,\d+,\d+', "PRODUCTVERSION  $fileVersion")
+        $new = [regex]::Replace($new, '(?m)(VALUE\s+"(?:FileVersion|ProductVersion)",\s*")\d+\.\d+\.\d+(\\0")', "`${1}$v`${2}")
+        # the version every exporter puts in the preprocessor definitions
+        # (the CMake ones carry the -D, the Visual Studio ones do not)
+        $new = [regex]::Replace($new, '(-D)?(JUCE_APP_VERSION=)[^"\s;\]]+', '${1}${2}' + $v)
+        $new = [regex]::Replace($new, '(-D)?(JUCE_APP_VERSION_HEX=)[^"\s;\]]+', '${1}${2}' + $hex)
+        # the macOS plist
+        $new = [regex]::Replace($new, '(?m)(<key>CFBundle(?:ShortVersionString|Version)</key>\s*<string>)\d+\.\d+\.\d+(</string>)', "`${1}$v`${2}")
+        if ($new -ne $text) {
+            Write-TextFile $f.FullName $new
+            $changed++
+        }
+    }
+    if ($changed -gt 0) {
+        Write-Host "    the generated exporters now say $v ($changed file(s))" -ForegroundColor Cyan
+    }
+}
+
+function Test-VersionSync {
+    # the .jucer is the source of truth - everything else must agree with it
+    $want = Get-ProjectVersion
+    if (-not $want) { return }
+    $checks = @(
+        @{ name = "the root CMakeLists";         path = "CMakeLists.txt";
+           pattern = 'project\(UPICuitous\s+VERSION\s+(\d+\.\d+\.\d+)' },
+        @{ name = "the plugin's CMakeLists";     path = "Plugin\CMakeLists.txt";
+           pattern = 'project\(UPICuitousPlugin\s+VERSION\s+(\d+\.\d+\.\d+)' },
+        @{ name = "the app's version";           path = "Source\Main.cpp";
+           pattern = 'getApplicationVersion\(\)\s*override\s*\{\s*return\s*"(\d+\.\d+\.\d+)"' },
+        @{ name = "the Android manifest";        path = "Builds\Android\app\src\main\AndroidManifest.xml";
+           pattern = 'android:versionName="([^"]+)"' },
+        @{ name = "the Android CMakeLists";      path = "Builds\Android\app\CMakeLists.txt";
+           pattern = '-DJUCE_APP_VERSION=([^]]+)\]\]' }
+    )
+    $drift = @()
+    foreach ($c in $checks) {
+        $p = Join-Path $root $c.path
+        if (-not (Test-Path $p)) { continue }
+        $m = [regex]::Match([IO.File]::ReadAllText($p, [Text.Encoding]::UTF8), $c.pattern)
+        if (-not $m.Success) {
+            $drift += "$($c.name): the version could not be read"
+        }
+        elseif ($m.Groups[1].Value -ne $want) {
+            $drift += "$($c.name): $($m.Groups[1].Value) (the .jucer says $want)"
+        }
+    }
+    if ($drift.Count -gt 0) {
+        Write-Host "    WARNING: the version has drifted:" -ForegroundColor Yellow
+        foreach ($d in $drift) { Write-Host "      $d" -ForegroundColor Yellow }
+        Write-Host "      .\scripts\build.ps1 -Version $want puts it right" -ForegroundColor Yellow
+    }
+}
+
 # JUCE writes the Windows version resource from Info.txt into
 # <Name>_resources.rc, but the custom command that does it only depends on
 # the icon - so a VERSION bump never reaches the .rc and Explorer keeps
 # showing the old version. Deleting the .rc makes the build regenerate it.
-function Set-PluginVersion([string] $v) {
+function Set-ProjectVersion([string] $v) {
     $cm = Join-Path $root "Plugin\CMakeLists.txt"
     if (-not (Test-Path $cm)) { Die "Plugin\CMakeLists.txt not found" }
-    $text = Get-Content $cm -Raw
+    $text = [IO.File]::ReadAllText($cm, [Text.Encoding]::UTF8)
     $text = [regex]::Replace($text, 'VERSION \d+\.\d+\.\d+', "VERSION $v")
     $parts = $v -split '\.'
     $short = "$($parts[0]).$($parts[1])"
     $text = [regex]::Replace($text, '# VST3 target for UPICuitous \(v[\d.]+\)', "# VST3 target for UPICuitous (v$short)")
-    # UTF-8 without BOM, so the em dashes in the comments survive
-    [IO.File]::WriteAllText($cm, $text, (New-Object System.Text.UTF8Encoding($false)))
+    Write-TextFile $cm $text
 
     # keep the standalone app's version in sync (Source/Main.cpp)
     $mc = Join-Path $root "Source\Main.cpp"
@@ -93,10 +236,28 @@ function Set-PluginVersion([string] $v) {
         $new = [regex]::Replace($mtext,
             '(getApplicationVersion\(\)\s*override\s*\{\s*return\s*")\d+\.\d+\.\d+(")',
             "`${1}$v`${2}")
-        if ($new -eq $mtext) {
+        if ($new -eq $mtext -and -not [regex]::IsMatch($mtext,
+            '(getApplicationVersion\(\)\s*override\s*\{\s*return\s*")\d+\.\d+\.\d+(")')) {
             Write-Host "    WARNING: the app version in Source/Main.cpp was not updated" -ForegroundColor Yellow
         }
-        [IO.File]::WriteAllText($mc, $new, (New-Object System.Text.UTF8Encoding($false)))
+        Write-TextFile $mc $new
+    }
+
+    # the root CMakeLists (the stand-alone app's own CMake build) - it had
+    # drifted behind the plugin for several releases
+    $rootCm = Join-Path $root "CMakeLists.txt"
+    if (Test-Path $rootCm) {
+        $rtext = [IO.File]::ReadAllText($rootCm, [Text.Encoding]::UTF8)
+        $new = [regex]::Replace($rtext,
+            '(project\(UPICuitous\s+VERSION\s+)\d+\.\d+\.\d+',
+            "`${1}$v")
+        if ($new -eq $rtext -and -not [regex]::IsMatch($rtext,
+            '(project\(UPICuitous\s+VERSION\s+)\d+\.\d+\.\d+')) {
+            Write-Host "    WARNING: the root CMakeLists version was not updated" -ForegroundColor Yellow
+        }
+        else {
+            Write-TextFile $rootCm $new
+        }
     }
 
     # the .jucer version feeds the Android manifest (versionName) and the
@@ -107,21 +268,27 @@ function Set-PluginVersion([string] $v) {
         $jnew = [regex]::Replace($jtext,
             '(<JUCERPROJECT\b[^>]*?\sversion=")\d+\.\d+\.\d+(")',
             "`${1}$v`${2}")
-        if ($jnew -eq $jtext) {
+        if ($jnew -eq $jtext -and -not [regex]::IsMatch($jtext,
+            '(<JUCERPROJECT\b[^>]*?\sversion=")\d+\.\d+\.\d+(")')) {
             Write-Host "    WARNING: the project version in UPICuitous.jucer was not updated" -ForegroundColor Yellow
         }
         else {
             # a broken .jucer would cost the user their project file
             try {
                 [xml]$null = $jnew
-                [IO.File]::WriteAllText($jucer, $jnew, (New-Object System.Text.UTF8Encoding($false)))
+                Write-TextFile $jucer $jnew
             }
             catch {
                 Write-Host "    WARNING: the new .jucer does not parse as XML - it was not written" -ForegroundColor Yellow
             }
         }
     }
-    Write-Host "    Plugin + app version -> $v"
+
+    # the exporters that carry the version too
+    Sync-AndroidVersion $v
+    Sync-GeneratedExporters $v
+
+    Write-Host "    version -> $v (the .jucer is the source of truth)"
 }
 
 function Get-CmakeVersion {
@@ -155,7 +322,8 @@ function Remove-StaleVersionResource {
 # Before anything is built: the app's getApplicationVersion() and the .jucer
 # (the Android manifest) must carry the new version, and the app is built
 # from that source.
-if ($Version) { Set-PluginVersion $Version }
+if ($Version) { Set-ProjectVersion $Version }
+Test-VersionSync
 
 # ------------------------------------------------------------------- app ---
 $appOk = $true
@@ -255,5 +423,6 @@ if (-not $SkipPlugin) {
 }
 
 Write-Host ""
-Write-Host "app selftest: $appSummary   |   plugin: $pluginSummary   |   smoke: $smokeSummary   |   $validateSummary" -ForegroundColor Green
+$versionSummary = "version " + (Get-ProjectVersion)
+Write-Host "app selftest: $appSummary   |   plugin: $pluginSummary   |   smoke: $smokeSummary   |   $validateSummary   |   $versionSummary" -ForegroundColor Green
 Write-Host ""

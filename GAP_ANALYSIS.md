@@ -1,7 +1,7 @@
 # UPICuitous - Gap Analysis & Improvement Plan
 
 ## Project Overview
-UPICuitous is a JUCE-based UPIC clone (v0.28.0) that implements Iannis Xenakis' UPIC concept: drawing pitch curves on a time-vs-pitch page, assigning wavetables and envelopes to arcs, and rendering them as oscillator, sample-based, live audio, and phase-modulation voices. It ships as:
+UPICuitous is a JUCE-based UPIC clone (v0.28.1) that implements Iannis Xenakis' UPIC concept: drawing pitch curves on a time-vs-pitch page, assigning wavetables and envelopes to arcs, and rendering them as oscillator, sample-based, live audio, and phase-modulation voices. It ships as:
 - Windows standalone app
 - VST3 plugin
 - Android tablet app

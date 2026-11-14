@@ -87,15 +87,33 @@ verified with), so the script owns that one line.
 
 ## The version
 
-`.\scripts\build.ps1 -Version 0.28.0` writes the version into three places:
+The version has one home: `UPICuitous.jucer` (the project version). Every
+other place that carries a number is written from it, and every build checks
+that they still agree.
 
+`.\scripts\build.ps1 -Version 0.28.1` writes the version into:
+
+* `UPICuitous.jucer` (the project version - the source of truth),
 * `Plugin/CMakeLists.txt` (the VST3),
+* the root `CMakeLists.txt` (the stand-alone app's own CMake build),
 * `Source/Main.cpp` (`getApplicationVersion()` - the desktop app),
-* `UPICuitous.jucer` (the project version - the Android manifest's
-  `versionName` and the generated IDE projects).
+* the Android manifest's `versionName` and the generated Android
+  `CMakeLists.txt` (`JUCE_APP_VERSION` and its hex form),
+* the Projucer's own exporters (the Visual Studio version resources and
+  projects, the Linux makefile, the macOS plist) - they are only rewritten
+  when the project is resaved in the Projucer, so the bump patches them.
 
 The `.jucer` edit is XML-safe: the script parses the result before writing
 it, and it warns (without writing) if the version could not be found.
+
+Every build runs the same check and reports a drift (a yellow warning, not
+a failure) when one of the files above no longer agrees with the `.jucer`:
+
+```
+    WARNING: the version has drifted:
+      the root CMakeLists: 0.28.0 (the .jucer says 0.28.1)
+      .\scripts\build.ps1 -Version 0.28.1 puts it right
+```
 
 ## Building the APK
 

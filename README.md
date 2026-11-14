@@ -29,7 +29,7 @@ waveform and a time bar; drag the centre line to scrub.*
 
 | Build | Where | State |
 |---|---|---|
-| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v0.28.0 |
+| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v0.28.1 |
 | Python + tkinter + numpy | `python-upic/` | Prototype, shares `.upic.json`. `python python-upic/upicuitous.py` |
 | Single-page WebAudio | `web-upic/` | Prototype, shares `.upic.json`. Open `web-upic/index.html` |
 
@@ -43,11 +43,14 @@ waveform and a time bar; drag the centre line to scrub.*
 .\Builds\VisualStudio2026\x64\Debug\App\UPICuitous.exe
 
 # VST3 (built by the script; the install asks for admin rights)
-.\scripts\install_plugin.ps1 -Version 0.28.0
+.\scripts\install_plugin.ps1 -Version 0.28.1
 ```
 
-`scripts/build.ps1 -Version 0.28.0` bumps the app and plugin version
-together. `-SkipApp` or `-SkipPlugin` narrows the run. See `BUILDING.md`
+`scripts/build.ps1 -Version 0.28.1` bumps the version everywhere it is
+written - the app, the plugin, the root CMake project, the Android manifest
+and the generated exporters - from one number in `UPICuitous.jucer`. Every
+build checks that the others still agree with it. `-SkipApp` or `-SkipPlugin`
+narrows the run. See `BUILDING.md`
 for the manual CMake commands, the Android project and troubleshooting.
 
 First run of the standalone: press **Audio** and pick the output device.
