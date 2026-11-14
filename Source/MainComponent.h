@@ -105,6 +105,29 @@ public:
     bool pieceHasUnsavedChanges() const { return pieceDirty.load (std::memory_order_relaxed); }
     void markPieceSaved() { pieceDirty.store (false, std::memory_order_relaxed); }
 
+    // --- v1.33.4 (L15, part 2): the undo stack ---
+    //
+    // The review: "core editing directly mutates vectors ... drawing,
+    // erasure, deletion and accidental closing need a recovery path.
+    // Introduce edit transactions, coalesce pointer drags into one undo
+    // action".
+    //
+    // The stack holds snapshots of the model (the piece). The sample audio
+    // is shared, so a snapshot costs only the pages - the audio is never
+    // copied again and again. An edit pushes one snapshot: the state from
+    // before it. A pointer drag is one transaction, so a drag is one undo
+    // step (the pointer moves do not push anything).
+    void beginEdit (const juce::String& label);
+    void endEdit();
+    bool canUndo() const { return ! undoStack.empty(); }
+    bool canRedo() const { return ! redoStack.empty(); }
+    juce::String undoLabel() const;
+    juce::String redoLabel() const;
+    int undoDepth() const { return (int) undoStack.size(); }
+    int redoDepth() const { return (int) redoStack.size(); }
+    void undo();
+    void redo();
+
     // v1.33.4 (M22): how many model snapshots were published (the timer
     // publishes only when the model changed). The selftest watches it.
     int modelSnapshotPublishCount() const { return snapshotPublishCount.load (std::memory_order_relaxed); }
@@ -373,6 +396,23 @@ private:
     std::atomic<bool> isPlaying { false };
     // v1.33.4 (L15): the piece differs from what was last written
     std::atomic<bool> pieceDirty { false };
+    // --- v1.33.4 (L15, part 2): the undo stack (the message thread only) ---
+    struct UndoEntry
+    {
+        upic::PieceModel model;
+        juce::int64 bytes = 0;      // the size of the snapshot (the audio is shared)
+        juce::String label;
+    };
+    std::vector<UndoEntry> undoStack, redoStack;
+    juce::int64 undoBytes = 0, redoBytes = 0;
+    // the snapshot of the edit that is in progress (empty when there is none)
+    std::unique_ptr<upic::PieceModel> pendingEdit;
+    juce::uint64 pendingRevision = 0;
+    juce::String pendingLabel;
+    // the bounds: the stack is bounded by the number of steps and by the
+    // memory it holds (the oldest steps go first).
+    static constexpr int kMaxUndoSteps = 50;
+    static constexpr juce::int64 kMaxUndoBytes = 64ll * 1024 * 1024;
     std::atomic<double> playRate { 1.0 };   // +1 forward, -1 backward
     std::atomic<double> prevPlayRate { 1.0 };
     std::atomic<int>    dirChangeSerial { 0 };

@@ -17,6 +17,8 @@ public:
     // The owner can give the selection a private wavetable before the first
     // sample changes; returning false cancels the edit (e.g. a read-only tab).
     void setOnEditStart(std::function<bool()> cb) { onEditStart = std::move(cb); }
+    // v1.33.4 (L15, part 2): the end of the edit (the undo transaction)
+    void setOnEditEnd(std::function<void()> cb) { onEditEnd = std::move(cb); }
     bool beginEdit() { return onEditStart ? onEditStart() : true; }
 
     // Read-only preview of loaded sample material (non-null => sample view).
@@ -121,13 +123,21 @@ public:
         paintAt(e.position);
     }
     void mouseDrag(const juce::MouseEvent& e) override { if (drawing) paintAt(e.position); }
-    void mouseUp(const juce::MouseEvent&) override { drawing = false; }
+    void mouseUp(const juce::MouseEvent&) override
+    {
+        drawing = false;
+        // v1.33.4 (L15, part 2): the edit is over - the owner keeps the
+        // state from before it as an undo step.
+        if (onEditEnd) onEditEnd();
+    }
 
 private:
     std::vector<upic::Waveform>* waves = nullptr;
     int* selected = nullptr;
     std::function<void()> onChange;
     std::function<bool()> onEditStart;
+    // v1.33.4 (L15, part 2): the end of the edit (the undo transaction)
+    std::function<void()> onEditEnd;
     juce::CriticalSection* modelLock = nullptr;
     juce::CriticalSection dummyLock;
     bool drawing = false;

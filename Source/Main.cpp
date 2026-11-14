@@ -1059,6 +1059,132 @@ public:
             file.deleteFile();
         }
 
+        // 6a-9. v1.33.4 (L15, part 2): the undo. The review: "drawing,
+        //     erasure, deletion and accidental closing need a recovery path.
+        //     Introduce edit transactions, coalesce pointer drags into one
+        //     undo action".
+        {
+            std::function<juce::Component*(juce::Component&, const juce::String&)> findByNameL15 =
+                [&findByNameL15](juce::Component& c, const juce::String& n) -> juce::Component* {
+                    if (c.getName() == n) return &c;
+                    for (int i = 0; i < c.getNumChildComponents(); ++i)
+                        if (auto* r = findByNameL15(*c.getChildComponent(i), n)) return r;
+                    return nullptr;
+                };
+
+            auto mcHolder = std::make_unique<MainComponent>();
+            auto& mc = *mcHolder;
+            mc.setSize (1280, 800);
+
+            auto countArcs = [] (const juce::var& piece) -> int
+            {
+                auto* pages = piece.getProperty ("pages", juce::var()).getArray();
+                if (pages == nullptr || pages->isEmpty()) return 0;
+                auto* arcs = pages->getReference (0).getProperty ("arcs", juce::var()).getArray();
+                return arcs != nullptr ? arcs->size() : 0;
+            };
+
+            const juce::String oneArc =
+                "{\"pages\":[{\"duration\":10,\"arcs\":["
+                "{\"id\":1,\"mode\":0,\"intensity\":0.8,"
+                "\"points\":[{\"t\":0,\"f\":220},{\"t\":4,\"f\":880}]}]}]}";
+            const juce::String noArc =
+                "{\"pages\":[{\"duration\":10,\"arcs\":[]}]}";
+
+            check (! mc.canUndo(), "a fresh app has nothing to undo");
+            check (! mc.canRedo(), "a fresh app has nothing to redo");
+
+            // an edit that changes nothing is not an undo step
+            const int depth0 = mc.undoDepth();
+            mc.beginEdit ("Nothing");
+            mc.endEdit();
+            check (mc.undoDepth() == depth0,
+                   "an edit that changed nothing is not an undo step",
+                   juce::String (mc.undoDepth()) + " steps (was "
+                   + juce::String (depth0) + ")");
+
+            // a real edit is one
+            mc.loadFromVar (juce::JSON::parse (oneArc));
+            mc.beginEdit ("Delete the arc");
+            mc.loadFromVar (juce::JSON::parse (noArc));
+            mc.endEdit();
+            check (mc.canUndo(), "an edit is an undo step");
+            check (mc.undoLabel() == "Delete the arc",
+                   "the undo step knows what it was", mc.undoLabel());
+            check (countArcs (mc.pieceToVar()) == 0, "the edit is in the model");
+
+            // the undo brings the arc back
+            mc.undo();
+            check (countArcs (mc.pieceToVar()) == 1, "the undo brings the arc back",
+                   juce::String (countArcs (mc.pieceToVar())));
+            check (! mc.canUndo(), "the undo stack is empty after the undo");
+            check (mc.canRedo(), "the redo stack has the step");
+
+            // and the redo takes it away again
+            mc.redo();
+            check (countArcs (mc.pieceToVar()) == 0, "the redo removes the arc again",
+                   juce::String (countArcs (mc.pieceToVar())));
+            check (mc.canUndo(), "the undo stack has the step again");
+            check (! mc.canRedo(), "the redo stack is empty after the redo");
+
+            // a new edit after an undo starts a new branch
+            mc.undo();
+            check (mc.canRedo(), "the undone edit can be redone");
+            mc.beginEdit ("A new edit");
+            mc.loadFromVar (juce::JSON::parse (noArc));
+            mc.endEdit();
+            check (! mc.canRedo(), "a new edit clears the redo stack");
+
+            // the drawing on the canvas is an undo step too - and a drag is
+            // one step, not one per mouse move
+            {
+                auto* sc = dynamic_cast<ScoreEditor*> (findByNameL15 (mc, "score"));
+                check (sc != nullptr, "the canvas is there for the undo test");
+                if (sc != nullptr)
+                {
+                    mc.loadFromVar (juce::JSON::parse (noArc));
+                    const int before = countArcs (mc.pieceToVar());
+                    const int depthBefore = mc.undoDepth();
+                    sc->setTool (ScoreEditor::Draw);
+                    const auto b = sc->getLocalBounds().toFloat();
+                    // the stroke stays above the pitch-centre line: the band
+                    // on it is the playhead's scrub target, not a canvas
+                    const auto p0 = juce::Point<float> (b.getX() + b.getWidth() * 0.25f,
+                                                        b.getY() + b.getHeight() * 0.22f);
+                    const auto p1 = juce::Point<float> (b.getX() + b.getWidth() * 0.60f,
+                                                        b.getY() + b.getHeight() * 0.30f);
+                    const auto now = juce::Time::getCurrentTime();
+                    const auto src = juce::Desktop::getInstance().getMainMouseSource();
+                    juce::MouseEvent down (src, p0, juce::ModifierKeys(), 1.0f,
+                                           0.0f, 0.0f, 0.0f, 0.0f, sc, sc, now, p0, now, 1, false);
+                    sc->mouseDown (down);
+                    juce::MouseEvent drag (src, p1, juce::ModifierKeys(), 1.0f,
+                                           0.0f, 0.0f, 0.0f, 0.0f, sc, sc, now, p0, now, 1, true);
+                    sc->mouseDrag (drag);
+                    sc->mouseUp (drag);
+                    check (countArcs (mc.pieceToVar()) == before + 1,
+                           "the stroke draws an arc",
+                           juce::String (countArcs (mc.pieceToVar())));
+                    check (mc.canUndo(), "the stroke is an undo step");
+                    // the review asked for the pointer drags to be coalesced
+                    // into one undo action: a stroke with many mouse moves is
+                    // one step, not one per move
+                    check (mc.undoDepth() == depthBefore + 1,
+                           "the whole drag is one undo step",
+                           juce::String (mc.undoDepth()) + " steps (was "
+                           + juce::String (depthBefore) + ")");
+                    mc.undo();
+                    check (countArcs (mc.pieceToVar()) == before,
+                           "the undo takes the stroke away",
+                           juce::String (countArcs (mc.pieceToVar())));
+                    // the piece on the screen is not what is on the disk any
+                    // more, so the app must ask before it closes
+                    check (mc.pieceHasUnsavedChanges(),
+                           "the undone piece counts as unsaved");
+                }
+            }
+        }
+
         // 6b. live take -> sample slot (v1.4 capture path, headless)
         {
             juce::AudioBuffer<float> take(2, 48000);

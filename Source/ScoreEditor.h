@@ -335,6 +335,9 @@ public:
     void deleteSelected()
     {
         if (! page || selArcs.empty()) return;
+        // v1.33.4 (L15, part 2): the undo transaction - the app keeps the
+        // state from before the change.
+        if (onEditStart) onEditStart ("Delete");
         const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
         auto& v = page->arcs;
         v.erase(std::remove_if(v.begin(), v.end(),
@@ -343,12 +346,15 @@ public:
         selArcs.clear();
         if (selectedZone >= 0 && tool != Zone) selectedZone = -1;
         notify();
+        if (onEditEnd) onEditEnd();
     }
 
     void duplicateSelected()
     {
         if (! page || selArcs.empty()) return;
         std::vector<int> created;
+        // v1.33.4 (L15, part 2): the undo transaction
+        if (onEditStart) onEditStart ("Duplicate");
         {
             const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
             const double off = juce::jlimit(0.1, 1.0, page->durationSec * 0.05);
@@ -380,6 +386,7 @@ public:
         }
         if (! created.empty()) selArcs = created; // selection follows the copies
         notify();
+        if (onEditEnd) onEditEnd();
     }
 
     void toggleMuteSelected()
@@ -445,6 +452,8 @@ public:
             return -1;
         }
         upic::SieveZone z;
+        // v1.33.4 (L15, part 2): the undo transaction
+        if (onEditStart) onEditStart ("Add a sieve zone");
         {
             const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
             z.id = page->nextZoneId++;
@@ -461,12 +470,15 @@ public:
         selectedZone = z.id;
         selArcs.clear();
         notify();
+        if (onEditEnd) onEditEnd();
         return z.id;
     }
 
     void deleteZone(int id)
     {
         if (! page) return;
+        // v1.33.4 (L15, part 2): the undo transaction
+        if (onEditStart) onEditStart ("Delete a sieve zone");
         {
             const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
             auto& v = page->zones;
@@ -475,6 +487,7 @@ public:
         }
         if (selectedZone == id) selectedZone = -1;
         notify();
+        if (onEditEnd) onEditEnd();
     }
 
     // Time-strip scrub: set the playhead from a canvas x position.
@@ -1009,6 +1022,9 @@ public:
             {
                 movingArc = true;
                 moveStartPos = e.position;
+                // v1.33.4 (L15, part 2): the whole drag is one undo step -
+                // the pointer moves do not push anything.
+                if (onEditStart) onEditStart ("Move the arc");
                 const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
                 moveStartMap.clear();
                 for (auto& a : page->arcs)
@@ -1029,11 +1045,15 @@ public:
             drawing = true;
             strokePts.clear();
             strokePts.push_back({ e.position, curPress(e) });
+            // v1.33.4 (L15, part 2): the undo transaction
+            if (onEditStart) onEditStart ("Draw");
             if (onArcEditingChanged != nullptr) onArcEditingChanged(true);
         }
         else if (tool == Line)
         {
             lineAnchor = e.position;
+            // v1.33.4 (L15, part 2): the undo transaction
+            if (onEditStart) onEditStart ("Draw a line");
             if (onArcEditingChanged != nullptr) onArcEditingChanged(true);
             lastMouse = e.position;
             repaint();
@@ -1209,6 +1229,8 @@ public:
             draggingZone = false;
             zoneHandle = 0;
             notify();
+            // v1.33.4 (L15, part 2): the transaction ends here
+            if (onEditEnd) onEditEnd();
             repaint();
             return;
         }
@@ -1225,7 +1247,7 @@ public:
         }
 
         if (movingArc) {
-            movingArc = false; moveStartMap.clear(); if (onArcEditingChanged != nullptr) onArcEditingChanged(false); notify(); repaint(); return;
+            movingArc = false; moveStartMap.clear(); if (onArcEditingChanged != nullptr) onArcEditingChanged(false); notify(); repaint(); if (onEditEnd) onEditEnd(); return;
         }
 
         if (tool == Line && lineAnchor)
@@ -1233,6 +1255,9 @@ public:
             if (onArcEditingChanged != nullptr) onArcEditingChanged(false);
             commitLine(*lineAnchor, e.position, curPress(e));
             lineAnchor.reset();
+            // v1.33.4 (L15, part 2): the transaction ends after the line is
+            // committed, so the app can see that something really changed.
+            if (onEditEnd) onEditEnd();
             return;
         }
         if (drawing)
@@ -1242,6 +1267,9 @@ public:
             strokePts.push_back({ e.position, curPress(e) });
             commitStroke();
             strokePts.clear();
+            // v1.33.4 (L15, part 2): the transaction ends after the stroke is
+            // committed, so the app can see that something really changed.
+            if (onEditEnd) onEditEnd();
             repaint();
         }
         lineAnchor.reset();
@@ -1261,6 +1289,15 @@ public:
         }
         if (cmd && (code == 'A' || code == 'a')) { selectAll(); if (onSelect) onSelect(getSelectedArc()); return true; }
         if (cmd && (code == 'D' || code == 'd')) { if (! selArcs.empty()) duplicateSelected(); return true; }
+        // v1.33.4 (L15, part 2): the undo and redo keys. The editor has the
+        // keyboard focus while the user draws, so it hands them to the app.
+        if (cmd && (code == 'Z' || code == 'z'))
+        {
+            if (shift) { if (onRedo) onRedo(); }
+            else       { if (onUndo) onUndo(); }
+            return true;
+        }
+        if (cmd && (code == 'Y' || code == 'y')) { if (onRedo) onRedo(); return true; }
 
         // arrow nudge: fine steps, Shift = grid-sized time / octave pitch
         const bool arrow = code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey
@@ -1332,6 +1369,18 @@ public:
 
     std::function<void(int)> onSelect;
     std::function<void(bool)> onArcEditingChanged;
+    // v1.33.4 (L15, part 2): the undo transaction. The editor tells the app
+    // when a change starts - the app keeps the state from before it - and
+    // when it is over; the app keeps that state only if something really
+    // changed. A pointer drag is one transaction, so a drag is one undo step
+    // (the review: "coalesce pointer drags into one undo action").
+    std::function<void (const juce::String& what)> onEditStart;
+    std::function<void()> onEditEnd;
+    // v1.33.4 (L15, part 2): the undo and redo keys (Ctrl+Z / Ctrl+Shift+Z).
+    // The editor has the keyboard focus while the user draws, so it hands
+    // the keys to the app.
+    std::function<void()> onUndo;
+    std::function<void()> onRedo;
     // v1.33.4 (M22): a lightweight "the model changed" hook. It is called
     // while a drag edits the model in place, where the full onChange (which
     // refreshes every combo box) would be far too heavy to run on every
@@ -1720,6 +1769,8 @@ private:
         zoneDragStart = pos;
         zoneDragT0 = z->t0; zoneDragT1 = z->t1;
         zoneDragF0 = z->f0; zoneDragF1 = z->f1;
+        // v1.33.4 (L15, part 2): the whole drag is one undo step
+        if (onEditStart) onEditStart ("Move the sieve zone");
     }
 
     // v1.33: the drag itself.

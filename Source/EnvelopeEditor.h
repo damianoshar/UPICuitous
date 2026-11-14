@@ -27,8 +27,17 @@ public:
         delBtn.setButtonText("-");
         addBtn.setTooltip("Add a point - tap the curve first to place it");
         delBtn.setTooltip("Remove the selected point(s)");
-        addBtn.onClick = [this] { if (addPoint()) notify(); };
-        delBtn.onClick = [this] { if (removePoint()) notify(); };
+        addBtn.onClick = [this] {
+            // v1.33.4 (L15, part 2): the undo transaction
+            if (onEditStart) onEditStart();
+            if (addPoint()) notify();
+            if (onEditEnd) onEditEnd();
+        };
+        delBtn.onClick = [this] {
+            if (onEditStart) onEditStart();
+            if (removePoint()) notify();
+            if (onEditEnd) onEditEnd();
+        };
         addAndMakeVisible(addBtn);
         addAndMakeVisible(delBtn);
     }
@@ -43,6 +52,11 @@ public:
 
     // audio thread reads points under this lock — see ScoreEditor::setModelLock
     void setModelLock(juce::CriticalSection* l) { modelLock = l; }
+
+    // v1.33.4 (L15, part 2): the undo transaction - the owner keeps the
+    // state from before the edit.
+    void setOnEditStart(std::function<void()> cb) { onEditStart = std::move(cb); }
+    void setOnEditEnd(std::function<void()> cb) { onEditEnd = std::move(cb); }
 
     // --- the point API (the buttons and the selftest use the same calls) ---
 
@@ -265,6 +279,9 @@ public:
         auto plot = plotRect();
         if (!plot.contains(e.position)) return;
         const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+        // v1.33.4 (L15, part 2): the undo transaction - the state from before
+        // the envelope is edited.
+        if (onEditStart) onEditStart();
         if (e.mods.isRightButtonDown())
         {
             int idx = nearest(e.position, plot);
@@ -348,6 +365,9 @@ public:
     void mouseUp(const juce::MouseEvent&) override
     {
         if (! dragBase.empty()) { dragBase.clear(); notify(); }
+        // v1.33.4 (L15, part 2): the edit is over - the owner keeps the
+        // state from before it as an undo step.
+        if (onEditEnd) onEditEnd();
     }
 
     void mouseDoubleClick(const juce::MouseEvent& e) override
@@ -386,6 +406,9 @@ private:
     std::vector<upic::Envelope>* envs = nullptr;
     int* selected = nullptr;
     std::function<void()> onChange;
+    // v1.33.4 (L15, part 2): the undo transaction
+    std::function<void()> onEditStart;
+    std::function<void()> onEditEnd;
     juce::CriticalSection* modelLock = nullptr;
     juce::CriticalSection dummyLock;
     std::vector<int> selIdxs;  // the selected point indices

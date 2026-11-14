@@ -502,6 +502,13 @@ void MainComponent::buildLiveControls()
         m.addItem (5, "Audio settings...");
         m.addItem (6, "MIDI + OSC settings...");
         m.addItem (7, "Clear page...");
+        // v1.33.4 (L15, part 2): the undo. The menu is built when it opens,
+        // so the steps are the ones that are really there.
+        if (canUndo())
+        {
+            m.addItem (9, "Undo " + undoLabel());
+            if (canRedo()) m.addItem (10, "Redo " + redoLabel());
+        }
         // v1.33.4 (M28): the long jobs (the render, the stems, the decode,
         // the save) run on a worker thread, so they can be stopped.
         if (jobRunning())
@@ -537,6 +544,8 @@ void MainComponent::buildLiveControls()
                     case 6: sp->showSettings(); break;
                     case 7: sp->showClearWarning(); break;
                     case 8: sp->cancelJob(); break;   // v1.33.4 (M28)
+                    case 9: sp->undo(); break;        // v1.33.4 (L15)
+                    case 10: sp->redo(); break;       // v1.33.4 (L15)
                     default: sp->transformPage (r); break;
                 }
             });
@@ -1776,7 +1785,14 @@ void MainComponent::buildScoreArea()
     score.setModelLock(&dataLock);
     waveEd.setModelLock(&dataLock);
     envEd.setModelLock(&dataLock);
-    waveEd.setOnEditStart([this]{ return prepareWaveEdit(); });
+    waveEd.setOnEditStart([this]{
+        // v1.33.4 (L15, part 2): the undo transaction - the state from
+        // before the wavetable is edited (the fork of the selection
+        // included).
+        beginEdit ("Edit the wavetable");
+        return prepareWaveEdit();
+    });
+    waveEd.setOnEditEnd([this]{ endEdit(); });
     // v1.18: the audio thread owns the playhead while playing; the editor
     // draws the published value and asks the audio thread to move on scrub
     score.setPlayheadSource(
@@ -1887,6 +1903,13 @@ void MainComponent::buildScoreArea()
             publishModelSnapshot();
         }
     };
+    // v1.33.4 (L15, part 2): the undo transaction. The editor says when a
+    // change starts and when it is over; the app keeps the state from
+    // before it (one snapshot per gesture - a drag is one undo step).
+    score.onEditStart = [this](const juce::String& what){ beginEdit (what); };
+    score.onEditEnd   = [this]{ endEdit(); };
+    score.onUndo = [this]{ undo(); };
+    score.onRedo = [this]{ redo(); };
 }
 
 void MainComponent::buildEditors()
@@ -2124,6 +2147,9 @@ void MainComponent::refreshScoreBinding()
     score.setPlaying(isPlaying);
     waveEd.bind(&waveforms, &selWave, [this]{ markModelChanged(); });
     envEd.bind(&envelopes, &selEnv, [this]{ markModelChanged(); });
+    // v1.33.4 (L15, part 2): the undo transaction for the envelope editor
+    envEd.setOnEditStart([this]{ beginEdit ("Edit the envelope"); });
+    envEd.setOnEditEnd([this]{ endEdit(); });
     updateSampleView();
     score.repaint(); waveEd.repaint(); envEd.repaint();
 }
@@ -2431,6 +2457,9 @@ void MainComponent::runGenerator(int kind)
     juce::String name = "generator";
     std::vector<int> created;
     int added = 0, skipped = 0;
+    // v1.33.4 (L15, part 2): the undo transaction - the state from before
+    // the arcs were generated.
+    beginEdit ("Generate arcs");
     {
         juce::ScopedLock l(dataLock);
         auto& pg = curPage();
@@ -2478,6 +2507,13 @@ void MainComponent::runGenerator(int kind)
     refreshBoxes();
     updateStatus();
     score.repaint();
+    // v1.33.4 (L15, part 2): the generated arcs are part of the model, so
+    // they must be marked as changed (the audio thread sees them right away
+    // instead of at the next safety-net publish) - and the undo keeps the
+    // state from before them.
+    markModelChanged();
+    publishModelSnapshot();
+    endEdit();
     juce::String msg = gen.empty() ? ("Generator produced no arcs (" + name + ")")
                                    : ("Generated " + juce::String(added) + " arcs -- " + name);
     if (skipped > 0)
@@ -5498,6 +5534,163 @@ bool MainComponent::savePieceToURL (const juce::URL& url, juce::int64 maxBytes)
     return true;
 }
 
+//==============================================================================
+// v1.33.4 (L15, part 2): the undo stack.
+//
+// The review asked for edit transactions and for the pointer drags to be
+// coalesced into one undo action. The stack holds snapshots of the model
+// (the piece): the sample audio is shared, so a snapshot costs only the
+// pages - the audio is never copied again and again.
+//
+// An edit captures the state from before it; the snapshot is kept only if
+// the model really moved (a click that changed nothing is not an undo
+// step). The restore goes through the normal loader, so the same checks
+// and the same limits apply to an undone piece as to a loaded one.
+static juce::int64 estimateModelBytes (const upic::PieceModel& m)
+{
+    juce::int64 bytes = 0;
+    for (const auto& p : m.pages)
+    {
+        bytes += (juce::int64) p.arcs.size() * 64;
+        for (const auto& a : p.arcs)
+            bytes += (juce::int64) a.points.size() * (juce::int64) sizeof (upic::ArcPoint);
+        bytes += (juce::int64) p.zones.size() * 64;
+    }
+    for (const auto& w : m.waveforms)
+        bytes += (juce::int64) w.samples.size() * (juce::int64) sizeof (float);
+    for (const auto& e : m.envelopes)
+        bytes += (juce::int64) e.points.size() * (juce::int64) sizeof (upic::EnvPoint);
+    return bytes;
+}
+
+void MainComponent::beginEdit (const juce::String& label)
+{
+    // v1.33.4 (L15, part 2): the state from before the change.
+    //
+    // A transaction that is still running is closed first: a gesture that
+    // was never finished (a mouse-up that was missed) must not block the
+    // next one.
+    if (pendingEdit != nullptr)
+        endEdit();
+
+    pendingEdit = std::make_unique<upic::PieceModel> (capturePieceModel());
+    pendingRevision = modelRevision.load (std::memory_order_relaxed);
+    pendingLabel = label;
+}
+
+void MainComponent::endEdit()
+{
+    if (pendingEdit == nullptr) return;
+
+    // nothing moved? then the snapshot is not worth keeping (a click that
+    // changed nothing is not an undo step).
+    if (modelRevision.load (std::memory_order_relaxed) == pendingRevision)
+    {
+        pendingEdit.reset();
+        return;
+    }
+
+    UndoEntry e;
+    e.model = std::move (*pendingEdit);
+    e.label = pendingLabel;
+    e.bytes = estimateModelBytes (e.model);
+    pendingEdit.reset();
+
+    undoStack.push_back (std::move (e));
+    undoBytes += undoStack.back().bytes;
+
+    // a new edit after an undo starts a new branch: the redo stack is gone
+    redoStack.clear();
+    redoBytes = 0;
+
+    // the bounds: the oldest steps go first
+    while ((int) undoStack.size() > kMaxUndoSteps || undoBytes > kMaxUndoBytes)
+    {
+        undoBytes -= undoStack.front().bytes;
+        undoStack.erase (undoStack.begin());
+    }
+}
+
+juce::String MainComponent::undoLabel() const
+{
+    return undoStack.empty() ? juce::String() : undoStack.back().label;
+}
+
+juce::String MainComponent::redoLabel() const
+{
+    return redoStack.empty() ? juce::String() : redoStack.back().label;
+}
+
+void MainComponent::undo()
+{
+    if (undoStack.empty()) return;
+
+    // the state we are leaving goes onto the redo stack
+    UndoEntry current;
+    current.model = capturePieceModel();
+    current.label = undoLabel();
+    current.bytes = estimateModelBytes (current.model);
+    redoStack.push_back (std::move (current));
+    redoBytes += redoStack.back().bytes;
+    while ((int) redoStack.size() > kMaxUndoSteps || redoBytes > kMaxUndoBytes)
+    {
+        redoBytes -= redoStack.front().bytes;
+        redoStack.erase (redoStack.begin());
+    }
+
+    UndoEntry entry = std::move (undoStack.back());
+    undoStack.pop_back();
+    undoBytes -= entry.bytes;
+
+    // the piece is replaced through the normal loader, so the same checks
+    // and the same limits apply as to a loaded piece
+    const bool wasPlaying = isPlaying.load (std::memory_order_relaxed);
+    if (! loadFromVar (upic::pieceToVar (entry.model)))
+    {
+        flash ("The undo could not be applied");
+        return;
+    }
+
+    // the piece on the screen is not what is on the disk any more
+    markModelChanged();
+    // the transport was running: it starts again, so the undo does not
+    // silence the app
+    if (wasPlaying) startPlayback();
+    flash ("Undo: " + entry.label);
+}
+
+void MainComponent::redo()
+{
+    if (redoStack.empty()) return;
+
+    UndoEntry current;
+    current.model = capturePieceModel();
+    current.label = redoLabel();
+    current.bytes = estimateModelBytes (current.model);
+    undoStack.push_back (std::move (current));
+    undoBytes += undoStack.back().bytes;
+    while ((int) undoStack.size() > kMaxUndoSteps || undoBytes > kMaxUndoBytes)
+    {
+        undoBytes -= undoStack.front().bytes;
+        undoStack.erase (undoStack.begin());
+    }
+
+    UndoEntry entry = std::move (redoStack.back());
+    redoStack.pop_back();
+    redoBytes -= entry.bytes;
+
+    const bool wasPlaying = isPlaying.load (std::memory_order_relaxed);
+    if (! loadFromVar (upic::pieceToVar (entry.model)))
+    {
+        flash ("The redo could not be applied");
+        return;
+    }
+
+    markModelChanged();
+    if (wasPlaying) startPlayback();
+    flash ("Redo: " + entry.label);
+}
+
 void MainComponent::loadFile()
 {
     // v1.33.4 (H11): the safe pointer is checked before the body runs, so the
@@ -5608,6 +5801,9 @@ bool MainComponent::decodeSampleFile (const juce::File& f, SampleImport& out, ju
 void MainComponent::installSample (int slotIndex, SampleImport&& import)
 {
     if (slotIndex < 0 || slotIndex >= (int) sampleSlots.size()) return;
+    // v1.33.4 (L15, part 2): the undo transaction - the state from before
+    // the material was replaced.
+    beginEdit ("Load the material");
     {
         // model is read by the audio thread -> mutate under the lock.
         // v1.18: the buffer is immutable + shared, so the pointer is
@@ -5626,6 +5822,7 @@ void MainComponent::installSample (int slotIndex, SampleImport&& import)
     refreshBoxes();
     updateSampleView();
     pushVoice();
+    endEdit();
     repaint();
 }
 
@@ -6057,6 +6254,9 @@ void MainComponent::waveFromSelectedSlot()
 
 void MainComponent::clearCurrentPage()
 {
+    // v1.33.4 (L15, part 2): the undo transaction - the state from before
+    // the page was cleared.
+    beginEdit ("Clear the page");
     {
         const juce::ScopedLock l(dataLock);
         curPage().arcs.clear();
@@ -6068,6 +6268,7 @@ void MainComponent::clearCurrentPage()
         markModelChanged(); // clearing while playing fades instead of clicking
         publishModelSnapshot();
     }
+    endEdit();
     repaint();
 }
 
@@ -6107,6 +6308,10 @@ void MainComponent::transformPage (int op)
     const bool onlySelected = ! ids.empty();
     int touched = 0;
 
+    // v1.33.4 (L15, part 2): the undo transaction - the state from before
+    // the transform.
+    beginEdit ("Transform the page");
+
     {
         const juce::ScopedLock l(dataLock);
         for (auto& a : curPage().arcs)
@@ -6135,10 +6340,12 @@ void MainComponent::transformPage (int op)
 
     if (touched == 0)
     {
+        endEdit();
         flash ("Nothing to transform on this page");
         return;
     }
 
+    endEdit();
     flash (juce::String (touched) + (touched == 1 ? " arc " : " arcs ") + what
            + (onlySelected ? " (the selection)" : ""));
     score.repaint();

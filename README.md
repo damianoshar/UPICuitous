@@ -126,6 +126,13 @@ make (the same palette the arcs use).
   ordinal spine.
 - Multi-select: Ctrl+A, Ctrl+C (count), Ctrl+D, Del, arrow nudge,
   Shift-click cycling, right-click menu.
+- Undo and redo: **Ctrl+Z** / **Ctrl+Shift+Z** (or **Ctrl+Y**) - also in the
+  File menu, where the step says what it was ("Undo Draw", "Undo Delete the
+  arc"). A drag is one step, not one per mouse move, and a click that
+  changed nothing is not a step at all. The stack holds 50 steps (the
+  oldest go first) and is bounded in memory too: a snapshot keeps the
+  pages, not the audio, so the sample material is never copied again and
+  again.
 - Wheel: pan pitch, Alt+wheel zoom pitch, Ctrl+wheel zoom time,
   Shift+wheel pan time; drag the centre line or the playhead triangle to scrub.
 - Touch: 1 finger draws/selects/scrubs, pinch zooms, two-finger drag
@@ -406,7 +413,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 596 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 616 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -435,7 +442,9 @@ working memory), the long jobs (the worker thread, the cancel, and
 the export that writes its file), the ids of a loaded piece (the
 duplicate arc ids, the impossible ones, the derived next id and the
 material references), the values that cross the thread boundary (the
-sample rate and the scrub tail) and the unsaved-changes flag ) and
+sample rate and the scrub tail), the unsaved-changes flag and the undo
+stack (the step, the restore, the redo, the branch, the drag that is one
+step, and the stroke on the canvas) ) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.
