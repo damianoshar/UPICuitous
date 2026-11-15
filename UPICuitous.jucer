@@ -12,6 +12,18 @@
       <FILE id="sTstH8" name="SelfTest.h" compile="0" resource="0" file="Source/SelfTest.h"/>
       <FILE id="mCcpp2" name="MainComponent.cpp" compile="1" resource="0"
             file="Source/MainComponent.cpp"/>
+      <FILE id="mCtl2" name="MainComponentControls.cpp" compile="1" resource="0"
+            file="Source/MainComponentControls.cpp"/>
+      <FILE id="mLay3" name="MainComponentLayout.cpp" compile="1" resource="0"
+            file="Source/MainComponentLayout.cpp"/>
+      <FILE id="mMod4" name="MainComponentModel.cpp" compile="1" resource="0"
+            file="Source/MainComponentModel.cpp"/>
+      <FILE id="mAud5" name="MainComponentAudio.cpp" compile="1" resource="0"
+            file="Source/MainComponentAudio.cpp"/>
+      <FILE id="mMid6" name="MainComponentMidi.cpp" compile="1" resource="0"
+            file="Source/MainComponentMidi.cpp"/>
+      <FILE id="mFil7" name="MainComponentFiles.cpp" compile="1" resource="0"
+            file="Source/MainComponentFiles.cpp"/>
       <FILE id="mChdr3" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
       <FILE id="eEdr04" name="EnvelopeEditor.h" compile="0" resource="0"
             file="Source/EnvelopeEditor.h"/>

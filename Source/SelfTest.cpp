@@ -792,6 +792,14 @@ int upic::runSelfTest()
         check (workerFinished.load (std::memory_order_relaxed),
                "the job finishes");
 
+        // The worker clears the "busy" flag after the work returns, so the next
+        // job may start - startJob runs one job at a time and refuses the second
+        // one. Without this wait the cancel check below could race with the end
+        // of the first job (and fail for no reason).
+        deadline = juce::Time::getMillisecondCounter() + 5000;
+        while (mc.jobRunning() && juce::Time::getMillisecondCounter() < deadline)
+            juce::Thread::sleep (1);
+
         // The cancel reaches the job: the worker sees the flag and
         // stops.
         std::atomic<bool> cancelSeen { false };

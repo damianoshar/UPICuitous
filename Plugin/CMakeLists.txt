@@ -42,6 +42,12 @@ target_sources(UPICuitousPlugin PRIVATE
     PluginProcessor.cpp
     PluginEditor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentControls.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentLayout.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentAudio.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentMidi.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentFiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/OscScrubReceiver.cpp)
 
 target_include_directories(UPICuitousPlugin PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../Source)
@@ -78,6 +84,12 @@ target_sources(UPICuitousPluginSmokeTest PRIVATE
     PluginEditor.cpp
     PluginSmokeTest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentControls.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentLayout.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentModel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentAudio.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentMidi.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentFiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/OscScrubReceiver.cpp)
 
 target_include_directories(UPICuitousPluginSmokeTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../Source)

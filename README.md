@@ -430,8 +430,11 @@ Source/              JUCE app + shared engine/UI
   WaveformEditor.h   wavetable drawing
   EnvelopeEditor.h   envelope drawing
   MainComponent.*    tabs, transport, pages, file IO, audio, status
+                     (MainComponent.cpp + Controls / Layout / Model /
+                     Audio / Midi / Files)
   AndroidBars.h      Android status/nav bar helpers
-  Main.cpp           entry, --selftest
+  Main.cpp           the app entry point
+  SelfTest.*         the headless checks (--selftest)
 Plugin/              VST3 wrapper (CMake): processor, editor, smoke test
 scripts/             build.ps1, install_plugin.ps1, fix_android.ps1,
                      check_juce.ps1, fetch_pluginval.ps1
