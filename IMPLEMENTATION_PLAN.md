@@ -118,7 +118,7 @@ release {
 ---
 
 ### 1.3 Add Project/State Size Limits (S-03) — HIGH
-**Files:** `Source/UpicModel.h`, `Source/MainComponentPiece.cpp` (`loadFile`, `loadFromVar`), `Plugin/PluginProcessor.cpp`  
+**Files:** `Source/PieceLimits.h`, `Source/MainComponentPiece.cpp` (`loadFile`, `loadFromVar`), `Plugin/PluginProcessor.cpp`  
 **Limits to enforce:**
 | Item | Limit |
 |------|-------|
@@ -153,7 +153,7 @@ if (base64String.size() > expectedDecoded * 1.5) throw ...; // ~1.33x is max bas
 ---
 
 ### 1.4 Add Finite Checks & Clamping (S-03) — HIGH
-**Files:** `Source/UpicModel.h`, `Source/UpicEngine.h`, `Source/LivePitch.h`, `Source/MainComponent.cpp`  
+**Files:** `Source/PieceLimits.h` (`clampFinite`, `clampGain`, `clampIntensity`), `Source/Arc.h` (`intensity`, the PM fields), `Source/MainComponent.h` (`masterGain`), `Source/UpicEngine.h`, `Source/LivePitch.h`, `Source/MainComponentPiece.cpp` (`std::stod`)  
 **Where to add checks:**
 - `masterGain` load: `masterGain.store(std::clamp(val, 0.0f, 1.5f))`
 - `intensity`: `std::clamp(val, 0.0f, 1.0f)`
@@ -371,7 +371,7 @@ jobs:
 ## Phase 5: Performance & Refactoring (Week 5-6)
 
 ### 5.1 Binary Search for Arc/Envelope Points (S-03) — MEDIUM
-**Files:** `Source/UpicModel.h` (`Arc::freqAt`, `Envelope::valueAt`)  
+**Files:** `Source/Arc.h` (`Arc::freqAt`), `Source/Envelope.h` (`Envelope::valueAt`)  
 **Change:** Replace linear scan with `std::upper_bound` / binary search (points are sorted by time).  
 **Acceptance:** 1000-point arc/envelope shows measurable CPU reduction; selftest PASS.
 
