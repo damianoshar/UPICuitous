@@ -698,9 +698,9 @@ public:
     // v1.33.4 (U6-B): the overload guard.
     //
     // A page can ask the audio thread for more work than one block has time
-    // for: 500 arcs sounding at once cost ~70% of a 48 kHz/512-sample block
-    // with the cursor path, and a crafted page (or the 2024-arc limit of
-    // option A) can cost several block budgets. The guard measures every
+    // for: the 2024-arc cap (U6 option A) allows a page whose arcs all
+    // sound at once, and that costs ~2.5x a 48 kHz/512-sample block even
+    // with the cursor path. The guard measures every
     // block; when the smoothed load stays over the budget it fades out the
     // quietest sounding arcs - over 5 ms, inside the block, so a dropped arc
     // cannot click - and skips them once silent. When the load drops, the
@@ -750,9 +750,9 @@ private:
     // (the message thread), and a reset only marks the slots free, so the
     // audio thread neither allocates nor frees.
     //
-    // The cap is the piece format's arc cap (H13): a page cannot hold more
-    // arcs than that, so the pool cannot run out.
-    static constexpr int kPoolCapacity = 512;
+    // The cap is the piece format's arc cap (H13, U6 option A): a page
+    // cannot hold more arcs than that, so the pool cannot run out.
+    static constexpr int kPoolCapacity = 2048; // >= kMaxArcsPerPage (2024)
 
     // How many slots of the voice pools are built in prepare() (the message
     // thread). A page with more arcs than this grows the pool while it

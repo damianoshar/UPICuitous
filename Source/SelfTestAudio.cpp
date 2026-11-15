@@ -1425,9 +1425,13 @@ void upic::runTransportChecks (upic::SelfTest& t)
     // Measured on the release build (48 kHz, 512-sample blocks), before
     // and after the cursor render path (v1.33.4, U6 option C):
     //   500 arcs x  20 points -> 16.4 ms/block  (154% of the budget)
-    //                                           -> 7.6 ms/block  (71%)
+    //                                           -> 7.4 ms/block  (69%)
     //   500 arcs x 1000 points -> 26.1 ms/block  (244%)
-    //                                           -> 9.6 ms/block  (90%)
+    //                                           -> 7.6 ms/block  (71%)
+    // The cap is now the UPIC's 2024 arcs (U6 option A), so this check
+    // renders 2024 arcs: 26.1 ms/block (244%) with 20 points, 28.0 ms
+    // (263%) with 1000. The guard (option B) is off in this raw engine:
+    // the check measures the render path itself, not the guard.
     // The cursor follows the arc's segment instead of searching for it
     // in every sample, so the point count barely costs anything now -
     // the arc count is the term that matters.

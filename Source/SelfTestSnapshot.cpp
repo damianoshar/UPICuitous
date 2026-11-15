@@ -1313,9 +1313,10 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
             // --- v1.33.4 (H13): one set of limits, no silent loss ---
             // The editor could create more arcs, pages, zones or points
             // than the piece format holds, and the loader dropped the
-            // extra ones without a word: a 501-arc page came back as 500
-            // arcs. The editor now refuses what does not fit (and says
-            // so), and the loader says what it had to drop.
+            // extra ones without a word: a page one arc over the cap came
+            // back with the cap's count. The editor now refuses what does
+            // not fit (and says so), and the loader says what it had to
+            // drop.
             {
                 std::function<juce::Component*(juce::Component&, const juce::String&)> findByNameH13 =
                     [&findByNameH13](juce::Component& c, const juce::String& n) -> juce::Component* {
@@ -1343,7 +1344,7 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                 };
 
                 // the loader keeps everything up to the cap
-                for (int n : { 499, 500 })
+                for (int n : { upic::limits::kMaxArcsPerPage - 1, upic::limits::kMaxArcsPerPage })
                 {
                     auto capHolder = std::make_unique<MainComponent>(true);
                     auto& mcCap = *capHolder;
@@ -1363,17 +1364,18 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                     auto capHolder = std::make_unique<MainComponent>(true);
                     auto& mcCap = *capHolder;
                     mcCap.setSize (1280, 800);
-                    mcCap.loadFromVar (juce::JSON::parse (pieceWithArcs (501)));
+                    mcCap.loadFromVar (juce::JSON::parse (pieceWithArcs (upic::limits::kMaxArcsPerPage + 1)));
                     const auto msg = mcCap.flashMessageForTest();
                     check (mcCap.arcCountForTest() == upic::limits::kMaxArcsPerPage
                            && msg.contains ("1 arc") && msg.contains ("bigger than"),
-                           "a page with 501 arcs says which arc did not fit",
+                           "a page with " + juce::String (upic::limits::kMaxArcsPerPage + 1)
+                               + " arcs says which arc did not fit",
                            juce::String (mcCap.arcCountForTest()) + " arcs - " + msg);
                 }
 
                 // the editor refuses the arc that does not fit (and the
                 // copy that does fit is still made)
-                for (int n : { 499, 500 })
+                for (int n : { upic::limits::kMaxArcsPerPage - 1, upic::limits::kMaxArcsPerPage })
                 {
                     auto capHolder = std::make_unique<MainComponent>(true);
                     auto& mcCap = *capHolder;
@@ -1386,7 +1388,7 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                     const bool fits = n < upic::limits::kMaxArcsPerPage;
                     const auto msg = mcCap.flashMessageForTest();
                     check (mcCap.arcCountForTest() == (fits ? n + 1 : n)
-                           && (fits || msg.contains ("500 arcs")),
+                           && (fits || msg.contains (juce::String (upic::limits::kMaxArcsPerPage) + " arcs")),
                            fits ? "the duplicate fits while the page is under the cap"
                                 : "the editor refuses the arc that does not fit",
                            juce::String (mcCap.arcCountForTest()) + " arcs - " + msg);
@@ -1397,7 +1399,7 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                     auto capHolder = std::make_unique<MainComponent>(true);
                     auto& mcCap = *capHolder;
                     mcCap.setSize (1280, 800);
-                    mcCap.loadFromVar (juce::JSON::parse (pieceWithArcs (500)));
+                    mcCap.loadFromVar (juce::JSON::parse (pieceWithArcs (upic::limits::kMaxArcsPerPage)));
                     auto* gen = dynamic_cast<juce::ComboBox*>(findByNameH13 (mcCap, "genBox"));
                     if (gen != nullptr)
                     {

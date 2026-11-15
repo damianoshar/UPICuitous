@@ -246,7 +246,8 @@ changes the sound - the arc's own pitch algorithm and its reversal, the
 sample slot's direction and the global pitch modes - so a reopened piece
 (or a reopened DAW session) sounds the same; older pieces without those
 fields still load, with the old defaults. The piece format has one set of
-limits - 500 arcs per page, 100 pages, 1000 points per arc, 200 sieve zones
+limits - 2024 arcs per page (the UPIC's own number), 100 pages, 1000
+points per arc, 200 sieve zones
 - and the editor and the loader share them: the editor refuses what does
 not fit (and says so), and a piece that is over a limit is loaded truncated
 with a message naming what did not fit, so music is never lost silently.
@@ -261,11 +262,14 @@ order, so the arc's segment and the envelope's segment are *followed*
 with a cursor instead of being searched for every sample. The pitch
 interpolation keeps the segment's endpoints (and their log2), so a
 sample costs a lerp instead of a binary search and two logarithms. The
-worst case the piece limits allow - 500 arcs sounding at the same time -
-now costs 7.4 ms per 512-sample block at 48 kHz (69% of the block
-budget; it was 16.4 ms, 154%), and the points per arc barely matter
-any more (1000 points per arc cost 2% more, not 60%). The selftest
-measures this every run and fails if the render path slows down.
+old cap's worst case - 500 arcs sounding at the same time - now costs
+7.4 ms per 512-sample block at 48 kHz (69% of the block budget; it was
+16.4 ms, 154%), and the points per arc barely matter any more (1000
+points per arc cost 2% more, not 60%). The page now holds the UPIC's
+2024 arcs; that page with every arc sounding at once costs 26 ms
+(2.4x the budget; 28 ms with 1000 points per arc), which is what the
+overload guard below is for. The selftest measures the worst case every
+run and fails if the render path slows down.
 **The overload guard** - the engine measures every block and, when the
 load stays over the budget, fades out the quietest sounding arcs (over
 5 ms, inside the block, so a dropped arc cannot click) and skips them
