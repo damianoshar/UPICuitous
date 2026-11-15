@@ -47,7 +47,10 @@ target_sources(UPICuitousPlugin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentModel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentAudio.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentMidi.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentFiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentPiece.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentExport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentJobs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentRecovery.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/ScoreEditor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/UpicEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/OscScrubReceiver.cpp
@@ -92,7 +95,10 @@ target_sources(UPICuitousPluginSmokeTest PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentModel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentAudio.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentMidi.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentFiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentPiece.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentExport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentJobs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentRecovery.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/ScoreEditor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/UpicEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/OscScrubReceiver.cpp

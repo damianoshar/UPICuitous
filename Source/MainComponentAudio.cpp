@@ -1204,3 +1204,38 @@ bool MainComponent::enableDeviceInputs()
     flash("No audio input channels on this device");
     return false;
 }
+
+//==============================================================================
+// The audio settings: the device selector as an in-app overlay (on
+// Android JUCE has no floating windows, so a dialog could never be
+// dismissed there).
+
+void MainComponent::showAudioSettings()
+{
+    // v1.7: an in-app overlay instead of a DialogWindow - on Android JUCE
+    // has no floating windows, so the dialog had no title bar and no close
+    // button there and could never be dismissed.
+    // Inputs are allowed: enabling them requests RECORD_AUDIO at runtime
+    // (manifest) and falls back to output-only when denied or absent.
+    closeSettings();
+    if (audioSelector == nullptr)
+        audioSelector = std::make_unique<juce::AudioDeviceSelectorComponent>(
+            deviceManager, 0, 2, 0, 2, false, false, true, false);
+    audioOverlay.addAndMakeVisible(*audioSelector);
+    // v1.26: keep the OK button above the selector. On some layouts the
+    // selector's viewport can otherwise sit over the button and eat its click.
+    audioOkBtn.toFront(false);
+    audioOverlay.setBounds(getLocalBounds());
+    audioOverlay.setVisible(true);
+    audioOverlay.toFront(false);
+    resized(); // position the selector + OK button inside the card
+}
+
+void MainComponent::closeAudioSettings()
+{
+    // device changes already applied live in the selector; OK / backdrop
+    // tap / Esc just dismiss the overlay
+    audioOverlay.setVisible(false);
+    if (audioSelector != nullptr && audioSelector->getParentComponent() == &audioOverlay)
+        audioOverlay.removeChildComponent(audioSelector.get());
+}
