@@ -67,6 +67,22 @@ public:
         pmVoices.reserve (kPoolCapacity);
         if (sampleVoices.size() < (size_t) kPrebuiltVoices) sampleVoices.resize ((size_t) kPrebuiltVoices);
         if (liveShift.size() < (size_t) kPrebuiltVoices) liveShift.resize ((size_t) kPrebuiltVoices);
+
+        // v1.33.4 (U6-B): the overload guard's table and scratch, sized here
+        // (the message thread) so the audio thread never allocates them.
+        guardTable.assign ((size_t) kGuardTableSize, GuardSlot{});
+        if (guardLevels.capacity() < (size_t) kGuardMaxArcs)
+            guardLevels.reserve ((size_t) kGuardMaxArcs);
+        guardLevels.clear();
+        guardUsed = 0;
+        guardFading = 0;
+        guardLoad = 0.0f;
+        // the limit and the adaptive flag survive a prepare: they are the
+        // engine's learned state, and a device change must not forget them.
+        // The table is cleared, so no gain from the old rate survives.
+        guardSilenced = 0;
+        guardThreshold = -1.0f;
+        guardOffline = false;
     }
 
     // v1.33.4 (M21): the vocoder's working memory (~50 KB per voice plus
@@ -262,8 +278,53 @@ public:
         const double invSr = 1.0 / sampleRate;
         const double step = freeze ? 0.0 : rate * invSr;
 
-        for (auto& arc : page.arcs)
+        // v1.33.4 (U6-B): the overload guard. The clock runs whenever the
+        // guard can measure (an idle engine pays only for two timer reads);
+        // the per-arc work starts when there is a limit or a fade to finish.
+        const bool guardMeasure = guardEnabled && ! freeze && ! guardOffline
+                                  && ! guardTable.empty();
+        const bool guardOn = guardMeasure && (guardMaxArcs > 0 || guardFading > 0);
+        const juce::int64 guardT0 = guardMeasure ? juce::Time::getHighResolutionTicks() : 0;
+
+        // The priority pass: an arc's level is what it contributes now (its
+        // drawn intensity, its envelope and its edge), so the quietest arcs
+        // are the ones that go first. A page with fewer arcs than the limit
+        // keeps them all (the threshold stays -1).
+        guardSilenced = 0;
+        guardThreshold = -1.0f;
+        if (guardOn && guardMaxArcs > 0)
         {
+            guardLevels.clear();
+            const double blockEndTime = playhead + (double) numSamples * std::abs (step);
+            for (auto& arc : page.arcs)
+            {
+                float level = 0.0f;
+                if (! arc.muted && arc.points.size() >= 2
+                    && arc.endTime() > arc.startTime()
+                    && arc.endTime() > playhead && arc.startTime() < blockEndTime)
+                {
+                    const upic::Envelope* e = findEnv (envs, arc.envelopeId);
+                    const double t = juce::jlimit (arc.startTime(), arc.endTime(), playhead);
+                    level = arc.intensity
+                            * (e != nullptr ? e->valueAt (arc.lifeAt (t)) : 1.0f)
+                            * arc.intensityAt (t);
+                }
+                guardLevels.push_back (level);
+            }
+            if ((int) guardLevels.size() > guardMaxArcs)
+            {
+                std::nth_element (guardLevels.begin(),
+                                  guardLevels.begin() + (guardMaxArcs - 1),
+                                  guardLevels.end(),
+                                  [] (float a, float b) { return a > b; });
+                guardThreshold = guardLevels[(size_t) guardMaxArcs - 1];
+            }
+        }
+
+        int rendered = 0;
+        for (size_t ai = 0; ai < page.arcs.size(); ++ai)
+        {
+            const upic::Arc& arc = page.arcs[ai];
             if (arc.muted || arc.points.size() < 2) continue;
 
             const double arcStart = arc.startTime(), arcEnd = arc.endTime();
@@ -297,19 +358,57 @@ public:
 
             if (freeze && arc.mode == 2) continue; // live input cannot be frozen
 
+            // v1.33.4 (U6-B): the guard's per-arc gain. A dropped arc fades
+            // out over 5 ms inside this block (so it cannot click) and is
+            // skipped once silent; a returning arc fades back in the same
+            // way. The gain is kept by arc id across blocks.
+            float g0 = 1.0f, gStep = 0.0f;
+            if (guardOn)
+            {
+                const bool keep = guardMaxArcs == 0
+                                  || (ai < guardLevels.size()
+                                        ? guardLevels[ai] >= guardThreshold
+                                        : true);
+                const float target = keep ? 1.0f : 0.0f;
+                const float start = guardGainOf (arc.id);
+                if (start == 0.0f && target == 0.0f)
+                {
+                    ++guardSilenced;
+                    continue;   // already silent: the saving
+                }
+                if (start != target)
+                {
+                    const int arcSamples = i1 - i0 + 1;
+                    const int fadeSamples = juce::jlimit (1, arcSamples,
+                                                          (int) (sampleRate * 0.005));
+                    const float span = (float) fadeSamples;
+                    const float gain = (target > start)
+                        ? juce::jmin (target, start + (float) arcSamples / span)
+                        : juce::jmax (target, start - (float) arcSamples / span);
+                    guardSetGain (arc.id, gain);
+                    g0 = start;
+                    gStep = (gain - start) / span;
+                    if (start >= 1.0f && gain < 1.0f) ++guardFading;
+                    else if (start < 1.0f && gain >= 1.0f)
+                        guardFading = juce::jmax (0, guardFading - 1);
+                }
+            }
+            ++rendered;
+
             // ---- mode 1: pitch-shifted sample material (see samplePitchMode) ----
             if (arc.mode == 1)
             {
                 const upic::SampleSlot* smp = findSlot(slots, arc.sampleId);
                 if (smp == nullptr) continue;
-                renderSampleArc(arc, *smp, playhead, i0, i1, invSr, e, map, rate, freeze);
+                renderSampleArc(arc, *smp, playhead, i0, i1, invSr, e, map, rate, freeze,
+                                g0, gStep);
                 continue;
             }
 
             // ---- mode 2: live input, pitch follows the arc in realtime ----
             if (arc.mode == 2)
             {
-                renderLiveArc(arc, playhead, i0, i1, invSr, e, map, rate);
+                renderLiveArc(arc, playhead, i0, i1, invSr, e, map, rate, g0, gStep);
                 continue;
             }
             // ---- mode 3: phase modulation (PM). pmOps operators (2 or 4),
@@ -347,6 +446,7 @@ public:
                 for (int n = i0; n <= i1; ++n)
                 {
                     const double t = playhead + (double) n * step;
+                    const float g = guardGainAt (g0, gStep, n - i0);
                     const double cFreq = juce::jlimit (upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
                     const float env = e != nullptr ? e->valueAt (arc.lifeAt (t), ec) : 1.0f;
                     const float idxE = (idxEnv != nullptr ? idxEnv->valueAt (arc.lifeAt (t), iec) : 1.0f);
@@ -379,7 +479,7 @@ public:
                     // 2-op legacy single-mod path unused when ops==2? keep for compat:
 
 
-                    scratch[(size_t) n] += osc * env * edge * (float) arc.intensity * arc.intensityAt (t, pc);
+                    scratch[(size_t) n] += osc * env * edge * (float) arc.intensity * arc.intensityAt (t, pc) * g;
                 }
                 continue;
             }
@@ -398,6 +498,7 @@ public:
             for (int n = i0; n <= i1; ++n)
             {
                 const double t = playhead + (double) n * step;
+                const float g = guardGainAt (g0, gStep, n - i0);
 
                 float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
                 const float edge = edgeFade(t, arcStart, arcEnd);
@@ -430,7 +531,7 @@ public:
                 ph += freq * invSr;
                 if (ph >= 1.0) ph -= std::floor(ph);
 
-                scratch[(size_t) n] += osc * env * edge * intensity * arc.intensityAt(t, pc);
+                scratch[(size_t) n] += osc * env * edge * intensity * arc.intensityAt(t, pc) * g;
             }
         }
 
@@ -440,6 +541,38 @@ public:
             const float out = (float) std::tanh(scratch[(size_t) n] * 0.6) * masterGain * 0.9f;
             left[n] += out;
             if (right != nullptr) right[n] += out;
+        }
+
+        // v1.33.4 (U6-B): the load and the adaptive limit. Over 90% of the
+        // block time the guard sheds arcs (15% of the limit per block);
+        // under 50% it lets them back in (15% per block), and once the
+        // limit passes the piece cap the guard rests until the next
+        // overload. The thresholds have hysteresis, so the limit does not
+        // oscillate every block.
+        if (guardMeasure)
+        {
+            const double elapsed = (double) (juce::Time::getHighResolutionTicks() - guardT0)
+                                   / (double) juce::Time::getHighResolutionTicksPerSecond();
+            const double blockSec = (double) numSamples / sampleRate;
+            const float load = blockSec > 0.0 ? (float) (elapsed / blockSec) : 0.0f;
+            guardLoad = 0.9f * guardLoad + 0.1f * load;
+            if (guardAdaptive)
+            {
+                if (guardMaxArcs == 0)
+                {
+                    // the first overload: the last block's arc count is the
+                    // starting point (the guard has no count of its own yet)
+                    if (guardLoad > 0.9f)
+                        guardMaxArcs = juce::jmax (16, (int) ((float) juce::jmax (1, rendered) * 0.8f));
+                }
+                else if (guardLoad > 0.9f)
+                    guardMaxArcs = juce::jmax (16, (int) ((float) guardMaxArcs * 0.85f));
+                else if (guardLoad < 0.5f)
+                {
+                    guardMaxArcs = (int) ((float) guardMaxArcs * 1.15f) + 1;
+                    if (guardMaxArcs >= kGuardMaxArcs) guardMaxArcs = 0;  // the guard can rest
+                }
+            }
         }
     }
 
@@ -469,6 +602,11 @@ public:
         if (sr <= 0.0 || totalFrames <= 0) return false;
         prepare (sr, 8192);
 
+        // v1.33.4 (U6-B): an export is exact - the overload guard must not
+        // shed an arc however long the render takes.
+        const bool savedGuardOffline = guardOffline;
+        guardOffline = true;
+
         // the block size: small, so the export's timing matches a typical
         // host block and the memory stays flat
         const int blockSize = 512;
@@ -492,11 +630,12 @@ public:
             render (page, scorePos, waves, envs, slots,
                     block.getWritePointer (0), block.getWritePointer (1),
                     n, masterGain, avgRate);
-            if (! fn (block, n)) return false;
+            if (! fn (block, n)) { guardOffline = savedGuardOffline; return false; }
 
             scorePos = s1;
             done += n;
         }
+        guardOffline = savedGuardOffline;
         return true;
     }
 
@@ -555,6 +694,53 @@ public:
         liveWriteEnd = savedLWrite; liveActive = savedLActive;
     }
 
+    //==========================================================================
+    // v1.33.4 (U6-B): the overload guard.
+    //
+    // A page can ask the audio thread for more work than one block has time
+    // for: 500 arcs sounding at once cost ~70% of a 48 kHz/512-sample block
+    // with the cursor path, and a crafted page (or the 2024-arc limit of
+    // option A) can cost several block budgets. The guard measures every
+    // block; when the smoothed load stays over the budget it fades out the
+    // quietest sounding arcs - over 5 ms, inside the block, so a dropped arc
+    // cannot click - and skips them once silent. When the load drops, the
+    // limit grows again and the arcs fade back in the same way.
+    //
+    // The per-arc gain lives in a fixed table keyed by arc id (ids are
+    // unique per piece, L13), so the audio thread never allocates and the
+    // table only holds the arcs that are actually fading or silent. An
+    // export never runs the guard (renderPageBlocks sets guardOffline), so
+    // the file is exactly what the score says however long it takes.
+    //
+    // The tests drive the limit directly, because the adaptive policy is a
+    // function of the machine's speed.
+    struct GuardState
+    {
+        float load = 0.0f;   // smoothed render time / block time
+        int limit = 0;       // the arc limit in force (0 = the guard is idle)
+        int silenced = 0;    // arcs faded out in the last block
+    };
+
+    GuardState guardState() const noexcept
+    {
+        return { guardLoad, guardMaxArcs, guardSilenced };
+    }
+
+    // The app and the plugin turn the guard on in their prepare; the raw
+    // engine leaves it off, so a test renders exactly what the score says.
+    void setOverloadGuardEnabled (bool on) noexcept { guardEnabled = on; }
+
+    // 0 = off, a positive number = that many arcs (the policy does not
+    // adapt). The default is the adaptive policy.
+    void setGuardLimitForTest (int limit)
+    {
+        guardMaxArcs = juce::jmax (0, limit);
+        guardAdaptive = false;
+    }
+
+    // the gain the guard is applying to an arc (1.0 = untouched)
+    float guardGainForTest (int id) const noexcept { return guardGainOf (id); }
+
 private:
     double sampleRate = 44100.0;
 
@@ -606,6 +792,108 @@ private:
     std::atomic<int> sampleGrainMs { 40 };  // granular grain size (normal playback)
     std::atomic<int> scrubGrainMs { 40 };   // granular grain size while freeze-holding
     std::atomic<int> liveGrainMs { 40 };    // granular grain size for LIVE arcs
+
+    // ---- v1.33.4 (U6-B): the overload guard ----
+    //
+    // The table only holds the arcs whose gain is not 1.0 (fading or
+    // silent); a fully restored arc is removed, so the table stays small
+    // and the hash keeps the per-arc lookup O(1). The table is sized in
+    // prepare() and the audio thread only reads and writes it.
+    static constexpr int kGuardTableSize = 4096; // power of two; > 2x the arc cap
+    static constexpr int kGuardMaxArcs = 2048;   // the level scratch / the "off" point
+    struct GuardSlot { int id = 0; float gain = 1.0f; bool used = false; };
+
+    std::vector<GuardSlot> guardTable;
+    std::vector<float> guardLevels;  // one level per page arc, per block
+    int guardUsed = 0;               // slots in use
+    int guardFading = 0;             // arcs whose gain is below 1.0
+    bool guardEnabled = false;       // the app/plugin turn it on in prepare
+    float guardLoad = 0.0f;          // smoothed render time / block time
+    int guardMaxArcs = 0;            // 0 = no limit
+    bool guardAdaptive = true;       // false after setGuardLimitForTest()
+    int guardSilenced = 0;           // arcs skipped in the last block
+    float guardThreshold = -1.0f;    // the level of the last arc kept
+    bool guardOffline = false;       // the offline render must not shed arcs
+
+    static unsigned guardHash (int id) noexcept
+    {
+        return (unsigned) id * 2654435761u;
+    }
+
+    float guardGainOf (int id) const noexcept
+    {
+        if (guardTable.empty()) return 1.0f;
+        const unsigned mask = (unsigned) kGuardTableSize - 1u;
+        unsigned i = guardHash (id) & mask;
+        for (int probes = 0; probes < kGuardTableSize; ++probes)
+        {
+            const auto& s = guardTable[(size_t) i];
+            if (! s.used) return 1.0f;       // an empty slot ends the chain
+            if (s.id == id) return s.gain;
+            i = (i + 1) & mask;
+        }
+        return 1.0f;
+    }
+
+    // The standard backward-shift deletion: a hole must not break the probe
+    // chain of the slots that follow it.
+    void guardRemoveAt (unsigned i) noexcept
+    {
+        const unsigned mask = (unsigned) kGuardTableSize - 1u;
+        --guardUsed;
+        for (;;)
+        {
+            guardTable[(size_t) i].used = false;
+            unsigned j = i;
+            for (;;)
+            {
+                j = (j + 1) & mask;
+                if (! guardTable[(size_t) j].used) return;
+                const unsigned home = guardHash (guardTable[(size_t) j].id) & mask;
+                // does the slot's home lie cyclically in (i, j]?  If it
+                // does, moving it would break its own chain.
+                const bool between = (i <= j) ? (i < home && home <= j)
+                                              : (i < home || home <= j);
+                if (! between) break;
+            }
+            guardTable[(size_t) i] = guardTable[(size_t) j];
+            i = j;
+        }
+    }
+
+    void guardSetGain (int id, float gain) noexcept
+    {
+        if (guardTable.empty()) return;
+        const unsigned mask = (unsigned) kGuardTableSize - 1u;
+        unsigned i = guardHash (id) & mask;
+        for (int probes = 0; probes < kGuardTableSize; ++probes)
+        {
+            auto& s = guardTable[(size_t) i];
+            if (! s.used)
+            {
+                if (gain < 1.0f)
+                {
+                    s.used = true;
+                    s.id = id;
+                    s.gain = gain;
+                    ++guardUsed;
+                }
+                return;
+            }
+            if (s.id == id)
+            {
+                if (gain >= 1.0f) guardRemoveAt (i);  // back to normal: forget it
+                else s.gain = gain;
+                return;
+            }
+            i = (i + 1) & mask;
+        }
+    }
+
+    static float guardGainAt (float g0, float gStep, int n) noexcept
+    {
+        return gStep == 0.0f ? g0 : juce::jlimit (0.0f, 1.0f, g0 + gStep * (float) n);
+    }
 
     // ---- v1.33.4 (M21): the voice pools ----
     //
@@ -818,7 +1106,8 @@ private:
     void renderSampleArc(const upic::Arc& arc, const upic::SampleSlot& smp,
                          double playhead, int i0, int i1, double invSr,
                          const upic::Envelope* e, const upic::Page::SpaceMap& map,
-                         double rate = 1.0, bool freeze = false)
+                         double rate = 1.0, bool freeze = false,
+                         float g0 = 1.0f, float gStep = 0.0f)
     {
         const int nFrames = smp.data != nullptr ? smp.data->getNumSamples() : 0;
         const double matDur = smp.durationSec();
@@ -932,6 +1221,7 @@ private:
         for (int n = i0; n <= i1; ++n)
         {
             const double t = playhead + (double) n * step;
+            const float g = guardGainAt (g0, gStep, n - i0);
 
             const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
             const double ratio = juce::jlimit(1.0 / 16.0, 16.0, freq / ref);
@@ -982,7 +1272,7 @@ private:
                 if (v.pos < 0.0) v.pos += matDur;
             }
 
-            scratch[(size_t) n] += s * env * edge * arc.intensity * arc.intensityAt(t, pc);
+            scratch[(size_t) n] += s * env * edge * arc.intensity * arc.intensityAt(t, pc) * g;
         }
     }
 
@@ -997,7 +1287,7 @@ private:
     // time) instead of the forward one.
     void renderLiveArc(const upic::Arc& arc, double playhead, int i0, int i1,
                        double invSr, const upic::Envelope* e, const upic::Page::SpaceMap& map,
-                       double rate = 1.0)
+                       double rate = 1.0, float g0 = 1.0f, float gStep = 0.0f)
     {
         // the arc's own mode, or the tab's setting
         // v1.33.4 (M24): the same rule the latency reporting uses
@@ -1050,6 +1340,7 @@ private:
         for (int n = i0; n <= i1; ++n)
         {
             const double t = playhead + (double) n * (rate * invSr);
+            const float g = guardGainAt (g0, gStep, n - i0);
 
             const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
             const double ratio = juce::jlimit(upic::kLiveMinRatio,
@@ -1067,7 +1358,7 @@ private:
 
             const float v = ls.next(ringA, ringB, ringSize, frameNow, ratio);
 
-            scratch[(size_t) n] += v * env * edge * arc.intensity * arc.intensityAt(t);
+            scratch[(size_t) n] += v * env * edge * arc.intensity * arc.intensityAt(t) * g;
         }
     }
 

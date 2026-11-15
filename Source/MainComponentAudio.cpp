@@ -174,6 +174,9 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
     audioSampleRateHz.store ((int) std::lround (sampleRate > 0.0 ? sampleRate : 44100.0),
                              std::memory_order_relaxed);
     engine.prepare(audioSampleRate(), samplesPerBlockExpected);
+    // v1.33.4 (U6-B): the realtime engine bounds its own work; the scrub
+    // preview is a single block and stays exact.
+    engine.setOverloadGuardEnabled (true);
     scrubEngine.prepare(audioSampleRate(), samplesPerBlockExpected);
     scrubEngine.setScrubPreview(true);
     // v1.33.4 (M21): the voice pools exist now, so the vocoder's working

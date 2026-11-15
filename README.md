@@ -266,6 +266,15 @@ now costs 7.4 ms per 512-sample block at 48 kHz (69% of the block
 budget; it was 16.4 ms, 154%), and the points per arc barely matter
 any more (1000 points per arc cost 2% more, not 60%). The selftest
 measures this every run and fails if the render path slows down.
+**The overload guard** - the engine measures every block and, when the
+load stays over the budget, fades out the quietest sounding arcs (over
+5 ms, inside the block, so a dropped arc cannot click) and skips them
+once silent; when the load drops, the limit grows again and the arcs fade
+back in the same way. The limit is adaptive and per engine (the app and
+the plugin turn the guard on in their prepare), the gain is keyed by arc
+id in a fixed table so the audio thread never allocates, and an export
+never runs the guard: the file is exactly what the score says, however
+long it takes.
 On Android the file chooser hands back a document-provider URL, not a
 path; the app works with that URL, so a piece, a sample or a preset picked
 from any provider (Downloads, Drive, a file manager) loads and saves

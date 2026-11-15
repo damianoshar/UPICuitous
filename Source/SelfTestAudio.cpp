@@ -1486,4 +1486,107 @@ void upic::runTransportChecks (upic::SelfTest& t)
         }
     }
 
+    // v1.33.4 (U6-B): the overload guard. The engine measures every block;
+    // when the load stays over the budget it fades out the quietest sounding
+    // arcs - over 5 ms, inside the block, so nothing clicks - and skips them
+    // once silent; when the load drops they fade back in the same way. The
+    // adaptive policy depends on the machine's speed, so the test drives the
+    // limit directly (setGuardLimitForTest) and reads the gains back.
+    {
+        const int sr = 48000, blk = 512;
+        auto waves = upic::defaultWaveforms();
+        auto envs  = upic::defaultEnvelopes();
+        std::vector<upic::SampleSlot> noSlots;
+
+        upic::Page pg;
+        pg.durationSec = 10.0;
+        // two steady arcs at well-separated pitches (so the RMS of the sum
+        // is stable over any block, not a function of their phase): the
+        // loud one and the quiet one
+        for (int i = 0; i < 2; ++i)
+        {
+            upic::Arc a;
+            a.id = i + 1;
+            a.intensity = (i == 0) ? 1.0f : 0.5f;
+            const double f = (i == 0) ? 220.0 : 1000.0;
+            a.points.push_back ({ 0.0, f });
+            a.points.push_back ({ 10.0, f });
+            pg.arcs.push_back (a);
+        }
+
+        UpicEngine e;
+        e.prepare (sr, blk);
+        e.setOverloadGuardEnabled (true);
+        juce::AudioBuffer<float> buf (2, blk);
+        auto renderAt = [&] (double t)
+        {
+            buf.clear();
+            e.render (pg, t, waves, envs, noSlots, buf.getWritePointer (0),
+                      buf.getWritePointer (1), blk, 0.8f, 1.0, false);
+        };
+        auto maxStep = [&] ()
+        {
+            float m = 0.0f;
+            const float* d = buf.getReadPointer (0);
+            for (int n = 1; n < blk; ++n)
+                m = juce::jmax (m, std::abs (d[n] - d[n - 1]));
+            return m;
+        };
+        const double dt = (double) blk / (double) sr;
+
+        // past the arcs' 12 ms edge fade, so the blocks compare
+        e.setGuardLimitForTest (0);
+        renderAt (1.0);
+        const float both = buf.getRMSLevel (0, 0, blk);
+        const float stepRef = maxStep();
+
+        // a limit of one: the quiet arc fades out, the loud one stays
+        e.setGuardLimitForTest (1);
+        renderAt (1.0 + dt);
+        const float stepFade = maxStep();
+        check (e.guardGainForTest (2) == 0.0f && e.guardGainForTest (1) == 1.0f,
+               "the overload guard fades the quietest arc out and keeps the loud one",
+               "gains " + juce::String (e.guardGainForTest (1), 2) + " / "
+               + juce::String (e.guardGainForTest (2), 2));
+        check (stepFade < stepRef + 0.05f,
+               "the guard's fade is click-light",
+               "step " + juce::String (stepFade, 3) + " vs " + juce::String (stepRef, 3));
+
+        // the next block skips the silent arc entirely
+        renderAt (1.0 + 2.0 * dt);
+        check (e.guardState().silenced == 1, "the silent arc is skipped",
+               juce::String (e.guardState().silenced));
+        const float one = buf.getRMSLevel (0, 0, blk);
+        check (one < both * 0.95f, "the guard removes the arc's energy",
+               juce::String (one, 3) + " vs " + juce::String (both, 3));
+
+        // the limit off: the arc fades back in and the energy returns
+        e.setGuardLimitForTest (0);
+        renderAt (1.0 + 3.0 * dt);
+        check (e.guardGainForTest (2) == 1.0f, "the guard lets the arc back in",
+               juce::String (e.guardGainForTest (2), 2));
+        renderAt (1.0 + 4.0 * dt);
+        const float back = buf.getRMSLevel (0, 0, blk);
+        check (std::abs (back - both) < both * 0.05f,
+               "the restored page matches the reference",
+               juce::String (back, 3) + " vs " + juce::String (both, 3));
+
+        // an export is exact: the offline render never sheds an arc, even
+        // with a limit that would drop the quiet one in realtime. Both
+        // engines start the offline pass with empty phase pools, so the
+        // two files are sample-for-sample identical.
+        e.setGuardLimitForTest (1);
+        juce::AudioBuffer<float> off (2, (int) (0.5 * sr));
+        e.renderPageOffline (pg, waves, envs, noSlots, off, sr, 0.8f);
+        UpicEngine ref;
+        juce::AudioBuffer<float> refBuf (2, (int) (0.5 * sr));
+        ref.renderPageOffline (pg, waves, envs, noSlots, refBuf, sr, 0.8f);
+        float maxDiff = 0.0f;
+        for (int n = 0; n < refBuf.getNumSamples(); ++n)
+            maxDiff = juce::jmax (maxDiff, std::abs (off.getReadPointer (0)[n]
+                                                     - refBuf.getReadPointer (0)[n]));
+        check (maxDiff < 1.0e-6f, "the offline render ignores the guard",
+               juce::String (maxDiff, 6));
+    }
+
 }
