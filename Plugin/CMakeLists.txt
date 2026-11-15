@@ -46,6 +46,7 @@ target_sources(UPICuitousPlugin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentLayout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentModel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentAudio.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentInput.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentMidi.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentPiece.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentExport.cpp
@@ -94,6 +95,7 @@ target_sources(UPICuitousPluginSmokeTest PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentLayout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentModel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentAudio.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentInput.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentMidi.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentPiece.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentExport.cpp

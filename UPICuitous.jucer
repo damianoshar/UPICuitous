@@ -28,6 +28,8 @@
             file="Source/MainComponentModel.cpp"/>
       <FILE id="mAud5" name="MainComponentAudio.cpp" compile="1" resource="0"
             file="Source/MainComponentAudio.cpp"/>
+      <FILE id="mInp14" name="MainComponentInput.cpp" compile="1" resource="0"
+            file="Source/MainComponentInput.cpp"/>
       <FILE id="mMid6" name="MainComponentMidi.cpp" compile="1" resource="0"
             file="Source/MainComponentMidi.cpp"/>
       <FILE id="mPce8" name="MainComponentPiece.cpp" compile="1" resource="0"

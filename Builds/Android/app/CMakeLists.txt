@@ -108,6 +108,7 @@ add_library( ${BINARY_NAME}
     "../../../Source/MainComponentLayout.cpp"
     "../../../Source/MainComponentModel.cpp"
     "../../../Source/MainComponentAudio.cpp"
+    "../../../Source/MainComponentInput.cpp"
     "../../../Source/MainComponentMidi.cpp"
     "../../../Source/MainComponentPiece.cpp"
     "../../../Source/MainComponentExport.cpp"
