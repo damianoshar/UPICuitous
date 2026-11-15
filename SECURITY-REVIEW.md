@@ -114,14 +114,14 @@ The debug key is public. Anyone can sign an APK with the same package name and a
 
 Relevant paths:
 
-- `Source/MainComponent.cpp:3710` - `loadFileAsString()` reads the entire project file.
-- `Source/MainComponent.cpp:3555-3690` - `loadFromVar()`.
-- `Source/UpicModel.h:828-851` - `SampleSlot::fromVar()`.
-- `Source/UpicModel.h` - `Arc::fromVar()`, `Envelope::fromVar()`, `SieveZone::fromVar()`, `Page::fromVar()`.
-- `Source/MainComponent.cpp:3740-3745` - `loadSampleIntoSlot()`.
-- `Source/UpicEngine.h:397-407` - `readMaterial()`.
+- `Source/MainComponentPiece.cpp:510-576` - `loadFile()` reads the entire project file (`loadFileAsString()`).
+- `Source/MainComponentPiece.cpp:65-368` - `loadFromVar()`.
+- `Source/Sample.h:102-148` - `SampleSlot::fromVar()`.
+- `Source/Arc.h`, `Source/Envelope.h`, `Source/Sieve.h`, `Source/Page.h` - `Arc::fromVar()`, `Envelope::fromVar()`, `SieveZone::fromVar()`, `Page::fromVar()`.
+- `Source/MainComponentPiece.cpp:645-704` - `loadSampleIntoSlot()`.
+- `Source/UpicEngine.cpp:776-825` - `readMaterial()`.
 - `Source/LivePitch.h` - grain and vocoder index calculations.
-- `Plugin/PluginProcessor.cpp:87-93` - `setStateInformation()`.
+- `Plugin/PluginProcessor.cpp:161-221` - `setStateInformation()`.
 
 Concrete issues:
 

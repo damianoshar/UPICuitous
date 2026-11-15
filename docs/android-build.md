@@ -141,11 +141,13 @@ flavour and the build type in step.
 
 ## The file list in the `.jucer`
 
-`Source/` is the only group, and it is current: `Main.cpp`,
-`MainComponent.cpp/.h`, `ScoreEditor.h`, `WaveformEditor.h`,
-`EnvelopeEditor.h`, `UpicModel.h`, `UpicEngine.h`, `LivePitch.h`,
-`AndroidBars.h`, `ModelSnapshot.h`, `MidiHub.h`, `AsioConfig.h`. A new
-header in `Source/` has to be added there, or a resave will drop it from
-the generated project.
+`Source/` is the only group, and every file in it is listed there: the 24
+`.cpp` files (the app, the selftest, the `MainComponent` files by area,
+`ScoreEditor.cpp`, `UpicEngine.cpp`, `OscScrubReceiver.cpp` and
+`JobRunner.cpp`) and the 32 headers (`MainComponent.h`,
+`UpicModel.h` and the model headers it is the umbrella over,
+`UpicEngine.h`, `ScoreEditor.h`, the editors, the panel helpers and the
+rest). A new file in `Source/` has to be added there, or a resave will
+drop it from the generated project.
 
-All headers are now listed in the `.jucer`.
+All files in `Source/` are now listed in the `.jucer`.

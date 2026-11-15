@@ -118,7 +118,7 @@ release {
 ---
 
 ### 1.3 Add Project/State Size Limits (S-03) — HIGH
-**Files:** `Source/UpicModel.h`, `Source/MainComponent.cpp` (`loadFileAsString`, `loadFromVar`), `Plugin/PluginProcessor.cpp`  
+**Files:** `Source/UpicModel.h`, `Source/MainComponentPiece.cpp` (`loadFile`, `loadFromVar`), `Plugin/PluginProcessor.cpp`  
 **Limits to enforce:**
 | Item | Limit |
 |------|-------|
@@ -378,22 +378,22 @@ jobs:
 ---
 
 ### 5.2 Add Try/Catch Around Parsing (S-03) — MEDIUM
-**Files:** `Source/MainComponent.cpp` (`loadFromVar`), `Source/UpicModel.h` (`fromVar`), `Plugin/PluginProcessor.cpp`  
+**Files:** `Source/MainComponentPiece.cpp` (`loadFromVar`), `Source/Sample.h`, `Source/Arc.h`, `Source/Envelope.h`, `Source/Sieve.h`, `Source/Page.h` (`fromVar`), `Plugin/PluginProcessor.cpp`  
 **Change:** Wrap allocation-heavy parsing in `try { ... } catch (std::bad_alloc&) { return false; }`  
 **Acceptance:** OOM during large file load doesn't crash; returns error gracefully.
 
 ---
 
 ### 5.3 Refactor MainComponent (Long-term) — LOW
-**Goal:** Split `MainComponent.cpp` (201K lines) into:
-- `MainComponent.h/cpp` (core app logic, ~5K lines)
-- `UI/ScoreEditorComponent.h/cpp` (canvas, tools)
-- `UI/MaterialControlsComponent.h/cpp` (tab strip, material row)
-- `UI/ArcListPanel.h/cpp` (already separate)
-- `UI/SettingsOverlay.h/cpp` (audio, MIDI/OSC, clear)
-- `Engine/AudioEngineWrapper.h/cpp` (UpicEngine + scrubEngine management)
+**Status:** **done (2026-11-15)** - split by concern rather than by folder, in nine steps (the step log is `BACKLOG.md`, L8).
+**Goal:** Split `MainComponent.cpp` (6815 lines) into files by concern:
+- `MainComponent.cpp` (the core: the constructor, the tabs, the transport)
+- `MainComponentControls.cpp` / `MainComponentLayout.cpp` / `MainComponentModel.cpp` (the controls, the layout, the model)
+- `MainComponentAudio.cpp` / `MainComponentInput.cpp` / `MainComponentMidi.cpp` (the realtime audio path, the live input and the capture, the MIDI)
+- `MainComponentPiece.cpp` / `MainComponentExport.cpp` / `MainComponentJobs.cpp` / `MainComponentRecovery.cpp` (the piece, the export, the jobs, the crash recovery)
+- the big headers were split the same way: `ScoreEditor.h/.cpp`, `UpicEngine.h/.cpp` and the model headers (`UpicModel.h` as the umbrella over `Sample.h`, `Arc.h`, `Envelope.h`, `Page.h` and the rest)
 
-**Acceptance:** Build passes; no functional regression; each component < 3K lines.
+**Acceptance:** Build passes; no functional regression; each component < 3K lines. **Met** - the biggest file in `Source/` is now `ScoreEditor.cpp` (2122 lines).
 
 ---
 
