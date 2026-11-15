@@ -436,7 +436,9 @@ offer a playhead changes nothing - the app keeps its own transport.
 
 ```
 Source/              JUCE app + shared engine/UI
-  UpicModel.h        Waveform / Envelope / Arc / Page / zones + JSON
+  UpicModel.h        the model umbrella: constants, math, theme, Waveform,
+                     Envelope, Arc, FreqSpace, Sieve, Generators, Sample,
+                     PickedFile, Ids, Page, Piece (one header per concept)
   UpicEngine.h       realtime + offline renderer, sample voices
   LivePitch.h        granular / tape / phase-vocoder shifters
   ScoreEditor.h      score canvas, tools, touch, grids
@@ -478,7 +480,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 663 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 670 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -516,7 +518,8 @@ choice of the clock, the start, the stop and the position), the drawing
 on a micro-time page (the arc, its points and their spread), the MIDI
 scrub transport (the note jog, the backwards jog, the speed that goes
 back and the host that yields) and the cursor render path (the pitch,
-the intensity and the envelope, forwards and backwards) ) and
+the intensity and the envelope, forwards and backwards), the overload
+guard (the fade, the limit, the adaptive ceiling and the silenced arcs) ) and
 writes
 the log to `%TEMP%\upic_selftest.txt`. The build script also runs the
 22-check plugin smoke test and pluginval at strictness 5.

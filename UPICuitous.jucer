@@ -40,6 +40,20 @@
             file="Source/WaveformEditor.h"/>
       <FILE id="uEdl8" name="UpicEngine.h" compile="0" resource="0" file="Source/UpicEngine.h"/>
       <FILE id="uMdl9" name="UpicModel.h" compile="0" resource="0" file="Source/UpicModel.h"/>
+      <FILE id="mdCst30" name="UpicConstants.h" compile="0" resource="0" file="Source/UpicConstants.h"/>
+      <FILE id="mdMth31" name="UpicMath.h" compile="0" resource="0" file="Source/UpicMath.h"/>
+      <FILE id="mdThm32" name="UpicTheme.h" compile="0" resource="0" file="Source/UpicTheme.h"/>
+      <FILE id="mdWav33" name="Waveform.h" compile="0" resource="0" file="Source/Waveform.h"/>
+      <FILE id="mdEnv34" name="Envelope.h" compile="0" resource="0" file="Source/Envelope.h"/>
+      <FILE id="mdArc35" name="Arc.h" compile="0" resource="0" file="Source/Arc.h"/>
+      <FILE id="mdFrq36" name="FreqSpace.h" compile="0" resource="0" file="Source/FreqSpace.h"/>
+      <FILE id="mdSiv37" name="Sieve.h" compile="0" resource="0" file="Source/Sieve.h"/>
+      <FILE id="mdGen38" name="Generators.h" compile="0" resource="0" file="Source/Generators.h"/>
+      <FILE id="mdSmp39" name="Sample.h" compile="0" resource="0" file="Source/Sample.h"/>
+      <FILE id="mdPck40" name="PickedFile.h" compile="0" resource="0" file="Source/PickedFile.h"/>
+      <FILE id="mdIds41" name="Ids.h" compile="0" resource="0" file="Source/Ids.h"/>
+      <FILE id="mdPge42" name="Page.h" compile="0" resource="0" file="Source/Page.h"/>
+      <FILE id="mdPce43" name="Piece.h" compile="0" resource="0" file="Source/Piece.h"/>
       <FILE id="uFvbxi" name="LivePitch.h" compile="0" resource="0" file="Source/LivePitch.h"/>
       <FILE id="qySKM1" name="AndroidBars.h" compile="0" resource="0" file="Source/AndroidBars.h"/>
       <FILE id="mSnp12" name="ModelSnapshot.h" compile="0" resource="0" file="Source/ModelSnapshot.h"/>
