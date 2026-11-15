@@ -439,7 +439,9 @@ Source/              JUCE app + shared engine/UI
   UpicModel.h        the model umbrella: constants, math, theme, Waveform,
                      Envelope, Arc, FreqSpace, Sieve, Generators, Sample,
                      PickedFile, Ids, Page, Piece (one header per concept)
-  UpicEngine.h       realtime + offline renderer, sample voices
+  UpicEngine.h       realtime + offline renderer, sample voices (the
+                     declarations; the renderPageBlocks template has to stay)
+  UpicEngine.cpp     the engine's implementation
   LivePitch.h        granular / tape / phase-vocoder shifters
   ScoreEditor.h      score canvas, tools, touch, grids (the declarations)
   ScoreEditor.cpp    the score canvas's implementation

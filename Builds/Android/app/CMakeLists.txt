@@ -111,6 +111,7 @@ add_library( ${BINARY_NAME}
     "../../../Source/MainComponentMidi.cpp"
     "../../../Source/MainComponentFiles.cpp"
     "../../../Source/ScoreEditor.cpp"
+    "../../../Source/UpicEngine.cpp"
     "../../../Source/MainComponent.h"
     "../../../Source/EnvelopeEditor.h"
     "../../../Source/ScoreEditor.h"

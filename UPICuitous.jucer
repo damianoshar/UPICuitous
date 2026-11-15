@@ -40,6 +40,7 @@
       <FILE id="wEdr06" name="WaveformEditor.h" compile="0" resource="0"
             file="Source/WaveformEditor.h"/>
       <FILE id="uEdl8" name="UpicEngine.h" compile="0" resource="0" file="Source/UpicEngine.h"/>
+      <FILE id="uEdl9" name="UpicEngine.cpp" compile="1" resource="0" file="Source/UpicEngine.cpp"/>
       <FILE id="uMdl9" name="UpicModel.h" compile="0" resource="0" file="Source/UpicModel.h"/>
       <FILE id="mdCst30" name="UpicConstants.h" compile="0" resource="0" file="Source/UpicConstants.h"/>
       <FILE id="mdMth31" name="UpicMath.h" compile="0" resource="0" file="Source/UpicMath.h"/>

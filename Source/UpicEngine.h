@@ -36,54 +36,8 @@ public:
     // audio thread never grows it.
     static constexpr int kMaxBlockSize = 8192;
 
-    void prepare(double sampleRate_, int blockSize = 0)
-    {
-        sampleRate = sampleRate_ > 0 ? sampleRate_ : 44100.0;
-        // v1.33.4 (M21): the pools are emptied here (the message thread), and
-        // their storage is reserved once, so the audio thread never grows
-        // them. The voices keep their buffers: a slot that is taken again
-        // reuses the vocoder memory it already has.
-        releasePhaseSlots();
-        releaseSampleSlots();
-        releaseLiveSlots();
-        releasePmSlots();
-        if (blockSize > 0)
-        {
-            // v1.33.4 (M21): the accumulation buffer is sized here (the
-            // message thread), for the largest block a host may send, so the
-            // audio thread never grows it
-            const int n = juce::jmax (blockSize, kMaxBlockSize);
-            if (scratch.capacity() < (size_t) n) scratch.reserve ((size_t) n);
-            if (scratch.size() < (size_t) n) scratch.resize ((size_t) n);
-        }
-        // v1.33.4 (M21): the first slots of the voice pools are built here,
-        // on the message thread. A sample voice and a live voice hold the
-        // vocoder's buffers, and a std::vector allocates a little
-        // bookkeeping block of its own in a debug build - so the audio
-        // thread must not be the one that constructs them.
-        phases.reserve (kPoolCapacity);
-        sampleVoices.reserve (kPoolCapacity);
-        liveShift.reserve (kPoolCapacity);
-        pmVoices.reserve (kPoolCapacity);
-        if (sampleVoices.size() < (size_t) kPrebuiltVoices) sampleVoices.resize ((size_t) kPrebuiltVoices);
-        if (liveShift.size() < (size_t) kPrebuiltVoices) liveShift.resize ((size_t) kPrebuiltVoices);
+    void prepare(double sampleRate_, int blockSize = 0);
 
-        // v1.33.4 (U6-B): the overload guard's table and scratch, sized here
-        // (the message thread) so the audio thread never allocates them.
-        guardTable.assign ((size_t) kGuardTableSize, GuardSlot{});
-        if (guardLevels.capacity() < (size_t) kGuardMaxArcs)
-            guardLevels.reserve ((size_t) kGuardMaxArcs);
-        guardLevels.clear();
-        guardUsed = 0;
-        guardFading = 0;
-        guardLoad = 0.0f;
-        // the limit and the adaptive flag survive a prepare: they are the
-        // engine's learned state, and a device change must not forget them.
-        // The table is cleared, so no gain from the old rate survives.
-        guardSilenced = 0;
-        guardThreshold = -1.0f;
-        guardOffline = false;
-    }
 
     // v1.33.4 (M21): the vocoder's working memory (~50 KB per voice plus
     // the FFT engine) is prepared here, on the message thread, before the
@@ -93,49 +47,35 @@ public:
     // `voices` is how many slots to prepare - the caller knows how many arcs
     // the page has. The audio thread hands the slots out in order, so the
     // first N arcs to sound are the ones that find a prepared voice.
-    void prepareSampleVocoderMemory (int voices)
-    {
-        const int n = juce::jmin (voices, (int) sampleVoices.size());
-        for (int i = 0; i < n; ++i)
-            sampleVoices[(size_t) i].voice.prepareVocoderMemory (sampleRate);
-    }
-    void prepareLiveVocoderMemory (int voices)
-    {
-        const int n = juce::jmin (voices, (int) liveShift.size());
-        for (int i = 0; i < n; ++i)
-            liveShift[(size_t) i].shifter.prepareVocoderMemory (sampleRate);
-    }
+    void prepareSampleVocoderMemory (int voices);
+
+    void prepareLiveVocoderMemory (int voices);
+
 
     // v1.15: the oscillator phase is free-running state - clearing it makes
     // every arc jump back to phase 0 mid-flight, which is a click. Only the
     // material/ring readers (sample + live voices) have to re-anchor, because
     // the material or the input window changed under them.
-    void reset() { releaseSampleSlots(); releaseLiveSlots(); releasePmSlots(); }
+    void reset();
+
     // v1.20: drop the live voices only (they re-anchor on their next
     // contact) - the oscillator phases keep running (v1.15).
-    void resetLiveVoices() { releaseLiveSlots(); }
+    void resetLiveVoices();
+
     // v1.28: carry oscillator phases from another engine (used to smooth the
     // scrub-preview -> freeze transition). Sample/PM voices are NOT copied;
     // they re-anchor at the freeze position.
-    void copyOscillatorPhasesFrom(const UpicEngine& other)
-    {
-        // v1.33.4 (M21): the phase slots are copied, not the map's nodes
-        phases = other.phases;
-    }
-    void noteOffArc(int arcId)
-    {
-        releasePhaseSlot (arcId);
-        releaseSampleSlot (arcId);
-        releaseLiveSlot (arcId);
-    }
-    void setScrubPreview(bool on) { scrubPreview = on; }
+    void copyOscillatorPhasesFrom(const UpicEngine& other);
+
+    void noteOffArc(int arcId);
+
+    void setScrubPreview(bool on);
+
     // Shared with the material view so its time bar uses the same tape
     // position as the audio engine (pitch-scaled, not ratio * elapsed).
     static double scrubMaterialPos(const upic::Arc& arc, double t, double ref, double matDur,
-                                   const upic::Page::SpaceMap& map)
-    {
-        return pitchScaledPos(arc, t, ref, matDur, map);
-    }
+                                   const upic::Page::SpaceMap& map);
+
 
     // v1.32: the arc's SOUNDING pitch. The drawn pitch goes through the
     // arc's frequency space: with a discrete temperament (the UPIC's
@@ -153,76 +93,54 @@ public:
     // VALUE: through a reference the compiler has to reload its five fields
     // on every sample (it cannot prove they do not alias the arc), which
     // cost a third of the render path.
-    static inline double arcPitch (const upic::Arc& arc, double t,
-                                   upic::Page::SpaceMap map)
-    {
-        double f = map.apply (arc.freqAt (t));
-        if (arc.stepDivisions > 0)
-            f = upic::applyTemperament (f, arc.stepDivisions, upic::kDefaultRefFreq);
-        return f;
-    }
+    static double arcPitch (const upic::Arc& arc, double t,
+                                   upic::Page::SpaceMap map);
+
 
     // v1.33.4 (U6-C): the cursor-based pitch. The render walks the samples
     // of a block in order, so the arc's segment can be followed instead of
     // searched for every sample.
-    static inline double arcPitch (const upic::Arc& arc, double t,
+    static double arcPitch (const upic::Arc& arc, double t,
                                    upic::Page::SpaceMap map,
-                                   upic::Arc::PitchCursor& cursor)
-    {
-        double f = map.apply (arc.freqAt (t, cursor));
-        if (arc.stepDivisions > 0)
-            f = upic::applyTemperament (f, arc.stepDivisions, upic::kDefaultRefFreq);
-        return f;
-    }
+                                   upic::Arc::PitchCursor& cursor);
+
 
     // Time scale for a sample voice. Mode 1 (granular stretch) uses the same
     // arc-length mapping in normal playback and scrub; mode 2 (phase vocoder)
     // only maps onto the arc in the scrub preview. Mode 3 (granular no
     // stretch) keeps the slot's own timeline.
     static double sampleArcTimeScale(int mode, bool scrub, double rate,
-                                     double matDur, double arcDur)
-    {
-        const double arcScale = std::abs(rate) * matDur / juce::jmax(1.0e-6, arcDur);
-        if (mode == 1) return arcScale;
-        if (mode == 2) return scrub ? arcScale : 1.0;
-        return 1.0;
-    }
-    void setSampleGrainMs(int ms) { sampleGrainMs.store(juce::jlimit(5, 500, ms), std::memory_order_relaxed); }
-    void setScrubGrainMs(int ms) { scrubGrainMs.store(juce::jlimit(5, 500, ms), std::memory_order_relaxed); }
+                                     double matDur, double arcDur);
+
+    void setSampleGrainMs(int ms);
+
+    void setScrubGrainMs(int ms);
+
     // v1.30: the LIVE tab's granular grain/hop length (5-500 ms).
-    void setLiveGrainMs(int ms) { liveGrainMs.store(juce::jlimit(5, 500, ms), std::memory_order_relaxed); }
+    void setLiveGrainMs(int ms);
+
 
     // Host publishes the live input ring each block (audio thread): frames up
     // to writeEnd are valid (absolute count), stereo ringA/ringB (B may be
     // null for mono). active=false silences mode-2 arcs entirely.
     void setLiveInput(const float* ringA, const float* ringB, int size,
-                      long long writeEnd, bool active)
-    {
-        liveRingA = ringA;
-        liveRingB = ringB;
-        liveRingSize = size;
-        liveWriteEnd = writeEnd;
-        liveActive = active;
-    }
+                      long long writeEnd, bool active);
+
 
     // v1.21 (wave 19): the reversed live ring - the same content, mirrored in
     // time (the capture's write head moves backwards). The arcs with
     // `reversed` read this one instead of the forward ring.
     void setLiveReverse(const float* ringA, const float* ringB, int size,
-                        long long writeEnd, bool active)
-    {
-        revRingA = ringA;
-        revRingB = ringB;
-        revRingSize = size;
-        revWriteEnd = writeEnd;
-        revActive = active;
-    }
+                        long long writeEnd, bool active);
+
 
     // Live pitch algorithm for mode-2 voices (safe from the message thread):
     // 0 = granular (v1.5 default), 1 = tape, 2 = phase vocoder. A change
     // drops the live voices so each re-anchors on its next contact.
-    void setLivePitchMode(int mode) { livePitchMode.store(juce::jlimit(0, 2, mode)); }
-    int getLivePitchMode() const { return livePitchMode.load(std::memory_order_relaxed); }
+    void setLivePitchMode(int mode);
+
+    int getLivePitchMode() const;
+
 
     // Sample pitch algorithm for mode-1 voices (safe from the message
     // thread): 0 = varispeed (default - the slot plays back faster/slower
@@ -231,18 +149,18 @@ public:
     // playback length and shifts pitch only), 3 = granular (no stretch -
     // keeps the slot's length and shifts pitch only). A change drops the
     // sample voices so each re-anchors.
-    void setSamplePitchMode(int mode) { samplePitchMode.store(juce::jlimit(0, 3, mode)); }
-    int getSamplePitchMode() const { return samplePitchMode.load(std::memory_order_relaxed); }
+    void setSamplePitchMode(int mode);
+
+    int getSamplePitchMode() const;
+
 
     // v1.33.4 (M24): the effective pitch algorithm of an arc - the arc's own
     // override (v1.33.4 / H7), or the tab's setting. The DSP and the latency
     // reporting share this rule: the old latency code consulted only the
     // global setting, so a page whose arc overrides it (a vocoder arc on a
     // granular page) reported the wrong latency to the host.
-    int effectiveMode (const upic::Arc& arc, int globalMode) const
-    {
-        return arc.pitchMode >= 0 ? arc.pitchMode : globalMode;
-    }
+    int effectiveMode (const upic::Arc& arc, int globalMode) const;
+
 
     // Realtime render: playhead in seconds (page-local), outputs stereo (same mono sum).
     // Cost model: each arc only touches its active sample range, with the
@@ -252,329 +170,8 @@ public:
                 const std::vector<upic::Envelope>& envs,
                 const std::vector<upic::SampleSlot>& slots,
                 float* left, float* right, int numSamples, float masterGain,
-                double rate = 1.0, bool freeze = false)
-    {
-        if (numSamples <= 0) return;
-        if (! freeze && std::abs(rate) < 1e-6) return; // stopped transport: silence
-        if (scratch.size() < (size_t) numSamples) scratch.resize((size_t) numSamples);
-        std::fill(scratch.begin(), scratch.begin() + numSamples, 0.0f);
+                double rate = 1.0, bool freeze = false);
 
-        // a shifter-mode change drops the live voices so each re-anchors
-        const int pitchMode = livePitchMode.load(std::memory_order_relaxed);
-        if (pitchMode != livePitchModeApplied)
-        {
-            livePitchModeApplied = pitchMode;
-            releaseLiveSlots(); // v1.33.4 (M21): mark them free, do not free them
-        }
-
-        // same for the sample pitch mode (varispeed / granular / vocoder)
-        const int smpMode = samplePitchMode.load(std::memory_order_relaxed);
-        if (smpMode != samplePitchModeApplied)
-        {
-            samplePitchModeApplied = smpMode;
-            releaseSampleSlots(); // v1.33.4 (M21): mark them free, do not free them
-        }
-
-        const double invSr = 1.0 / sampleRate;
-        const double step = freeze ? 0.0 : rate * invSr;
-
-        // v1.33.4 (U6-B): the overload guard. The clock runs whenever the
-        // guard can measure (an idle engine pays only for two timer reads);
-        // the per-arc work starts when there is a limit or a fade to finish.
-        const bool guardMeasure = guardEnabled && ! freeze && ! guardOffline
-                                  && ! guardTable.empty();
-        const bool guardOn = guardMeasure && (guardMaxArcs > 0 || guardFading > 0);
-        const juce::int64 guardT0 = guardMeasure ? juce::Time::getHighResolutionTicks() : 0;
-
-        // The priority pass: an arc's level is what it contributes now (its
-        // drawn intensity, its envelope and its edge), so the quietest arcs
-        // are the ones that go first. A page with fewer arcs than the limit
-        // keeps them all (the threshold stays -1).
-        guardSilenced = 0;
-        guardThreshold = -1.0f;
-        if (guardOn && guardMaxArcs > 0)
-        {
-            guardLevels.clear();
-            const double blockEndTime = playhead + (double) numSamples * std::abs (step);
-            for (auto& arc : page.arcs)
-            {
-                float level = 0.0f;
-                if (! arc.muted && arc.points.size() >= 2
-                    && arc.endTime() > arc.startTime()
-                    && arc.endTime() > playhead && arc.startTime() < blockEndTime)
-                {
-                    const upic::Envelope* e = findEnv (envs, arc.envelopeId);
-                    const double t = juce::jlimit (arc.startTime(), arc.endTime(), playhead);
-                    level = arc.intensity
-                            * (e != nullptr ? e->valueAt (arc.lifeAt (t)) : 1.0f)
-                            * arc.intensityAt (t);
-                }
-                guardLevels.push_back (level);
-            }
-            if ((int) guardLevels.size() > guardMaxArcs)
-            {
-                std::nth_element (guardLevels.begin(),
-                                  guardLevels.begin() + (guardMaxArcs - 1),
-                                  guardLevels.end(),
-                                  [] (float a, float b) { return a > b; });
-                guardThreshold = guardLevels[(size_t) guardMaxArcs - 1];
-            }
-        }
-
-        int rendered = 0;
-        for (size_t ai = 0; ai < page.arcs.size(); ++ai)
-        {
-            const upic::Arc& arc = page.arcs[ai];
-            if (arc.muted || arc.points.size() < 2) continue;
-
-            const double arcStart = arc.startTime(), arcEnd = arc.endTime();
-            if (arcEnd <= arcStart) continue;
-
-            int i0, i1;
-            if (freeze)
-            {
-                if (playhead < arcStart || playhead > arcEnd) continue;
-                i0 = 0;
-                i1 = numSamples - 1;
-            }
-            else
-            {
-                const double nA = (arcStart - playhead) * sampleRate / rate;
-                const double nB = (arcEnd   - playhead) * sampleRate / rate;
-                i0 = (int) std::ceil(juce::jmin(nA, nB));
-                i1 = (int) std::floor(juce::jmax(nA, nB));
-                i0 = juce::jmax(0, i0);
-                i1 = juce::jmin(numSamples - 1, i1);
-                if (i0 > i1) continue;
-            }
-
-            const upic::Envelope* e = findEnv(envs, arc.envelopeId);
-            const float intensity = arc.intensity;
-
-            // v1.33: the frequency space this arc is played in (the UPIC's
-            // four tables). The mapping is computed once per arc, not per
-            // sample.
-            const upic::Page::SpaceMap map = page.spaceMap (arc.space);
-
-            if (freeze && arc.mode == 2) continue; // live input cannot be frozen
-
-            // v1.33.4 (U6-B): the guard's per-arc gain. A dropped arc fades
-            // out over 5 ms inside this block (so it cannot click) and is
-            // skipped once silent; a returning arc fades back in the same
-            // way. The gain is kept by arc id across blocks.
-            float g0 = 1.0f, gStep = 0.0f;
-            if (guardOn)
-            {
-                const bool keep = guardMaxArcs == 0
-                                  || (ai < guardLevels.size()
-                                        ? guardLevels[ai] >= guardThreshold
-                                        : true);
-                const float target = keep ? 1.0f : 0.0f;
-                const float start = guardGainOf (arc.id);
-                if (start == 0.0f && target == 0.0f)
-                {
-                    ++guardSilenced;
-                    continue;   // already silent: the saving
-                }
-                if (start != target)
-                {
-                    const int arcSamples = i1 - i0 + 1;
-                    const int fadeSamples = juce::jlimit (1, arcSamples,
-                                                          (int) (sampleRate * 0.005));
-                    const float span = (float) fadeSamples;
-                    const float gain = (target > start)
-                        ? juce::jmin (target, start + (float) arcSamples / span)
-                        : juce::jmax (target, start - (float) arcSamples / span);
-                    guardSetGain (arc.id, gain);
-                    g0 = start;
-                    gStep = (gain - start) / span;
-                    if (start >= 1.0f && gain < 1.0f) ++guardFading;
-                    else if (start < 1.0f && gain >= 1.0f)
-                        guardFading = juce::jmax (0, guardFading - 1);
-                }
-            }
-            ++rendered;
-
-            // ---- mode 1: pitch-shifted sample material (see samplePitchMode) ----
-            if (arc.mode == 1)
-            {
-                const upic::SampleSlot* smp = findSlot(slots, arc.sampleId);
-                if (smp == nullptr) continue;
-                renderSampleArc(arc, *smp, playhead, i0, i1, invSr, e, map, rate, freeze,
-                                g0, gStep);
-                continue;
-            }
-
-            // ---- mode 2: live input, pitch follows the arc in realtime ----
-            if (arc.mode == 2)
-            {
-                renderLiveArc(arc, playhead, i0, i1, invSr, e, map, rate, g0, gStep);
-                continue;
-            }
-            // ---- mode 3: phase modulation (PM). pmOps operators (2 or 4),
-            //     serial chain: mod_top -> ... -> mod_1 -> carrier. ----
-            if (arc.mode == 3)
-            {
-                const int ops = (arc.pmOps == 4) ? 4 : 2;
-                const upic::Envelope* idxEnv = (arc.pmIndexEnv > 0)
-                    ? findEnv (envs, arc.pmIndexEnv) : e;
-                // v1.33.4 (M21): the PM voice comes from the pool - no map
-                // node is allocated in the audio thread
-                PmSlot* pslot = pmSlotFor (pmVoices, arc.id);
-                if (pslot == nullptr) pslot = acquirePmSlot (arc.id);
-                if (pslot == nullptr) continue; // the pool is full (impossible in practice)
-                PmVoice& v = pslot->voice;
-                if (! v.prepared) { v.prepare (sampleRate); v.prepared = true; v.ops = ops; }
-                const double fb = juce::jlimit (0.0, 1.0, arc.pmFeedback);
-                // per-stage ratios (ops>=2: carrier uses pmRatio for stage 1)
-                const double r[4] = { 1.0,
-                                      juce::jlimit (0.1,32.0,arc.pmRatio),
-                                      juce::jlimit (0.1,32.0,arc.pmR2),
-                                      juce::jlimit (0.1,32.0,arc.pmR3), } ;
-                const double id[4] = { 0.0,
-                                      juce::jlimit (0.0,20.0,arc.pmIndex),
-                                      juce::jlimit (0.0,20.0,arc.pmI2),
-                                      juce::jlimit (0.0,20.0,arc.pmI3), } ;
-                const upic::Waveform* carW = findWave (waves, arc.waveformId);
-
-                // v1.33.4 (U6-C): the cursors. The loop walks the samples in
-                // order, so the arc's segment and the two envelopes' segments
-                // can be followed instead of searched for every sample.
-                upic::Arc::PitchCursor pc;
-                upic::SegmentCursor ec, iec;
-
-                for (int n = i0; n <= i1; ++n)
-                {
-                    const double t = playhead + (double) n * step;
-                    const float g = guardGainAt (g0, gStep, n - i0);
-                    const double cFreq = juce::jlimit (upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
-                    const float env = e != nullptr ? e->valueAt (arc.lifeAt (t), ec) : 1.0f;
-                    const float idxE = (idxEnv != nullptr ? idxEnv->valueAt (arc.lifeAt (t), iec) : 1.0f);
-                    const float edge = edgeFade (t, arcStart, arcEnd);
-
-                    // advance topology (serial): top modulator ... -> carrier
-                    // phases indexed 0=carrier, 1..ops-1 modulators
-                    const int top = ops - 1;
-                    double phTop = v.ph[top] + 2.0 * juce::MathConstants<double>::pi * fb * v.prev[top];
-                    float modTop = std::sin ((float) phTop);
-                    v.prev[top] = modTop;
-                    v.ph[top] += 2.0 * juce::MathConstants<double>::pi * (cFreq * r[top]) * invSr;
-                    float carry = modTop;
-                    for (int k = top - 1; k >= 1; --k)
-                    {
-                        float m = std::sin ((float) (v.ph[k] + (double) id[k+1] * (double) idxE * carry));
-                        carry = m;
-                        v.ph[k] += 2.0 * juce::MathConstants<double>::pi * (cFreq * r[k]) * invSr;
-                    }
-                    const float carPhaseMod = (float) (v.ph[0] + (double) id[1] * (double) idxE * carry);
-                    const float carPhase01 = (carPhaseMod >= 0.0f)
-                        ? (carPhaseMod / (float)(2.0*juce::MathConstants<double>::pi) - std::floor (carPhaseMod / (float)(2.0*juce::MathConstants<double>::pi)))
-                        : 0.0f;
-                    const float osc = (carW != nullptr) ? carW->valueAt (carPhase01) : std::sin (carPhaseMod);
-
-                    v.ph[0] += 2.0 * juce::MathConstants<double>::pi * cFreq * invSr;
-                    for (int k = 0; k < ops; ++k)
-                        while (v.ph[k] >= 2.0 * juce::MathConstants<double>::pi) v.ph[k] -= 2.0 * juce::MathConstants<double>::pi;
-
-                    // 2-op legacy single-mod path unused when ops==2? keep for compat:
-
-
-                    scratch[(size_t) n] += osc * env * edge * (float) arc.intensity * arc.intensityAt (t, pc) * g;
-                }
-                continue;
-            }
-
-            // ---- mode 0: wavetable oscillator ----
-            const upic::Waveform* w = findWave(waves, arc.waveformId);
-            if (w == nullptr) continue;
-
-            double& ph = phaseFor (arc.id); // 0..1, kept across blocks for continuity
-
-            // v1.33.4 (U6-C): the cursors - the arc's segment and the
-            // envelope's segment are followed, not searched.
-            upic::Arc::PitchCursor pc;
-            upic::SegmentCursor ec;
-
-            for (int n = i0; n <= i1; ++n)
-            {
-                const double t = playhead + (double) n * step;
-                const float g = guardGainAt (g0, gStep, n - i0);
-
-                float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
-                const float edge = edgeFade(t, arcStart, arcEnd);
-
-                float freq = (float) juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
-
-                // v1.31 (U1): the polyagogy - the arc's own wave can also
-                // be a control signal. The curve is read at its own rate
-                // (the LFO's), so it is a shape over the arc's life at rate
-                // 1 and a free-running LFO above it.
-                if (arc.waveUse != upic::Arc::waveAsOscillator && arc.modDepth > 0.0)
-                {
-                    const double m = w->valueAt (std::fmod (t * arc.modRate, 1.0));
-                    if (arc.waveUse == upic::Arc::waveAlsoAmplitude)
-                    {
-                        // the amplitude follows the curve (envelope shaping)
-                        env *= (float) juce::jmax (0.0, 1.0 + arc.modDepth * m);
-                    }
-                    else
-                    {
-                        // the pitch follows the curve (a fixed pitch or a
-                        // glissando) - the depth is in semitones
-                        const double semis = arc.modDepth * 12.0 * m;
-                        freq = (float) juce::jlimit (upic::kMinFreq, upic::kMaxFreq,
-                            freq * std::pow (2.0, semis / 12.0));
-                    }
-                }
-
-                const float osc = w->valueAt(ph);
-                ph += freq * invSr;
-                if (ph >= 1.0) ph -= std::floor(ph);
-
-                scratch[(size_t) n] += osc * env * edge * intensity * arc.intensityAt(t, pc) * g;
-            }
-        }
-
-        // soft clip + master gain, accumulate into output (buffer was zeroed by caller)
-        for (int n = 0; n < numSamples; ++n)
-        {
-            const float out = (float) std::tanh(scratch[(size_t) n] * 0.6) * masterGain * 0.9f;
-            left[n] += out;
-            if (right != nullptr) right[n] += out;
-        }
-
-        // v1.33.4 (U6-B): the load and the adaptive limit. Over 90% of the
-        // block time the guard sheds arcs (15% of the limit per block);
-        // under 50% it lets them back in (15% per block), and once the
-        // limit passes the piece cap the guard rests until the next
-        // overload. The thresholds have hysteresis, so the limit does not
-        // oscillate every block.
-        if (guardMeasure)
-        {
-            const double elapsed = (double) (juce::Time::getHighResolutionTicks() - guardT0)
-                                   / (double) juce::Time::getHighResolutionTicksPerSecond();
-            const double blockSec = (double) numSamples / sampleRate;
-            const float load = blockSec > 0.0 ? (float) (elapsed / blockSec) : 0.0f;
-            guardLoad = 0.9f * guardLoad + 0.1f * load;
-            if (guardAdaptive)
-            {
-                if (guardMaxArcs == 0)
-                {
-                    // the first overload: the last block's arc count is the
-                    // starting point (the guard has no count of its own yet)
-                    if (guardLoad > 0.9f)
-                        guardMaxArcs = juce::jmax (16, (int) ((float) juce::jmax (1, rendered) * 0.8f));
-                }
-                else if (guardLoad > 0.9f)
-                    guardMaxArcs = juce::jmax (16, (int) ((float) guardMaxArcs * 0.85f));
-                else if (guardLoad < 0.5f)
-                {
-                    guardMaxArcs = (int) ((float) guardMaxArcs * 1.15f) + 1;
-                    if (guardMaxArcs >= kGuardMaxArcs) guardMaxArcs = 0;  // the guard can rest
-                }
-            }
-        }
-    }
 
     // v1.33.4 (H8): the offline render, in blocks.
     //
@@ -644,55 +241,8 @@ public:
                            const std::vector<upic::Waveform>& waves,
                            const std::vector<upic::Envelope>& envs,
                            const std::vector<upic::SampleSlot>& slots,
-                           juce::AudioBuffer<float>& dest, double destSampleRate, float masterGain)
-    {
-        prepare(destSampleRate > 0 ? destSampleRate : 44100.0);
-        // live input is realtime-only: offline voice reads nothing
-        const float* savedLA = liveRingA;
-        const float* savedLB = liveRingB;
-        const int savedLSize = liveRingSize;
-        const long long savedLWrite = liveWriteEnd;
-        const bool savedLActive = liveActive;
-        liveRingA = nullptr; liveRingB = nullptr; liveRingSize = 0;
-        liveWriteEnd = 0; liveActive = false;
+                           juce::AudioBuffer<float>& dest, double destSampleRate, float masterGain);
 
-        // the offline render must not disturb the realtime state
-        // v1.33.4 (M21): the phase slots are saved and released (not
-        // destroyed), so the offline pass cannot touch the realtime voices
-        auto saved = phases; releasePhaseSlots();
-
-        const int total = dest.getNumSamples();
-        int pos = 0;
-        renderPageBlocks (page, waves, envs, slots,
-                          destSampleRate > 0 ? destSampleRate : 44100.0, masterGain, total,
-                          [&] (const juce::AudioBuffer<float>& block, int n)
-                          {
-                              // the render adds into the destination, so the
-                              // region it covers is cleared first
-                              juce::FloatVectorOperations::clear (dest.getWritePointer (0) + pos, n);
-                              juce::FloatVectorOperations::copy (dest.getWritePointer (0) + pos,
-                                                                 block.getReadPointer (0), n);
-                              if (dest.getNumChannels() > 1)
-                              {
-                                  juce::FloatVectorOperations::clear (dest.getWritePointer (1) + pos, n);
-                                  juce::FloatVectorOperations::copy (dest.getWritePointer (1) + pos,
-                                                                     block.getReadPointer (1), n);
-                              }
-                              pos += n;
-                              return true;
-                          });
-
-        phases = saved;
-        // sample voices are recreated on the next realtime contact (they may
-        // hold vocoder state from this pass)
-        // v1.33.4 (M21): the slots are released, not destroyed - a voice
-        // keeps its buffers, so the next voice that takes the slot does not
-        // have to allocate them again
-        releaseSampleSlots();
-        releaseLiveSlots();
-        liveRingA = savedLA; liveRingB = savedLB; liveRingSize = savedLSize;
-        liveWriteEnd = savedLWrite; liveActive = savedLActive;
-    }
 
     //==========================================================================
     // v1.33.4 (U6-B): the overload guard.
@@ -721,25 +271,22 @@ public:
         int silenced = 0;    // arcs faded out in the last block
     };
 
-    GuardState guardState() const noexcept
-    {
-        return { guardLoad, guardMaxArcs, guardSilenced };
-    }
+    GuardState guardState() const noexcept;
+
 
     // The app and the plugin turn the guard on in their prepare; the raw
     // engine leaves it off, so a test renders exactly what the score says.
-    void setOverloadGuardEnabled (bool on) noexcept { guardEnabled = on; }
+    void setOverloadGuardEnabled (bool on) noexcept;
+
 
     // 0 = off, a positive number = that many arcs (the policy does not
     // adapt). The default is the adaptive policy.
-    void setGuardLimitForTest (int limit)
-    {
-        guardMaxArcs = juce::jmax (0, limit);
-        guardAdaptive = false;
-    }
+    void setGuardLimitForTest (int limit);
+
 
     // the gain the guard is applying to an arc (1.0 = untouched)
-    float guardGainForTest (int id) const noexcept { return guardGainOf (id); }
+    float guardGainForTest (int id) const noexcept;
+
 
 private:
     double sampleRate = 44100.0;
@@ -815,85 +362,22 @@ private:
     float guardThreshold = -1.0f;    // the level of the last arc kept
     bool guardOffline = false;       // the offline render must not shed arcs
 
-    static unsigned guardHash (int id) noexcept
-    {
-        return (unsigned) id * 2654435761u;
-    }
+    static unsigned guardHash (int id) noexcept;
 
-    float guardGainOf (int id) const noexcept
-    {
-        if (guardTable.empty()) return 1.0f;
-        const unsigned mask = (unsigned) kGuardTableSize - 1u;
-        unsigned i = guardHash (id) & mask;
-        for (int probes = 0; probes < kGuardTableSize; ++probes)
-        {
-            const auto& s = guardTable[(size_t) i];
-            if (! s.used) return 1.0f;       // an empty slot ends the chain
-            if (s.id == id) return s.gain;
-            i = (i + 1) & mask;
-        }
-        return 1.0f;
-    }
+
+    float guardGainOf (int id) const noexcept;
+
 
     // The standard backward-shift deletion: a hole must not break the probe
     // chain of the slots that follow it.
-    void guardRemoveAt (unsigned i) noexcept
-    {
-        const unsigned mask = (unsigned) kGuardTableSize - 1u;
-        --guardUsed;
-        for (;;)
-        {
-            guardTable[(size_t) i].used = false;
-            unsigned j = i;
-            for (;;)
-            {
-                j = (j + 1) & mask;
-                if (! guardTable[(size_t) j].used) return;
-                const unsigned home = guardHash (guardTable[(size_t) j].id) & mask;
-                // does the slot's home lie cyclically in (i, j]?  If it
-                // does, moving it would break its own chain.
-                const bool between = (i <= j) ? (i < home && home <= j)
-                                              : (i < home || home <= j);
-                if (! between) break;
-            }
-            guardTable[(size_t) i] = guardTable[(size_t) j];
-            i = j;
-        }
-    }
+    void guardRemoveAt (unsigned i) noexcept;
 
-    void guardSetGain (int id, float gain) noexcept
-    {
-        if (guardTable.empty()) return;
-        const unsigned mask = (unsigned) kGuardTableSize - 1u;
-        unsigned i = guardHash (id) & mask;
-        for (int probes = 0; probes < kGuardTableSize; ++probes)
-        {
-            auto& s = guardTable[(size_t) i];
-            if (! s.used)
-            {
-                if (gain < 1.0f)
-                {
-                    s.used = true;
-                    s.id = id;
-                    s.gain = gain;
-                    ++guardUsed;
-                }
-                return;
-            }
-            if (s.id == id)
-            {
-                if (gain >= 1.0f) guardRemoveAt (i);  // back to normal: forget it
-                else s.gain = gain;
-                return;
-            }
-            i = (i + 1) & mask;
-        }
-    }
 
-    static float guardGainAt (float g0, float gStep, int n) noexcept
-    {
-        return gStep == 0.0f ? g0 : juce::jlimit (0.0f, 1.0f, g0 + gStep * (float) n);
-    }
+    void guardSetGain (int id, float gain) noexcept;
+
+
+    static float guardGainAt (float g0, float gStep, int n) noexcept;
+
 
     // ---- v1.33.4 (M21): the voice pools ----
     //
@@ -902,139 +386,56 @@ private:
     // reserved in prepare() (the message thread), and a slot keeps its
     // buffers when it is released.
 
-    static PhaseSlot* phaseSlotFor (std::vector<PhaseSlot>& pool, int id)
-    {
-        for (auto& s : pool) if (s.id == id) return &s;
-        return nullptr;
-    }
-    static SampleSlot* sampleSlotFor (std::vector<SampleSlot>& pool, int id)
-    {
-        for (auto& s : pool) if (s.id == id) return &s;
-        return nullptr;
-    }
-    static PmSlot* pmSlotFor (std::vector<PmSlot>& pool, int id)
-    {
-        for (auto& s : pool) if (s.id == id) return &s;
-        return nullptr;
-    }
-    static LiveSlot* liveSlotFor (std::vector<LiveSlot>& pool, int id)
-    {
-        for (auto& s : pool) if (s.id == id) return &s;
-        return nullptr;
-    }
+    static PhaseSlot* phaseSlotFor (std::vector<PhaseSlot>& pool, int id);
+
+    static SampleSlot* sampleSlotFor (std::vector<SampleSlot>& pool, int id);
+
+    static PmSlot* pmSlotFor (std::vector<PmSlot>& pool, int id);
+
+    static LiveSlot* liveSlotFor (std::vector<LiveSlot>& pool, int id);
+
 
     // The phase of an arc, creating the slot if the arc is new. The slot's
     // phase is free-running state (v1.15), so it survives a reset.
-    double& phaseFor (int id)
-    {
-        if (auto* s = phaseSlotFor (phases, id)) return s->phase;
-        // a free slot first - the pool only grows when every slot is taken
-        for (auto& s : phases)
-            if (s.id < 0) { s.id = id; s.phase = 0.0; return s.phase; }
-        if (phases.size() < (size_t) kPoolCapacity)
-        {
-            phases.emplace_back();
-            auto& s = phases.back();
-            s.id = id; s.phase = 0.0;
-            return s.phase;
-        }
-        // the pool is full (more arcs than the piece format allows): fall
-        // back to a scratch phase so the arc still sounds
-        overflowPhase = 0.0;
-        return overflowPhase;
-    }
+    double& phaseFor (int id);
 
-    void releasePhaseSlots() { for (auto& s : phases) s.id = -1; }
-    void releasePhaseSlot (int id)
-    {
-        if (auto* s = phaseSlotFor (phases, id)) s->id = -1;
-    }
-    void releaseSampleSlots() { for (auto& s : sampleVoices) s.id = -1; }
-    void releaseSampleSlot (int id)
-    {
-        if (auto* s = sampleSlotFor (sampleVoices, id)) s->id = -1;
-    }
-    void releaseLiveSlots() { for (auto& s : liveShift) s.id = -1; }
-    void releaseLiveSlot (int id)
-    {
-        if (auto* s = liveSlotFor (liveShift, id)) s->id = -1;
-    }
-    void releasePmSlots() { for (auto& s : pmVoices) s.id = -1; }
+
+    void releasePhaseSlots();
+
+    void releasePhaseSlot (int id);
+
+    void releaseSampleSlots();
+
+    void releaseSampleSlot (int id);
+
+    void releaseLiveSlots();
+
+    void releaseLiveSlot (int id);
+
+    void releasePmSlots();
+
 
     // Take a free slot for an arc, or make a new one. The pool's storage is
     // reserved, so this does not allocate (unless the pool is full, which
     // the piece format's arc cap rules out).
-    SampleSlot* acquireSampleSlot (int id)
-    {
-        for (auto& s : sampleVoices)
-            if (s.id < 0) { s.id = id; return &s; }
-        if (sampleVoices.size() >= (size_t) kPoolCapacity) return nullptr;
-        sampleVoices.emplace_back();
-        auto& s = sampleVoices.back();
-        s.id = id;
-        return &s;
-    }
-    LiveSlot* acquireLiveSlot (int id)
-    {
-        for (auto& s : liveShift)
-            if (s.id < 0) { s.id = id; return &s; }
-        if (liveShift.size() >= (size_t) kPoolCapacity) return nullptr;
-        liveShift.emplace_back();
-        auto& s = liveShift.back();
-        s.id = id;
-        return &s;
-    }
-    PmSlot* acquirePmSlot (int id)
-    {
-        for (auto& s : pmVoices)
-            if (s.id < 0) { s.id = id; return &s; }
-        if (pmVoices.size() >= (size_t) kPoolCapacity) return nullptr;
-        pmVoices.emplace_back();
-        auto& s = pmVoices.back();
-        s.id = id;
-        return &s;
-    }
+    SampleSlot* acquireSampleSlot (int id);
+
+    LiveSlot* acquireLiveSlot (int id);
+
+    PmSlot* acquirePmSlot (int id);
+
 
     double overflowPhase = 0.0; // the fallback when the phase pool is full
 
-    static float edgeFade(double t, double arcStart, double arcEnd)
-    {
-        double edge = juce::jmin(t - arcStart, arcEnd - t) / 0.012;
-        edge = juce::jlimit(0.0, 1.0, edge);
-        return (float) (edge * edge * (3.0 - 2.0 * edge));
-    }
+    static float edgeFade(double t, double arcStart, double arcEnd);
+
 
     // Varispeed material position for a scrub reset: integrate the arc's
     // pitch ratio from the arc start to `t`, so a falling pitch curve still
     // advances the sample forward instead of flipping direction.
     static double pitchScaledPos(const upic::Arc& arc, double t, double ref, double matDur,
-                                 const upic::Page::SpaceMap& map)
-    {
-        const double start = arc.startTime();
-        const double end = juce::jmin(t, arc.endTime());
-        if (end <= start) return 0.0;
-        double pos = 0.0;
-        const auto& pts = arc.points;
-        for (size_t i = 1; i < pts.size(); ++i)
-        {
-            const double a = juce::jmax(start, pts[i - 1].t);
-            const double b = juce::jmin(end, pts[i].t);
-            if (b <= a) continue;
-            const int steps = 8;
-            const double dt = (b - a) / (double) steps;
-            for (int k = 0; k < steps; ++k)
-            {
-                const double t0 = a + dt * (double) k;
-                const double t1 = t0 + dt;
-                const double f0 = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t0, map));
-                const double f1 = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t1, map));
-                const double r0 = juce::jlimit(1.0 / 16.0, 16.0, f0 / ref);
-                const double r1 = juce::jlimit(1.0 / 16.0, 16.0, f1 / ref);
-                pos += 0.5 * (r0 + r1) * dt;
-            }
-        }
-        return std::fmod(pos, matDur);
-    }
+                                 const upic::Page::SpaceMap& map);
+
 
     // Material read: mono mix of the slot at a position in seconds, wrapped
     // over the seamless loop, linear interpolation (shared by every mode).
@@ -1042,56 +443,8 @@ private:
     // rules are the same in both directions; a reversed slot mirrors the
     // read (the material's last frame comes first), so every pitch mode
     // works on the mirrored material without touching the shifter.
-    static float readMaterial(const upic::SampleSlot& smp, double pos, bool mirrored)
-    {
-        if (smp.data == nullptr) return 0.0f;
-        const auto& buf = *smp.data;
-        const int nFrames = buf.getNumSamples();
-        if (nFrames <= 0) return 0.0f;
-        const double matDur = smp.durationSec();
-        const double matSr = smp.sampleRate;
-        const int nCh = juce::jmin(2, buf.getNumChannels());
+    static float readMaterial(const upic::SampleSlot& smp, double pos, bool mirrored);
 
-        // SECURITY (S-03): a zero or negative duration (a crafted sample rate
-        // or frame count) would make the wrap loops below spin forever, and a
-        // NaN position would fall straight through into the index maths.
-        // Both are rejected here - the audio thread must never block or index
-        // out of range.
-        if (! std::isfinite (pos)) return 0.0f;
-        if (! std::isfinite (matDur) || matDur <= 1.0e-6) return 0.0f;
-        if (! std::isfinite (matSr) || matSr <= 0.0) return 0.0f;
-
-        while (pos >= matDur) pos -= matDur;
-        while (pos < 0.0) pos += matDur;
-
-        const double x = pos * matSr;
-        int ia = (int) x;
-        float fr = (float) (x - (double) ia);
-        if (ia >= nFrames) ia = nFrames - 1;
-        if (ia < 0) ia = 0;
-        int ib = ia + 1; if (ib >= nFrames) ib = 0;
-
-        if (mirrored && nFrames > 1)
-        {
-            // The mirrored read: the material's frame (n-1-ia) comes first
-            // and the one before it (n-ia) is the interpolation partner. The
-            // fraction runs the other way, so the read moves backwards inside
-            // the sample - and it stays continuous over the loop seam (a
-            // seamless material ends where it starts).
-            const int ra = (nFrames - 1 - ia + nFrames) % nFrames;
-            const int rb = (nFrames - ia) % nFrames;
-            ia = ra; ib = rb;
-            fr = 1.0f - fr;
-        }
-
-        float v = buf.getSample(0, ia) * (1.0f - fr) + buf.getSample(0, ib) * fr;
-        if (nCh > 1)
-        {
-            const float v1 = buf.getSample(1, ia) * (1.0f - fr) + buf.getSample(1, ib) * fr;
-            v = 0.5f * (v + v1);
-        }
-        return v;
-    }
 
     // Mode-1 voice: pitch follows the arc's frequency curve (ratio = arcFreq
     // / refFreq). Varispeed (the original behaviour) advances the material
@@ -1107,174 +460,8 @@ private:
                          double playhead, int i0, int i1, double invSr,
                          const upic::Envelope* e, const upic::Page::SpaceMap& map,
                          double rate = 1.0, bool freeze = false,
-                         float g0 = 1.0f, float gStep = 0.0f)
-    {
-        const int nFrames = smp.data != nullptr ? smp.data->getNumSamples() : 0;
-        const double matDur = smp.durationSec();
-        // SECURITY (S-03): a non-finite or non-positive duration would make
-        // the fmod() wraps below produce NaN, and NaN would reach the shifter
-        // and from there the buffer index maths.
-        if (nFrames < 2 || ! std::isfinite (matDur) || matDur <= 0.0) return;
-        if (! std::isfinite (playhead) || ! std::isfinite (rate)) return;
-        const double arcStart = arc.startTime(), arcEnd = arc.endTime();
-        const double arcDur = juce::jmax(1.0e-6, arcEnd - arcStart);
-        const double ref = juce::jmax(1.0, arc.refFreq);
-        // v1.21 (wave 19): the arc's own pitch mode, or the tab's setting
-        // v1.33.4 (M24): the same rule the latency reporting uses
-        int mode = effectiveMode (arc, samplePitchModeApplied);
-        if (freeze) mode = 1; // granular grain-hold for a stable freeze
-        const bool mirrored = smp.reversed != (rate < 0.0);
-        const double step = rate * invSr;
-        // Granular (stretch) maps the whole sample onto the arc's x-axis in
-        // both playback and scrub. Granular (no stretch) and the vocoder keep
-        // the slot's original length during playback; the vocoder only maps
-        // onto the arc in the scrub preview. Direction is handled by the
-        // mirrored read.
-        const double timeScale = sampleArcTimeScale(mode, scrubPreview, rate, matDur, arcDur);
-        // v1.33.4 (M21): the voice comes from the pool - no map node is
-        // allocated in the audio thread
-        SampleSlot* slot = sampleSlotFor (sampleVoices, arc.id);
-        const bool freshVoice = (slot == nullptr);
-        if (freshVoice)
-        {
-            slot = acquireSampleSlot (arc.id);
-            if (slot == nullptr) return; // the pool is full (impossible in practice)
-            // voice created on first contact (fresh after seek/reset): anchor
-            // at the arc's start - varispeed at the integrated pitch-scaled
-            // position, granular (stretch) at the arc progress, granular
-            // (no stretch) and the vocoder at the slot's own elapsed time;
-            // the scrub preview maps the vocoder onto the arc too
-            const double t0 = playhead + (double) i0 * step;
-            const double elapsed = juce::jmax(0.0, t0 - arcStart);
-            upic::SampleVoice& v = slot->voice;
-            // v1.33.4 (M21): the vocoder's ~50 KB of working memory is only
-            // allocated when the arc really plays through the vocoder
-            v.prepare(sampleRate, mode == 2);
-            const double progress = juce::jlimit(0.0, 1.0, elapsed / arcDur);
-            double anchorPos;
-            if (mode == 0)
-                anchorPos = pitchScaledPos(arc, t0, ref, matDur, map);
-            else if (mode == 1)
-                anchorPos = progress * matDur; // stretch granular maps the slot to the arc
-            else if (mode == 2)
-                anchorPos = scrubPreview ? progress * matDur : elapsed;
-            else
-                anchorPos = elapsed; // no-stretch granular keeps the slot's own timeline
-            const double anchor = mirrored
-                ? std::fmod(matDur - anchorPos, matDur)
-                : std::fmod(anchorPos, matDur);
-            v.reset(anchor);
-            v.lastMode = mode;
-            if (scrubPreview && mode == 2)
-            {
-                // A fresh VocoderCore needs two analysis windows before it
-                // emits its first sample. Pre-roll the scrub voice so the
-                // first short preview block is audible instead of silent;
-                // the first read is one kPrime behind the write tail, so the
-                // output still starts close to the dragged anchor.
-                double pp = anchor;
-                const int primeSamples = 2 * upic::VocoderCore::kFftSize;
-                for (int k = 0; k < primeSamples; ++k)
-                {
-                    const double pt = t0 + (double) k * step;
-                    const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, pt, map));
-                    const double primeRatio = juce::jlimit(1.0 / 16.0, 16.0,
-                        freq / ref / juce::jmax(1.0e-6, timeScale));
-                    v.voc.next(readMaterial(smp, pp, mirrored), primeRatio);
-                    pp += invSr * timeScale;
-                    pp = std::fmod(pp, matDur);
-                    if (pp < 0.0) pp += matDur;
-                }
-                v.vocInPos = pp;
-            }
-        }
-        else if (slot->voice.lastMode != mode)
-        {
-            // v1.21: the arc's own mode changed - the voice's shifter state
-            // (the grain taps, the vocoder's overlap-add) belongs to the old
-            // algorithm, so it has to re-anchor
-            slot->voice.grain = {};
-            // v1.33.4 (M21): reset() clears the vocoder's state without
-            // freeing its buffers; the old "voc = {}" freed them and the
-            // prepare() below allocated them again - in the audio thread
-            slot->voice.voc.reset();
-            slot->voice.grain.prepare(upic::GrainCore::kHopSec, 1.0 / sampleRate);
-            // v1.33.4 (M21): the vocoder's working memory is normally already
-            // there (the message thread prepared it before the page started);
-            // this call only covers the case where it is not
-            if (mode == 2)
-                slot->voice.prepareVocoderMemory (sampleRate);
-            slot->voice.reset(slot->voice.pos);
-            slot->voice.lastMode = mode;
-        }
-        auto& v = slot->voice;
-        v.grain.setTimeScale(timeScale);
-        const int grainMs = freeze ? scrubGrainMs.load(std::memory_order_relaxed)
-                                   : sampleGrainMs.load(std::memory_order_relaxed);
-        v.grain.setHop(juce::jmax(0.005, (double) grainMs / 1000.0));
+                         float g0 = 1.0f, float gStep = 0.0f);
 
-        // v1.33.4 (U6-C): the cursors - the arc's segment and the envelope's
-        // segment are followed, not searched.
-        upic::Arc::PitchCursor pc;
-        upic::SegmentCursor ec;
-
-        for (int n = i0; n <= i1; ++n)
-        {
-            const double t = playhead + (double) n * step;
-            const float g = guardGainAt (g0, gStep, n - i0);
-
-            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
-            const double ratio = juce::jlimit(1.0 / 16.0, 16.0, freq / ref);
-
-            const float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
-            const float edge = edgeFade(t, arcStart, arcEnd);
-
-            float s;
-            if (mode == 1)
-            {
-                // granular: the grain-start timeline follows the arc x-axis;
-                // the reads inside the grains run at `ratio` for pitch
-                const float wA = v.grain.crossfadeWeight();
-                const double pa = v.grain.tapA(ratio);
-                const double pb = v.grain.tapBForScale(ratio, timeScale);
-                if (freeze) v.grain.advanceHold(); else v.grain.advance();
-                s = wA * readMaterial(smp, pa, mirrored) + (1.0f - wA) * readMaterial(smp, pb, mirrored);
-            }
-            else if (mode == 2)
-            {
-                // phase vocoder: the material stream follows the arc x-axis
-                const float in = readMaterial(smp, v.vocInPos, mirrored);
-                v.vocInPos += invSr * timeScale;
-                v.vocInPos = std::fmod(v.vocInPos, matDur);
-                if (v.vocInPos < 0.0) v.vocInPos += matDur;
-                const double vocRatio = juce::jlimit(1.0 / 16.0, 16.0,
-                    ratio / juce::jmax(1.0e-6, timeScale));
-                s = v.voc.next(in, vocRatio);
-            }
-            else if (mode == 3)
-            {
-                // granular (no stretch): the grain-start timeline advances at
-                // the slot's own speed, while the reads inside the grains run
-                // at the pitch ratio - the slot keeps its length and only the
-                // pitch shifts. It never maps the slot onto the arc.
-                const float wA = v.grain.crossfadeWeight();
-                const double pa = v.grain.tapA(ratio);
-                const double pb = v.grain.tapBForScale(ratio, timeScale);
-                if (freeze) v.grain.advanceHold(); else v.grain.advance();
-                s = wA * readMaterial(smp, pa, mirrored)
-                    + (1.0f - wA) * readMaterial(smp, pb, mirrored);
-            }
-            else
-            {
-                s = readMaterial(smp, v.pos, mirrored);
-                v.pos += invSr * ratio * (scrubPreview ? std::abs(rate) : 1.0);
-                v.pos = std::fmod(v.pos, matDur);
-                if (v.pos < 0.0) v.pos += matDur;
-            }
-
-            scratch[(size_t) n] += s * env * edge * arc.intensity * arc.intensityAt(t, pc) * g;
-        }
-    }
 
     // Live input follows the arc's pitch: the selected live shifter (granular
     // / tape / phase vocoder) reads the host ring; ratio = arcFreq/refFreq
@@ -1287,104 +474,17 @@ private:
     // time) instead of the forward one.
     void renderLiveArc(const upic::Arc& arc, double playhead, int i0, int i1,
                        double invSr, const upic::Envelope* e, const upic::Page::SpaceMap& map,
-                       double rate = 1.0, float g0 = 1.0f, float gStep = 0.0f)
-    {
-        // the arc's own mode, or the tab's setting
-        // v1.33.4 (M24): the same rule the latency reporting uses
-        const int mode = effectiveMode (arc, livePitchMode.load(std::memory_order_relaxed));
-        // the arc reads the reversed ring when it asks for it - or when the
-        // global transport is reversing (v1.30: global reverse forces the
-        // live input backwards too, independent of the per-arc Rev box)
-        const bool globalReverse = rate < 0.0;
-        const bool useRev = (globalReverse || arc.reversed) && revActive
-                            && revRingA != nullptr && revRingSize >= 64;
-        const float* ringA = useRev ? revRingA : liveRingA;
-        const float* ringB = useRev ? revRingB : liveRingB;
-        const int ringSize = useRev ? revRingSize : liveRingSize;
-        const long long ringEnd = useRev ? revWriteEnd : liveWriteEnd;
-        const bool ringActive = useRev ? revActive : liveActive;
+                       double rate = 1.0, float g0 = 1.0f, float gStep = 0.0f);
 
-        if (! ringActive || ringA == nullptr || ringSize < 64) return;
-        const double arcStart = arc.startTime(), arcEnd = arc.endTime();
-        const double ref = juce::jmax(1.0, arc.refFreq);
 
-        // v1.33.4 (M21): the live voice comes from the pool - no map node is
-        // allocated in the audio thread
-        LiveSlot* slot = liveSlotFor (liveShift, arc.id);
-        if (slot == nullptr)
-        {
-            slot = acquireLiveSlot (arc.id);
-            if (slot == nullptr) return; // the pool is full (impossible in practice)
-            upic::LiveShifter& ls = slot->shifter;
-            // v1.33.4 (M21): the vocoder's working memory is only allocated
-            // when the arc really plays through the vocoder
-            ls.prepare(sampleRate, mode == 2);
-            ls.setMode((upic::LiveShifter::Mode) mode);
-            ls.reset(ringEnd);
-        }
-        auto& ls = slot->shifter;
-        ls.setMode((upic::LiveShifter::Mode) mode); // the arc's own mode wins
-        // v1.33.4 (M21): the arc switched to the vocoder - its working
-        // memory is normally already there (the message thread prepared it
-        // before the page started); this call only covers the case where it
-        // is not
-        if (mode == 2)
-            ls.prepareVocoderMemory (sampleRate);
-        ls.setGrainMs((double) liveGrainMs.load(std::memory_order_relaxed));
+    static const upic::Waveform* findWave(const std::vector<upic::Waveform>& v, int id);
 
-        // v1.33.4 (U6-C): the cursors - the arc's segment and the envelope's
-        // segment are followed, not searched.
-        upic::Arc::PitchCursor pc;
-        upic::SegmentCursor ec;
+    static const upic::Envelope* findEnv(const std::vector<upic::Envelope>& v, int id);
 
-        for (int n = i0; n <= i1; ++n)
-        {
-            const double t = playhead + (double) n * (rate * invSr);
-            const float g = guardGainAt (g0, gStep, n - i0);
-
-            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
-            const double ratio = juce::jlimit(upic::kLiveMinRatio,
-                                              upic::kLiveMaxRatio, freq / ref);
-
-            const float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
-            const float edge = edgeFade(t, arcStart, arcEnd);
-
-            // v1.14: the live ring is filled per block, so the write head
-            // only advances every block. A shifter that reads AT the write
-            // head would see the same frame for the whole block (a
-            // staircase) - the vocoder re-synthesises that as a buzz at the
-            // block rate. The per-sample frame keeps the read continuous.
-            const std::int64_t frameNow = ringEnd - (std::int64_t) (i1 - n) - 1;
-
-            const float v = ls.next(ringA, ringB, ringSize, frameNow, ratio);
-
-            scratch[(size_t) n] += v * env * edge * arc.intensity * arc.intensityAt(t) * g;
-        }
-    }
-
-    static const upic::Waveform* findWave(const std::vector<upic::Waveform>& v, int id)
-    {
-        for (auto& w : v) if (w.id == id) return &w;
-        return v.empty() ? nullptr : &v.front();
-    }
-    static const upic::Envelope* findEnv(const std::vector<upic::Envelope>& v, int id)
-    {
-        for (auto& e : v) if (e.id == id) return &e;
-        return v.empty() ? nullptr : &v.front();
-    }
     // Exact slot if it has audio, else the first loaded slot (so material
     // still sounds if the arc points at an empty slot by mistake).
-    static const upic::SampleSlot* findSlot(const std::vector<upic::SampleSlot>& v, int id)
-    {
-        const upic::SampleSlot* first = nullptr;
-        for (auto& s : v)
-        {
-            if (! s.loaded()) continue;
-            if (s.id == id) return &s;
-            if (first == nullptr) first = &s;
-        }
-        return first;
-    }
+    static const upic::SampleSlot* findSlot(const std::vector<upic::SampleSlot>& v, int id);
+
 };
 
 //==============================================================================
@@ -1396,27 +496,10 @@ private:
 // temporary sibling and replaces the target only once the whole file is on
 // disk. The result is reported: false means "nothing was written", and the
 // file that was there before is untouched.
-inline bool writeWavFile (const juce::File& target,
+bool writeWavFile (const juce::File& target,
                           const juce::AudioBuffer<float>& buf,
-                          double sr)
-{
-    if (target == juce::File() || sr <= 0.0 || buf.getNumChannels() < 1) return false;
+                          double sr);
 
-    juce::TemporaryFile temp (target);
-    auto out = temp.getFile().createOutputStream();
-    if (out == nullptr) return false;
-
-    juce::WavAudioFormat fmt;
-    std::unique_ptr<juce::AudioFormatWriter> w (
-        fmt.createWriterFor (out.release(), sr, (unsigned int) buf.getNumChannels(), 16, {}, 0));
-    if (w == nullptr) return false;
-
-    const bool wrote = w->writeFromAudioSampleBuffer (buf, 0, buf.getNumSamples());
-    w.reset(); // flushes and closes the file
-    if (! wrote) return false;
-
-    return temp.overwriteTargetFileWithTemporary();
-}
 
 //==============================================================================
 // v1.33.4 (H8): the page rendered straight into a WAV file, block by block.
@@ -1441,7 +524,7 @@ inline bool writeWavFile (const juce::File& target,
 // progress and be cancelled: `progress` is called with the percentage done
 // and returns false to stop the render (the file that was there before is
 // then left alone - the write goes to a temporary sibling).
-inline bool writePageToWavFile (const juce::File& target,
+bool writePageToWavFile (const juce::File& target,
                                 const upic::Page& page,
                                 const std::vector<upic::Waveform>& waves,
                                 const std::vector<upic::Envelope>& envs,
@@ -1450,46 +533,8 @@ inline bool writePageToWavFile (const juce::File& target,
                                 int samplePitchMode = 0,
                                 int sampleGrainMs = 0,
                                 int liveGrainMs = 0,
-                                const std::function<bool (int percent)>& progress = {})
-{
-    if (target == juce::File() || sr <= 0.0 || page.durationSec <= 0.0) return false;
+                                const std::function<bool (int percent)>& progress = {});
 
-    juce::TemporaryFile temp (target);
-    auto out = temp.getFile().createOutputStream();
-    if (out == nullptr) return false;
-
-    juce::WavAudioFormat fmt;
-    std::unique_ptr<juce::AudioFormatWriter> w (
-        fmt.createWriterFor (out.release(), sr, 2, 16, {}, 0));
-    if (w == nullptr) return false;
-
-    UpicEngine eng;
-    if (samplePitchMode >= 0) eng.setSamplePitchMode (samplePitchMode);
-    if (sampleGrainMs > 0) eng.setSampleGrainMs (sampleGrainMs);
-    if (liveGrainMs > 0) eng.setLiveGrainMs (liveGrainMs);
-
-    // the page's own time decides the length: a warped page needs more
-    // audio than it has score
-    const int frames = (int) std::ceil (page.audioDurationSec() * sr);
-    int done = 0;
-    const bool ok = eng.renderPageBlocks (page, waves, envs, slots, sr, masterGain, frames,
-        [&] (const juce::AudioBuffer<float>& block, int n)
-        {
-            if (! w->writeFromAudioSampleBuffer (block, 0, n)) return false;
-            done += n;
-            if (progress)
-            {
-                const int pct = frames > 0 ? (int) (100.0 * (double) done / (double) frames) : 100;
-                if (! progress (juce::jlimit (0, 100, pct))) return false;
-            }
-            return true;
-        });
-
-    w.reset(); // flushes and closes the file (the WAV header is patched here)
-    if (! ok) return false;
-
-    return temp.overwriteTargetFileWithTemporary();
-}
 
 //==============================================================================
 // The result of a stem export: the files that were really written, and how
@@ -1515,7 +560,7 @@ struct StemExport
 // v1.33.4 (M28): the export runs on a worker thread, so it can report its
 // progress and be cancelled: `progress` is called with the percentage done
 // and returns false to stop (the files that were already written stay).
-inline StemExport renderStems(const upic::Page& page,
+StemExport renderStems(const upic::Page& page,
                               const std::vector<upic::Waveform>& waves,
                               const std::vector<upic::Envelope>& envs,
                               const std::vector<upic::SampleSlot>& slots,
@@ -1525,138 +570,4 @@ inline StemExport renderStems(const upic::Page& page,
                               int samplePitchMode = 0,
                               int sampleGrainMs = 0,
                               int liveGrainMs = 0,
-                              const std::function<bool (int percent)>& progress = {})
-{
-    StemExport result;
-    if (page.arcs.empty() || sr <= 0.0 || prefix.isEmpty()) return result;
-
-    // mirror of engine slot lookup: is there any material for this slot id?
-    auto slotUsable = [&](int sid) {
-        bool any = false;
-        for (auto& s : slots)
-        {
-            if (! s.loaded()) continue;
-            if (s.id == sid) return true;
-            any = true;
-        }
-        return any;
-    };
-
-    std::vector<int> wIds, sIds;
-    // v1.33.4 (M23): the PM arcs are grouped by their PM voice (the
-    // operators, the ratio, the index and the envelope), so a PM-only page
-    // exports its stems too - the old grouping knew only the wavetable and
-    // the sample modes, and a PM page produced no files at all.
-    auto samePmVoice = [] (const upic::Arc& a, const upic::Arc& b)
-    {
-        return a.pmOps == b.pmOps && a.pmRatio == b.pmRatio && a.pmIndex == b.pmIndex
-            && a.pmIndexEnv == b.pmIndexEnv && a.pmFeedback == b.pmFeedback
-            && a.pmR2 == b.pmR2 && a.pmR3 == b.pmR3 && a.pmR4 == b.pmR4
-            && a.pmI2 == b.pmI2 && a.pmI3 == b.pmI3 && a.pmI4 == b.pmI4;
-    };
-    std::vector<upic::Arc> pmVoices;   // one representative per PM voice
-    int liveArcs = 0;
-    for (auto& a : page.arcs)
-    {
-        if (a.muted || a.points.size() < 2) continue;
-        if (a.mode == 1)
-        {
-            if (! slotUsable(a.sampleId)) continue;
-            if (std::find(sIds.begin(), sIds.end(), a.sampleId) == sIds.end())
-                sIds.push_back(a.sampleId);
-        }
-        else if (a.mode == 0 && std::find(wIds.begin(), wIds.end(), a.waveformId) == wIds.end())
-        {
-            wIds.push_back(a.waveformId);
-        }
-        else if (a.mode == 3)
-        {
-            bool known = false;
-            for (auto& v : pmVoices)
-                if (samePmVoice (v, a)) { known = true; break; }
-            if (! known) pmVoices.push_back (a);
-        }
-        else if (a.mode == 2)
-        {
-            // the live input is realtime-only: the offline render has no
-            // microphone, so these arcs are not exported
-            ++liveArcs;
-        }
-    }
-    if (wIds.empty() && sIds.empty() && pmVoices.empty())
-    {
-        // v1.33.4 (M23): a page that holds only live material says so
-        // instead of quietly producing nothing.
-        if (liveArcs > 0)
-            result.note = "the page holds only live material ("
-                          + juce::String (liveArcs) + " live arc(s)) - there is nothing to export";
-        return result;
-    }
-    if (liveArcs > 0)
-        result.note = juce::String (liveArcs) + " live arc(s) were not exported (they need the microphone)";
-
-    outDir.createDirectory();
-
-    // v1.33.4 (M28): the progress runs over the voices, and the cancel stops
-    // the render (the files that were already written stay).
-    const int totalVoices = (int) (wIds.size() + sIds.size() + pmVoices.size());
-    int voicesDone = 0;
-    bool cancelled = false;
-
-    auto renderOne = [&](const upic::Page& one, const juce::File& f) {
-        if (cancelled) return;
-        ++result.attempted;
-        // v1.33.4 (H8): the stem is rendered straight into the file, block
-        // by block, and it is as long as the page's own time needs (a warped
-        // page used to be cut off at the end)
-        const bool ok = writePageToWavFile (f, one, waves, envs, slots, sr, masterGain,
-                                samplePitchMode, sampleGrainMs, liveGrainMs,
-                                [&] (int percent)
-                                {
-                                    if (! progress) return true;
-                                    const int overall = totalVoices > 0
-                                        ? (int) (100.0 * ((double) voicesDone
-                                                          + (double) percent / 100.0)
-                                                 / (double) totalVoices)
-                                        : 100;
-                                    if (! progress (juce::jlimit (0, 100, overall)))
-                                    {
-                                        cancelled = true;
-                                        return false;
-                                    }
-                                    return true;
-                                });
-        if (ok) result.written.push_back (f);
-        else if (! cancelled) ++result.failed;
-        ++voicesDone;
-    };
-
-    for (int id : wIds)
-    {
-        upic::Page one = page;
-        one.arcs.clear();
-        for (auto& a : page.arcs)
-            if (! a.muted && a.mode == 0 && a.waveformId == id) one.arcs.push_back(a);
-        renderOne(one, outDir.getChildFile(prefix + "_wave" + juce::String(id) + ".wav"));
-    }
-    for (int id : sIds)
-    {
-        upic::Page one = page;
-        one.arcs.clear();
-        for (auto& a : page.arcs)
-            if (! a.muted && a.mode == 1 && a.sampleId == id) one.arcs.push_back(a);
-        renderOne(one, outDir.getChildFile(prefix + "_sample" + juce::String(id) + ".wav"));
-    }
-    // v1.33.4 (M23): the PM voices get a stem each
-    for (size_t vi = 0; vi < pmVoices.size(); ++vi)
-    {
-        upic::Page one = page;
-        one.arcs.clear();
-        for (auto& a : page.arcs)
-            if (! a.muted && a.mode == 3 && samePmVoice (pmVoices[vi], a))
-                one.arcs.push_back(a);
-        renderOne(one, outDir.getChildFile(prefix + "_pm" + juce::String ((int) vi + 1) + ".wav"));
-    }
-    return result;
-}
-
+                              const std::function<bool (int percent)>& progress = {});
