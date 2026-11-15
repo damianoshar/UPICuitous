@@ -36,6 +36,7 @@
       <FILE id="eEdr04" name="EnvelopeEditor.h" compile="0" resource="0"
             file="Source/EnvelopeEditor.h"/>
       <FILE id="sEdr05" name="ScoreEditor.h" compile="0" resource="0" file="Source/ScoreEditor.h"/>
+      <FILE id="sEdc30" name="ScoreEditor.cpp" compile="1" resource="0" file="Source/ScoreEditor.cpp"/>
       <FILE id="wEdr06" name="WaveformEditor.h" compile="0" resource="0"
             file="Source/WaveformEditor.h"/>
       <FILE id="uEdl8" name="UpicEngine.h" compile="0" resource="0" file="Source/UpicEngine.h"/>

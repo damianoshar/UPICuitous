@@ -48,6 +48,7 @@ target_sources(UPICuitousPlugin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentAudio.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentMidi.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentFiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/ScoreEditor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/OscScrubReceiver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/JobRunner.cpp)
 
@@ -91,6 +92,7 @@ target_sources(UPICuitousPluginSmokeTest PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentAudio.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentMidi.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentFiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/ScoreEditor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/OscScrubReceiver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/JobRunner.cpp)
 

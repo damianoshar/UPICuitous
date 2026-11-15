@@ -441,7 +441,8 @@ Source/              JUCE app + shared engine/UI
                      PickedFile, Ids, Page, Piece (one header per concept)
   UpicEngine.h       realtime + offline renderer, sample voices
   LivePitch.h        granular / tape / phase-vocoder shifters
-  ScoreEditor.h      score canvas, tools, touch, grids
+  ScoreEditor.h      score canvas, tools, touch, grids (the declarations)
+  ScoreEditor.cpp    the score canvas's implementation
   WaveformEditor.h   wavetable drawing
   EnvelopeEditor.h   envelope drawing
   MainComponent.*    tabs, transport, pages, file IO, audio, status
