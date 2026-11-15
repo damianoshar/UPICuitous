@@ -2,7 +2,6 @@
 #include <JuceHeader.h>
 #include <atomic>
 #include <functional>
-#include <thread>
 #include "UpicModel.h"
 #include "UpicEngine.h"
 #include "ModelSnapshot.h"
@@ -13,6 +12,7 @@
 #include "EnvelopeEditor.h"
 #include "OverlayPanels.h"
 #include "OscScrubReceiver.h"
+#include "JobRunner.h"
 
 //==============================================================================
 // Main UPIC window: transport + score page + wavetable/envelope editors.
@@ -183,33 +183,9 @@ public:
 
     // --- v1.33.4 (M28): the long jobs off the message thread ---
     //
-    // The sample decode, the base64 write and the whole-page render used to
-    // run in the file chooser's callback: on the message thread, and mostly
-    // while holding dataLock. A 120 s export at 96 kHz wants ~88 MiB of
-    // stereo floats and minutes of CPU - the window froze, the audio thread
-    // waited for the lock, and the app looked hung.
-    //
-    // The job now runs on a worker thread. The model is captured on the
-    // message thread (the sample audio is shared, so the copy is eight
-    // pointers), the worker never touches the component, and the report
-    // comes back on the message thread. The job reports its progress and
-    // can be cancelled.
-    struct Job
-    {
-        juce::String label;                    // what the status line says
-        std::atomic<bool> cancelled { false };
-        std::atomic<bool> done { false };      // the work is finished
-        std::atomic<int> progress { 0 };       // 0..100
-        bool ok = false;                       // the job's result (the report reads it)
-        // v1.33.4 (L15, part 3): a silent job does not take over the status
-        // line and does not flash a message - the recovery snapshot runs
-        // every half minute and must not keep interrupting the user.
-        bool silent = false;
-        juce::String message;                  // what the report says
-        std::function<void (Job&)> work;       // the heavy part (the worker thread)
-        std::function<void (Job&)> report;     // the result (the message thread)
-    };
-    using JobPtr = std::shared_ptr<Job>;
+    // The job and its worker thread live in JobRunner.h; this class starts
+    // them and shows their progress in the status line.
+    using Job = upic::Job;
 
     // starts a job on the worker thread (message thread). One at a time: a
     // second job would fight the first over the disk.
@@ -218,9 +194,9 @@ public:
                    std::function<void (Job&)> report,
                    bool announce = true);
     void cancelJob();                                  // asks the running job to stop
-    bool jobRunning() const { return jobBusy.load (std::memory_order_relaxed); }
-    int jobProgress() const;
-    juce::String jobLabel() const;
+    bool jobRunning() const { return jobs.running(); }
+    int jobProgress() const { return jobs.progress(); }
+    juce::String jobLabel() const { return jobs.label(); }
 
     // --- v1.33.4 (L15, part 3): the crash recovery ---
     //
@@ -543,11 +519,8 @@ private:
     ModelSnapshot* liveSnapshot = nullptr;          // audio thread only
 
     // --- v1.33.4 (M28): the worker thread ---
-    // The job that is running (the message thread reads it; the worker has
-    // its own copy) and the thread itself. One job at a time.
-    JobPtr activeJob;
-    std::thread worker;
-    std::atomic<bool> jobBusy { false };
+    // The job that is running and the thread itself (one job at a time).
+    upic::JobRunner jobs;
     std::atomic<int> pageEpoch { 0 };               // message -> audio
     int seenPageEpoch = -1;                         // audio
     int audioPage = 0;                              // audio thread's page

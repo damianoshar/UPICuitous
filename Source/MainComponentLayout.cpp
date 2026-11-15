@@ -268,9 +268,7 @@ MainComponent::~MainComponent()
     // v1.33.4 (M28): the worker must be gone before the members it could
     // touch are. It is asked to stop first - a render checks the flag
     // between the blocks, so it ends at once.
-    if (activeJob) activeJob->cancelled.store (true);
-    if (worker.joinable()) worker.join();
-    activeJob.reset();
+    jobs.shutdown();
     // v1.18: stop the audio thread first (no callback can be in flight), then
     // hand back the snapshots it owned so the handover can free them here.
     shutdownAudio();

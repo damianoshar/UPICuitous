@@ -432,6 +432,7 @@ Source/              JUCE app + shared engine/UI
   MainComponent.*    tabs, transport, pages, file IO, audio, status
                      (MainComponent.cpp + Controls / Layout / Model /
                      Audio / Midi / Files)
+  JobRunner.h        the long jobs (the worker thread, the report)
   AndroidBars.h      Android status/nav bar helpers
   Main.cpp           the app entry point
   SelfTest.*         the headless checks (--selftest): the runner, the

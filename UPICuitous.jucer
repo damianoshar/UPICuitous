@@ -50,6 +50,8 @@
     <FILE id="oVly25" name="OverlayPanels.h" compile="0" resource="0" file="Source/OverlayPanels.h"/>
     <FILE id="oScr26" name="OscScrubReceiver.cpp" compile="1" resource="0" file="Source/OscScrubReceiver.cpp"/>
     <FILE id="oScH27" name="OscScrubReceiver.h" compile="0" resource="0" file="Source/OscScrubReceiver.h"/>
+    <FILE id="jRu28" name="JobRunner.cpp" compile="1" resource="0" file="Source/JobRunner.cpp"/>
+    <FILE id="jRuH29" name="JobRunner.h" compile="0" resource="0" file="Source/JobRunner.h"/>
     </GROUP>
   </MAINGROUP>
   <MODULES>

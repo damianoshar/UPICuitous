@@ -35,6 +35,10 @@ MainComponent::MainComponent(bool pluginMode)
     // layout's scale, so a control's text is never wrapped or cut off.
     setLookAndFeel (&appLaf);
 
+    // v1.33.4 (M28): the job runner reports through the status line (the
+    // flash message) - the runner itself is in JobRunner.h.
+    jobs.announce = [this] (const juce::String& m) { flash (m); };
+
     // v1.18 (wave 15): publish the first model snapshot before the audio
     // device starts, so the audio thread always has a model to render from
     // (it never takes dataLock any more).
@@ -897,10 +901,11 @@ void MainComponent::timerCallback()
     // that the app is working and how far it is. A silent job (the recovery
     // snapshot, L15) keeps out of the way: it runs every half minute and
     // must not keep interrupting the user.
-    if (jobRunning() && ! (activeJob && activeJob->silent))
+    const auto job = jobs.current();
+    if (jobRunning() && ! (job != nullptr && job->silent))
     {
         s = jobLabel() + " " + juce::String (jobProgress()) + "%"
-            + (activeJob && activeJob->cancelled.load (std::memory_order_relaxed)
+            + (job != nullptr && job->cancelled.load (std::memory_order_relaxed)
                    ? " (cancelling...)" : " (File -> Cancel the job)");
     }
     else if (juce::Time::getMillisecondCounter() < flashUntilMs)

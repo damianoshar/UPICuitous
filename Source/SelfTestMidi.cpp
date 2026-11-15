@@ -1,4 +1,5 @@
 #include <JuceHeader.h>
+#include <thread>
 #include "MainComponent.h"
 #include "SelfTest.h"
 #include "AllocCounter.h"

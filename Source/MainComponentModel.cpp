@@ -320,79 +320,19 @@ void MainComponent::flash(const juce::String& m)
 //==============================================================================
 // v1.33.4 (M28): the long jobs - the render, the stems, the decode, the
 // save - run on a worker thread, so the window stays alive and the audio
-// thread is not held up by them.
-//
-// The rules:
-//   - the model is captured on the message thread (under the lock) and the
-//     worker never touches the component again
-//   - the work checks the cancel flag between the blocks, and the progress
-//     is published as a percentage the status line shows
-//   - the report comes back on the message thread (the worker posts it), so
-//     the messages and the UI are only touched there
+// thread is not held up by them. The job and its thread live in JobRunner.h;
+// the app starts them and shows their progress in the status line.
 void MainComponent::startJob (const juce::String& label,
                               std::function<void (Job&)> work,
                               std::function<void (Job&)> report,
                               bool announce)
 {
-    // one job at a time - a second one would fight the first over the disk
-    if (jobBusy.load (std::memory_order_relaxed))
-    {
-        if (announce)
-            flash ("Another job is still running (" + jobLabel() + ") - wait for it, or cancel it");
-        return;
-    }
-
-    // the previous job's thread is done (it cleared the flag), so it can go
-    if (worker.joinable()) worker.join();
-
-    auto job = std::make_shared<Job>();
-    job->label = label;
-    job->silent = ! announce;
-    job->work = std::move (work);
-    job->report = std::move (report);
-    activeJob = job;
-    jobBusy.store (true, std::memory_order_relaxed);
-    if (announce)
-        flash (label + "...");
-
-    // the safe pointer: the window can be closed while the job runs
-    juce::Component::SafePointer<MainComponent> sp (this);
-    worker = std::thread ([sp, job]
-    {
-        if (job->work)
-        {
-            try { job->work (*job); }
-            catch (...) { job->ok = false; }
-        }
-        // the job is done - the next one may start (the report is only a
-        // message, it does not block anything)
-        job->done.store (true, std::memory_order_relaxed);
-        if (sp != nullptr) sp->jobBusy.store (false, std::memory_order_relaxed);
-        // the report belongs to the message thread
-        juce::MessageManager::callAsync ([sp, job]
-        {
-            if (sp == nullptr) return;
-            if (sp->activeJob == job) sp->activeJob.reset();
-            if (job->report) job->report (*job);
-        });
-    });
+    jobs.start (label, std::move (work), std::move (report), announce);
 }
 
 void MainComponent::cancelJob()
 {
-    if (! jobBusy.load (std::memory_order_relaxed)) return;
-    if (activeJob) activeJob->cancelled.store (true, std::memory_order_relaxed);
-    flash ("Cancelling " + jobLabel() + "...");
-}
-
-int MainComponent::jobProgress() const
-{
-    return activeJob ? activeJob->progress.load (std::memory_order_relaxed) : 0;
-}
-
-juce::String MainComponent::jobLabel() const
-{
-    return activeJob ? activeJob->label : juce::String();
+    jobs.cancel();
 }
 
 void MainComponent::pushSieve()
