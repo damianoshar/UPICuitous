@@ -1,0 +1,933 @@
+#include <JuceHeader.h>
+#include "MainComponent.h"
+#include "SelfTest.h"
+#include "AllocCounter.h"
+
+//==============================================================================
+// The model: the pitch transformations, the frequency spaces, the staircase,
+// the acceleration, the digitised wave page, the polyagogy, the sieve, the
+// generators and the curve simplification.
+
+void upic::runTransformChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // 6i. v1.31 (U3): the UPIC's pitch transformations - transpose and
+    //     invert. The reverse already exists; these are the pitch ones.
+    {
+        upic::Arc a;
+        a.points = { { 0.0, 220.0 }, { 1.0, 440.0 }, { 2.0, 880.0 } };
+
+        // an octave up doubles every pitch
+        a.transpose (12.0);
+        check (std::abs (a.points[0].freq - 440.0) < 1e-6
+            && std::abs (a.points[1].freq - 880.0) < 1e-6
+            && std::abs (a.points[2].freq - 1760.0) < 1e-6,
+               "transpose up an octave doubles the drawn pitches",
+               juce::String (a.points[0].freq, 1) + " / "
+               + juce::String (a.points[1].freq, 1) + " / "
+               + juce::String (a.points[2].freq, 1));
+
+        // and back down again
+        a.transpose (-12.0);
+        check (std::abs (a.points[0].freq - 220.0) < 1e-6
+            && std::abs (a.points[2].freq - 880.0) < 1e-6,
+               "transpose down an octave is the inverse");
+
+        // the inversion mirrors the contour: a rising line becomes a
+        // falling one of the same size, around the same centre
+        upic::Arc b;
+        b.points = { { 0.0, 220.0 }, { 1.0, 440.0 }, { 2.0, 880.0 } };
+        const double centre = std::sqrt (220.0 * 880.0); // the geometric mean
+        b.invertPitch();
+        check (std::abs (b.points[0].freq - centre * centre / 220.0) < 1e-6
+            && std::abs (b.points[2].freq - centre * centre / 880.0) < 1e-6
+            && b.points[0].freq > b.points[1].freq
+            && b.points[1].freq > b.points[2].freq,
+               "invert mirrors the pitch contour",
+               juce::String (b.points[0].freq, 1) + " / "
+               + juce::String (b.points[1].freq, 1) + " / "
+               + juce::String (b.points[2].freq, 1));
+
+        // and it is its own inverse
+        b.invertPitch();
+        check (std::abs (b.points[0].freq - 220.0) < 1e-6
+            && std::abs (b.points[2].freq - 880.0) < 1e-6,
+               "inverting twice gives the arc back");
+    }
+
+    // 6i-e. v1.31: the time-axis half of the classical transformation
+    //      family - retrograde (mirror in time) and augmentation /
+    //      diminution (scale in time).
+    {
+        upic::Arc a;
+        a.points = { { 0.0, 220.0 }, { 1.0, 440.0 }, { 2.0, 880.0 } };
+
+        // the retrograde reads backwards inside the arc's own span
+        upic::Arc r = a;
+        r.retrograde();
+        check (std::abs (r.points[0].t - 0.0) < 1e-9
+            && std::abs (r.points[2].t - 2.0) < 1e-9,
+               "the retrograde keeps the arc's time span",
+               juce::String (r.points[0].t, 3) + " .. "
+               + juce::String (r.points[2].t, 3));
+        check (std::abs (r.points[0].freq - 880.0) < 1e-6
+            && std::abs (r.points[2].freq - 220.0) < 1e-6,
+               "the retrograde plays the contour backwards",
+               juce::String (r.points[0].freq, 1) + " -> "
+               + juce::String (r.points[2].freq, 1));
+        bool sorted = true;
+        for (size_t i = 1; i < r.points.size(); ++i)
+            if (r.points[i].t < r.points[i-1].t) sorted = false;
+        check (sorted, "the retrograde keeps the points sorted in time");
+
+        // and it is its own inverse
+        r.retrograde();
+        check (std::abs (r.points[0].freq - 220.0) < 1e-6
+            && std::abs (r.points[2].freq - 880.0) < 1e-6,
+               "retrograding twice gives the arc back");
+
+        // the augmentation stretches the contour in time
+        upic::Arc g = a;
+        g.scaleTime (2.0);
+        check (std::abs ((g.points[2].t - g.points[0].t) - 4.0) < 1e-6,
+               "the augmentation doubles the arc's time span",
+               juce::String (g.points[2].t - g.points[0].t, 3) + " s");
+        check (std::abs (g.points[1].freq - 440.0) < 1e-6,
+               "the augmentation keeps the pitch");
+
+        // and the diminution halves it
+        upic::Arc d = a;
+        d.scaleTime (0.5);
+        check (std::abs ((d.points[2].t - d.points[0].t) - 1.0) < 1e-6,
+               "the diminution halves the arc's time span",
+               juce::String (d.points[2].t - d.points[0].t, 3) + " s");
+    }
+
+    // 6i-f. v1.32: the discrete frequency space - the UPIC's
+    //      "discrete/non-discrete" function. The pitch that plays is
+    //      moved through a temperament of n equal divisions per octave,
+    //      so a glissando is heard as a staircase of discrete steps.
+    {
+        const double ref = upic::kDefaultRefFreq; // C4
+
+        // the continuum leaves the pitch alone
+        check (std::abs (upic::applyTemperament (445.0, 0, ref) - 445.0) < 1e-9,
+               "no temperament leaves the pitch alone");
+
+        // a pitch on the chromatic scale stays where it is
+        const double a4 = upic::applyTemperament (440.0, 12, ref);
+        check (std::abs (a4 - 440.0) < 0.02,
+               "the chromatic scale leaves A4 where it is",
+               juce::String (a4, 3) + " Hz");
+
+        // a pitch between two steps snaps to the nearest one
+        const double snapped = upic::applyTemperament (445.0, 12, ref);
+        check (std::abs (snapped - a4) < 0.02,
+               "a pitch between two steps snaps to the nearer one",
+               juce::String (snapped, 2) + " Hz");
+
+        // a different temperament is a different scale: the diatonic
+        // one (7 divisions) puts A4 between two of its steps
+        const double seven = upic::applyTemperament (440.0, 7, ref);
+        check (std::abs (seven - a4) > 1.0,
+               "the diatonic scale moves A4 to another step",
+               juce::String (seven, 2) + " Hz");
+        check (std::abs (std::log2 (seven / ref) * 7.0
+                         - std::round (std::log2 (seven / ref) * 7.0)) < 1e-9,
+               "the diatonic scale lands exactly on one of its steps");
+
+        // the glissando becomes a staircase: every step of the sweep
+        // lands on the scale, and the sweep visits several steps
+        upic::Page plainPage;   // the page's own space: the identity
+        upic::Arc g;
+        g.points = { { 0.0, 400.0 }, { 1.0, 800.0 } };
+        g.stepDivisions = 12;
+        const auto plainMap = plainPage.spaceMap (0);
+        bool allOnScale = true;
+        std::set<double> visited;
+        for (int i = 0; i <= 100; ++i)
+        {
+            const double f = UpicEngine::arcPitch (g, (double) i / 100.0, plainMap);
+            const double l = std::log2 (f / ref) * 12.0;
+            if (std::abs (l - std::round (l)) > 1e-9) allOnScale = false;
+            visited.insert (std::round (l));
+        }
+        check (allOnScale, "the stepped glissando stays on the scale");
+        check (visited.size() > 3,
+               "the stepped glissando is heard as several discrete steps",
+               juce::String ((int) visited.size()) + " steps");
+
+        // and the continuum version of the same arc is not a staircase
+        upic::Arc c = g;
+        c.stepDivisions = 0;
+        bool anyOffScale = false;
+        for (int i = 0; i <= 100; ++i)
+        {
+            const double f = UpicEngine::arcPitch (c, (double) i / 100.0, plainMap);
+            const double l = std::log2 (f / ref) * 12.0;
+            if (std::abs (l - std::round (l)) > 1e-9) anyOffScale = true;
+        }
+        check (anyOffScale, "the continuum glissando is not stepped");
+
+        // the drawing is untouched: the stepping is a property of the
+        // sound, not of the drawn curve
+        check (std::abs (g.points[0].freq - 400.0) < 1e-9
+            && std::abs (g.points[1].freq - 800.0) < 1e-9,
+               "the stepping leaves the drawn curve alone");
+
+        // it travels with the piece
+        upic::Arc saved = upic::Arc::fromVar (g.toVar());
+        check (saved.stepDivisions == 12,
+               "the discrete frequency space travels with the piece",
+               juce::String (saved.stepDivisions) + " divisions");
+        upic::Arc plain = upic::Arc::fromVar (upic::Arc().toVar());
+        check (plain.stepDivisions == 0,
+               "a piece without it is the continuum");
+    }
+
+    // 6i-f2. v1.33: the frequency spaces - the UPIC's four frequency
+    //      tables. The page owns four spaces; an arc names the one it
+    //      is played in, the way it names its wave or its envelope.
+    {
+        upic::Page pg;   // the ambitus: 20 Hz - 12 kHz
+        const double mid = 2000.0;
+
+        // space 0 IS the page's range: the pitch passes through
+        // unchanged, bit for bit (the phase vocoder's bin index is a
+        // truncated k*ratio, so an identity mapping must not round-trip
+        // through log2/exp2)
+        check (pg.placeInSpace (mid, 0) == mid,
+               "the page's own space is the identity",
+               juce::String (pg.placeInSpace (mid, 0), 6) + " Hz");
+
+        // an octave up: the same drawing, one octave higher
+        pg.spaces[1] = 3;   // "An octave up"
+        const double up = pg.placeInSpace (mid, 1);
+        check (std::abs (up - mid * 2.0) < 1e-6,
+               "a space an octave up sounds an octave up",
+               juce::String (up, 1) + " Hz");
+
+        // half the range: the intervals are scaled with it
+        pg.spaces[2] = 1;   // "Half the range"
+        const double half = pg.placeInSpace (mid, 2);
+        check (half < mid && half > mid * 0.4 && half < mid * 0.6,
+               "half the range compresses the drawing's intervals",
+               juce::String (half, 1) + " Hz");
+        // the edges of the drawing land on the edges of the space
+        double sLo = 0.0, sHi = 0.0;
+        pg.spaceRange (2, sLo, sHi);
+        check (std::abs (pg.placeInSpace (upic::kMinFreq, 2) - sLo) < 1e-6
+            && std::abs (pg.placeInSpace (upic::kMaxFreq, 2) - sHi) < 1e-6,
+               "the space's edges are where the drawing's edges land",
+               juce::String (sLo, 1) + " - " + juce::String (sHi, 1) + " Hz");
+
+        // the arcs are independent: each names its own space
+        upic::Arc a1, a2;
+        a1.points = { { 0.0, mid }, { 1.0, mid } };
+        a2.points = { { 0.0, mid }, { 1.0, mid } };
+        a1.space = 0;
+        a2.space = 1;
+        const auto m0 = pg.spaceMap (a1.space);
+        const auto m1 = pg.spaceMap (a2.space);
+        check (std::abs (UpicEngine::arcPitch (a1, 0.5, m0) - mid) < 1e-9
+            && std::abs (UpicEngine::arcPitch (a2, 0.5, m1) - mid * 2.0) < 1e-3,
+               "two arcs can sit in two spaces at the same time",
+               juce::String (UpicEngine::arcPitch (a1, 0.5, m0), 1) + " / "
+               + juce::String (UpicEngine::arcPitch (a2, 0.5, m1), 1) + " Hz");
+
+        // the space travels with the piece
+        upic::Arc saved = upic::Arc::fromVar (a2.toVar());
+        check (saved.space == 1, "the frequency space travels with the piece");
+        check (upic::Arc::fromVar (a1.toVar()).space == 0,
+               "an arc without a space is in the page's own");
+        const auto pageBack = upic::Page::fromVar (pg.toVar());
+        check (pageBack.spaces[1] == 3 && pageBack.spaces[2] == 1,
+               "the page's four spaces travel with the piece");
+    }
+
+    // 6i-f3. v1.33: the ambitus - the interval the page's vertical axis
+    //      covers. "The scale of the millimetric surface could be
+    //      selected, so that the vertical axis could correspond to any
+    //      interval."
+    {
+        // the mapping is the page's interval, not the whole world
+        const double lo = 261.63 / 4.0, hi = 261.63 * 4.0;   // three octaves
+        check (std::abs (upic::normYToFreqIn (0.0f, lo, hi) - lo) < 1e-6
+            && std::abs (upic::normYToFreqIn (1.0f, lo, hi) - hi) < 1e-6,
+               "the page's interval spans its axis");
+        check (std::abs (upic::freqToNormYIn (lo, lo, hi) - 0.0f) < 1e-6
+            && std::abs (upic::freqToNormYIn (hi, lo, hi) - 1.0f) < 1e-6,
+               "the page's interval maps back to its axis");
+        // the middle of the axis is the middle of the interval, in log
+        // pitch: the geometric mean, not the arithmetic one
+        check (std::abs (upic::normYToFreqIn (0.5f, lo, hi)
+                         - std::sqrt (lo * hi)) < 1e-6,
+               "the middle of the page is the geometric middle",
+               juce::String (upic::normYToFreqIn (0.5f, lo, hi), 1) + " Hz");
+
+        // a pitch outside the page is off the page (not clamped onto it)
+        check (upic::freqToNormYIn (upic::kMinFreq, lo, hi) < 0.0f
+            && upic::freqToNormYIn (upic::kMaxFreq, lo, hi) > 1.0f,
+               "a pitch outside the page is off the page");
+
+        // the ambitus travels with the piece
+        upic::Page pg;
+        pg.pitchLo = lo;
+        pg.pitchHi = hi;
+        const auto back = upic::Page::fromVar (pg.toVar());
+        check (std::abs (back.pitchLo - lo) < 1e-9
+            && std::abs (back.pitchHi - hi) < 1e-9,
+               "the ambitus travels with the piece",
+               juce::String (back.pitchLo, 1) + " - "
+               + juce::String (back.pitchHi, 1) + " Hz");
+        // and a piece without one is the default interval
+        const auto plain = upic::Page::fromVar (upic::Page().toVar());
+        check (plain.pitchLo == upic::kDefaultPitchLo
+            && plain.pitchHi == upic::kDefaultPitchHi,
+               "a piece without an ambitus is the default interval");
+    }
+
+    // 6i-f5. v1.33: the range reaches infrasonic and ultrasonic. "The
+    //      frequency range of the 1990s UPIC was extended to
+    //      infrasonics, starting at 0.01 Hz" (Robindoré), and the
+    //      frequency table could span "as large a range as
+    //      0.01-22,050 Hz".
+    {
+        check (upic::kMinFreq <= 0.01 + 1e-9 && upic::kMaxFreq >= 22050.0 - 1e-9,
+               "the pitch range reaches infrasonic and ultrasonic",
+               juce::String (upic::kMinFreq, 3) + " - "
+               + juce::String (upic::kMaxFreq, 0) + " Hz");
+
+        auto renderAt = [&](double f, juce::AudioBuffer<float>& buf) {
+            upic::Page pg; pg.durationSec = 4.0;
+            upic::Arc a; a.id = 1; a.mode = 0; a.intensity = 1.0f;
+            a.points = { { 0.0, f }, { 4.0, f } };
+            pg.arcs.push_back (a);
+            auto waves = upic::defaultWaveforms();
+            std::vector<upic::Envelope> envs;
+            upic::Envelope flat; flat.presetFlat(); envs.push_back (flat);
+            std::vector<upic::SampleSlot> noSlots;
+            buf.setSize (2, 44100 * 4); buf.clear();
+            UpicEngine e; e.prepare (44100.0, 8192);
+            e.renderPageOffline (pg, waves, envs, noSlots, buf, 44100.0, 1.0f);
+        };
+        auto crossings = [](const juce::AudioBuffer<float>& buf) {
+            int n = 0; bool high = false; bool finite = true;
+            for (int i = 44100; i < 88200; ++i)
+            {
+                const float v = buf.getSample (0, i);
+                if (! std::isfinite (v)) { finite = false; continue; }
+                if (! high && v > 0.0f) { high = true; ++n; }
+                else if (high && v < 0.0f) high = false;
+            }
+            return std::make_pair (n, finite);
+        };
+
+        // an infrasonic arc: one slow swell in a second, not a buzz
+        juce::AudioBuffer<float> lo;
+        renderAt (0.01, lo);
+        const auto loX = crossings (lo);
+        check (loX.second && loX.first <= 1,
+               "an infrasonic arc is a slow swell",
+               juce::String (loX.first) + " crossings in a second");
+
+        // and an ultrasonic one
+        juce::AudioBuffer<float> hi;
+        renderAt (20000.0, hi);
+        const auto hiX = crossings (hi);
+        check (hiX.second && hiX.first > 15000,
+               "an ultrasonic arc is still a tone",
+               juce::String (hiX.first) + " crossings in a second");
+
+        // the middle of the range is untouched
+        juce::AudioBuffer<float> mid;
+        renderAt (440.0, mid);
+        const auto midX = crossings (mid);
+        check (midX.second && std::abs (midX.first - 440) < 20,
+               "the middle of the range sounds as it always did",
+               juce::String (midX.first) + " crossings in a second");
+    }
+
+    // 6i-f7. v1.33: the staircase. The sieve's points are the step
+    //      corners - the pitch holds until the next step and then
+    //      jumps - so the sound is a staircase too.
+    {
+        upic::Arc a;
+        // (0, 261) - (1, 277) - (1, 294) - (2, 294): a step at t = 1
+        a.points = { { 0.0, 261.0 }, { 1.0, 277.0 }, { 1.0, 294.0 }, { 2.0, 294.0 } };
+        check (std::abs (a.freqAt (0.5) - std::sqrt (261.0 * 277.0)) < 1.0,
+               "the staircase holds the pitch between the corners",
+               juce::String (a.freqAt (0.5), 1) + " Hz");
+        check (std::abs (a.freqAt (1.0) - 277.0) < 1e-6,
+               "the staircase is at the old step on the corner",
+               juce::String (a.freqAt (1.0), 1) + " Hz");
+        check (std::abs (a.freqAt (1.0001) - 294.0) < 1e-6,
+               "the staircase jumps to the new step right after it",
+               juce::String (a.freqAt (1.0001), 1) + " Hz");
+        check (std::abs (a.freqAt (1.5) - 294.0) < 1e-6,
+               "the staircase holds the new step");
+    }
+
+    // 6i-f6. v1.33: the page's acceleration. The UPIC's page could be
+    //      expanded and contracted in time "with the additional option
+    //      of acceleration and deceleration" (Robindoré): the page's
+    //      own time ran at a varying rate.
+    {
+        upic::Page pg;
+        pg.durationSec = 4.0;
+        check (pg.rateAt (0.0) == 1.0 && pg.rateAt (2.0) == 1.0,
+               "a straight page runs at its own rate");
+        pg.warp = 0.6;
+        check (std::abs (pg.rateAt (0.0) - 0.4) < 1e-9
+            && std::abs (pg.rateAt (4.0) - 1.6) < 1e-9,
+               "an accelerating page starts slow and speeds up",
+               juce::String (pg.rateAt (0.0), 2) + " -> "
+               + juce::String (pg.rateAt (4.0), 2) + "x");
+        pg.warp = -0.6;
+        check (std::abs (pg.rateAt (0.0) - 1.6) < 1e-9,
+               "a decelerating page starts fast and slows down");
+
+        // it travels with the piece
+        upic::Page warped; warped.warp = 0.3;
+        check (std::abs (upic::Page::fromVar (warped.toVar()).warp - 0.3) < 1e-9,
+               "the acceleration travels with the piece");
+        check (upic::Page::fromVar (upic::Page().toVar()).warp == 0.0,
+               "a piece without one is a straight line");
+
+        // and the render follows the sweep: a short arc at page time
+        // 1 s arrives later when the page starts slowly
+        auto clickAt = [&](double warp) {
+            upic::Page p; p.durationSec = 4.0; p.warp = warp;
+            upic::Arc a; a.id = 1; a.mode = 0; a.intensity = 1.0f;
+            a.points = { { 0.9, 1000.0 }, { 1.1, 1000.0 } };
+            p.arcs.push_back (a);
+            auto waves = upic::defaultWaveforms();
+            std::vector<upic::Envelope> envs;
+            upic::Envelope flat; flat.presetFlat(); envs.push_back (flat);
+            std::vector<upic::SampleSlot> noSlots;
+            juce::AudioBuffer<float> buf (2, 44100 * 6);
+            UpicEngine e; e.prepare (44100.0, 8192);
+            e.renderPageOffline (p, waves, envs, noSlots, buf, 44100.0, 1.0f);
+            int peak = -1; float best = 0.0f;
+            for (int i = 0; i < buf.getNumSamples(); ++i)
+                if (std::abs (buf.getSample (0, i)) > best)
+                { best = std::abs (buf.getSample (0, i)); peak = i; }
+            return (double) peak / 44100.0;
+        };
+        const double straight = clickAt (0.0);
+        const double swept = clickAt (0.6);
+        check (std::abs (straight - 1.0) < 0.15,
+               "a straight page plays the arc at its own time",
+               juce::String (straight, 2) + " s");
+        check (swept > straight + 0.4,
+               "an accelerating page delays the arc",
+               juce::String (straight, 2) + " s -> " + juce::String (swept, 2) + " s");
+    }
+
+    // 6i-b. v1.31 (U4): the digitised wave page - a take becomes one
+    //      loop of the oscillator.
+    {
+        // a sine over four cycles, resampled into one cycle of 1024
+        juce::AudioBuffer<float> take (1, 4096);
+        for (int i = 0; i < 4096; ++i)
+            take.setSample (0, i, 0.5f * (float) std::sin (
+                2.0 * juce::MathConstants<double>::pi * 4.0 * i / 4096.0));
+
+        const auto w = upic::waveFromTake (take, 42, "take");
+        check (w.id == 42 && w.name == "take",
+               "the digitised wave keeps its id and name");
+        check ((int) w.samples.size () == upic::kWaveSize,
+               "the digitised wave is one cycle of the wavetable",
+               juce::String ((int) w.samples.size ()));
+        float peak = 0.0f;
+        for (auto s : w.samples) peak = juce::jmax (peak, std::abs (s));
+        check (peak > 0.9f && peak <= 1.0f,
+               "the digitised wave is normalised",
+               juce::String (peak, 3));
+
+        // the loop is seamless: the last sample meets the first
+        const float first = w.samples.front();
+        const float last  = w.samples.back();
+        check (std::abs (first - last) < 0.05f,
+               "the digitised wave loops without a step",
+               juce::String (first, 3) + " -> " + juce::String (last, 3));
+    }
+
+    // 6i-c. v1.31 (U2): the micro-time end of the duration range. The
+    //      real UPIC's page ran from a few milliseconds to 12 minutes.
+    {
+        check (upic::kMinPageSeconds <= 0.01
+            && upic::kMaxPageSeconds >= 700.0,
+               "the page duration range reaches micro-time and macro-time",
+               juce::String (upic::kMinPageSeconds, 3) + " s .. "
+               + juce::String (upic::kMaxPageSeconds, 0) + " s");
+
+        // a millisecond-scale page survives the parser
+        const auto pg = upic::Page::fromVar (juce::JSON::parse (
+            "{\"duration\":0.02,\"arcs\":[{\"id\":1,\"points\":["
+            "{\"t\":0,\"f\":220},{\"t\":0.015,\"f\":440}]}]}"));
+        check (std::abs (pg.durationSec - 0.02) < 1e-9,
+               "a millisecond-scale page loads",
+               juce::String (pg.durationSec, 4) + " s");
+        check (pg.arcs.size () == 1 && pg.arcs[0].points.size () == 2
+            && pg.arcs[0].points[1].t <= 0.02,
+               "the arcs of a millisecond-scale page keep their times",
+               juce::String (pg.arcs[0].points[1].t, 4));
+
+        // and a 12-minute page too
+        const auto longPg = upic::Page::fromVar (juce::JSON::parse (
+            "{\"duration\":900,\"arcs\":[{\"id\":1,\"points\":["
+            "{\"t\":0,\"f\":220},{\"t\":700,\"f\":440}]}]}"));
+        check (std::abs (longPg.durationSec - 720.0) < 1e-9,
+               "a 12-minute page is clamped to the top of the range",
+               juce::String (longPg.durationSec, 1) + " s");
+        check (longPg.arcs[0].points[1].t <= 720.0,
+               "an arc beyond the top of the range is clamped",
+               juce::String (longPg.arcs[0].points[1].t, 1));
+    }
+
+    // 6i-d. v1.31 (U1): the polyagogy. The same drawn curve can be the
+    //      timbre AND a control signal - an amplitude LFO or a frequency
+    //      LFO. The sound has to change when the arc's wave is put to
+    //      that second use.
+    {
+        upic::Page pg; pg.durationSec = 4.0;
+        upic::Arc a; a.id = 1; a.mode = 0; a.intensity = 1.0f;
+        a.refFreq = 220.0;
+        a.points = { { 0.0, 220.0 }, { 4.0, 220.0 } };
+        pg.arcs.push_back (a);
+        upic::Envelope flat; flat.presetFlat();
+        std::vector<upic::Envelope> envs { flat };
+        auto waves = upic::defaultWaveforms();
+
+        // render the arc plain, then with its own wave as an amplitude
+        // LFO, and compare the two
+        auto renderArc = [&] (const upic::Arc& arc, juce::AudioBuffer<float>& buf)
+        {
+            upic::Page p2 = pg; p2.arcs[0] = arc;
+            UpicEngine e; e.prepare (44100.0, 8192);
+            buf.setSize (1, 44100);
+            buf.clear();
+            e.renderPageOffline (p2, waves, envs, {}, buf, 44100.0, 1.0f);
+        };
+
+        juce::AudioBuffer<float> plainBuf (1, 44100);
+        renderArc (a, plainBuf);
+        auto peakOf = [] (const juce::AudioBuffer<float>& b)
+        {
+            float pk = 0.0f;
+            for (int i = 0; i < b.getNumSamples(); ++i)
+                pk = juce::jmax (pk, std::abs (b.getSample (0, i)));
+            return pk;
+        };
+        const float plain = peakOf (plainBuf);
+        check (plain > 0.01f, "the plain oscillator arc sounds",
+               juce::String (plain, 4));
+
+        // the amplitude LFO: the same wave now shapes the loudness, so
+        // the signal is no longer the same - and it tremolos (the
+        // loudness in one eighth of a second differs from the next)
+        juce::AudioBuffer<float> ampBuf (1, 44100);
+        upic::Arc modAmp = a;
+        modAmp.waveUse = upic::Arc::waveAlsoAmplitude;
+        modAmp.modRate = 4.0;   // 4 sweeps a second
+        modAmp.modDepth = 1.0;
+        renderArc (modAmp, ampBuf);
+
+        double maxDiff = 0.0;
+        for (int i = 0; i < plainBuf.getNumSamples(); ++i)
+            maxDiff = juce::jmax (maxDiff, (double) std::abs (
+                plainBuf.getSample (0, i) - ampBuf.getSample (0, i)));
+        check (maxDiff > 0.01,
+               "the wave as an amplitude LFO changes the sound",
+               juce::String (maxDiff, 4));
+
+        auto slicePeak = [&] (const juce::AudioBuffer<float>& b, int from, int to)
+        {
+            float pk = 0.0f;
+            for (int i = from; i < to; ++i) pk = juce::jmax (pk, std::abs (b.getSample (0, i)));
+            return pk;
+        };
+        // the loudest and the quietest 10 ms window of the first second:
+        // a full-depth tremolo swings the gain from 0 to 2
+        float loudest = 0.0f, quietest = 1e9f;
+        for (int from = 0; from + 441 <= ampBuf.getNumSamples(); from += 441)
+        {
+            const float pk = slicePeak (ampBuf, from, from + 441);
+            loudest = juce::jmax (loudest, pk);
+            quietest = juce::jmin (quietest, pk);
+        }
+        check (loudest > quietest * 1.5f,
+               "the amplitude LFO tremolos the arc",
+               juce::String (quietest, 4) + " .. " + juce::String (loudest, 4));
+
+        // the frequency LFO: the same wave now moves the pitch, so the
+        // waveform itself changes (the peak stays the same - it is a
+        // vibrato)
+        juce::AudioBuffer<float> freqBuf (1, 44100);
+        upic::Arc modFreq = a;
+        modFreq.waveUse = upic::Arc::waveAlsoFrequency;
+        modFreq.modRate = 4.0;
+        modFreq.modDepth = 1.0;
+        renderArc (modFreq, freqBuf);
+
+        double maxDiffF = 0.0;
+        for (int i = 0; i < plainBuf.getNumSamples(); ++i)
+            maxDiffF = juce::jmax (maxDiffF, (double) std::abs (
+                plainBuf.getSample (0, i) - freqBuf.getSample (0, i)));
+        check (maxDiffF > 0.01,
+               "the wave as a frequency LFO changes the sound",
+               juce::String (maxDiffF, 4));
+
+        // and the settings travel with the piece
+        upic::Arc saved = upic::Arc::fromVar (modAmp.toVar());
+        check (saved.waveUse == upic::Arc::waveAlsoAmplitude
+            && std::abs (saved.modRate - 4.0) < 1e-6
+            && std::abs (saved.modDepth - 1.0) < 1e-6,
+               "the polyagogy settings survive a piece round trip",
+               juce::String (saved.waveUse) + " / "
+               + juce::String (saved.modRate, 2) + " / "
+               + juce::String (saved.modDepth, 2));
+    }
+
+}
+
+void upic::runModelMathChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // 7. pen pressure -> per-point intensity curve
+    {
+        upic::Arc a;
+        a.points = { {0.0, 440.0, 1.0f}, {1.0, 440.0, 0.0f}, {2.0, 440.0, 1.0f} };
+        const float i05 = a.intensityAt(0.5);
+        const float i10 = a.intensityAt(1.0);
+        const float ib  = a.intensityAt(-1.0); // before start -> front value
+        const float ia  = a.intensityAt(5.0);  // after end -> back value
+        check(std::abs(i05 - 0.5f) < 1e-5f && std::abs(i10 - 0.0f) < 1e-5f,
+              "pressure intensityAt linear interp",
+              juce::String(i05, 3) + "/" + juce::String(i10, 3));
+        check(std::abs(ib - 1.0f) < 1e-6f && std::abs(ia - 1.0f) < 1e-6f,
+              "pressure intensityAt clamps outside arc");
+
+        // pressure 0 everywhere => silence
+        upic::Page pg; pg.durationSec = 1.0;
+        upic::Arc z; z.id = 1; z.intensity = 1.0f;
+        z.points = { {0.0, 440.0, 0.0f}, {1.0, 440.0, 0.0f} };
+        pg.arcs.push_back(z);
+        juce::AudioBuffer<float> zb(2, 44100); zb.clear();
+        UpicEngine e1; e1.prepare(44100.0, 8192);
+        auto waves = upic::defaultWaveforms();
+        auto envs = upic::defaultEnvelopes();
+        std::vector<upic::SampleSlot> noSlots;
+        e1.renderPageOffline(pg, waves, envs, noSlots, zb, 44100.0, 1.0f);
+        double zpeak = 0.0;
+        for (int i = 0; i < zb.getNumSamples(); ++i)
+            zpeak = juce::jmax(zpeak, (double) std::abs(zb.getSample(0, i)));
+        check(zpeak < 1e-6, "pressure 0 => silence", juce::String(zpeak, 8));
+
+        // JSON round-trip of point pressure (old files: absent -> 1.0)
+        auto back = upic::Page::fromVar(juce::JSON::parse(juce::JSON::toString(pg.toVar(), false)));
+        check(! back.arcs.empty() && ! back.arcs[0].points.empty()
+              && std::abs(back.arcs[0].points[0].i - 0.0f) < 1e-6f,
+              "json round-trip point pressure (i)");
+        auto legacy = upic::Page::fromVar(juce::JSON::parse(
+            "{\"duration\":10,\"arcs\":[{\"id\":1,\"points\":[{\"t\":0,\"f\":440}]}]}"));
+        check(! legacy.arcs.empty() && legacy.arcs[0].points[0].i == 1.0f,
+              "legacy point without i defaults to 1");
+    }
+
+    // 8. sieve quantizer (Xenakis) on the MIDI-note axis
+    {
+        auto closeTo = [](double a, double b){ return std::abs(a - b) < 0.5; };
+        check(closeTo(upic::sieveQuantizeHz(440.0, 12, {9}), 440.0),
+              "sieve on-grid pitch unchanged (m12 r9 = A)");
+        const double off = upic::sieveQuantizeHz(450.0, 12, {9});
+        check(closeTo(off, 440.0), "sieve snaps to nearest allowed pitch",
+              juce::String(off, 2) + " Hz (expect 440)");
+        const double major = upic::sieveQuantizeHz(262.0, 12, {0,2,4,5,7,9,11});
+        check(closeTo(major, 261.63), "sieve major scale -> C4", juce::String(major, 3) + " Hz");
+        check(upic::sieveQuantizeHz(300.0, 12, {}) == 300.0,
+              "sieve empty remainders = identity");
+        check(upic::sieveQuantizeHz(300.0, 0, {1}) == 300.0,
+              "sieve m < 2 = identity");
+    }
+
+    // 9. page sequencer order
+    {
+        check(upic::seqNextPage(0, 3, true) == 1, "seq advances page 0 -> 1");
+        check(upic::seqNextPage(2, 3, true) == 0, "seq wraps last -> first when looping");
+        check(upic::seqNextPage(2, 3, false) == -1, "seq stops after last page");
+        check(upic::seqNextPage(0, 1, true) == 0, "seq single page wraps to itself");
+    }
+
+}
+
+void upic::runSieveChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // 11. magnetic snap helpers: stickiness, time grid, click-free stop ramp
+    {
+        check(upic::stickify(450.0, 440.0, 0.0) == 450.0, "stickify 0 = free");
+        check(upic::stickify(450.0, 440.0, 1.0) == 440.0, "stickify 1 = magnetic");
+        check(std::abs(upic::stickify(450.0, 440.0, 0.5) - 445.0) < 1e-9, "stickify 0.5 = midpoint");
+        check(std::abs(upic::timeGridSnap(1.13, 4.0) - 1.25) < 1e-9, "time grid 1.13 @4/s -> 1.25",
+              juce::String(upic::timeGridSnap(1.13, 4.0), 4));
+        check(upic::timeGridSnap(2.0, 0.0) == 2.0, "time grid off = identity");
+        check(std::abs(upic::timeGridSnap(1.0, 8.0) - 1.0) < 1e-9, "time grid on-step unchanged");
+
+        check(upic::stopFadeGain(0.05, 0.03) == 1.0, "stop fade before window = 1");
+        check(std::abs(upic::stopFadeGain(0.015, 0.03) - 0.5) < 1e-9, "stop fade midpoint = 0.5");
+        check(upic::stopFadeGain(0.0, 0.03) == 0.0, "stop fade at end = 0");
+        check(upic::stopFadeGain(-1.0, 0.03) == 0.0, "stop fade past end = 0");
+        bool mono = true;
+        double prev = 1.1;
+        for (int i = 0; i <= 100; ++i)
+        {
+            const double g = upic::stopFadeGain(0.03 * (1.0 - i / 100.0), 0.03);
+            mono = mono && g <= prev + 1e-12;
+            prev = g;
+        }
+        check(mono, "stop fade ramp monotonic");
+    }
+
+    // 12. sieve preset library (UPISketch-style examples)
+    {
+        const auto ps = upic::sievePresets();
+        check(ps.size() >= 8, "sieve presets >= 8", juce::String((int) ps.size()));
+        bool valid = ! ps.empty();
+        bool unique = true;
+        for (size_t i = 0; i < ps.size(); ++i)
+        {
+            valid = valid && ps[i].m >= 2;
+            for (size_t j = i + 1; j < ps.size(); ++j)
+                unique = unique && ps[i].name != ps[j].name;
+            for (int r : ps[i].remainders) valid = valid && r >= 0 && r < ps[i].m;
+        }
+        check(valid, "sieve presets well-formed (m>=2, 0<=r<m)");
+        check(unique, "sieve preset names unique");
+        bool wt = false;
+        for (auto& p : ps)
+            wt = wt || (p.m == 12 && p.remainders == std::vector<int>({ 0,2,4,6,8,10 }));
+        check(wt, "preset whole-tone = m12 {0,2,4,6,8,10}");
+        bool chrom = false;
+        for (auto& p : ps)
+            chrom = chrom || (p.name == "Chromatic" && p.m == 12
+                              && (int) p.remainders.size() == 12);
+        check(chrom, "preset Chromatic allows all twelve semitones");
+    }
+
+    // 13. sieve zones: containment, JSON, unified quantizePoint precedence
+    {
+        upic::SieveZone z;
+        z.id = 7; z.t0 = 5; z.t1 = 10; z.f0 = 400; z.f1 = 800; // reversed corners allowed
+        z.m = 12; z.remainders = { 0,1,2,3,4,5,6,7,8,9,10,11 }; z.timeGrid = 8;
+        check(z.contains(7.5, 500.0), "zone contains interior point");
+        check(z.contains(5.0, 400.0), "zone contains corners (inclusive)");
+        check(! z.contains(4.999, 500.0), "zone excludes outside point");
+        std::vector<upic::SieveZone> zones { z };
+        check(upic::zoneAt(zones, 6.0, 500.0) != nullptr, "zoneAt finds zone");
+        check(upic::zoneAt(zones, 1.0, 500.0) == nullptr, "zoneAt misses outside");
+
+        z.stickiness = 0.4;
+        auto zj = upic::SieveZone::fromVar(juce::JSON::parse(juce::JSON::toString(z.toVar(), false)));
+        check(zj.id == 7 && std::abs(zj.t0 - 5.0) < 1e-9 && std::abs(zj.f1 - 800.0) < 1e-9
+              && zj.m == 12 && zj.remainders == z.remainders
+              && std::abs(zj.timeGrid - 8.0) < 1e-9
+              && std::abs(zj.stickiness - 0.4) < 1e-9, "zone JSON round-trip");
+        {
+            // a zone written before per-zone stickiness follows the global
+            auto legacy = upic::SieveZone::fromVar(juce::JSON::parse(
+                "{\"id\":9,\"t0\":0,\"t1\":1,\"f0\":100,\"f1\":200,\"m\":12,\"r\":[0]}"));
+            check(std::abs(legacy.stickiness + 1.0) < 1e-9,
+                  "a legacy zone follows the global stick");
+        }
+
+        upic::Page pz; pz.durationSec = 20; pz.zones.push_back(z); pz.nextZoneId = 8;
+        auto pb = upic::Page::fromVar(juce::JSON::parse(juce::JSON::toString(pz.toVar(), false)));
+        check(pb.zones.size() == 1 && pb.nextZoneId == 8, "page zones JSON round-trip");
+        auto oldPg = upic::Page::fromVar(juce::JSON::parse("{\"duration\":10,\"arcs\":[]}"));
+        check(oldPg.zones.empty() && oldPg.nextZoneId == 1, "legacy page has no zones");
+
+        // zone sieve beats global sieve; global grid applies outside the zone
+        const std::vector<int> globalR { 0, 7 };
+        double t = 6.0, f = 450.0; // inside the chromatic zone
+        upic::quantizePoint(true, true, 12, globalR, 4.0, 1.0, zones, t, f);
+        check(std::abs(f - 440.0) < 0.5, "zone sieve overrides global (450 -> 440)",
+              juce::String(f, 2));
+        check(std::abs(t - 6.0) < 1e-9, "zone time grid 8/s keeps 6.0");
+        t = 2.13; f = 450.0;       // outside -> global sieve {0,7} + global grid 4/s
+        upic::quantizePoint(true, true, 12, globalR, 4.0, 1.0, zones, t, f);
+        check(std::abs(f - 392.0) < 0.6, "global sieve outside zone (450 -> 392)",
+              juce::String(f, 2));
+        check(std::abs(t - 2.25) < 1e-9, "global time grid snaps 2.13 -> 2.25",
+              juce::String(t, 4));
+        t = 0.0; f = 450.0;        // chromatic snap softened by stickiness 0.5
+        upic::quantizePoint(true, false, 12, { 0 }, 0.0, 0.5, {}, t, f);
+        check(std::abs(f - 445.0) < 0.6, "stickiness 0.5 half-snaps (450 -> ~445)",
+              juce::String(f, 2));
+
+        // v1.33.2: per-zone stickiness. The zone's own value wins inside
+        // it; -1 means "follow the global stick" (old pieces).
+        {
+            upic::SieveZone zs;
+            zs.t0 = 0; zs.t1 = 10; zs.f0 = 100; zs.f1 = 1000;
+            zs.m = 12; zs.remainders = { 0 }; zs.timeGrid = 0; zs.stickiness = 0.0;
+            std::vector<upic::SieveZone> zz { zs };
+            t = 5.0; f = 450.0;
+            upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, t, f);
+            check(std::abs(f - 450.0) < 1e-9,
+                  "zone stick 0 leaves the pitch free inside the zone",
+                  juce::String(f, 2));
+            zz[0].stickiness = -1.0;
+            t = 5.0; f = 450.0;
+            upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, t, f);
+            check(std::abs(upic::freqToMidi(f) - 72.0) < 0.05,
+                  "zone stick -1 follows the global stick (450 -> C5)",
+                  juce::String(f, 2));
+        }
+    }
+
+    // 14. freehand curve simplification (RDP): fewer points, shape kept
+    {
+        std::vector<upic::ArcPoint> pts;
+        juce::Random jr(77);
+        const int N = 300;
+        for (int i = 0; i <= N; ++i)
+        {
+            const double t = (double) i / N * 10.0;
+            const double f = 440.0 * std::pow(2.0, 0.8 * std::sin(t))
+                           * (1.0 + (jr.nextFloat() - 0.5f) * 0.01);
+            pts.push_back({ t, f, 1.0f });
+        }
+        const auto orig = pts;
+        upic::simplifyArcPoints(pts, 0.01);
+        check(pts.size() < orig.size() / 2, "simplify halves dense stroke",
+              juce::String((int) pts.size()) + " of " + juce::String((int) orig.size()));
+        check(! pts.empty() && pts.front().t == orig.front().t
+              && pts.front().freq == orig.front().freq
+              && pts.back().t == orig.back().t
+              && pts.back().freq == orig.back().freq,
+              "simplify preserves endpoints");
+
+        const double t0 = orig.front().t, tSpan = juce::jmax(1e-9, orig.back().t - t0);
+        double lmin = 1e18, lmax = -1e18;
+        for (auto& q : orig) { const double l = std::log2(q.freq); lmin = std::min(lmin, l); lmax = std::max(lmax, l); }
+        const double lSpan = juce::jmax(1e-9, lmax - lmin);
+        auto segDist = [](double px, double py, double ax, double ay, double bx, double by){
+            const double dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+            if (len2 < 1e-18) return std::hypot(px - ax, py - ay);
+            const double u = juce::jlimit(0.0, 1.0, ((px - ax) * dx + (py - ay) * dy) / len2);
+            return std::hypot(px - (ax + u * dx), py - (ay + u * dy));
+        };
+        double maxDev = 0.0;
+        for (auto& q : orig)
+        {
+            const double px = (q.t - t0) / tSpan, py = (std::log2(q.freq) - lmin) / lSpan;
+            double best = 1e18;
+            for (size_t i = 1; i < pts.size(); ++i)
+            {
+                const double ax = (pts[i-1].t - t0) / tSpan, ay = (std::log2(pts[i-1].freq) - lmin) / lSpan;
+                const double bx = (pts[i].t - t0) / tSpan,   by = (std::log2(pts[i].freq) - lmin) / lSpan;
+                best = std::min(best, segDist(px, py, ax, ay, bx, by));
+            }
+            maxDev = std::max(maxDev, best);
+        }
+        check(maxDev <= 0.021, "simplify deviation <= 2*eps", juce::String(maxDev, 4));
+    }
+
+    // 15. procedural arc generation (nUPIC-style generators)
+    {
+        upic::GenParams gp; gp.t0 = 0.0; gp.t1 = 8.0; gp.f0 = 90.0; gp.f1 = 3000.0;
+        auto structural = [&](const std::vector<upic::Arc>& arcs, int minArcs){
+            bool ok = (int) arcs.size() >= minArcs;
+            for (auto& a : arcs)
+            {
+                ok = ok && a.points.size() >= 2;
+                double lastT = -1.0;
+                for (auto& p : a.points)
+                {
+                    ok = ok && p.t >= gp.t0 - 1e-9 && p.t <= gp.t1 + 1e-9;
+                    ok = ok && p.t > lastT; // strictly increasing
+                    ok = ok && p.freq >= upic::kMinFreq - 1e-6 && p.freq <= upic::kMaxFreq + 1e-6;
+                    ok = ok && p.freq == p.freq; // no NaN
+                    lastT = p.t;
+                }
+            }
+            return ok;
+        };
+        juce::Random r1(4242);
+        auto stoch = upic::genStochasticArborescence(gp, r1);
+        check(structural(stoch, 3), "gen stochastic arborescence (>=3 arcs)",
+              juce::String((int) stoch.size()) + " arcs");
+
+        juce::Random r2(4242);
+        auto conv = upic::genConvergentArborescence(gp, r2);
+        check(structural(conv, 4), "gen convergent arborescence (>=4 arcs)",
+              juce::String((int) conv.size()) + " arcs");
+        const double target = 0.5 * (std::log2(gp.f0) + std::log2(gp.f1));
+        bool convOk = ! conv.empty();
+        for (auto& a : conv)
+            convOk = convOk && a.points.size() >= 2
+                  && std::abs(std::log2(a.points.back().freq) - target) < 1e-6;
+        check(convOk, "convergent arcs end on the shared target pitch");
+
+        juce::Random r3(4242);
+        auto ech = upic::genEchelon(gp, r3);
+        check(structural(ech, 4), "gen echelon construction (>=4 ranks)",
+              juce::String((int) ech.size()) + " arcs");
+
+        juce::Random r4(4242);
+        auto spine = upic::genOrdinalSpine(gp, r4);
+        check(structural(spine, 4), "gen ordinal spine + branches (>=4 arcs)",
+              juce::String((int) spine.size()) + " arcs");
+
+        juce::Random d1(99), d2(99);
+        auto A = upic::genStochasticArborescence(gp, d1);
+        auto B = upic::genStochasticArborescence(gp, d2);
+        bool same = A.size() == B.size() && ! A.empty();
+        for (size_t i = 0; same && i < A.size(); ++i)
+        {
+            same = A[i].points.size() == B[i].points.size();
+            for (size_t j = 0; same && j < A[i].points.size(); ++j)
+                same = A[i].points[j].t == B[i].points[j].t
+                    && A[i].points[j].freq == B[i].points[j].freq;
+        }
+        check(same, "generators deterministic for a fixed seed");
+    }
+
+    // 16. per-arc entry/exit edge fade: square wave (worst case) starts/ends silent
+    {
+        upic::Waveform sq(99, "Square", juce::Colours::white);
+        sq.makeSquare();
+        std::vector<upic::Waveform> waves { sq };
+        auto envs = upic::defaultEnvelopes();
+        upic::Page pg; pg.durationSec = 1.0;
+        upic::Arc a; a.id = 1; a.waveformId = 99; a.intensity = 1.0f;
+        a.points = { { 0.2, 440.0 }, { 0.8, 440.0 } };
+        pg.arcs.push_back(a);
+        juce::AudioBuffer<float> buf(2, 44100); buf.clear();
+        UpicEngine eng; eng.prepare(44100.0, 8192);
+        std::vector<upic::SampleSlot> noSlots;
+        eng.renderPageOffline(pg, waves, envs, noSlots, buf, 44100.0, 1.0f);
+        const int i0 = (int) (0.2 * 44100.0), i1 = (int) (0.8 * 44100.0);
+        const float first = std::abs(buf.getSample(0, i0));
+        const float last  = std::abs(buf.getSample(0, i1));
+        const float mid   = std::abs(buf.getSample(0, (i0 + i1) / 2));
+        check(first < 0.01, "arc entry fade starts silent", juce::String(first, 4));
+        check(last < 0.01, "arc exit fade ends silent", juce::String(last, 4));
+        check(mid > 0.15, "arc mid-level audible", juce::String(mid, 4));
+    }
+
+}

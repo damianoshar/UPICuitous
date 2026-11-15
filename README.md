@@ -434,7 +434,9 @@ Source/              JUCE app + shared engine/UI
                      Audio / Midi / Files)
   AndroidBars.h      Android status/nav bar helpers
   Main.cpp           the app entry point
-  SelfTest.*         the headless checks (--selftest)
+  SelfTest.*         the headless checks (--selftest): the runner, the
+                     checks by area (Engine / Audio / Model / Files /
+                     Midi / Ui / Snapshot) and the allocation counter
 Plugin/              VST3 wrapper (CMake): processor, editor, smoke test
 scripts/             build.ps1, install_plugin.ps1, fix_android.ps1,
                      check_juce.ps1, fetch_pluginval.ps1
@@ -462,7 +464,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 662 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 663 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -486,12 +488,12 @@ sample PCM surviving repeated saves, the stems of a PM-only page, the
 latency following an arc's own algorithm, and the file a chooser
 returns, the MIDI message queue, the MIDI channel labels, the model
 snapshot that the status timer publishes, the audio thread's
-allocations (the render, the steady state, a reset and the vocoder's
-working memory), the long jobs (the worker thread, the cancel, and
-the export that writes its file), the ids of a loaded piece (the
-duplicate arc ids, the impossible ones, the derived next id and the
-material references), the values that cross the thread boundary (the
-sample rate and the scrub tail), the unsaved-changes flag, the undo
+allocations (the counter itself, the render, the steady state, a reset
+and the vocoder's working memory), the long jobs (the worker thread,
+the cancel, and the export that writes its file), the ids of a loaded
+piece (the duplicate arc ids, the impossible ones, the derived next id
+and the material references), the values that cross the thread boundary
+(the sample rate and the scrub tail), the unsaved-changes flag, the undo
 stack (the step, the restore, the redo, the branch, the drag that is one
 step, and the stroke on the canvas), the recovery snapshot (the
 snapshot, the sidecar with the audio, the reuse of the unchanged audio,

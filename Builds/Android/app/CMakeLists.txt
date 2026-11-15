@@ -95,6 +95,14 @@ add_library( ${BINARY_NAME}
     "../../../Source/Main.cpp"
     "../../../Source/SelfTest.cpp"
     "../../../Source/SelfTest.h"
+    "../../../Source/SelfTestAudio.cpp"
+    "../../../Source/SelfTestEngine.cpp"
+    "../../../Source/SelfTestFiles.cpp"
+    "../../../Source/SelfTestMidi.cpp"
+    "../../../Source/SelfTestModel.cpp"
+    "../../../Source/SelfTestSnapshot.cpp"
+    "../../../Source/SelfTestUi.cpp"
+    "../../../Source/AllocCounter.h"
     "../../../Source/MainComponent.cpp"
     "../../../Source/MainComponentControls.cpp"
     "../../../Source/MainComponentLayout.cpp"
@@ -2570,6 +2578,7 @@ add_library( ${BINARY_NAME}
 
 set_source_files_properties(
     "../../../Source/SelfTest.h"
+    "../../../Source/AllocCounter.h"
     "../../../Source/MainComponent.h"
     "../../../Source/EnvelopeEditor.h"
     "../../../Source/ScoreEditor.h"

@@ -1,18 +1,55 @@
 #pragma once
+#include <JuceHeader.h>
 
 //==============================================================================
 // The headless verification of UPICuitous (UPICuitous.exe --selftest).
 //
-// The checks live in SelfTest.cpp: they cover the DSP engine, the envelope
-// and pitch maths, the JSON round-trip (including the files written by the
-// Python version), the file I/O, the undo/redo, the crash recovery and the
-// offscreen UI snapshots.
-//
-// They are kept out of Main.cpp on purpose: the application entry point is
-// small enough to read at a glance, and the checks can grow without making
-// it harder to find the app itself.
+// The checks live in the SelfTest*.cpp files, by area: the engine, the audio
+// path, the model, the files, the MIDI, the interface and the offscreen
+// snapshot. They are kept out of Main.cpp on purpose - the application entry
+// point is small enough to read at a glance.
 namespace upic
 {
+    // The shared state of a run: the log and the number of failures so far.
+    struct SelfTest
+    {
+        juce::String log;
+        int failures = 0;
+
+        // Records one check: "PASS" or "FAIL", with the detail (if any).
+        void check (bool ok, const juce::String& name, const juce::String& detail = {});
+    };
+
+    // The checks, by area. They run in the order the runner lists them (the
+    // same order they had before the split).
+    void runDspChecks (SelfTest& t);
+    void runAudioThreadChecks (SelfTest& t);
+    void runLoadedPieceChecks (SelfTest& t);
+    void runThreadValueChecks (SelfTest& t);
+    void runPieceStateChecks (SelfTest& t);
+    void runHostTransportChecks (SelfTest& t);
+    void runDrawingChecks (SelfTest& t);
+    void runMidiScrubChecks (SelfTest& t);
+    void runCursorPathChecks (SelfTest& t);
+    void runLivePathChecks (SelfTest& t);
+    void runTransformChecks (SelfTest& t);
+    void runUntrustedPieceChecks (SelfTest& t);
+    void runModelMathChecks (SelfTest& t);
+    void runExportChecks (SelfTest& t);
+    void runSieveChecks (SelfTest& t);
+    void runEditorChecks (SelfTest& t);
+    void runSnapshotChecks (SelfTest& t);
+    void runContinuityChecks (SelfTest& t);
+    void runRealtimeChecks (SelfTest& t);
+    void runArcOverrideChecks (SelfTest& t);
+    void runPanelChecks (SelfTest& t);
+    void runPmPresetChecks (SelfTest& t);
+    void runWidgetChecks (SelfTest& t);
+    void runMidiInputChecks (SelfTest& t);
+    void runEnvelopeChecks (SelfTest& t);
+    void runTransportChecks (SelfTest& t);
+    void runChooserChecks (SelfTest& t);
+
     // Runs every check and returns the number of failures (0 = all passed).
     // The log of the run is written to <temp>/upic_selftest.txt.
     int runSelfTest();
