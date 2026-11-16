@@ -328,7 +328,7 @@ void MainComponent::resized()
     auto neededWidth = [&] (juce::Component* c) -> int
     {
         if (c == nullptr) return 0;
-        juce::Font f;
+        juce::Font f (juce::FontOptions{});
         juce::String text;
         int pad = 6;
         if (auto* t = dynamic_cast<juce::ToggleButton*> (c))

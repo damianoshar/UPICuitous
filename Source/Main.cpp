@@ -75,17 +75,18 @@ public:
             // area in logical px. The immersive switch + refit timer below
             // take it from there.
             if (display != nullptr)
-                setSize(display->userArea.getWidth(), display->userArea.getHeight());
+                setSize (juce::roundToInt (display->userBounds.getWidth()),
+                         juce::roundToInt (display->userBounds.getHeight()));
             else
                 setSize(1024, 768);
 #else
             // Default window: the 1280x800 dp design, clamped to the screen
-            // (userArea is in logical px too).
+            // (userBounds is in logical px too).
             int w = 1280, h = 800;
             if (display != nullptr)
             {
-                const int availW = display->userArea.getWidth()  - 16;
-                const int availH = display->userArea.getHeight() - 48;
+                const int availW = juce::roundToInt (display->userBounds.getWidth())  - 16;
+                const int availH = juce::roundToInt (display->userBounds.getHeight()) - 48;
                 w = juce::jmin(w, juce::jmax(460, availW));
                 h = juce::jmin(h, juce::jmax(360, availH));
             }
@@ -104,8 +105,8 @@ public:
             // Rotation/fold: JUCE refreshes its Displays data from the
             // activity's layout listener, but never re-applies top-level
             // bounds, so follow the display ourselves. The target mirrors
-            // the peer's own fullscreen rule: totalArea while the bars are
-            // hidden, userArea otherwise.
+            // the peer's own fullscreen rule: logicalBounds while the bars
+            // are hidden, userBounds otherwise.
             refitter = std::make_unique<WindowRefitter>(*this);
 #endif
         }
@@ -182,8 +183,8 @@ public:
                 if (d == nullptr) return;
 
                 const auto target = (window.getPeer() != nullptr && window.getPeer()->isFullScreen())
-                                        ? d->totalArea
-                                        : d->userArea;
+                                        ? d->logicalBounds.toNearestInt()
+                                        : d->userBounds.toNearestInt();
 
                 if (! target.isEmpty() && window.getBounds() != target)
                     window.setBounds (target);
@@ -191,7 +192,7 @@ public:
                 // Re-assert immersive bars (AndroidBars.h): swipe reveals,
                 // focus loss, volume panels and rotation all clear the hide
                 // request otherwise.
-                if (target == d->totalArea)
+                if (target == d->logicalBounds.toNearestInt())
                     hideSystemBars();
             }
 

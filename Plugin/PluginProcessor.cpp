@@ -90,10 +90,10 @@ void UpicuitousAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // A host that does not offer a playhead says so ("known" = false) and
     // the app keeps its own transport.
     {
-        auto* playHead = getPlayHead();
-        if (playHead != nullptr)
+        auto* hostPlayHead = getPlayHead();
+        if (hostPlayHead != nullptr)
         {
-            if (const auto pos = playHead->getPosition())
+            if (const auto pos = hostPlayHead->getPosition())
             {
                 // the host may leave the time unset (it knows the position
                 // in samples but not in seconds) - then the position is 0

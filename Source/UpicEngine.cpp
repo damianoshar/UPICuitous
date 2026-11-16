@@ -1097,12 +1097,14 @@ bool writeWavFile(const juce::File& target, const juce::AudioBuffer<float>& buf,
     if (target == juce::File() || sr <= 0.0 || buf.getNumChannels() < 1) return false;
 
     juce::TemporaryFile temp (target);
-    auto out = temp.getFile().createOutputStream();
+    std::unique_ptr<juce::OutputStream> out = temp.getFile().createOutputStream();
     if (out == nullptr) return false;
 
     juce::WavAudioFormat fmt;
-    std::unique_ptr<juce::AudioFormatWriter> w (
-        fmt.createWriterFor (out.release(), sr, (unsigned int) buf.getNumChannels(), 16, {}, 0));
+    auto w = fmt.createWriterFor (out, juce::AudioFormatWriterOptions{}
+                                           .withSampleRate (sr)
+                                           .withNumChannels (buf.getNumChannels())
+                                           .withBitsPerSample (16));
     if (w == nullptr) return false;
 
     const bool wrote = w->writeFromAudioSampleBuffer (buf, 0, buf.getNumSamples());
@@ -1117,12 +1119,14 @@ bool writePageToWavFile(const juce::File& target, const upic::Page& page, const 
     if (target == juce::File() || sr <= 0.0 || page.durationSec <= 0.0) return false;
 
     juce::TemporaryFile temp (target);
-    auto out = temp.getFile().createOutputStream();
+    std::unique_ptr<juce::OutputStream> out = temp.getFile().createOutputStream();
     if (out == nullptr) return false;
 
     juce::WavAudioFormat fmt;
-    std::unique_ptr<juce::AudioFormatWriter> w (
-        fmt.createWriterFor (out.release(), sr, 2, 16, {}, 0));
+    auto w = fmt.createWriterFor (out, juce::AudioFormatWriterOptions{}
+                                           .withSampleRate (sr)
+                                           .withNumChannels (2)
+                                           .withBitsPerSample (16));
     if (w == nullptr) return false;
 
     UpicEngine eng;
