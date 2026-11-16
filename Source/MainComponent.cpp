@@ -14,6 +14,20 @@
 // audio in MainComponentAudio.cpp, the MIDI in MainComponentMidi.cpp and the
 // files in MainComponentFiles.cpp.
 
+// Keep every numeric slider in the same visual family as Master Volume.
+// Deliberately do not change range, behaviour, format or text-box dimensions.
+namespace
+{
+void applyMasterVolumeSliderTheme (juce::Slider& s)
+{
+    s.setColour (juce::Slider::backgroundColourId,     juce::Colour (0xff4a4a5c));
+    s.setColour (juce::Slider::trackColourId,          juce::Colour (0xff5ac8fa));
+    s.setColour (juce::Slider::thumbColourId,          juce::Colour (0xffe6f4ff));
+    s.setColour (juce::Slider::textBoxTextColourId,    juce::Colour (0xfff2f2f7));
+    s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colour (0xff4a4a5c));
+}
+}
+
 //==============================================================================
 MainComponent::MainComponent(bool pluginMode)
     : pluginMode_(pluginMode)
@@ -72,6 +86,32 @@ MainComponent::MainComponent(bool pluginMode)
     buildLiveInputControls();
     buildScoreArea();
     buildEditors();
+    // Theme all slider groups after their builders run. Previously Scrub,
+    // Drag smooth, Sample grain and Live grain retained the transparent
+    // JUCE value boxes instead of the Master Volume treatment.
+    for (auto* slider : { &durSlider, &masterSlider, &intenSlider,
+                          &refSlider, &tempoSlider, &pmRatioSlider,
+                          &pmIndexSlider, &pmFeedbackSlider, &stickSlider,
+                          &inGainSlider, &scrubLenSlider, &scrubCrossSlider,
+                          &scrubTailSlider, &scrubGrainSlider, &grainSlider,
+                          &dragSmoothSlider, &liveGrainSlider, &oscPortSlider,
+                          &oscMcPortSlider, &modRateSlider, &modDepthSlider,
+                          &stepDivSlider, &warpSlider, &levelSlider })
+        applyMasterVolumeSliderTheme (*slider);
+    // Icon-only controls remain discoverable with mouse/pen hover. Preserve
+    // any more specific tooltips that the individual controls already set.
+    pageAddBtn.setTooltip ("Add a page");
+    pageDupBtn.setTooltip ("Duplicate the current page");
+    pageDelBtn.setTooltip ("Delete the current page");
+    for (auto* b : { &playBtn, &stopBtn, &menuBtn, &settingsBtn, &clearBtn,
+                     &saveBtn, &loadBtn, &exportBtn, &stemsBtn, &audioBtn,
+                     &waveTog, &envTog, &hintsTog, &arcListBtn,
+                     &matOscTog, &matSampleTog, &matLiveTog, &matPmTog,
+                     &assignBtn, &delArcBtn, &muteArcBtn,
+                     &loadSampleBtn, &pmImportBtn, &pmExportBtn,
+                     &normMatBtn, &fadeMatBtn, &resetMatBtn,
+                     &liveRevBtn, &revBtn, &waveFromSlotBtn })
+        if (b->getTooltip().isEmpty()) b->setTooltip (b->getButtonText());
     // v1.29: listen for the phone/MobMuPlat scrub. Message-loop callbacks
     // mean the playhead moves on the message thread exactly like a drag.
     // v1.30 (5.3 refactor): the receiver owns its own listeners; starting it
@@ -156,8 +196,6 @@ void MainComponent::buildTransportControls()
         s->setSliderStyle(juce::Slider::LinearHorizontal);
         s->setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
         s->setNumDecimalPlacesToDisplay(0);
-        s->setColour(juce::Slider::textBoxTextColourId, juce::Colours::white);
-        s->setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         addAndMakeVisible(s);
     }
     for (auto* l : { &scrubLenLab, &scrubCrossLab, &scrubTailLab, &scrubGrainLab })
@@ -203,8 +241,6 @@ void MainComponent::buildTransportControls()
     grainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
     grainSlider.setNumDecimalPlacesToDisplay(0);
     grainSlider.setTextValueSuffix(" ms");
-    grainSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colours::white);
-    grainSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     grainSlider.setRange(5.0, 500.0, 1.0);
     grainSlider.setValue((double) sampleGrainMs, juce::dontSendNotification);
     grainSlider.onValueChange = [this]{
@@ -229,8 +265,6 @@ void MainComponent::buildTransportControls()
     dragSmoothSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
     dragSmoothSlider.setNumDecimalPlacesToDisplay(0);
     dragSmoothSlider.setTextValueSuffix(" ms");
-    dragSmoothSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colours::white);
-    dragSmoothSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     dragSmoothSlider.setRange(0.0, 1000.0, 1.0);
     dragSmoothSlider.setValue((double) dragSmoothMs.load(), juce::dontSendNotification);
     dragSmoothSlider.onValueChange = [this]{ dragSmoothMs.store((int) dragSmoothSlider.getValue(), std::memory_order_relaxed); };
@@ -473,8 +507,6 @@ void MainComponent::buildLiveControls()
     liveGrainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 56, 18);
     liveGrainSlider.setNumDecimalPlacesToDisplay(0);
     liveGrainSlider.setTextValueSuffix(" ms");
-    liveGrainSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colours::white);
-    liveGrainSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     liveGrainSlider.setRange(5.0, 500.0, 1.0);
     liveGrainSlider.setValue((double) liveGrainMs, juce::dontSendNotification);
     liveGrainSlider.setTooltip("Granular grain size for the LIVE tab.\n"
@@ -593,6 +625,7 @@ void MainComponent::buildCombos()
     addAndMakeVisible(waveEditBox); addAndMakeVisible(envEditBox);
     addAndMakeVisible(pageAddBtn); addAndMakeVisible(pageDupBtn); addAndMakeVisible(pageDelBtn);
 
+    toolBox.setName ("toolBox"); // the tool selector displays its SVG beside the selected tool
     toolBox.addItem("Draw", 1); toolBox.addItem("Line", 2); toolBox.addItem("Sine", 3);
     toolBox.addItem("Select/Move", 4); toolBox.addItem("Erase", 5);
     toolBox.addItem("Sieve zone", 6);
@@ -777,20 +810,8 @@ void MainComponent::buildToolbarControls()
     // v1.31 (U2): the duration now reaches "720.000 s", so its value box
     // needs a little more room than the shared 72 px.
     durSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 92, 18);
-    // v1.25: brighter tracks and thumbs - the dark scheme put the unfilled
-    // track almost on top of the toolbar card.
-    auto styleSlider = [](juce::Slider& s)
-    {
-        s.setColour (juce::Slider::backgroundColourId,     juce::Colour (0xff4a4a5c));
-        s.setColour (juce::Slider::trackColourId,          juce::Colour (0xff5ac8fa));
-        s.setColour (juce::Slider::thumbColourId,          juce::Colour (0xffe6f4ff));
-        s.setColour (juce::Slider::textBoxTextColourId,    juce::Colour (0xfff2f2f7));
-        s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colour (0xff4a4a5c));
-    };
-    for (auto* s : { &durSlider, &masterSlider, &intenSlider, &refSlider, &tempoSlider,
-                     &pmRatioSlider, &pmIndexSlider, &pmFeedbackSlider, &stickSlider,
-                     &inGainSlider })
-        styleSlider (*s);
+    // The full numeric-slider palette is applied once in the constructor,
+    // after every control group (including Scrub and overlays) is built.
 }
 
 //==============================================================================

@@ -13,6 +13,7 @@
 #include "OverlayPanels.h"
 #include "OscScrubReceiver.h"
 #include "JobRunner.h"
+#include "UpicButtonIcons.h"
 
 //==============================================================================
 // Main UPIC window: transport + score page + wavetable/envelope editors.
@@ -381,6 +382,110 @@ private:
         { return withDefaultMetrics (juce::FontOptions (juce::jlimit (8.0f, 15.0f, 15.0f * uiScale))); }
 
         juce::Font getTextButtonFont (juce::TextButton&, int) override { return buttonFont(); }
+        // Paint icons as an addition to the ORIGINAL visible label, never as
+        // a replacement. On short buttons use icon+text; on narrow buttons
+        // stack a small symbol above the text. When a control is too small
+        // for both, the original JUCE text takes priority over the icon.
+        void drawButtonText (juce::Graphics& g, juce::TextButton& button,
+                             bool highlighted, bool down) override
+        {
+            const auto* icon = upic::buttonIcons::drawableFor (button);
+            if (icon == nullptr)
+            {
+                juce::LookAndFeel_V4::drawButtonText (g, button, highlighted, down);
+                return;
+            }
+
+            const auto bounds = button.getLocalBounds();
+            const auto label = button.getButtonText();
+            const auto font = buttonFont();
+            if (label.isEmpty())
+            {
+                const float sz = (float) juce::jmin (18, juce::jmin (bounds.getWidth(), bounds.getHeight()) - 4);
+                if (sz > 0.0f)
+                    icon->drawWithin (g, { ((float) bounds.getWidth() - sz) * 0.5f,
+                                            ((float) bounds.getHeight() - sz) * 0.5f, sz, sz },
+                                      juce::RectanglePlacement::centred,
+                                      button.isEnabled() ? 1.0f : 0.42f);
+                return;
+            }
+
+            const auto drawLabel = [&] (juce::Rectangle<int> labelBounds, juce::Font labelFont)
+            {
+                g.setFont (labelFont);
+                g.setColour (button.findColour (button.getToggleState()
+                    ? juce::TextButton::textColourOnId : juce::TextButton::textColourOffId));
+                if (! button.isEnabled()) g.setOpacity (0.5f);
+                g.drawFittedText (label, labelBounds, juce::Justification::centred, 1, 0.55f);
+            };
+
+            // Prefer horizontal icons when the text fits without shrinking.
+            // The estimate errs on the generous side for the variable-width
+            // UI font, avoiding unreadable icons+labels in narrow controls.
+            const int sideIconSize = juce::jmax (0, juce::jmin (juce::jlimit (10, 17,
+                                             juce::roundToInt (16.0f * uiScale)), bounds.getHeight() - 6));
+            const int estimatedLabelWidth = juce::roundToInt (
+                font.getHeight() * 0.58f * (float) label.length());
+            const bool compactPreset = upic::buttonIcons::compactShapeButton (button);
+            const bool sideBySide = ! compactPreset
+                && bounds.getWidth() >= estimatedLabelWidth + sideIconSize + 12;
+
+            if (sideBySide && sideIconSize > 0)
+            {
+                const int iconX = 4;
+                const int iconY = (bounds.getHeight() - sideIconSize) / 2;
+                icon->drawWithin (g, { (float) iconX, (float) iconY,
+                                       (float) sideIconSize, (float) sideIconSize },
+                                  juce::RectanglePlacement::centred,
+                                  button.isEnabled() ? 1.0f : 0.42f);
+                drawLabel (bounds.withTrimmedLeft (iconX + sideIconSize + 3)
+                                 .withTrimmedRight (2), font);
+                return;
+            }
+
+            // The waveform/envelope preset row is about 26px high. Even
+            // there, show BOTH the miniature actual shape and its original
+            // caption (Sine, Saw, Sqr, Tri, Noise, Smooth, Norm, etc.).
+            if (bounds.getHeight() >= 19 && bounds.getWidth() >= 16)
+            {
+                const int topPadding = 1;
+                const int iconSize = juce::jlimit (7, 12, (bounds.getHeight() - 4) / 2);
+                icon->drawWithin (g, { (float) (bounds.getWidth() - iconSize) * 0.5f,
+                                       (float) topPadding, (float) iconSize, (float) iconSize },
+                                  juce::RectanglePlacement::centred,
+                                  button.isEnabled() ? 1.0f : 0.42f);
+                const int labelTop = topPadding + iconSize + 1;
+                const auto smallFont = font.withHeight (juce::jlimit (7.0f, 10.0f,
+                    (float) (bounds.getHeight() - labelTop) * 0.94f));
+                drawLabel (bounds.withTrimmedTop (labelTop).reduced (1, 0), smallFont);
+                return;
+            }
+
+            // Very small controls retain the readable original text rather
+            // than silently becoming pictogram-only buttons.
+            juce::LookAndFeel_V4::drawButtonText (g, button, highlighted, down);
+        }
+
+        void drawComboBox (juce::Graphics& g, int width, int height,
+                           bool isButtonDown, int buttonX, int buttonY,
+                           int buttonW, int buttonH, juce::ComboBox& box) override
+        {
+            juce::LookAndFeel_V4::drawComboBox (g, width, height, isButtonDown,
+                                                buttonX, buttonY, buttonW, buttonH, box);
+            if (const auto* icon = upic::buttonIcons::toolDrawable (box))
+            {
+                const float sz = (float) juce::jlimit (10, 17, height - 8);
+                icon->drawWithin (g, { 6.0f, (height - sz) * 0.5f, sz, sz },
+                                  juce::RectanglePlacement::centred, box.isEnabled() ? 1.0f : 0.4f);
+            }
+        }
+
+        void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override
+        {
+            juce::LookAndFeel_V4::positionComboBoxText (box, label);
+            if (box.getName() == "toolBox")
+                label.setBounds (label.getBounds().withTrimmedLeft (20));
+        }
         juce::Font getComboBoxFont (juce::ComboBox&) override { return buttonFont(); }
         juce::Font getLabelFont (juce::Label& l) override
         { return withDefaultMetrics (juce::FontOptions (l.getFont().getHeight() * uiScale)); }
@@ -393,6 +498,33 @@ private:
             const auto font = toggleFont();
             const auto fontSize = font.getHeight();
             const auto tickWidth = fontSize * 1.1f;
+            const auto* icon = upic::buttonIcons::drawableFor (button);
+            if (icon != nullptr && button.getWidth() >= 34)
+            {
+                const float sz = juce::jlimit (10.0f, 18.0f, fontSize * 1.04f);
+                const float top = ((float) button.getHeight() - sz) * 0.5f;
+                const auto accent = button.findColour (juce::ToggleButton::tickColourId);
+                // The coloured icon plate is an explicit indicator of the
+                // toggle's on/off state, replacing the default tick box.
+                g.setColour (accent.withAlpha (button.getToggleState() ? 0.37f : 0.10f));
+                g.fillRoundedRectangle ({ 2.0f, top - 2.0f, sz + 5.0f, sz + 4.0f }, 3.0f);
+                if (button.getToggleState())
+                {
+                    g.setColour (accent.withAlpha (0.9f));
+                    g.drawRoundedRectangle ({ 2.0f, top - 2.0f, sz + 5.0f, sz + 4.0f }, 3.0f, 1.1f);
+                }
+                icon->drawWithin (g, { 4.0f, top, sz, sz },
+                                  juce::RectanglePlacement::centred,
+                                  button.isEnabled() ? 1.0f : 0.42f);
+                g.setColour (button.findColour (juce::ToggleButton::textColourId));
+                g.setFont (font);
+                if (! button.isEnabled()) g.setOpacity (0.5f);
+                g.drawFittedText (button.getButtonText(),
+                                  button.getLocalBounds().withTrimmedLeft ((int) sz + 11)
+                                         .withTrimmedRight (2),
+                                  juce::Justification::centredLeft, 1);
+                return;
+            }
             drawTickBox (g, button, 4.0f, ((float) button.getHeight() - tickWidth) * 0.5f,
                          tickWidth, tickWidth, button.getToggleState(), button.isEnabled(),
                          highlighted, down);

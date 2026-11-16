@@ -744,6 +744,70 @@ void upic::runWidgetChecks (upic::SelfTest& t)
         }
     }
 
+    // 21f. v1.33.5 (L7): the button pictograms and the unified sliders.
+    //     - every icon the button map names has to exist, and every
+    //       embedded icon has to parse (a broken SVG would quietly leave
+    //       a button without its pictogram)
+    //     - every numeric slider wears the same colours now (the Master
+    //       Volume treatment), so the rows read as one family
+    //     - the captions stay: an icon is added, never a replacement
+    {
+        int missing = 0;
+        for (const auto& mapping : upic::buttonIcons::buttonMappings)
+            if (upic::buttonIcons::find (mapping.icon) == nullptr) ++missing;
+        check (missing == 0, "every button mapping has an icon",
+               juce::String (missing) + " missing");
+
+        int broken = 0;
+        for (const auto& definition : upic::buttonIcons::definitions)
+            if (upic::buttonIcons::find (definition.name) == nullptr) ++broken;
+        check (broken == 0, "every embedded icon parses",
+               juce::String (broken) + " broken");
+
+        auto mcHolder = std::make_unique<MainComponent>();
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+
+        std::function<void (juce::Component&, std::vector<juce::Slider*>&)> collectSliders =
+            [&collectSliders] (juce::Component& c, std::vector<juce::Slider*>& out)
+            {
+                if (auto* s = dynamic_cast<juce::Slider*> (&c)) out.push_back (s);
+                for (int i = 0; i < c.getNumChildComponents(); ++i)
+                    collectSliders (*c.getChildComponent (i), out);
+            };
+        std::vector<juce::Slider*> sliders;
+        collectSliders (mc, sliders);
+
+        int offTheme = 0;
+        for (auto* s : sliders)
+            if (s->findColour (juce::Slider::backgroundColourId)  != juce::Colour (0xff4a4a5c)
+             || s->findColour (juce::Slider::trackColourId)       != juce::Colour (0xff5ac8fa)
+             || s->findColour (juce::Slider::thumbColourId)       != juce::Colour (0xffe6f4ff)
+             || s->findColour (juce::Slider::textBoxTextColourId) != juce::Colour (0xfff2f2f7))
+                ++offTheme;
+        check (sliders.size() >= 24 && offTheme == 0,
+               "all the numeric sliders wear the same colours",
+               juce::String (sliders.size()) + " sliders, "
+                   + juce::String (offTheme) + " off theme");
+
+        std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+            [&findByName](juce::Component& c, const juce::String& n) -> juce::Component* {
+                if (c.getName() == n) return &c;
+                for (int i = 0; i < c.getNumChildComponents(); ++i)
+                    if (auto* r = findByName(*c.getChildComponent(i), n)) return r;
+                return nullptr;
+            };
+        auto* play = dynamic_cast<juce::Button*> (findByName (mc, "Play"));
+        auto* sine = dynamic_cast<juce::TextButton*> (findByName (mc, "wSine"));
+        check (play != nullptr && play->getButtonText() == "Play"
+               && upic::buttonIcons::drawableFor (*play) != nullptr,
+               "a button keeps its caption and gains an icon");
+        check (sine != nullptr && sine->getButtonText() == "Sine"
+               && upic::buttonIcons::drawableFor (*sine) != nullptr
+               && upic::buttonIcons::compactShapeButton (*sine),
+               "a narrow preset keeps its caption and gains its shape");
+    }
+
 }
 
 void upic::runEnvelopeChecks (upic::SelfTest& t)

@@ -9,6 +9,22 @@ microphone input (pitch-shifted in realtime).
 Ships as a **desktop app**, an **Android tablet app**, and a **VST3
 plugin** with the same UI and engine.
 
+## Button pictograms and captions
+
+Most tools now have vector pictograms (Lucide plus custom wave/envelope/tool
+shapes). **Every existing button caption remains visibly rendered:** wider
+buttons put the icon beside the original text; narrow waveform and envelope
+presets put the icon above the original text. On exceptionally small controls,
+text has priority and the icon may be omitted. No control names, callbacks,
+shortcuts or accessibility labels are changed. The SVGs are included under
+`Resources/Icons/`, with attribution and the generator in `Tools/`.
+
+Every numeric slider also wears the same colours now - the treatment the
+Master Volume slider always had (unfilled track `#4a4a5c`, filled track
+`#5ac8fa`, thumb `#e6f4ff`, value text `#f2f2f7`, value-box outline
+`#4a4a5c`). Ranges, values, callbacks, text-box sizes and suffixes are
+unchanged - only the colours are.
+
 ## Screenshots
 
 ![UPICuitous desktop app](docs/screenshots/upicuitous-overview.png)
@@ -593,3 +609,15 @@ entry (Di Scipio, 2023).
 Next: see `FUTURE_IDEAS.md` and the Kanso board. The signed playhead,
 MIDI scrub, live reverse and PM voice shipped in v1.25; the FM8 bridge,
 the full FM engine and DAW sync are still flagged as future ideas.
+
+### Vector button and tool images
+
+The default JUCE UI includes 52 embedded, scalable SVG icons (`Resources/Icons/`).
+Transport and file/page controls have standard pictograms; the small wave and
+envelope preset buttons show the actual preset shapes; the TOOL selector displays
+an icon for its currently selected drawing mode. Button callbacks and text remain
+unchanged, and the icons are bundled directly into the C++ sources for use in
+standalone, VST3, Projucer and Android builds. Attribution and regeneration
+instructions are in `Resources/Icons/README.md`.
+
+![The button and tool icons](docs/screenshots/upicuitous-button-icons.png)

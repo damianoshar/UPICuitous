@@ -178,6 +178,11 @@ void MainComponent::buildEditors()
     addAndMakeVisible(wNoise); addAndMakeVisible(wSmooth); addAndMakeVisible(wNorm);
     wSine.setName("wSine");
     eFlat.setName("envFlatBtn");
+    // Miniature wave/envelope presets show both their icons and their
+    // original text; tooltips describe the action in more detail.
+    for (auto* b : { &wSine, &wSaw, &wSqr, &wTri, &wNoise, &wSmooth, &wNorm,
+                     &eFlat, &ePerc, &eSwell, &eGate, &eStr })
+        b->setTooltip ("Apply " + b->getButtonText() + " shape");
     addAndMakeVisible(eFlat); addAndMakeVisible(ePerc); addAndMakeVisible(eSwell); addAndMakeVisible(eGate); addAndMakeVisible(eStr);
     addAndMakeVisible(assignBtn); addAndMakeVisible(delArcBtn); addAndMakeVisible(muteArcBtn);
     addAndMakeVisible(voiceLab); addAndMakeVisible(waveLab); addAndMakeVisible(envLab); addAndMakeVisible(toolLab);

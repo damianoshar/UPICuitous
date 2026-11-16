@@ -41,6 +41,8 @@
       <FILE id="mRec11" name="MainComponentRecovery.cpp" compile="1" resource="0"
             file="Source/MainComponentRecovery.cpp"/>
       <FILE id="mChdr3" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
+      <FILE id="icMap1" name="UpicButtonIcons.h" compile="0" resource="0" file="Source/UpicButtonIcons.h"/>
+      <FILE id="icData2" name="UpicButtonIconData.h" compile="0" resource="0" file="Source/UpicButtonIconData.h"/>
       <FILE id="eEdr04" name="EnvelopeEditor.h" compile="0" resource="0"
             file="Source/EnvelopeEditor.h"/>
       <FILE id="sEdr05" name="ScoreEditor.h" compile="0" resource="0" file="Source/ScoreEditor.h"/>
