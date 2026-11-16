@@ -83,6 +83,18 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./gradlew
+          # The debug signing config points at ~/.android/debug.keystore - the
+          # public Android debug key. A developer machine has that file
+          # (Android Studio makes it), a CI runner does not, and gradle only
+          # creates it for its own default debug config - not for the custom
+          # one the project declares. The job makes it with the standard
+          # parameters, so the debug APK is signed with the usual debug key.
+          mkdir -p "$HOME/.android"
+          keytool -genkeypair -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
           # SECURITY (S-02): the release build type fails closed when the
           # release keystore is missing - and that check runs while gradle
           # *configures* the build, so every gradle invocation needs a
@@ -181,8 +193,10 @@ jobs:
   macos:
     continue-on-error: true
     # the macOS 14 image was retired on 2026-11-02 - the label now points
-    # at a configuration that no runner offers
-    runs-on: macos-15
+    # at a configuration that no runner offers. The arm64 images
+    # (macos-15, macos-latest) are often out of capacity for public
+    # repositories, so the job asks for the Intel image.
+    runs-on: macos-15-intel
     permissions:
       actions: read
       contents: read
