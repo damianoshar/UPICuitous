@@ -76,23 +76,29 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./gradlew
+          # The throwaway key and the properties file never outlive the step,
+          # not even when the build fails.
+          trap 'rm -f app/keystore.properties app/throwaway.keystore' EXIT
           # The release build type fails closed without a keystore (S-02), so
           # this job signs the build with a THROWAWAY key that it generates
           # itself. The real release key never exists on this runner - it is
           # only in the signing job below, which replaces this signature.
+          #
+          # The keystore sits next to the app's build.gradle, because the
+          # storeFile in keystore.properties is resolved against the app
+          # module's own directory (not against Builds/Android).
           keytool -genkeypair -v \
-            -keystore app/build/throwaway.keystore \
-            -alias throwaway -keyalg RSA -keysize 2048 -validity 1 \
+            -keystore app/throwaway.keystore \
+            -alias throwaway -keyalg RSA -keysize 2048 -validity 30 \
             -storepass throwaway -keypass throwaway \
-            -dname "CN=throwaway, O=upicuitous-ci" >/dev/null 2>&1
+            -dname "CN=throwaway, O=upicuitous-ci"
           {
-            echo "storeFile=app/build/throwaway.keystore"
+            echo "storeFile=throwaway.keystore"
             echo "keyAlias=throwaway"
             echo "keyPassword=throwaway"
             echo "storePassword=throwaway"
           } > app/keystore.properties
           ./gradlew assembleRelease_Release --no-daemon --stacktrace
-          rm -f app/keystore.properties app/build/throwaway.keystore
 
       - name: Collect the APK
         run: |
