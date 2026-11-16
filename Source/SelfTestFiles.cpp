@@ -745,19 +745,40 @@ void upic::runExportChecks (upic::SelfTest& t)
         check(wrote && readable, "the WAV export writes a playable file",
               target.existsAsFile() ? juce::String((int) target.getSize()) : juce::String("no file"));
 
-        // the failure path: a read-only target cannot be replaced, so the
-        // export must fail - and the file that was there must survive.
-        const auto sizeBefore = target.getSize();
-        target.setReadOnly (true);
-        juce::AudioBuffer<float> other(2, 2205);
-        for (int ch = 0; ch < 2; ++ch)
-            for (int i = 0; i < other.getNumSamples(); ++i)
-                other.setSample (ch, i, 0.9f);
-        const bool failedWrite = writeWavFile (target, other, 44100.0);
-        target.setReadOnly (false);
-        const bool kept = target.existsAsFile() && target.getSize() == sizeBefore;
-        check(! failedWrite && kept, "a failed export keeps the previous WAV",
-              juce::String((int) target.getSize()) + " vs " + juce::String((int) sizeBefore));
+        // the failure path: the destination cannot be written, so the
+        // export must report the failure - and what was there must
+        // survive (the old code deleted the destination before it knew
+        // whether the write could succeed).
+        //
+        // The destination is a directory: a file cannot take the place of
+        // a directory on any platform, not even for an account that
+        // ignores the permission bits. (A read-only *file* is not enough:
+        // on Linux and macOS the destination is renamed over, which works
+        // even when the file is read-only - only Windows refuses that,
+        // which is why the old check only ever worked there.) The WAV
+        // that was in the directory has to survive the failed export too.
+        {
+            auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                           .getChildFile("upic_wav_export_target");
+            dir.deleteRecursively();
+            dir.createDirectory();
+            const auto previous = dir.getChildFile("upic_wav_export_test.wav");
+            writeWavFile (previous, buf, 44100.0);
+            const auto sizeBefore = previous.getSize();
+
+            juce::AudioBuffer<float> other(2, 2205);
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < other.getNumSamples(); ++i)
+                    other.setSample (ch, i, 0.9f);
+            const bool failedWrite = writeWavFile (dir, other, 44100.0);
+
+            const bool kept = dir.isDirectory()
+                           && previous.existsAsFile()
+                           && previous.getSize() == sizeBefore;
+            check(! failedWrite && kept, "a failed export keeps the previous WAV",
+                  juce::String((int) previous.getSize()) + " vs " + juce::String((int) sizeBefore));
+            dir.deleteRecursively();
+        }
         target.deleteFile();
     }
 
