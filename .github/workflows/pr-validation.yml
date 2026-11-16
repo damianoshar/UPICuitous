@@ -81,7 +81,28 @@ jobs:
       - name: Build the debug APK
         working-directory: Builds/Android
         run: |
+          set -euo pipefail
           chmod +x ./gradlew
+          # SECURITY (S-02): the release build type fails closed when the
+          # release keystore is missing - and that check runs while gradle
+          # *configures* the build, so every gradle invocation needs a
+          # keystore.properties file to exist, even one that only builds the
+          # debug APK. This job builds the DEBUG apk, which is signed with
+          # the public debug key; the throwaway key below never signs
+          # anything that ships, and the release key is not in this job at
+          # all. Both files are removed when the step ends.
+          trap 'rm -f app/keystore.properties app/throwaway.keystore' EXIT
+          keytool -genkeypair -v \
+            -keystore app/throwaway.keystore \
+            -alias throwaway -keyalg RSA -keysize 2048 -validity 30 \
+            -storepass throwaway -keypass throwaway \
+            -dname "CN=throwaway, O=upicuitous-ci"
+          {
+            echo "storeFile=throwaway.keystore"
+            echo "keyAlias=throwaway"
+            echo "keyPassword=throwaway"
+            echo "storePassword=throwaway"
+          } > app/keystore.properties
           ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload the APK
@@ -127,22 +148,41 @@ jobs:
         run: cmake --build Builds/App --parallel
 
       - name: Self-test
+        id: selftest
         # the selftest never shows a window, but JUCE still wants a display
-        # on Linux - xvfb provides a virtual one
+        # on Linux - xvfb provides a virtual one.
+        #
+        # The step itself does not fail the job: the check below reads the
+        # log and reports what failed. Otherwise the log - the only place
+        # the failing check is named - would be lost, because the job stops
+        # at the first failure.
+        continue-on-error: true
         run: xvfb-run -a ./Builds/App/UPICuitous_artefacts/Release/UPICuitous --selftest
 
       - name: Check the selftest result
         run: |
           set -euo pipefail
-          if grep -q '^FAIL' "$TMPDIR/upic_selftest.txt" 2>/dev/null \
-             || grep -q '^FAIL' /tmp/upic_selftest.txt 2>/dev/null; then
-            cat /tmp/upic_selftest.txt
+          LOG="${TMPDIR:-/tmp}/upic_selftest.txt"
+          if [ ! -f "$LOG" ]; then
+            echo "the selftest wrote no log ($LOG)"
             exit 1
           fi
+          if grep -q '^FAIL' "$LOG"; then
+            cat "$LOG"
+            exit 1
+          fi
+          if [ "${{ steps.selftest.outcome }}" != "success" ]; then
+            echo "the selftest exited ${{ steps.selftest.outcome }} without a FAIL line"
+            tail -40 "$LOG"
+            exit 1
+          fi
+          echo "the selftest passed"
 
   macos:
     continue-on-error: true
-    runs-on: macos-14
+    # the macOS 14 image was retired on 2026-11-02 - the label now points
+    # at a configuration that no runner offers
+    runs-on: macos-15
     permissions:
       actions: read
       contents: read
@@ -162,15 +202,30 @@ jobs:
         run: cmake --build Builds/App --parallel
 
       - name: Self-test
+        id: selftest
+        # the check below reads the log and reports what failed - the step
+        # itself does not stop the job, or the log would be lost
+        continue-on-error: true
         run: ./Builds/App/UPICuitous_artefacts/Release/UPICuitous --selftest
 
       - name: Check the selftest result
         run: |
           set -euo pipefail
-          if grep -q '^FAIL' "$TMPDIR/upic_selftest.txt" 2>/dev/null; then
-            cat "$TMPDIR/upic_selftest.txt"
+          LOG="${TMPDIR:-/tmp}/upic_selftest.txt"
+          if [ ! -f "$LOG" ]; then
+            echo "the selftest wrote no log ($LOG)"
             exit 1
           fi
+          if grep -q '^FAIL' "$LOG"; then
+            cat "$LOG"
+            exit 1
+          fi
+          if [ "${{ steps.selftest.outcome }}" != "success" ]; then
+            echo "the selftest exited ${{ steps.selftest.outcome }} without a FAIL line"
+            tail -40 "$LOG"
+            exit 1
+          fi
+          echo "the selftest passed"
 
   security:
     runs-on: ubuntu-latest
