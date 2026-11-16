@@ -22,6 +22,7 @@
 #include "UpicConstants.h"
 #include "UpicMath.h"
 #include "UpicTheme.h"
+#include "Tuning.h"
 #include "Waveform.h"
 #include "Envelope.h"
 #include "Arc.h"

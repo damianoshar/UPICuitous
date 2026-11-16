@@ -37,6 +37,7 @@ namespace upic
     void runModelMathChecks (SelfTest& t);
     void runExportChecks (SelfTest& t);
     void runSieveChecks (SelfTest& t);
+    void runTuningChecks (SelfTest& t);   // M4: the Scala tuning import
     void runEditorChecks (SelfTest& t);
     void runSnapshotChecks (SelfTest& t);
     void runContinuityChecks (SelfTest& t);

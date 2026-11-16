@@ -136,6 +136,7 @@ add_library( ${BINARY_NAME}
     "../../../Source/Ids.h"
     "../../../Source/Page.h"
     "../../../Source/Piece.h"
+    "../../../Source/Tuning.h"
     "../../../Source/LivePitch.h"
     "../../../Source/AndroidBars.h"
     "../../../Source/ModelSnapshot.h"

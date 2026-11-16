@@ -250,6 +250,15 @@ void ScoreEditor::setTimeGrid(double div)
 double ScoreEditor::getTimeGrid() const
 { return timeGrid; }
 
+void ScoreEditor::setTuning (const upic::Tuning& t)
+{
+    tuning = t;
+    repaint();
+}
+
+const upic::Tuning& ScoreEditor::getTuning() const
+{ return tuning; }
+
 double ScoreEditor::xToTime(float x) const
 {
         auto r = plotArea();
@@ -295,7 +304,7 @@ void ScoreEditor::quantizeXY(double& t, double& f) const
 {
         if (! page) return;
         upic::quantizePoint(snap, sieveOn, sieveM, sieveR, timeGrid, stickiness,
-                            page->zones, t, f);
+                            page->zones, tuning, t, f);
         // v1.33: the page's ambitus - the drawing lives inside the page's
         // interval, so a stroke cannot leave the paper.
         f = juce::jlimit (page->pitchLo, page->pitchHi, f);
@@ -608,6 +617,37 @@ void ScoreEditor::paint(juce::Graphics& g)
                                         (int) r.getX() + 3, (int) y - 3 });
                 }
             }
+            else if (tuning.custom)
+            {
+                // M4: with a tuning loaded the guide lines are the scale's
+                // own degrees - the base (1/1) is the strong line, the
+                // other degrees the faint ones.
+                const int n = tuning.degrees();
+                int faint = 0;
+                for (const auto& s : tuning.axisStepsInRange(upic::kMinFreq, upic::kMaxFreq))
+                {
+                    const double f = s.freq;
+                    const long long si = (long long) std::llround(s.step);
+                    const bool isBase = (((si % n) + n) % n) == 0;
+                    float y = freqToY(f);
+                    if (y < r.getY() || y > r.getBottom()) continue;
+                    if (! isBase)
+                    {
+                        // the canvas is not a hatch: a scale with many
+                        // degrees keeps only the first of them
+                        if (++faint > 120) continue;
+                        g.setColour(juce::Colour(0xff26262f));
+                        g.drawHorizontalLine((int)y, r.getX(), r.getRight());
+                        continue;
+                    }
+                    g.setColour(juce::Colour(0xff3a3a4d));
+                    g.drawHorizontalLine((int)y, r.getX(), r.getRight());
+                    const int octave = (int) std::floor(s.step / (double) n);
+                    overlay.push_back({ juce::MidiMessage::getMidiNoteName(tuning.baseNote + 12 * octave,
+                                                                           true, true, 3),
+                                        10.0f, juce::Colour(0xff8a8a99), (int)r.getX() + 3, (int)y - 3 });
+                }
+            }
             else
             for (int midi = 12; midi <= 120; ++midi)
             {
@@ -646,13 +686,15 @@ void ScoreEditor::paint(juce::Graphics& g)
                 // collect first: a dense sieve (e.g. all twelve semitones
                 // across nine octaves) would be a solid hatch, not a guide
                 std::vector<float> ys;
-                for (int midi = 12; midi <= 120; ++midi)
+                // M4: the sieve's m/R works on the tuning's axis - the
+                // semitones in 12-tone equal temperament, the scale's
+                // degrees in a tuning.
+                for (const auto& s : tuning.axisStepsInRange(fLo, fHi))
                 {
-                    const int rr = ((midi % m) + m) % m;
+                    const long long si = (long long) std::llround(s.step);
+                    const int rr = (int) (((si % m) + m) % m);
                     if (std::find (R.begin(), R.end(), rr) == R.end()) continue;
-                    const double f = upic::midiToFreq ((double) midi);
-                    if (f < fLo || f > fHi) continue;
-                    const float y = freqToY (f);
+                    const float y = freqToY (s.freq);
                     if (y < r.getY() || y > r.getBottom()) continue;
                     if ((int) ys.size() >= 96) return;
                     ys.push_back (y);
@@ -1872,7 +1914,16 @@ bool ScoreEditor::pitchMagnet(int& m, std::vector<int>& R, double t, double f) c
             return ! R.empty(); // empty zone remainders = free inside the zone
         }
         if (sieveOn) { m = sieveM; R = sieveR; return ! R.empty(); }
-        if (snap)    { m = 12; R = { 0,1,2,3,4,5,6,7,8,9,10,11 }; return true; }
+        if (snap)
+        {
+            // M4: the chromatic magnet is the axis's own steps - the
+            // semitones in 12-tone equal temperament (unchanged), the
+            // scale's degrees in a tuning.
+            m = tuning.degrees();
+            R.clear();
+            for (int i = 0; i < m; ++i) R.push_back (i);
+            return true;
+        }
         return false;
     }
 
@@ -1880,9 +1931,13 @@ double ScoreEditor::nextAllowedPitch(double f, int dir, double t) const
 {
         int m = 12; std::vector<int> R;
         if (! pitchMagnet(m, R, t, f))
-            return juce::jlimit(ambitusLo(), ambitusHi(),
-                                f * std::pow(2.0, dir / 12.0));
-        const double n = upic::freqToMidi(f);
+        {
+            // no magnet: one step of the axis up or down - a semitone in
+            // 12-tone equal temperament, a degree of the scale in a tuning.
+            const double target = tuning.stepToFreq (tuning.freqToStep (f) + (double) dir);
+            return juce::jlimit(ambitusLo(), ambitusHi(), target);
+        }
+        const double n = tuning.freqToStep(f);
         double best = dir > 0 ? 1.0e18 : -1.0e18;
         for (int r : R)
         {
@@ -1892,9 +1947,9 @@ double ScoreEditor::nextAllowedPitch(double f, int dir, double t) const
             if (dir > 0) { if (cand <= n + 1e-9) cand += m; best = juce::jmin(best, cand); }
             else         { if (cand >= n - 1e-9) cand -= m; best = juce::jmax(best, cand); }
         }
-        if (best < 12.0 || best > 120.0)
+        if (! tuning.stepInRange(best))
             return juce::jlimit(ambitusLo(), ambitusHi(), f); // edge: stay
-        return juce::jlimit(ambitusLo(), ambitusHi(), upic::midiToFreq(best));
+        return juce::jlimit(ambitusLo(), ambitusHi(), tuning.stepToFreq(best));
     }
 
 double ScoreEditor::nudgePitch(double t, double f, int dSemi) const
@@ -1904,7 +1959,7 @@ double ScoreEditor::nudgePitch(double t, double f, int dSemi) const
         const double raw = f * std::pow(2.0, dSemi / 12.0);
         if (! pitchMagnet(m, R, t, f))
             return juce::jlimit(ambitusLo(), ambitusHi(), raw);
-        return juce::jlimit(ambitusLo(), ambitusHi(), upic::sieveQuantizeHz(raw, m, R));
+        return juce::jlimit(ambitusLo(), ambitusHi(), upic::sieveQuantizeHz(raw, m, R, tuning));
     }
 
 double ScoreEditor::pageTimeResolution() const

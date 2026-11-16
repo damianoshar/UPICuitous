@@ -6,6 +6,7 @@
 #include "Page.h"
 #include "PieceLimits.h"
 #include "Sample.h"
+#include "Tuning.h"
 
 namespace upic
 {
@@ -40,6 +41,11 @@ namespace upic
         float masterGain = 0.8f;
         int  samplePitchMode = 0;
         int  livePitchMode = 0;
+        // M4: the tuning the piece is drawn in. The arcs hold frequencies,
+        // so the tuning does not change what is played - it changes what
+        // the drawing snaps to, and it travels with the piece so the piece
+        // is edited the way it was drawn.
+        Tuning tuning;
     };
 
     // The piece as a var. The samples become base64 here, and that is the
@@ -77,6 +83,10 @@ namespace upic
         // v1.2 (same rule: defaults keep old files working unchanged)
         o->setProperty("stickiness", m.stickiness);
         o->setProperty("timeGrid", m.timeGrid);
+        // M4: the tuning. An old piece has none -> 12-tone equal
+        // temperament, which is what it was drawn in.
+        if (m.tuning.custom)
+            o->setProperty("tuning", m.tuning.toVar());
         juce::Array<juce::var> wa, ea, pa, sa;
         for (auto& w : m.waveforms) wa.add (w.toVar());
         for (auto& e : m.envelopes) ea.add (e.toVar());

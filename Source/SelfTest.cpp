@@ -84,6 +84,7 @@ int upic::runSelfTest()
     upic::runModelMathChecks (t);
     upic::runExportChecks (t);
     upic::runSieveChecks (t);
+    upic::runTuningChecks (t);   // M4: the Scala tuning import
     upic::runEditorChecks (t);
     upic::runSnapshotChecks (t);
     upic::runContinuityChecks (t);

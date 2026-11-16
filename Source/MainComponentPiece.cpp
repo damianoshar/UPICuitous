@@ -51,6 +51,7 @@ upic::PieceModel MainComponent::capturePieceModel() const
     m.sieveR = sieveR;
     m.stickiness = stickiness;
     m.timeGrid = timeGrid;
+    m.tuning = tuning;   // M4: the scale the piece was drawn in
     m.masterGain = masterGain.load();
     m.samplePitchMode = engine.getSamplePitchMode();
     m.livePitchMode = engine.getLivePitchMode();
@@ -328,6 +329,10 @@ bool MainComponent::loadFromVar(const juce::var& v)
     }
     score.setRecordPressure(recordPressure);
     score.setSieve(sieveOn, sieveM, sieveR);
+    // M4: the tuning the piece was drawn in. An old piece carries none ->
+    // 12-tone equal temperament, which is what it was drawn in.
+    tuning = upic::Tuning::fromVar (v.getProperty ("tuning", juce::var()));
+    score.setTuning (tuning);
     // v1.2 state (defaults: full stickiness, no time grid = v1.1 behaviour)
     stickiness = upic::limits::clampFinite((double) v.getProperty("stickiness", 1.0), 0.0, 1.0);
     timeGrid = upic::limits::clampFinite((double) v.getProperty("timeGrid", 0.0), 0.0, 64.0);
@@ -573,6 +578,70 @@ void MainComponent::loadFile()
                 flash ("Could not load the piece");
             }
         });
+}
+
+//==============================================================================
+// M4: the Scala tuning import.
+//
+// The tuning is the scale the drawing snaps to. The arcs hold frequencies,
+// not pitches, so a tuning does not retune anything that is already drawn:
+// it changes the axis the pencil, the magnet and the sieve work on. The
+// scale travels with the piece, so a piece is edited the way it was drawn.
+void MainComponent::importScalaTuning()
+{
+    // v1.33.4 (H11): the safe pointer is checked before the body runs, so
+    // the raw `this` below is only ever used while the component is alive.
+    juce::Component::SafePointer<MainComponent> sp (this);
+    auto fc = std::make_shared<juce::FileChooser>(
+        "Import a Scala tuning (.scl)",
+        juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+        "*.scl;*.SCL;*.txt");
+    fc->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [this, sp, fc](const juce::FileChooser& c){
+            if (sp == nullptr) return;
+            // v1.33.4 (M17): the chooser can return a document-provider URL
+            // (Android) - getResult() drops it, so the file is read through
+            // the URL instead.
+            upic::PickedFile picked;
+            juce::String error;
+            if (! upic::readPickedFile (c.getURLResult(), picked,
+                                        (juce::int64) upic::limits::kMaxTuningBytes, error))
+            {
+                sp->flash (error);
+                return;
+            }
+            const auto f = picked.file;
+            if (! f.existsAsFile()) return;
+            const auto text = f.loadFileAsString();
+            if (text.getNumBytesAsUTF8() > (juce::int64) upic::limits::kMaxTuningBytes)
+            {
+                sp->flash ("The tuning file is too large");
+                return;
+            }
+            upic::Tuning t;
+            juce::String parseError;
+            if (! upic::parseScalaTuning (text, t, parseError))
+            {
+                sp->flash ("Not a Scala tuning - " + parseError);
+                return;
+            }
+            sp->applyTuning (t);
+        });
+}
+
+// The tuning becomes the piece's tuning: the editor snaps to it, and the
+// piece carries it when it is saved.
+void MainComponent::applyTuning (const upic::Tuning& t)
+{
+    tuning = t;
+    score.setTuning (tuning);
+    // the arcs keep their frequencies - the tuning is not part of the audio
+    // model, so no snapshot is published. The piece itself has changed, so
+    // the app asks to save it.
+    markModelChanged();
+    flash (tuning.custom
+               ? ("Tuning: " + tuning.describe() + " (the sieve now counts the scale's degrees)")
+               : "Tuning: 12-tone equal temperament");
 }
 
 //==============================================================================

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "UpicConstants.h"
+#include "Tuning.h"
 
 namespace upic
 {
@@ -39,12 +40,18 @@ namespace upic
         return p;
     }
     //---------------- Sieve quantizer (Xenakis) ----------------
-    // Allowed pitches on the MIDI-note axis: n mod m ∈ remainders.
+    // Allowed pitches on the step axis: n mod m ∈ remainders.
     // Returns the nearest allowed frequency; identity when inert.
-    inline double sieveQuantizeHz(double hz, int m, const std::vector<int>& remainders)
+    //
+    // M4: the axis is the tuning's own: semitones in 12-tone equal
+    // temperament (the numbers do not change), the scale's degrees in a
+    // tuning. The old behaviour is therefore untouched when no tuning is
+    // loaded.
+    inline double sieveQuantizeHz(double hz, int m, const std::vector<int>& remainders,
+                                  const Tuning& tuning = defaultTuning())
     {
         if (m < 2 || remainders.empty() || hz <= 0.0) return hz;
-        const double n = freqToMidi(hz);
+        const double n = tuning.freqToStep(hz);
         double best = n, bestDist = 1.0e18;
         for (int r : remainders)
         {
@@ -54,7 +61,7 @@ namespace upic
             const double d = std::abs(cand - n);
             if (d < bestDist) { bestDist = d; best = cand; }
         }
-        return juce::jlimit(kMinFreq, kMaxFreq, midiToFreq(best));
+        return juce::jlimit(kMinFreq, kMaxFreq, tuning.stepToFreq(best));
     }
 
     //---------------- the discrete frequency space (v1.32) ----------------

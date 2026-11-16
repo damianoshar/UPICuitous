@@ -763,18 +763,18 @@ void upic::runSieveChecks (upic::SelfTest& t)
         // zone sieve beats global sieve; global grid applies outside the zone
         const std::vector<int> globalR { 0, 7 };
         double tSec = 6.0, f = 450.0; // inside the chromatic zone
-        upic::quantizePoint(true, true, 12, globalR, 4.0, 1.0, zones, tSec, f);
+        upic::quantizePoint(true, true, 12, globalR, 4.0, 1.0, zones, upic::defaultTuning(), tSec, f);
         check(std::abs(f - 440.0) < 0.5, "zone sieve overrides global (450 -> 440)",
               juce::String(f, 2));
         check(std::abs(tSec - 6.0) < 1e-9, "zone time grid 8/s keeps 6.0");
         tSec = 2.13; f = 450.0;       // outside -> global sieve {0,7} + global grid 4/s
-        upic::quantizePoint(true, true, 12, globalR, 4.0, 1.0, zones, tSec, f);
+        upic::quantizePoint(true, true, 12, globalR, 4.0, 1.0, zones, upic::defaultTuning(), tSec, f);
         check(std::abs(f - 392.0) < 0.6, "global sieve outside zone (450 -> 392)",
               juce::String(f, 2));
         check(std::abs(tSec - 2.25) < 1e-9, "global time grid snaps 2.13 -> 2.25",
               juce::String(tSec, 4));
         tSec = 0.0; f = 450.0;        // chromatic snap softened by stickiness 0.5
-        upic::quantizePoint(true, false, 12, { 0 }, 0.0, 0.5, {}, tSec, f);
+        upic::quantizePoint(true, false, 12, { 0 }, 0.0, 0.5, {}, upic::defaultTuning(), tSec, f);
         check(std::abs(f - 445.0) < 0.6, "stickiness 0.5 half-snaps (450 -> ~445)",
               juce::String(f, 2));
 
@@ -786,13 +786,13 @@ void upic::runSieveChecks (upic::SelfTest& t)
             zs.m = 12; zs.remainders = { 0 }; zs.timeGrid = 0; zs.stickiness = 0.0;
             std::vector<upic::SieveZone> zz { zs };
             tSec = 5.0; f = 450.0;
-            upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, tSec, f);
+            upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, upic::defaultTuning(), tSec, f);
             check(std::abs(f - 450.0) < 1e-9,
                   "zone stick 0 leaves the pitch free inside the zone",
                   juce::String(f, 2));
             zz[0].stickiness = -1.0;
             tSec = 5.0; f = 450.0;
-            upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, tSec, f);
+            upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, upic::defaultTuning(), tSec, f);
             check(std::abs(upic::freqToMidi(f) - 72.0) < 0.05,
                   "zone stick -1 follows the global stick (450 -> C5)",
                   juce::String(f, 2));
@@ -930,4 +930,195 @@ void upic::runSieveChecks (upic::SelfTest& t)
         check(mid > 0.15, "arc mid-level audible", juce::String(mid, 4));
     }
 
+}
+
+//==============================================================================
+// M4: the tuning.
+//
+// The Scala parser, the scale's degrees and the sieve on the scale's own
+// axis. The arcs hold frequencies, so the tuning does not change what is
+// played - it changes what the drawing snaps to.
+void upic::runTuningChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // --- the official 12-tone file: the 1/1 is implicit, the octave is 2/1 ---
+    const juce::String twelveTone =
+        "! 12-tone equal temperament.scl\n"
+        "!\n"
+        "12-tone equal temperament\n"
+        " 12\n"
+        "!\n"
+        " 100.00000\n"
+        " 200.00000\n"
+        " 300.00000\n"
+        " 400.00000\n"
+        " 500.00000\n"
+        " 600.00000\n"
+        " 700.00000\n"
+        " 800.00000\n"
+        " 900.00000\n"
+        " 1000.00000\n"
+        " 1100.00000\n"
+        " 2/1\n";
+    upic::Tuning tun;
+    juce::String err;
+    const bool parsed = upic::parseScalaTuning (twelveTone, tun, err);
+    check (parsed, "scl: a 12-tone file parses", err);
+    check (parsed && tun.custom && tun.degrees() == 12,
+           "scl: the 12-tone file has twelve degrees", parsed ? juce::String (tun.degrees()) : err);
+    check (parsed && tun.name == "12-tone equal temperament",
+           "scl: the description is the name", parsed ? tun.name : err);
+    check (parsed && tun.cents.size() == 12 && std::abs (tun.cents[0]) < 1e-9
+           && std::abs (tun.cents[1] - 100.0) < 1e-6
+           && std::abs (tun.cents[11] - 1100.0) < 1e-6,
+           "scl: the degrees are the twelve semitones");
+
+    // the same file with the 1/1 written out (the other convention)
+    {
+        const juce::String withBase =
+            "12-tone equal temperament\n"
+            " 12\n"
+            " 0.0\n"
+            " 100.0\n 200.0\n 300.0\n 400.0\n 500.0\n 600.0\n"
+            " 700.0\n 800.0\n 900.0\n 1000.0\n 1100.0\n"
+            " 2/1\n";
+        upic::Tuning t2; juce::String e2;
+        const bool ok = upic::parseScalaTuning (withBase, t2, e2);
+        check (ok && t2.degrees() == 12, "scl: a file that lists the 1/1 parses too",
+               ok ? juce::String (t2.degrees()) : e2);
+    }
+
+    // the official example: cents and ratios mixed, the octave as 2/1
+    {
+        const juce::String meanquar =
+            "! meanquar.scl\n"
+            "!\n"
+            "1/4-comma meantone scale. Pietro Aaron's temperament (1523)\n"
+            " 12\n"
+            "!\n"
+            " 76.04900\n"
+            " 193.15686\n"
+            " 310.26471\n"
+            " 5/4\n"
+            " 503.42157\n"
+            " 579.47057\n"
+            " 696.57843\n"
+            " 25/16\n"
+            " 889.73529\n"
+            " 1006.84314\n"
+            " 1082.89214\n"
+            " 2/1\n";
+        upic::Tuning t3; juce::String e3;
+        const bool ok = upic::parseScalaTuning (meanquar, t3, e3);
+        check (ok && t3.degrees() == 12, "scl: the meantone example parses",
+               ok ? juce::String (t3.degrees()) : e3);
+        // 5/4 is 386.31 cents, 25/16 is 772.63 cents
+        check (ok && std::abs (t3.cents[4] - 386.3137) < 0.01
+               && std::abs (t3.cents[8] - 772.6273) < 0.01,
+               "scl: a ratio is read as a ratio",
+               ok ? juce::String (t3.cents[4], 2) : e3);
+    }
+
+    // the details of the format: a plain integer is a ratio (2 -> 2/1), a
+    // name after the value is ignored, and a value that starts with a
+    // period is relative to the pitch before it
+    {
+        upic::Tuning t4; juce::String e4;
+        const bool ok = upic::parseScalaTuning (
+            "a test scale\n"
+            " 4\n"
+            " 100.0 C#\n"
+            " 9/8\n"
+            " .5\n"
+            " 2\n", t4, e4);
+        check (ok && t4.degrees() == 4, "scl: the format's details parse",
+               ok ? juce::String (t4.degrees()) : e4);
+        check (ok && std::abs (t4.cents[1] - 100.0) < 1e-6,
+               "scl: a name after the value is ignored");
+        check (ok && std::abs (t4.cents[2] - 203.9099) < 0.01,
+               "scl: 9/8 is 203.91 cents");
+        check (ok && std::abs (t4.cents[3] - (203.9099 + 0.5)) < 0.01,
+               "scl: a value that starts with a period is relative",
+               ok ? juce::String (t4.cents[3], 3) : e4);
+    }
+
+    // --- the refusals ---
+    {
+        auto refuses = [&check] (const juce::String& text, const juce::String& what)
+        {
+            upic::Tuning tt; juce::String ee;
+            const bool ok = upic::parseScalaTuning (text, tt, ee);
+            check (! ok && ee.isNotEmpty(), "scl: " + what + " is refused", ee);
+        };
+        refuses ("a scale\n 5\n 100.0\n 200.0\n 2/1\n", "a wrong note count");
+        refuses ("a scale\n 2\n 200.0\n 100.0\n 2/1\n", "a scale that does not rise");
+        refuses ("a scale\n 2\n 100.0\n 200.0\n", "a scale without the octave");
+        refuses ("a scale\n 2\n 100.0\n hello\n 2/1\n", "a line that is not a pitch");
+        refuses ("a scale\n 2\n -5.0\n 2/1\n", "a pitch below the base");
+        refuses ("a scale\n", "a file that is too short");
+    }
+
+    // --- the degrees ---
+    {
+        // the degrees of the 12-tone scale: the base is middle C, the
+        // octave is an octave up, and the pitch and the degree are
+        // each other's inverse
+        check (std::abs (tun.degreeToCents (0.0)) < 1e-9,
+               "tuning: the base is 0 cents");
+        check (std::abs (tun.degreeToCents (12.0) - 1200.0) < 1e-6,
+               "tuning: the twelfth degree is the octave");
+        check (std::abs (tun.stepToFreq (0.0) - upic::kDefaultRefFreq) < 0.01,
+               "tuning: the base is middle C",
+               juce::String (tun.stepToFreq (0.0), 2) + " Hz");
+        bool inverse = true;
+        for (double s = -6.0; s <= 18.0; s += 0.5)
+            inverse = inverse && std::abs (tun.freqToStep (tun.stepToFreq (s)) - s) < 1e-6;
+        check (inverse, "tuning: a degree and its pitch are each other's inverse");
+        // the chromatic snap lands on a degree of the scale
+        const double snapped = tun.snapToStep (300.0);
+        check (std::abs (tun.freqToStep (snapped) - std::round (tun.freqToStep (snapped))) < 1e-6,
+               "tuning: the chromatic snap lands on a degree",
+               juce::String (snapped, 2) + " Hz");
+    }
+
+    // --- the sieve on the scale's own axis ---
+    {
+        // a seven-note scale (just intonation): the degrees are the
+        // seventh of the octave, so the sieve's m = 7 is the octave
+        const juce::String justIntonation =
+            "! Just_Intonation.scl\n"
+            "!\n"
+            "Just Intonation\n"
+            "8\n"
+            "!\n"
+            "1/1\n"
+            "9/8\n"
+            "5/4\n"
+            "4/3\n"
+            "3/2\n"
+            "5/3\n"
+            "15/8\n"
+            "2/1\n";
+        upic::Tuning ji; juce::String e5;
+        const bool ok = upic::parseScalaTuning (justIntonation, ji, e5);
+        check (ok && ji.degrees() == 7, "scl: a seven-note scale parses",
+               ok ? juce::String (ji.degrees()) : e5);
+        // the sieve's m = 7, R = {0} keeps the base degrees
+        const double base = upic::sieveQuantizeHz (300.0, 7, { 0 }, ji);
+        check (ok && std::abs (base - upic::kDefaultRefFreq) < 0.5,
+               "tuning: the sieve m=7 counts the scale's degrees",
+               juce::String (base, 2) + " Hz");
+        // ... and R = {1} keeps the second degree (9/8)
+        const double second = upic::sieveQuantizeHz (300.0, 7, { 1 }, ji);
+        check (ok && std::abs (second - upic::kDefaultRefFreq * 9.0 / 8.0) < 0.5,
+               "tuning: the sieve R=1 is the scale's second degree",
+               juce::String (second, 2) + " Hz");
+        // the 12-tone sieve is unchanged (the numbers do not move)
+        check (std::abs (upic::sieveQuantizeHz (450.0, 12, { 9 }) - 440.0) < 0.5,
+               "tuning: the 12-tone sieve is unchanged");
+    }
 }

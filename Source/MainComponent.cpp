@@ -505,6 +505,21 @@ void MainComponent::buildLiveControls()
         m.addItem (5, "Audio settings...");
         m.addItem (6, "MIDI + OSC settings...");
         m.addItem (7, "Clear page...");
+        // M4: the tuning - the scale the drawing snaps to. The arcs hold
+        // frequencies, so a tuning does not retune what is already drawn.
+        m.addSeparator();
+        {
+            juce::String label = "Import a Scala tuning...";
+            if (tuning.custom)
+            {
+                juce::String now = tuning.describe();
+                if (now.length() > 28) now = now.substring (0, 27) + "...";
+                label += " (now: " + now + ")";
+            }
+            m.addItem (12, label);
+        }
+        if (tuning.custom)
+            m.addItem (13, "Use 12-tone equal temperament");
         // v1.33.4 (L15, part 2): the undo. The menu is built when it opens,
         // so the steps are the ones that are really there.
         if (canUndo())
@@ -558,6 +573,8 @@ void MainComponent::buildLiveControls()
                     case 10: sp->redo(); break;       // v1.33.4 (L15)
                     case 11: sp->setFollowHostTransport (! sp->isFollowingHostTransport());
                              break;                    // v1.33.4 (H3)
+                    case 12: sp->importScalaTuning(); break;  // M4
+                    case 13: sp->applyTuning (upic::Tuning{}); break;  // M4
                     default: sp->transformPage (r); break;
                 }
             });

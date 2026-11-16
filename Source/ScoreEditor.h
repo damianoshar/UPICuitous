@@ -207,6 +207,13 @@ public:
 
     double getTimeGrid() const;
 
+    // M4: the tuning the drawing snaps to. The default (no tuning) is
+    // 12-tone equal temperament - the snapping is then exactly what it
+    // was before.
+    void setTuning (const upic::Tuning& t);
+
+    const upic::Tuning& getTuning() const;
+
     // --- coordinate mapping (through the view: timeZoom/timeOffset,
     //     freqZoom/freqOffset) ---
     double xToTime(float x) const;
@@ -370,6 +377,8 @@ private:
     std::vector<int> sieveR { 0 };
     double stickiness = 1.0; // 0..1 magnetic strength
     double timeGrid = 0.0;   // divisions per second, 0 = off
+    // M4: the tuning the drawing snaps to (12-TET by default).
+    upic::Tuning tuning;
     static constexpr double kSimplifyEps = 0.006; // RDP tolerance (normalized box)
 
     // pen pressure of an event -> intensity multiplier (1 = no pressure info)

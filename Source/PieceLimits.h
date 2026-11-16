@@ -65,6 +65,14 @@ namespace upic
         constexpr int kMaxPointsPerEnvelope = 1000;
         constexpr int kMaxSieveZones = 200;
         constexpr int kMaxSieveRemainders = 5000;
+        // The degrees of one octave in a tuning (M4). A scale with more
+        // notes than this is not a scale a person can use, and the cap
+        // keeps a crafted piece from carrying a huge list.
+        constexpr int kMaxTuningDegrees = 256;
+        // The size of a Scala tuning file (M4). A scale is a list of
+        // degrees - a few kilobytes at most - so a megabyte is generous,
+        // and the cap keeps a hostile file from being read in wholesale.
+        constexpr size_t kMaxTuningBytes = 1024u * 1024u;
 
         // --- the per-sample limits ---
         // 60 seconds of material, counted at the material's OWN rate: a

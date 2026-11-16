@@ -124,6 +124,21 @@ make (the same palette the arcs use).
   zone the zone's sieve wins over the toolbar's global Sieve box.
 - Procedural generators: stochastic / convergent arborescence, echelon,
   ordinal spine.
+- **A tuning of your own** - the File menu's **Import a Scala tuning...**
+  reads a Scala (`.scl`) scale file: the description, the number of notes,
+  and the pitches as cents (`100.0`) or as ratios (`9/8`). The scale's first
+  note (1/1) is the base and sits on middle C; the scale repeats every
+  octave and the steps between two notes are interpolated. The file's
+  format is the standard one (the 1/1 may be written out or left implicit,
+  a note may carry a name after it, and the last note is the octave), and a
+  file that does not make a scale is refused with the reason.
+  With a scale loaded, the **drawing snaps to the scale's own degrees**
+  instead of to the semitones: the magnet, the pitch guide lines and the
+  sieve's `m`/`R` all work on the scale (so a seven-note scale gets its
+  octave at `m = 7`). The arcs hold frequencies, not pitches, so a tuning
+  does not retune what is already drawn - it changes what the pencil lands
+  on. The scale travels with the piece, and **Use 12-tone equal
+  temperament** puts the semitones back.
 - Multi-select: Ctrl+A, Ctrl+C (count), Ctrl+D, Del, arrow nudge,
   Shift-click cycling, right-click menu.
 - Undo and redo: **Ctrl+Z** / **Ctrl+Shift+Z** (or **Ctrl+Y**) - also in the
@@ -247,7 +262,7 @@ sample slot's direction and the global pitch modes - so a reopened piece
 (or a reopened DAW session) sounds the same; older pieces without those
 fields still load, with the old defaults. The piece format has one set of
 limits - 2024 arcs per page (the UPIC's own number), 100 pages, 1000
-points per arc, 200 sieve zones
+points per arc, 200 sieve zones, 256 notes in a tuning
 - and the editor and the loader share them: the editor refuses what does
 not fit (and says so), and a piece that is over a limit is loaded truncated
 with a message naming what did not fit, so music is never lost silently.
@@ -439,6 +454,8 @@ Source/              JUCE app + shared engine/UI
   UpicModel.h        the model umbrella: constants, math, theme, Waveform,
                      Envelope, Arc, FreqSpace, Sieve, Generators, Sample,
                      PickedFile, Ids, Page, Piece (one header per concept)
+  Tuning.h           the tuning: the scale's degrees and the Scala (.scl)
+                     parser (the step axis the sieve and the magnets work on)
   UpicEngine.h       realtime + offline renderer, sample voices (the
                      declarations; the renderPageBlocks template has to stay)
   UpicEngine.cpp     the engine's implementation
@@ -484,7 +501,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 670 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 705 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -497,6 +514,8 @@ augment), the discrete frequency space, the four frequency spaces, the
 ambitus, the infrasonic-to-ultrasound range, the page's acceleration, the
 movable sieve zones, the quantised line, the per-zone stickiness, the
 sieve checkbox end-to-end, the zone menu actions, the digitised wave page,
+the Scala tuning import (the parser, the scale's degrees and the sieve on
+the scale's own axis),
 the micro-time page, the toolbar's group flow, the hints sidebar, the
 button text fitting, the capture button's colours, the wavetable
 buttons' colours, the PM preset round trip, the WAV export, the piece

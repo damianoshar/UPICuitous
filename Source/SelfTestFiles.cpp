@@ -117,6 +117,60 @@ void upic::runLoadedPieceChecks (upic::SelfTest& t)
         }
     }
 
+    // 6a-8b. M4: the tuning travels with the piece. A piece that was drawn
+    //     in a scale is edited in that scale, and a piece that carries no
+    //     tuning (an old one) is in 12-tone equal temperament - which is
+    //     what it was drawn in.
+    {
+        auto mcHolder = std::make_unique<MainComponent>();
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+
+        // a piece without a tuning: the default, and nothing is written out
+        const juce::String oldPiece = "{\"pages\":[{\"duration\":10,\"arcs\":[]}]}";
+        check (mc.loadFromVar (juce::JSON::parse (oldPiece)),
+               "an old piece (no tuning) loads");
+        check (! mc.getTuning().custom,
+               "an old piece is in 12-tone equal temperament");
+        check (mc.pieceToVar().getProperty ("tuning", juce::var()).isVoid(),
+               "a piece without a tuning does not carry one");
+
+        // a piece with a tuning: it is loaded, saved and loaded again
+        upic::Tuning scale;
+        scale.name = "a test scale";
+        scale.cents = { 0.0, 100.0, 203.9099, 300.0, 400.0, 500.0, 600.0, 700.0,
+                        800.0, 900.0, 1000.0, 1100.0 };
+        scale.baseNote = 60;
+        scale.custom = true;
+        mc.applyTuning (scale);
+        check (mc.getTuning().custom && mc.getTuning().degrees() == 12,
+               "the tuning is applied to the piece");
+
+        const auto saved = mc.pieceToVar();
+        auto* tuningVar = saved.getProperty ("tuning", juce::var()).getDynamicObject();
+        check (tuningVar != nullptr, "the piece carries the tuning");
+        const auto back = upic::Tuning::fromVar (saved.getProperty ("tuning", juce::var()));
+        check (back.custom && back.degrees() == 12 && back.name == "a test scale"
+               && std::abs (back.cents[2] - 203.9099) < 1e-6,
+               "the tuning survives the piece round trip");
+
+        // and the piece that comes back is loaded with the same tuning
+        mc.loadFromVar (juce::JSON::parse (juce::JSON::toString (saved, false)));
+        check (mc.getTuning().custom && mc.getTuning().degrees() == 12
+               && std::abs (mc.getTuning().cents[2] - 203.9099) < 1e-6,
+               "a loaded piece brings its tuning back");
+
+        // a broken tuning in a piece falls back to the default: a piece must
+        // always load
+        const juce::String broken =
+            "{\"pages\":[{\"duration\":10,\"arcs\":[]}],"
+            "\"tuning\":{\"name\":\"broken\",\"base\":60,\"cents\":[0.0,500.0,100.0]}}";
+        check (mc.loadFromVar (juce::JSON::parse (broken)),
+               "a piece with a broken tuning still loads");
+        check (! mc.getTuning().custom,
+               "a broken tuning falls back to 12-tone equal temperament");
+    }
+
 }
 
 void upic::runPieceStateChecks (upic::SelfTest& t)

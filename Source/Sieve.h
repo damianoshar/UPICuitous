@@ -118,22 +118,21 @@ namespace upic
     // Precedence: zone sieve > global sieve > plain chromatic snap; the zone's
     // time grid overrides the global one. A zone's own stick (when set) also
     // overrides the global stick, so "global" only means outside the zones.
+    //
+    // M4: the snapping happens on the tuning's axis - semitones in 12-tone
+    // equal temperament, the scale's degrees in a tuning.
     inline void quantizePoint(bool chromaticSnap, bool sieveOn, int sieveM,
                               const std::vector<int>& sieveR, double timeGrid,
                               double stickiness, const std::vector<SieveZone>& zones,
+                              const Tuning& tuning,
                               double& t, double& f)
     {
         const SieveZone* z = zoneAt(zones, t, f);
         const double stick = (z != nullptr) ? z->effectiveStickiness(stickiness) : stickiness;
         double target = f;
-        if (z != nullptr)          target = sieveQuantizeHz(f, z->m, z->remainders);
-        else if (sieveOn)          target = sieveQuantizeHz(f, sieveM, sieveR);
-        else if (chromaticSnap)
-        {
-            double mn = std::round(freqToMidi(f));
-            mn = juce::jlimit(12.0, 120.0, mn);
-            target = midiToFreq(mn);
-        }
+        if (z != nullptr)          target = sieveQuantizeHz(f, z->m, z->remainders, tuning);
+        else if (sieveOn)          target = sieveQuantizeHz(f, sieveM, sieveR, tuning);
+        else if (chromaticSnap)    target = tuning.snapToStep(f);
         f = juce::jlimit(kMinFreq, kMaxFreq, stickify(f, target, stick));
 
         const double g = (z != nullptr) ? z->timeGrid : timeGrid;

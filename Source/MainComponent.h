@@ -600,6 +600,11 @@ private:
     bool sieveOn = false;
     int sieveM = 12;
     std::vector<int> sieveR { 0 };
+    // M4: the tuning the piece is drawn in (12-tone equal temperament by
+    // default). The arcs hold frequencies, so the tuning does not change
+    // what is played - it changes what the drawing snaps to, and it travels
+    // with the piece so the piece is edited the way it was drawn.
+    upic::Tuning tuning;
     juce::String flashMsg;              // transient status message (timer shows it)
     unsigned int flashUntilMs = 0;
 
@@ -953,6 +958,14 @@ public:
     // when the var is not a piece - the current piece is then kept, so a
     // broken file cannot wipe the unsaved work.
     bool loadFromVar(const juce::var& v);
+
+    // M4: the Scala tuning import. The file is read through the chooser
+    // (a document provider on Android too), and the scale it holds becomes
+    // the axis the drawing snaps to. `applyTuning` is public so the
+    // selftest can drive it without a chooser.
+    void importScalaTuning();
+    void applyTuning (const upic::Tuning& t);
+    const upic::Tuning& getTuning() const { return tuning; }
 
     // v1.33.4 (H6): the piece saver. It measures the piece first and refuses
     // (with a message) when it would be bigger than the loader accepts, so
