@@ -90,6 +90,13 @@ void MainComponent::refreshBoxes()
                           (int)i + 1);
     selSlot = juce::jlimit(0, (int) sampleSlots.size() - 1, selSlot);
     sampleBox.setSelectedId(selSlot + 1, juce::dontSendNotification);
+    // M5: the Sample tab shows the slot's own Ref and level, and the
+    // material's buttons follow the slot.
+    syncRefToSlot();
+    levelSlider.setValue (selSlot >= 0 && selSlot < (int) sampleSlots.size()
+                            ? (double) sampleSlots[(size_t) selSlot].level : 1.0,
+                          juce::dontSendNotification);
+    updateMaterialButtons();
 
     // keep selections valid
     auto findIdx = [](auto& vec, int id){ for (size_t i = 0; i < vec.size(); ++i) if (vec[i].id == id) return (int)i; return 0; };
@@ -204,6 +211,9 @@ void MainComponent::pushVoice()
     const int sid = (selSlot >= 0 && selSlot < (int) sampleSlots.size())
                         ? sampleSlots[(size_t) selSlot].id : 1;
     drawSampleId = sid; // remembered for procedural generation
+    // M5: on the Sample tab the Ref is the slot's (the material's base
+    // pitch), so the grid and the new arcs are born with it.
+    syncRefToSlot();
     score.setCurrentVoice(selWave, selEnv, drawIntensity, drawMatMode, sid, drawRef);
     // v1.32: a new arc is born with the frequency space on show
     score.setCurrentStep (stepBtn.getToggleState()
@@ -281,6 +291,9 @@ void MainComponent::syncControlsToArc(int arcId)
             updateRevButton();
             drawRef = a.refFreq;
             refSlider.setValue(drawRef, juce::dontSendNotification);
+            // M5: on the Sample tab the Ref is the slot's (the material's
+            // base pitch), so the slider shows it.
+            syncRefToSlot();
             updateSampleView();
             pushVoice();
             break;
@@ -309,6 +322,65 @@ void MainComponent::updateRevButton()
     revBtn.setButtonText(on ? "Rev ON" : "Rev");
     revBtn.setTooltip(on ? "The slot plays backwards (click to play it forward)"
                           : "Play the selected slot backwards");
+}
+
+// M5: the Sample tab's Ref is the SLOT's - the material's base pitch (the
+// UPIC's per-slot REF). The slider, the grid and the new arcs all follow
+// it, and every arc that plays the slot shares it.
+void MainComponent::syncRefToSlot()
+{
+    if (drawMatMode != 1 || selSlot < 0 || selSlot >= (int) sampleSlots.size()) return;
+    const double slotRef = sampleSlots[(size_t) selSlot].refFreq;
+    if (! (slotRef > 0.0)) return;
+    drawRef = slotRef;
+    refSlider.setValue (drawRef, juce::dontSendNotification);
+}
+
+// M5: the material's buttons follow the selected slot - they are off when
+// the slot has no material to edit.
+void MainComponent::updateMaterialButtons()
+{
+    const bool has = selSlot >= 0 && selSlot < (int) sampleSlots.size()
+                     && sampleSlots[(size_t) selSlot].loaded();
+    normMatBtn.setEnabled (has);
+    fadeMatBtn.setEnabled (has);
+    resetMatBtn.setEnabled (has);
+}
+
+// M5: one of the material's edits (1 = normalise, 2 = fade, 3 = reset).
+//
+// The edits are not a rewrite of the audio: the normalise is a gain, and
+// the fades and the trim are read parameters - so the app's undo stack can
+// step over them, and the Reset button can take them back.
+void MainComponent::editMaterial (int what)
+{
+    if (selSlot < 0 || selSlot >= (int) sampleSlots.size()) return;
+    auto& slot = sampleSlots[(size_t) selSlot];
+    if (! slot.loaded()) { flash ("The slot has no material"); return; }
+
+    beginEdit (what == 1 ? "Normalize the material"
+               : what == 2 ? "Fade the material" : "Reset the material");
+    bool ok = true;
+    {
+        juce::ScopedLock l (dataLock);
+        if (what == 1) ok = slot.normalise();
+        else if (what == 2) slot.applyFade();
+        else slot.resetEdits();
+    }
+    if (ok)
+    {
+        markModelChanged();       // the material changed -> the piece changed
+        publishModelSnapshot();   // the audio thread must see it now
+    }
+    endEdit();
+
+    // the trimmed material is a different length
+    score.sampleDurations[slot.id] = slot.durationSec();
+    updateSampleView();
+    if (! ok) flash ("The material is silent - there is nothing to normalize");
+    else if (what == 1) flash ("The material is normalized");
+    else if (what == 2) flash ("The material is faded at both ends");
+    else flash ("The material's edits are undone");
 }
 
 void MainComponent::flash(const juce::String& m)
@@ -567,7 +639,15 @@ void MainComponent::waveFromSelectedSlot()
                  + " wave " + juce::String (n++);
         }
 
-        wave = upic::waveFromTake (*slot->data, newId, name);
+        // M5: the wavetable is made from the material's REGION (the trim) -
+        // it must be the part that is actually played, not the whole file.
+        const int ch = slot->data->getNumChannels();
+        const int frames = slot->regionFrames();
+        juce::AudioBuffer<float> region (ch, frames);
+        for (int c = 0; c < ch; ++c)
+            region.copyFrom (c, 0, *slot->data, c, slot->regionStart(), frames);
+
+        wave = upic::waveFromTake (region, newId, name);
         waveforms.push_back (wave);
         selWave = newId;
     }

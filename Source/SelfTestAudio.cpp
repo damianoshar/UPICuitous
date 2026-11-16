@@ -75,6 +75,7 @@ void upic::runAudioThreadChecks (upic::SelfTest& t)
         std::vector<upic::SampleSlot> slots;
         {
             upic::SampleSlot s; s.id = 1; s.name = "sine"; s.sampleRate = 44100.0;
+            s.refFreq = 220.0;   // M5: the material's Ref is the slot's
             juce::AudioBuffer<float> buf(1, 44100);
             for (int i = 0; i < 44100; ++i)
                 buf.setSample(0, i, 0.5f * (float) std::sin(
@@ -222,6 +223,7 @@ void upic::runAudioThreadChecks (upic::SelfTest& t)
 
         // the material
         upic::SampleSlot slot; slot.id = 1; slot.name = "sine220"; slot.sampleRate = sr;
+        slot.refFreq = 220.0;   // M5: the material's Ref is the slot's
         {
             juce::AudioBuffer<float> buf (1, 44100);
             for (int i = 0; i < 44100; ++i)
@@ -816,6 +818,7 @@ void upic::runLivePathChecks (upic::SelfTest& t)
         auto rampSlot = [N](bool reversed) {
             upic::SampleSlot s;
             s.id = 1; s.name = "ramp"; s.sampleRate = 44100.0;
+            s.refFreq = 220.0;   // M5: the material's Ref is the slot's
             s.reversed = reversed;
             juce::AudioBuffer<float> buf(1, N);
             for (int i = 0; i < N; ++i)
@@ -827,6 +830,7 @@ void upic::runLivePathChecks (upic::SelfTest& t)
         auto sineSlot = [N](bool reversed) {
             upic::SampleSlot s;
             s.id = 1; s.name = "sine220"; s.sampleRate = 44100.0;
+            s.refFreq = 220.0;   // M5: the material's Ref is the slot's
             s.reversed = reversed;
             juce::AudioBuffer<float> buf(1, N);
             for (int i = 0; i < N; ++i)
@@ -1227,6 +1231,7 @@ void upic::runRealtimeChecks (upic::SelfTest& t)
 
         upic::SampleSlot slot;
         slot.id = 1; slot.name = "scrub sine"; slot.sampleRate = 44100.0;
+        slot.refFreq = 220.0;   // M5: the material's Ref is the slot's
         juce::AudioBuffer<float> sb(1, 44100);
         for (int i = 0; i < sb.getNumSamples(); ++i)
             sb.setSample(0, i, 0.8f * (float) std::sin(
@@ -1344,6 +1349,7 @@ void upic::runTransportChecks (upic::SelfTest& t)
         auto rampSlot = [N]() {
             upic::SampleSlot s;
             s.id = 1; s.name = "ramp"; s.sampleRate = 44100.0;
+            s.refFreq = 220.0;   // M5: the material's Ref is the slot's
             s.reversed = false;
             juce::AudioBuffer<float> buf(1, N);
             for (int i = 0; i < N; ++i)
@@ -1391,6 +1397,7 @@ void upic::runTransportChecks (upic::SelfTest& t)
 
         upic::SampleSlot s;
         s.id = 1; s.name = "ramp"; s.sampleRate = 1000.0; s.reversed = false;
+        s.refFreq = 220.0;   // M5: the material's Ref is the slot's
         juce::AudioBuffer<float> buf(1, N);
         for (int i = 0; i < N; ++i)
             buf.setSample(0, i, (float) i / (float) (N - 1));
@@ -1604,4 +1611,498 @@ void upic::runTransportChecks (upic::SelfTest& t)
                juce::String (maxDiff, 6));
     }
 
+}
+
+//==============================================================================
+// M5: the material's Ref (the UPIC's per-slot REF) and the material's own
+// edits (the trim, the fades, the normalise gain and the slot's level).
+//
+// The Ref used to live on the arc, so two arcs on the same material could
+// disagree about the pitch it was recorded at. It lives on the SLOT now, so
+// the material has one unity point - and the piece's format carries it (and
+// the material's edits) from one session to the next.
+void upic::runMaterialChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    const int sr = 44100;
+
+    // a 220 Hz sine (integer cycles => a seamless loop)
+    auto sineSlot = [sr] (double ref) {
+        upic::SampleSlot s;
+        s.id = 1; s.name = "sine220"; s.sampleRate = (double) sr;
+        s.refFreq = ref;
+        juce::AudioBuffer<float> buf (1, sr);
+        for (int i = 0; i < sr; ++i)
+            buf.setSample (0, i, 0.8f * (float) std::sin (
+                juce::MathConstants<double>::pi * 2.0 * 220.0 * i / sr));
+        s.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
+        return s;
+    };
+
+    // --- 1. the slot's Ref decides the ratio (the arc's Ref does not) ---
+    {
+        auto measure = [&](double arcRef, double slotRef, double arcFreq) {
+            std::vector<upic::SampleSlot> slots { sineSlot (slotRef) };
+            upic::Page pg; pg.durationSec = 2.0;
+            upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = 1; a.refFreq = arcRef;
+            a.intensity = 1.0f;
+            a.points = { { 0.0, arcFreq }, { 2.0, arcFreq } };
+            pg.arcs.push_back (a);
+            upic::Envelope flat; flat.presetFlat();
+            std::vector<upic::Envelope> envs { flat };
+            auto waves = upic::defaultWaveforms();
+            juce::AudioBuffer<float> out (2, sr * 2);
+            out.clear();
+            UpicEngine e; e.prepare ((double) sr, 8192);
+            e.renderPageOffline (pg, waves, envs, slots, out, (double) sr, 1.0f);
+            // the zero crossings over [0.5 s, 1.5 s] => Hz
+            float pk = 0.0f;
+            for (int i = sr / 2; i < sr * 3 / 2; ++i)
+                pk = juce::jmax (pk, std::abs (out.getSample (0, i)));
+            const float thr = pk * 0.15f;
+            int zc = 0; bool high = false;
+            for (int i = sr / 2; i < sr * 3 / 2; ++i)
+            {
+                const float v = out.getSample (0, i);
+                if (! high && v > thr) { high = true; ++zc; }
+                else if (high && v < -thr) high = false;
+            }
+            return (double) zc;
+        };
+
+        // the material was recorded at 220 Hz, but the slot's Ref says 440
+        // (the user retuned the material): the arc at 440 Hz is at ratio 1,
+        // so the material sounds at its own pitch (220 Hz)
+        const double bySlot = measure (220.0, 440.0, 440.0);
+        check (std::abs (bySlot - 220.0) < 10.0,
+               "the slot's Ref decides the ratio, not the arc's",
+               juce::String (bySlot, 1) + " Hz (expect 220)");
+        // the arc's Ref (220) would have made it an octave up
+        const double byArc = measure (220.0, 220.0, 440.0);
+        check (std::abs (byArc - 440.0) < 20.0,
+               "the material at its own Ref is an octave up",
+               juce::String (byArc, 1) + " Hz (expect 440)");
+    }
+
+    // --- 2. the trim: the material plays only the region ---
+    {
+        // a ramp: the value tells the position inside the material
+        upic::SampleSlot s;
+        s.id = 1; s.name = "ramp"; s.sampleRate = (double) sr;
+        s.refFreq = 220.0;
+        juce::AudioBuffer<float> buf (1, sr);
+        for (int i = 0; i < sr; ++i)
+            buf.setSample (0, i, (float) i / (float) (sr - 1));
+        s.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
+
+        check (std::abs (s.durationSec() - 1.0) < 1.0e-9,
+               "the material is as long as it was loaded",
+               juce::String (s.durationSec(), 3) + " s");
+        s.loopStart = sr / 4; s.loopEnd = (3 * sr) / 4;
+        check (s.regionFrames() == sr / 2
+               && std::abs (s.durationSec() - 0.5) < 1.0e-9,
+               "the trim shortens the material",
+               juce::String (s.durationSec(), 3) + " s ("
+                   + juce::String (s.regionFrames()) + " frames)");
+
+        // the frames outside the region are not played: the ramp starts at
+        // the region's first frame (0.25) and ends at its last (0.75)
+        upic::Page pg; pg.durationSec = 2.0;
+        upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = 1; a.refFreq = 220.0;
+        a.intensity = 1.0f;
+        a.points = { { 0.0, 220.0 }, { 2.0, 220.0 } };
+        pg.arcs.push_back (a);
+        upic::Envelope flat; flat.presetFlat();
+        std::vector<upic::Envelope> envs { flat };
+        auto waves = upic::defaultWaveforms();
+        std::vector<upic::SampleSlot> slots { s };
+        juce::AudioBuffer<float> out (2, sr * 2);
+        out.clear();
+        UpicEngine e; e.prepare ((double) sr, 8192);
+        e.renderPageOffline (pg, waves, envs, slots, out, (double) sr, 1.0f);
+        // the ramp is read at ratio 1, so it runs from 0.25 to 0.75 in the
+        // first second - the values before the region and after it are not
+        // heard at all (the master's soft clip is in the way, so the
+        // expected bounds are the clipped ones)
+        float lo = 1.0f, hi = -1.0f;
+        for (int i = sr / 10; i < sr * 9 / 10; ++i)
+        {
+            lo = juce::jmin (lo, out.getSample (0, i));
+            hi = juce::jmax (hi, out.getSample (0, i));
+        }
+        const float expectLo = (float) std::tanh (0.25 * 0.6) * 0.9f;
+        const float expectHi = (float) std::tanh (0.75 * 0.6) * 0.9f;
+        check (lo > expectLo * 0.98f && lo < expectLo * 1.02f
+               && hi > expectHi * 0.98f && hi < expectHi * 1.02f,
+               "the trimmed material plays only the region",
+               "min " + juce::String (lo, 3) + " max " + juce::String (hi, 3)
+                   + " (expect " + juce::String (expectLo, 3) + ".."
+                   + juce::String (expectHi, 3) + ")");
+    }
+
+    // --- 2b. the reversed read is the REGION's reverse ---
+    {
+        // a ramp: the value tells the position inside the material
+        upic::SampleSlot s;
+        s.id = 1; s.name = "ramp"; s.sampleRate = (double) sr;
+        s.refFreq = 220.0;
+        juce::AudioBuffer<float> buf (1, sr);
+        for (int i = 0; i < sr; ++i)
+            buf.setSample (0, i, (float) i / (float) (sr - 1));
+        s.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
+        s.loopStart = sr / 4; s.loopEnd = (3 * sr) / 4;
+
+        upic::Page pg; pg.durationSec = 2.0;
+        upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = 1; a.refFreq = 220.0;
+        a.intensity = 1.0f;
+        a.points = { { 0.0, 220.0 }, { 2.0, 220.0 } };
+        pg.arcs.push_back (a);
+        upic::Envelope flat; flat.presetFlat();
+        std::vector<upic::Envelope> envs { flat };
+        auto waves = upic::defaultWaveforms();
+
+        // the value 25 ms into the arc (past the arc's own edge fade)
+        auto renderAt = [&](bool reversed) {
+            upic::SampleSlot s2 = s;
+            s2.reversed = reversed;
+            std::vector<upic::SampleSlot> slots { s2 };
+            juce::AudioBuffer<float> out (2, sr * 2);
+            out.clear();
+            UpicEngine e; e.prepare ((double) sr, 8192);
+            e.renderPageOffline (pg, waves, envs, slots, out, (double) sr, 1.0f);
+            return out.getSample (0, sr / 40);
+        };
+        const float fwd = renderAt (false);
+        const float rev = renderAt (true);
+        // the region holds the values 0.25..0.75 (the master's soft clip is
+        // in the way, so the expected bounds are the clipped ones)
+        const float clipLo = (float) std::tanh (0.25 * 0.6) * 0.9f;
+        const float clipHi = (float) std::tanh (0.75 * 0.6) * 0.9f;
+        check (rev > fwd + 0.15f && fwd > clipLo * 0.95f && fwd < clipHi
+               && rev < clipHi * 1.05f && rev > clipLo,
+               "the reversed read is the region's reverse",
+               "fwd " + juce::String (fwd, 3) + " rev " + juce::String (rev, 3)
+                   + " (the region is " + juce::String (clipLo, 3) + ".."
+                   + juce::String (clipHi, 3) + ")");
+    }
+
+    // --- 3. the fades quieten the ends of the region ---
+    {
+        // a constant material: the fade is the only thing that changes it
+        upic::SampleSlot s;
+        s.id = 1; s.name = "flat"; s.sampleRate = (double) sr;
+        s.refFreq = 220.0;
+        juce::AudioBuffer<float> buf (1, sr);
+        for (int i = 0; i < sr; ++i) buf.setSample (0, i, 0.2f);
+        s.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
+        s.fadeInSec = 0.1; s.fadeOutSec = 0.1;
+
+        upic::Page pg; pg.durationSec = 2.0;
+        upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = 1; a.refFreq = 220.0;
+        a.intensity = 1.0f;
+        a.points = { { 0.0, 220.0 }, { 2.0, 220.0 } };
+        pg.arcs.push_back (a);
+        upic::Envelope flat; flat.presetFlat();
+        std::vector<upic::Envelope> envs { flat };
+        auto waves = upic::defaultWaveforms();
+        std::vector<upic::SampleSlot> slots { s };
+        juce::AudioBuffer<float> out (2, sr * 2);
+        out.clear();
+        UpicEngine e; e.prepare ((double) sr, 8192);
+        e.renderPageOffline (pg, waves, envs, slots, out, (double) sr, 1.0f);
+
+        // the material loops every second, so the fade is heard again at
+        // the start of the second loop
+        float head = 0.0f, middle = 0.0f;
+        for (int i = sr * 2 / 100; i < sr * 4 / 100; ++i)   // 20..40 ms: inside the fade
+            head = juce::jmax (head, std::abs (out.getSample (0, i)));
+        for (int i = sr / 3; i < sr / 2; ++i)                // the middle of the region
+            middle = juce::jmax (middle, std::abs (out.getSample (0, i)));
+        check (head < middle * 0.5f && head > middle * 0.2f && middle > 0.02f,
+               "the fade quiets the start of the region",
+               "head " + juce::String (head, 4) + " middle " + juce::String (middle, 4));
+
+        // the fade is a tenth of the region when no length is given
+        upic::SampleSlot s2 = s;
+        s2.fadeInSec = 0.0; s2.fadeOutSec = 0.0;
+        s2.applyFade();
+        check (std::abs (s2.fadeInSec - 0.1) < 1.0e-9
+               && std::abs (s2.fadeOutSec - 0.1) < 1.0e-9,
+               "the fade takes a tenth of the material",
+               juce::String (s2.fadeInSec, 3) + " s");
+    }
+
+    // --- 4. the slot's level scales the render ---
+    {
+        upic::SampleSlot s;
+        s.id = 1; s.name = "flat"; s.sampleRate = (double) sr;
+        s.refFreq = 220.0;
+        juce::AudioBuffer<float> buf (1, sr);
+        for (int i = 0; i < sr; ++i) buf.setSample (0, i, 0.2f);
+        s.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
+
+        upic::Page pg; pg.durationSec = 2.0;
+        upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = 1; a.refFreq = 220.0;
+        a.intensity = 1.0f;
+        a.points = { { 0.0, 220.0 }, { 2.0, 220.0 } };
+        pg.arcs.push_back (a);
+        upic::Envelope flat; flat.presetFlat();
+        std::vector<upic::Envelope> envs { flat };
+        auto waves = upic::defaultWaveforms();
+
+        auto peakAt = [&](float level) {
+            s.level = level;
+            std::vector<upic::SampleSlot> slots { s };
+            juce::AudioBuffer<float> out (2, sr * 2);
+            out.clear();
+            UpicEngine e; e.prepare ((double) sr, 8192);
+            e.renderPageOffline (pg, waves, envs, slots, out, (double) sr, 1.0f);
+            float pk = 0.0f;
+            for (int i = sr / 3; i < sr / 2; ++i)
+                pk = juce::jmax (pk, std::abs (out.getSample (0, i)));
+            return (double) pk;
+        };
+        const double full = peakAt (1.0f);
+        const double half = peakAt (0.5f);
+        check (full > 0.02 && std::abs (half / full - 0.5) < 0.06,
+               "the slot's level scales the render",
+               "full " + juce::String (full, 4) + " half " + juce::String (half, 4));
+
+        // the normalise gain: the region's peak sits just under full scale
+        s.level = 1.0f;
+        const float peak = s.peakInRegion();
+        check (peak > 0.19f && peak < 0.21f, "the material's peak is measured",
+               juce::String (peak, 4));
+        check (s.normalise() && std::abs (s.gain - 0.99f / peak) < 0.01f,
+               "the normalise gain brings the peak up to full scale",
+               "gain " + juce::String (s.gain, 4));
+        s.resetEdits();
+        check (std::abs (s.gain - 1.0f) < 1.0e-6f, "the reset takes the gain back",
+               juce::String (s.gain, 4));
+    }
+
+    // --- 5. the piece carries the material's Ref and its edits ---
+    {
+        upic::SampleSlot s;
+        s.id = 1; s.name = "mat"; s.sampleRate = (double) sr;
+        s.refFreq = 330.0;
+        s.level = 0.75f;
+        s.gain = 2.5f;
+        s.loopStart = 100;
+        s.loopEnd = 5000;
+        s.fadeInSec = 0.03;
+        s.fadeOutSec = 0.07;
+        juce::AudioBuffer<float> buf (1, 10000);
+        for (int i = 0; i < 10000; ++i) buf.setSample (0, i, 0.25f);
+        s.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
+
+        const auto back = upic::SampleSlot::fromVar (s.toVar(), 1);
+        check (std::abs (back.refFreq - 330.0) < 1.0e-9
+               && std::abs (back.level - 0.75f) < 1.0e-6f
+               && std::abs (back.gain - 2.5f) < 1.0e-6f
+               && back.loopStart == 100 && back.loopEnd == 5000
+               && std::abs (back.fadeInSec - 0.03) < 1.0e-9
+               && std::abs (back.fadeOutSec - 0.07) < 1.0e-9,
+               "the piece carries the material's Ref, level, gain, trim and fades",
+               "ref " + juce::String (back.refFreq, 1) + " level "
+                   + juce::String (back.level, 2) + " gain "
+                   + juce::String (back.gain, 2) + " trim "
+                   + juce::String (back.loopStart) + ".." + juce::String (back.loopEnd)
+                   + " fades " + juce::String (back.fadeInSec, 3) + "/"
+                   + juce::String (back.fadeOutSec, 3));
+
+        // a piece without the new fields loads with the old defaults
+        const auto old = upic::SampleSlot::fromVar (juce::JSON::parse (
+            "{\"id\":1,\"name\":\"old\",\"sampleRate\":44100,\"channels\":1,\"frames\":0}"), 1);
+        check (old.refFreq == 0.0 && old.level == 1.0f && old.gain == 1.0f
+               && old.loopStart == 0 && old.loopEnd == 0
+               && old.fadeInSec == 0.0 && old.fadeOutSec == 0.0,
+               "a piece from before M5 has no Ref on the slot",
+               "ref " + juce::String (old.refFreq, 1));
+    }
+
+    // --- 6. a piece from before M5: the slot inherits the arc's Ref ---
+    {
+        MainComponent mc;
+        mc.setSize (1280, 800);
+
+        // a slot in the format of a piece from before M5: no "ref", no
+        // "level", no "gain", no trim and no fades
+        upic::SampleSlot s;
+        s.id = 1; s.name = "sine220"; s.sampleRate = (double) sr;
+        juce::AudioBuffer<float> buf (1, sr);
+        for (int i = 0; i < sr; ++i)
+            buf.setSample (0, i, 0.8f * (float) std::sin (
+                juce::MathConstants<double>::pi * 2.0 * 220.0 * i / sr));
+        s.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
+        auto slotVar = s.toVar();
+        if (auto* o = slotVar.getDynamicObject())
+        {
+            o->removeProperty ("ref"); o->removeProperty ("level");
+            o->removeProperty ("gain"); o->removeProperty ("loopStart");
+            o->removeProperty ("loopEnd"); o->removeProperty ("fadeIn");
+            o->removeProperty ("fadeOut");
+        }
+
+        auto* root = new juce::DynamicObject();
+        juce::Array<juce::var> samples;
+        samples.add (slotVar);
+        root->setProperty ("samples", samples);
+        upic::Page pg; pg.durationSec = 2.0;
+        upic::Arc a; a.id = 1; a.mode = 1; a.sampleId = 1; a.refFreq = 220.0;
+        a.intensity = 1.0f;
+        a.points = { { 0.0, 220.0 }, { 2.0, 220.0 } };
+        pg.arcs.push_back (a);
+        juce::Array<juce::var> pages;
+        pages.add (pg.toVar());
+        root->setProperty ("pages", pages);
+        mc.loadFromVar (juce::var (root));
+
+        const auto out = mc.pieceToVar();
+        double slotRef = -1.0;
+        if (auto* arr = out.getProperty ("samples", juce::var()).getArray())
+            if (! arr->isEmpty())
+                slotRef = (double) arr->getReference (0).getProperty ("ref", -1.0);
+        check (std::abs (slotRef - 220.0) < 1.0e-6,
+               "a piece from before M5 gives the slot the Ref of the first arc that uses it",
+               juce::String (slotRef, 1) + " Hz");
+    }
+
+    // --- 7. the app: the Sample tab's Ref is the slot's, and the material's
+    //        own buttons work ---
+    {
+        MainComponent mc;
+        mc.setSize (1280, 800);
+
+        auto* root = new juce::DynamicObject();
+        juce::Array<juce::var> samples;
+        {
+            upic::SampleSlot s;
+            s.id = 1; s.name = "mat"; s.sampleRate = (double) sr;
+            s.refFreq = 220.0;
+            juce::AudioBuffer<float> buf (1, sr);
+            for (int i = 0; i < sr; ++i) buf.setSample (0, i, 0.25f);
+            s.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
+            samples.add (s.toVar());
+        }
+        root->setProperty ("samples", samples);
+        upic::Page pg; pg.durationSec = 4.0;
+        for (int k = 1; k <= 2; ++k)
+        {
+            upic::Arc a; a.id = k; a.mode = 1; a.sampleId = 1; a.refFreq = 220.0;
+            a.intensity = 1.0f;
+            a.points = { { 0.0, 220.0 }, { 4.0, 220.0 } };
+            pg.arcs.push_back (a);
+        }
+        juce::Array<juce::var> pages;
+        pages.add (pg.toVar());
+        root->setProperty ("pages", pages);
+        mc.loadFromVar (juce::var (root));
+
+        std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+            [&findByName](juce::Component& c, const juce::String& n) -> juce::Component* {
+                if (c.getName() == n) return &c;
+                for (int i = 0; i < c.getNumChildComponents(); ++i)
+                    if (auto* r = findByName(*c.getChildComponent(i), n)) return r;
+                return nullptr;
+            };
+        auto* ref = dynamic_cast<juce::Slider*> (findByName (mc, "refSlider"));
+        auto* level = dynamic_cast<juce::Slider*> (findByName (mc, "levelSlider"));
+        auto* norm = dynamic_cast<juce::TextButton*> (findByName (mc, "normMatBtn"));
+        auto* fade = dynamic_cast<juce::TextButton*> (findByName (mc, "fadeMatBtn"));
+        auto* reset = dynamic_cast<juce::TextButton*> (findByName (mc, "resetMatBtn"));
+        auto* waveEd = dynamic_cast<WaveformEditor*> (findByName (mc, "waveEd"));
+        check (ref != nullptr && level != nullptr && norm != nullptr && fade != nullptr
+               && reset != nullptr && waveEd != nullptr,
+               "M5: the material's controls are there");
+
+        // the Sample tab (the Ref is the slot's there)
+        if (auto* tab = dynamic_cast<juce::Button*> (findByName (mc, "Sample")))
+        {
+            tab->setToggleState (true, juce::dontSendNotification);
+            tab->onClick();
+        }
+
+        // a helper: the slot's fields, as the piece carries them
+        auto slotField = [&mc] (const char* name) -> double {
+            const auto out = mc.pieceToVar();
+            if (auto* arr = out.getProperty ("samples", juce::var()).getArray())
+                if (! arr->isEmpty())
+                    return (double) arr->getReference (0).getProperty (name, -1.0);
+            return -1.0;
+        };
+        // and the first arc's Ref
+        auto arcRef = [&mc] (int arcId) -> double {
+            const auto out = mc.pieceToVar();
+            if (auto* pagesArr = out.getProperty ("pages", juce::var()).getArray())
+                if (! pagesArr->isEmpty())
+                    if (auto* arcsArr = pagesArr->getReference (0)
+                            .getProperty ("arcs", juce::var()).getArray())
+                        for (const auto& av : *arcsArr)
+                            if ((int) av.getProperty ("id", -1) == arcId)
+                                return (double) av.getProperty ("refFreq", -1.0);
+            return -1.0;
+        };
+
+        if (ref != nullptr && level != nullptr && norm != nullptr && fade != nullptr
+            && reset != nullptr && waveEd != nullptr)
+        {
+            // the Ref slider sets the slot's Ref, and every arc on the slot
+            // follows it
+            ref->setValue (330.0, juce::sendNotificationSync);
+            check (std::abs (slotField ("ref") - 330.0) < 1.0e-6,
+                   "M5: the Sample tab's Ref sets the slot's Ref",
+                   juce::String (slotField ("ref"), 1) + " Hz");
+            check (std::abs (arcRef (1) - 330.0) < 1.0e-6
+                   && std::abs (arcRef (2) - 330.0) < 1.0e-6,
+                   "M5: the arcs on the slot follow its Ref",
+                   juce::String (arcRef (1), 1) + "/" + juce::String (arcRef (2), 1));
+
+            // the level slider sets the slot's level
+            level->setValue (0.5, juce::sendNotificationSync);
+            check (std::abs (slotField ("level") - 0.5) < 1.0e-6,
+                   "M5: the level slider sets the slot's level",
+                   juce::String (slotField ("level"), 2));
+
+            // the material's own buttons
+            const int depthBefore = mc.undoDepth();
+            norm->onClick();
+            check (std::abs (slotField ("gain") - 0.99 / 0.25) < 0.02,
+                   "M5: Norm sets the material's gain",
+                   juce::String (slotField ("gain"), 3));
+            check (mc.undoDepth() > depthBefore,
+                   "M5: the material's edits are undoable",
+                   juce::String (mc.undoDepth()) + " steps");
+
+            fade->onClick();
+            check (slotField ("fadeIn") > 0.0 && slotField ("fadeOut") > 0.0,
+                   "M5: Fade sets the fades at both ends",
+                   juce::String (slotField ("fadeIn"), 3) + "/"
+                       + juce::String (slotField ("fadeOut"), 3));
+
+            // the trim: the two edges of the region in the material view
+            check (waveEd->setSampleRegionForTest (1000, 20000),
+                   "M5: the material view can trim the material");
+            check ((int) slotField ("loopStart") == 1000
+                   && (int) slotField ("loopEnd") == 20000,
+                   "M5: the trim is kept in the piece",
+                   juce::String ((int) slotField ("loopStart")) + ".."
+                       + juce::String ((int) slotField ("loopEnd")));
+
+            reset->onClick();
+            check (std::abs (slotField ("gain") - 1.0) < 1.0e-6
+                   && std::abs (slotField ("fadeIn")) < 1.0e-9
+                   && std::abs (slotField ("fadeOut")) < 1.0e-9
+                   && (int) slotField ("loopStart") == 0
+                   && (int) slotField ("loopEnd") == 0,
+                   "M5: Reset undoes the material's edits",
+                   "gain " + juce::String (slotField ("gain"), 2)
+                       + " fades " + juce::String (slotField ("fadeIn"), 3) + "/"
+                       + juce::String (slotField ("fadeOut"), 3));
+        }
+    }
 }

@@ -38,6 +38,7 @@ namespace upic
     void runExportChecks (SelfTest& t);
     void runSieveChecks (SelfTest& t);
     void runTuningChecks (SelfTest& t);   // M4: the Scala tuning import
+    void runMaterialChecks (SelfTest& t); // M5: the per-slot Ref and the material's edits
     void runEditorChecks (SelfTest& t);
     void runSnapshotChecks (SelfTest& t);
     void runContinuityChecks (SelfTest& t);

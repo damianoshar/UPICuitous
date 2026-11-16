@@ -92,6 +92,9 @@ bool MainComponent::loadFromVar(const juce::var& v)
     // counts. A piece over a cap used to lose the extra music silently on
     // the next open; the user is told what did not make it in.
     juce::String droppedMsg;
+    // M5: the piece was adjusted, not truncated (the arcs' own Refs gave
+    // way to the material's Ref). It gets its own message.
+    juce::String adjustedMsg;
     // v1.33.4 (L13): how many ids had to be changed (a duplicate or an
     // impossible one) and how many material references pointed at nothing.
     int renamed = 0;
@@ -193,6 +196,46 @@ bool MainComponent::loadFromVar(const juce::var& v)
     if (newWaves.empty()) newWaves = upic::defaultWaveforms();
     if (newEnvelopes.empty()) newEnvelopes = upic::defaultEnvelopes();
     if (newPages.empty()) newPages.push_back(upic::Page());
+
+    // M5: the material's Ref is the SLOT's (the UPIC's per-slot REF). A
+    // piece written before M5 carries no Ref on the slot - the Ref lived
+    // on the arc - so the slot inherits the Ref of the first arc that
+    // uses it. The piece then sounds exactly as it did, unless an arc
+    // carried a Ref of its own (a different one) - the material's Ref
+    // decides now, and the user is told.
+    int ownRefArcs = 0;
+    for (auto& s : newSlots)
+    {
+        if (s.refFreq > 0.0) continue;
+        double ref = 0.0;
+        for (const auto& pg : newPages)
+        {
+            for (const auto& a : pg.arcs)
+            {
+                if (a.mode != 1 || a.sampleId != s.id) continue;
+                ref = a.refFreq;
+                break;
+            }
+            if (ref > 0.0) break;
+        }
+        s.refFreq = (ref > 0.0) ? upic::limits::clampFinite (ref, 20.0, 20000.0)
+                                : upic::kDefaultRefFreq;
+    }
+    // an arc whose Ref differs from its material's is now played with the
+    // material's Ref - say so, so the change is never silent.
+    for (const auto& pg : newPages)
+        for (const auto& a : pg.arcs)
+        {
+            if (a.mode != 1) continue;
+            for (const auto& s : newSlots)
+                if (s.id == a.sampleId && s.refFreq > 0.0
+                    && std::abs (1200.0 * std::log2 (a.refFreq / s.refFreq)) > 1.0)
+                { ++ownRefArcs; break; }
+        }
+    if (ownRefArcs > 0)
+        adjustedMsg = juce::String (ownRefArcs) + (ownRefArcs == 1 ? " arc had a Ref of its own"
+                                                                   : " arcs had Refs of their own")
+                    + " - the material's Ref decides now";
 
     // v1.33.4 (L13): the wavetables and the envelopes are keyed by their id
     // too - two wavetables with the same id made the arc list show the
@@ -362,6 +405,8 @@ bool MainComponent::loadFromVar(const juce::var& v)
     // it did not make it in. Say so instead of losing the music silently.
     if (! droppedMsg.isEmpty())
         flash ("This piece is bigger than the app supports - not loaded: " + droppedMsg);
+    else if (! adjustedMsg.isEmpty())
+        flash ("This piece was adjusted: " + adjustedMsg);
     } // the settings scope
 
     // v1.33.4 (L15): the loaded piece is what the file holds, so there is
@@ -699,6 +744,10 @@ void MainComponent::installSample (int slotIndex, SampleImport&& import)
         slot.name = import.name;
         slot.sampleRate = import.sample.sampleRate;
         slot.data = std::make_shared<const juce::AudioBuffer<float>>(std::move (import.sample.data));
+        // M5: the material's edits (the trim, the fades, the normalise
+        // gain) belong to the material that was there - the new file has
+        // none of them. The Ref belongs to the slot, so it stays.
+        slot.resetEdits();
         markModelChanged(); // v1.15: new material -> fade across it
         publishModelSnapshot(); // the next block must see it (no timer needed)
     }

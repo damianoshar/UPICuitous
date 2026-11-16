@@ -28,6 +28,25 @@ void MainComponent::buildScoreArea()
         return prepareWaveEdit();
     });
     waveEd.setOnEditEnd([this]{ endEdit(); });
+    // M5: the material's trim (the loop region) is dragged in the material
+    // view. It is an edit of its own: the undo transaction, the end of it,
+    // and the model's publication.
+    waveEd.setOnSampleEditStart([this]{
+        beginEdit ("Trim the material");
+        return true;
+    });
+    waveEd.setOnSampleEditEnd([this]{
+        endEdit();
+        // the trimmed material is a different length
+        if (selSlot >= 0 && selSlot < (int) sampleSlots.size())
+        {
+            const auto& slot = sampleSlots[(size_t) selSlot];
+            score.sampleDurations[slot.id] = slot.durationSec();
+        }
+        publishModelSnapshot();
+        updateSampleView();
+    });
+    waveEd.setOnSampleChanged([this]{ markModelChanged(); });
     // v1.18: the audio thread owns the playhead while playing; the editor
     // draws the published value and asks the audio thread to move on scrub
     score.setPlayheadSource(
@@ -70,9 +89,13 @@ void MainComponent::buildScoreArea()
                 for (size_t i = 0; i < sampleSlots.size(); ++i)
                     if (sampleSlots[i].id == a.sampleId && sampleSlots[i].loaded()) { si = (int) i; break; }
                 if (si < 0) break;
-                double sd = sampleSlots[(size_t) si].durationSec();
+                const auto& slot = sampleSlots[(size_t) si];
+                double sd = slot.durationSec();
                 if (sd <= 0.0) break;
-                double ref = juce::jmax(1.0, a.refFreq);
+                // M5: the material's Ref is the slot's (the material's base
+                // pitch) - the same one the engine uses, so the marker in
+                // the material view sits where the sound is.
+                double ref = juce::jmax(1.0, slot.refFreq > 0.0 ? slot.refFreq : a.refFreq);
                 const int tabMode = samplePitchBox.getSelectedId() - 1;
                 bool arcMapped = (a.pitchMode >= 0) ? (a.pitchMode == 1 || a.pitchMode == 2)
                                                     : (tabMode == 1 || tabMode == 2);
@@ -380,6 +403,9 @@ void MainComponent::resized()
     juce::Component* const sampleCtl[] = { &slotLab, &sampleBox, &loadSampleBtn, &revBtn,
                                            &samplePitchLab, &samplePitchBox,
                                            &grainLab, &grainSlider,
+                                           // M5: the slot's level and the material's edits
+                                           &levelLab, &levelSlider,
+                                           &normMatBtn, &fadeMatBtn, &resetMatBtn,
                                            &inGainLab, &inGainSlider, &monBtn, &capBtn,
                                            &waveFromSlotBtn };
     for (auto* c : sampleCtl) c->setVisible(showSampleCtl);
@@ -457,8 +483,13 @@ void MainComponent::resized()
             mat.items = { FL(&slotLab, 34, &sampleBox, 180),
                           F(&loadSampleBtn, 110), F(&revBtn, 64),
                           FL(&refLab, 34, &refSlider, 210),
+                          FL(&levelLab, 34, &levelSlider, 110),
                           FL(&samplePitchLab, 34, &samplePitchBox, 180),
                           FL(&grainLab, 40, &grainSlider, 100),
+                          // M5: the material's own edits (the normalise, the
+                          // fades and the reset; the trim is dragged in the
+                          // material view)
+                          F(&normMatBtn, 64), F(&fadeMatBtn, 64), F(&resetMatBtn, 64),
                           FL(&inGainLab, 30, &inGainSlider, 140), F(&monBtn, 64), F(&capBtn, 84),
                           F(&waveFromSlotBtn, 110) };
         else if (showLiveCtl)

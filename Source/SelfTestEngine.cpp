@@ -8,6 +8,18 @@
 // render, the cursor render path, the continuity of the output and the
 // per-arc overrides.
 
+// M5: the material's Ref is the SLOT's (the material's base pitch - the
+// UPIC's per-slot REF), so the engine's ratio is arcPitch / slotRef. A
+// test that means "the arc is at ratio 1..8" therefore has to put the Ref
+// on the slot, not on the arc. This gives every slot the same Ref.
+static std::vector<upic::SampleSlot> withSlotRef (const std::vector<upic::SampleSlot>& in,
+                                                   double ref)
+{
+    std::vector<upic::SampleSlot> out = in;
+    for (auto& s : out) s.refFreq = ref;
+    return out;
+}
+
 void upic::runDspChecks (upic::SelfTest& t)
 {
     auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
@@ -215,7 +227,9 @@ void upic::runDspChecks (upic::SelfTest& t)
             eng.prepare(44100.0, 8192);
             eng.setSamplePitchMode(pitchMode);
             eng.setScrubPreview(scrub);
-            eng.renderPageOffline(pg, waves, envs, slots, buf, 44100.0, 1.0f);
+            // M5: the material's Ref is the slot's - the test's `ref` is
+            // the 1x pitch of the material, so it goes on the slot.
+            eng.renderPageOffline(pg, waves, envs, withSlotRef (slots, ref), buf, 44100.0, 1.0f);
         };
         auto measurePitch = [&](double arcFreq, double ref, int pitchMode = 0,
                                 int sampleId = 1, bool scrub = false) -> double
@@ -308,7 +322,8 @@ void upic::runDspChecks (upic::SelfTest& t)
             eng.setScrubPreview(true);
             const int block = 512;
             juce::AudioBuffer<float> b(2, block); b.clear();
-            eng.render(pg, t, waves, envs, slots, b.getWritePointer(0), b.getWritePointer(1),
+            eng.render(pg, t, waves, envs, withSlotRef (slots, 220.0),
+                       b.getWritePointer(0), b.getWritePointer(1),
                        block, 1.0f, 1.0);
             float pk = 0.0f;
             for (int i = 0; i < block; ++i)
@@ -546,6 +561,11 @@ void upic::runContinuityChecks (upic::SelfTest& t)
             e.setSamplePitchMode(sampleMode);
             e.setLivePitchMode(liveMode);
             const bool live = ! pg.arcs.empty() && pg.arcs[0].mode == 2;
+            // M5: the material's Ref is the slot's - the page's arc Ref is
+            // the 1x pitch of the material, so it goes on the slot.
+            const double ref = (! pg.arcs.empty() && pg.arcs[0].mode == 1)
+                                 ? pg.arcs[0].refFreq : 0.0;
+            const auto testSlots = withSlotRef (slots, ref);
             int pos = 0;
             while (pos < total)
             {
@@ -554,7 +574,7 @@ void upic::runContinuityChecks (upic::SelfTest& t)
                 const int n = (pos == 0) ? juce::jmin(1024, total - pos)
                                          : juce::jmin(block, total - pos);
                 if (live) e.setLiveInput(ring.data(), nullptr, ringSize, write0 + pos, true);
-                e.render(pg, (double) pos / sr, waves, envs, slots,
+                e.render(pg, (double) pos / sr, waves, envs, testSlots,
                          out.data() + pos, nullptr, n, 0.8f);
                 pos += n;
             }
@@ -763,6 +783,7 @@ void upic::runArcOverrideChecks (upic::SelfTest& t)
         // --- the per-arc mode (a sample arc) ---
         {
             upic::SampleSlot s; s.id = 1; s.name = "sine"; s.sampleRate = 44100.0;
+            s.refFreq = 220.0;   // M5: the material's Ref is the slot's
             juce::AudioBuffer<float> buf(1, 44100);
             for (int i = 0; i < 44100; ++i)
                 buf.setSample(0, i, 0.8f * (float) std::sin(

@@ -20,6 +20,9 @@ void MainComponent::buildMaterialControls()
     addAndMakeVisible(waveFromSlotBtn);
     addAndMakeVisible(inGainSlider); addAndMakeVisible(inGainLab);
     addAndMakeVisible(slotLab); addAndMakeVisible(refLab); addAndMakeVisible(matHintLab);
+    // M5: the slot's level and the material's own edits
+    addAndMakeVisible(levelSlider); addAndMakeVisible(levelLab);
+    addAndMakeVisible(normMatBtn); addAndMakeVisible(fadeMatBtn); addAndMakeVisible(resetMatBtn);
     matHintLab.setName("matHintLab");
     addAndMakeVisible (pmRatioLab); addAndMakeVisible (pmIndexLab);
     addAndMakeVisible (pmIndexEnvLab); addAndMakeVisible (pmIndexEnvBox);
@@ -667,15 +670,33 @@ void MainComponent::buildMaterialTabs()
     refSlider.setValue(upic::kDefaultRefFreq, juce::dontSendNotification);
     refSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 72, 18);
     refSlider.setTextValueSuffix(" Hz");
-    refSlider.setTooltip("Reference pitch: the arc's 1x pitch and the grid's 1x.\n"
-                         "Dragging it retunes the selected arc(s) and sets the "
-                         "reference for new strokes.");
+    refSlider.setTooltip("Reference pitch: the 1x pitch of the material and the grid's 1x.\n"
+                         "On the Sample tab it is the SLOT's Ref (the material's base\n"
+                         "pitch - every arc that plays the slot follows it); on the Live\n"
+                         "tab it retunes the selected arc(s) and sets the reference for\n"
+                         "new strokes.");
     refSlider.onValueChange = [this]{
         drawRef = refSlider.getValue();
         const auto ids = score.getSelectedArcs();
         bool changed = false;
-        if (! ids.empty())
+        if (drawMatMode == 1 && selSlot >= 0 && selSlot < (int) sampleSlots.size())
         {
+            // M5: the Sample tab's Ref is the SLOT's - the material's base
+            // pitch (the UPIC's per-slot REF). Every arc that plays the
+            // slot follows it, on every page: the material has one unity
+            // point, so every arc on it shares it.
+            const int sid = sampleSlots[(size_t) selSlot].id;
+            juce::ScopedLock l(dataLock);
+            sampleSlots[(size_t) selSlot].refFreq = drawRef;
+            changed = true;
+            for (auto& pg : pages)
+                for (auto& a : pg.arcs)
+                    if (a.mode == 1 && a.sampleId == sid)
+                        a.refFreq = drawRef;
+        }
+        else if (! ids.empty())
+        {
+            // the Live tab: the selected arcs (the old behaviour)
             juce::ScopedLock l(dataLock);
             for (auto& a : curPage().arcs)
                 if (std::find(ids.begin(), ids.end(), a.id) != ids.end())
@@ -881,6 +902,13 @@ void MainComponent::buildSampleControls()
             publishModelSnapshot();
         }
         updateSampleView(); pushVoice();
+        // M5: the Sample tab's Ref is the slot's, and the material's
+        // buttons follow the slot.
+        syncRefToSlot();
+        updateMaterialButtons();
+        levelSlider.setValue (selSlot >= 0 && selSlot < (int) sampleSlots.size()
+                                ? (double) sampleSlots[(size_t) selSlot].level : 1.0,
+                              juce::dontSendNotification);
         updateRevButton(); // v1.19: the button shows the selected slot's state
     };
     loadSampleBtn.onClick = [this]{ loadSampleIntoSlot(selSlot); };
@@ -917,6 +945,44 @@ void MainComponent::buildSampleControls()
         flash(on ? "Selected slot(s): reversed" : "Selected slot(s): forward");
     };
     updateRevButton();
+
+    // --- M5: the slot's level and the material's own edits ---
+    //
+    // The level is the slot's own knob (the material's loudness). It
+    // changes the sound, so it travels with the piece.
+    levelSlider.setName("levelSlider");
+    levelSlider.setNormalisableRange (juce::NormalisableRange<double> (0.0, 2.0, 0.01, 0.2));
+    levelSlider.setValue (1.0, juce::dontSendNotification);
+    levelSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 18);
+    levelSlider.setTooltip ("The slot's level - how loud the material is "
+                            "(1 = as it was loaded)");
+    levelSlider.onValueChange = [this]{
+        if (selSlot < 0 || selSlot >= (int) sampleSlots.size()) return;
+        const float v = (float) levelSlider.getValue();
+        {
+            juce::ScopedLock l (dataLock);
+            sampleSlots[(size_t) selSlot].level = v;
+        }
+        markModelChanged();       // the level changes the sound
+        publishModelSnapshot();   // the audio thread must see it now
+    };
+
+    // The material's edits. They are not a rewrite of the audio: the
+    // normalise is a gain, the fades and the trim are read parameters, so
+    // they can be undone (the app's undo stack and the Reset button).
+    normMatBtn.setName ("normMatBtn");
+    normMatBtn.setTooltip ("Normalize the material: the gain is set so the "
+                           "loudest point of the material is just under full scale");
+    normMatBtn.onClick = [this]{ editMaterial (1); };
+    fadeMatBtn.setName ("fadeMatBtn");
+    fadeMatBtn.setTooltip ("Fade the material in and out over a tenth of its "
+                           "length, so the loop does not click");
+    fadeMatBtn.onClick = [this]{ editMaterial (2); };
+    resetMatBtn.setName ("resetMatBtn");
+    resetMatBtn.setTooltip ("Undo the material's edits (the trim, the fades "
+                            "and the normalise gain)");
+    resetMatBtn.onClick = [this]{ editMaterial (3); };
+    updateMaterialButtons();
 
     // v1.10: the sample pitch mode mirrors the live pitch selector - the
     // original varispeed stays the default; granular (stretch) maps the slot

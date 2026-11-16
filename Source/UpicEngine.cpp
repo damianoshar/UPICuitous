@@ -795,7 +795,12 @@ float UpicEngine::readMaterial(const upic::SampleSlot& smp, double pos, bool mir
         while (pos >= matDur) pos -= matDur;
         while (pos < 0.0) pos += matDur;
 
-        const double x = pos * matSr;
+        // M5: the loop region (the trim). The material plays only this
+        // part of it, and the position is measured from the region's
+        // first frame.
+        const int rStart = smp.regionStart();
+        const int rEnd = smp.regionEnd();
+        const double x = (double) rStart + pos * matSr;
         int ia = (int) x;
         float fr = (float) (x - (double) ia);
         if (ia >= nFrames) ia = nFrames - 1;
@@ -804,13 +809,16 @@ float UpicEngine::readMaterial(const upic::SampleSlot& smp, double pos, bool mir
 
         if (mirrored && nFrames > 1)
         {
-            // The mirrored read: the material's frame (n-1-ia) comes first
-            // and the one before it (n-ia) is the interpolation partner. The
-            // fraction runs the other way, so the read moves backwards inside
-            // the sample - and it stays continuous over the loop seam (a
-            // seamless material ends where it starts).
-            const int ra = (nFrames - 1 - ia + nFrames) % nFrames;
-            const int rb = (nFrames - ia) % nFrames;
+            // The mirrored read: the frame before the region's first one
+            // (the region's last) comes first and the region's first is the
+            // interpolation partner. The fraction runs the other way, so the
+            // read moves backwards inside the REGION - and it stays
+            // continuous over the loop seam (a seamless material ends where
+            // it starts). M5: the mirror is the region's, not the whole
+            // material's - the frames outside the trim are not played.
+            const int rel = juce::jlimit (0, rEnd - rStart - 1, ia - rStart);
+            const int ra = rEnd - 1 - rel;
+            const int rb = (ra + 1 < rEnd) ? (ra + 1) : rStart;
             ia = ra; ib = rb;
             fr = 1.0f - fr;
         }
@@ -820,6 +828,20 @@ float UpicEngine::readMaterial(const upic::SampleSlot& smp, double pos, bool mir
         {
             const float v1 = buf.getSample(1, ia) * (1.0f - fr) + buf.getSample(1, ib) * fr;
             v = 0.5f * (v + v1);
+        }
+
+        // M5: the fades at the two ends of the region. The gain follows
+        // the position inside the region, so a faded loop does not click
+        // at the seam (the fade is heard on every pass of the loop).
+        if (smp.fadeInSec > 0.0 || smp.fadeOutSec > 0.0)
+        {
+            const double u = pos / matDur;          // 0..1 inside the region
+            double fg = 1.0;
+            if (smp.fadeInSec > 0.0)
+                fg *= juce::jlimit (0.0, 1.0, (u * matDur) / smp.fadeInSec);
+            if (smp.fadeOutSec > 0.0)
+                fg *= juce::jlimit (0.0, 1.0, ((1.0 - u) * matDur) / smp.fadeOutSec);
+            v *= (float) fg;
         }
         return v;
     }
@@ -835,7 +857,17 @@ void UpicEngine::renderSampleArc(const upic::Arc& arc, const upic::SampleSlot& s
         if (! std::isfinite (playhead) || ! std::isfinite (rate)) return;
         const double arcStart = arc.startTime(), arcEnd = arc.endTime();
         const double arcDur = juce::jmax(1.0e-6, arcEnd - arcStart);
-        const double ref = juce::jmax(1.0, arc.refFreq);
+        // M5: the material's Ref is the SLOT's (the UPIC's per-slot REF):
+        // the ratio is arcPitch / slotRef, so the material has ONE unity
+        // point. An arc that carries a Ref of its own (a piece written
+        // before M5) does not get a second one - the loader gives the
+        // slot the Ref of the first arc that uses it and says so when an
+        // arc had one of its own.
+        const double slotRef = juce::jmax(1.0, smp.refFreq);
+        const double ref = (smp.refFreq > 0.0) ? slotRef : juce::jmax(1.0, arc.refFreq);
+        // M5: the slot's level and the material's own gain (what
+        // Normalize sets).
+        const float slotGain = juce::jlimit (0.0f, 64.0f, smp.level * smp.gain);
         // v1.21 (wave 19): the arc's own pitch mode, or the tab's setting
         // v1.33.4 (M24): the same rule the latency reporting uses
         int mode = effectiveMode (arc, samplePitchModeApplied);
@@ -989,7 +1021,7 @@ void UpicEngine::renderSampleArc(const upic::Arc& arc, const upic::SampleSlot& s
                 if (v.pos < 0.0) v.pos += matDur;
             }
 
-            scratch[(size_t) n] += s * env * edge * arc.intensity * arc.intensityAt(t, pc) * g;
+            scratch[(size_t) n] += s * env * edge * arc.intensity * arc.intensityAt(t, pc) * g * slotGain;
         }
     }
 

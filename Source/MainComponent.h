@@ -795,6 +795,14 @@ private:
     juce::ComboBox samplePitchBox;
     juce::Label samplePitchLab{ {}, "Pitch" };
 
+    // M5: the slot's level and the material's own edits. The level is the
+    // user's knob (it changes the sound, so it travels with the piece); the
+    // three buttons edit the material itself - the normalise gain, the
+    // fades and the trim (the trim is dragged in the material view).
+    juce::Slider levelSlider;
+    juce::Label levelLab{ {}, "Level" };
+    juce::TextButton normMatBtn{ "Norm" }, fadeMatBtn{ "Fade" }, resetMatBtn{ "Reset" };
+
     // v1.8 the one tab strip (replaces the Material dropdown AND the old
     // Score / Live pitch tabs): each material is its own tab + canvas layer
     // - Osc (wavetable), Sample (slots + capture), Live (mic)
@@ -872,6 +880,14 @@ private:
     void syncControlsToArc(int arcId); // load an arc into the toolbar
     void updateSampleView();
     void updateRevButton();       // v1.19: the Reverse button follows the slot
+    // M5: the material's own controls. `editMaterial` does one of the
+    // three edits (normalise, fade, reset); the buttons follow the slot
+    // (they are off when the slot has no material).
+    void updateMaterialButtons();
+    void editMaterial (int what);
+    // M5: the Sample tab's Ref is the SLOT's (the material's base pitch),
+    // so the Ref slider, the grid and the new arcs all follow it.
+    void syncRefToSlot();
     void updateRevBuffers();      // v1.20: (re)allocate the live reverse buffers
     void rebuildArcList();        // v1.21: rebuild the panel's rows from the model
     void handleMidi();            // v1.23: the MIDI messages (message thread)

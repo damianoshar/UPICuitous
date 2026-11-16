@@ -969,7 +969,15 @@ void MainComponent::timerCallback()
                 s += "Sel #" + juce::String(a.id);
                 if (nsel > 1) s += " (+" + juce::String(nsel - 1) + " more)";
                 if (a.mode == 1)
-                    s += "  [SAMPLE s" + juce::String(a.sampleId) + " ref " + juce::String(a.refFreq, 0) + "Hz]";
+                {
+                    // M5: the material's Ref is the slot's (the material's
+                    // base pitch), so that is what the line shows.
+                    double matRef = a.refFreq;
+                    for (const auto& sl : sampleSlots)
+                        if (sl.id == a.sampleId && sl.refFreq > 0.0) { matRef = sl.refFreq; break; }
+                    s += "  [SAMPLE s" + juce::String(a.sampleId) + " ref "
+                       + juce::String(matRef, 0) + "Hz]";
+                }
                 else
                     s += "  v" + juce::String(a.waveformId);
                 s += " e" + juce::String(a.envelopeId) + "  int " + juce::String(a.intensity, 2)

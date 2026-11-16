@@ -23,7 +23,8 @@ choose the pitch mode. Arc x is time; arc y is the playback ratio
 (1x = Ref). Granular (stretch) fits the slot to the arc length;
 Varispeed and Granular (no stretch) change the slot's playback length
 with pitch; Phase vocoder shifts pitch only. The material view shows the
-waveform and a time bar; drag the centre line to scrub.*
+waveform and a time bar; drag the centre line to scrub, and drag the two
+yellow edges to trim the material.*
 
 ## Builds in this repo
 
@@ -193,6 +194,28 @@ mirrored, the pitch stays the same. **Slot -> Wave** turns the selected
 slot into a wavetable - the UPIC's digitised wave page, where the take
 becomes one loop of the oscillator (the pitch then follows the arc).
 
+**The Ref belongs to the slot, not to the arc.** The material has one
+unity point - the pitch it was recorded at - and every arc that plays it
+shares it, on every page. The Sample tab's `Ref` slider moves the
+material's Ref: the arcs on that slot follow it, the grid moves with it
+and a new stroke is born with it. (The Live tab's `Ref` still belongs to
+the arcs, as it always did.) A piece written before this carries no Ref
+on its slots: the slot then inherits the Ref of the first arc that plays
+it, so such a piece sounds exactly as it did - and if an arc carried a
+Ref of its own, the material's Ref decides now and the app says so when
+the piece is opened.
+
+**The material can be edited.** The material view under the score shows
+the loaded material; the two yellow edges are handles - drag them to
+**trim** the material (the frames outside the region are not played, and
+the region is what the piece keeps). **Norm** sets the material's gain so
+its loudest point sits just under full scale, **Fade** fades it in and out
+over a tenth of its length (a click-free loop) and **Reset** undoes the
+material's edits. The **Level** slider (0 - 2) is the slot's own loudness.
+The edits are not a rewrite of the audio: they are parameters, so the
+undo stack can step over them and they travel with the piece (and with
+the host state in the plugin).
+
 **PM tab** - phase-modulation arcs: Ratio, Index, index envelope,
 Feedback and 2/4 operators, with bell / brass / pluck presets. The PM
 toolbar values are also the values of the next PM arc drawn, and editing
@@ -258,9 +281,13 @@ and again. Saving the piece or throwing it away removes the snapshot;
 the plugin keeps no snapshot (the host holds the piece). The piece
 carries everything that
 changes the sound - the arc's own pitch algorithm and its reversal, the
-sample slot's direction and the global pitch modes - so a reopened piece
+sample slot's direction, its Ref, its level and the material's own edits
+(the trim, the fades, the normalise gain) and the global pitch modes - so
+a reopened piece
 (or a reopened DAW session) sounds the same; older pieces without those
-fields still load, with the old defaults. The piece format has one set of
+fields still load, with the old defaults (a piece from before the
+per-slot Ref keeps its sound: the slot inherits the Ref of the first arc
+that plays it). The piece format has one set of
 limits - 2024 arcs per page (the UPIC's own number), 100 pages, 1000
 points per arc, 200 sieve zones, 256 notes in a tuning
 - and the editor and the loader share them: the editor refuses what does
@@ -501,7 +528,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 705 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` runs 730 headless checks (DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
@@ -516,6 +543,9 @@ movable sieve zones, the quantised line, the per-zone stickiness, the
 sieve checkbox end-to-end, the zone menu actions, the digitised wave page,
 the Scala tuning import (the parser, the scale's degrees and the sieve on
 the scale's own axis),
+the per-slot Ref and the material's own edits (the Ref that decides the
+ratio, the trim, the fades, the normalise gain, the slot's level and the
+piece from before M5 that keeps its sound),
 the micro-time page, the toolbar's group flow, the hints sidebar, the
 button text fitting, the capture button's colours, the wavetable
 buttons' colours, the PM preset round trip, the WAV export, the piece

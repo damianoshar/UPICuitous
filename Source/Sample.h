@@ -33,14 +33,123 @@ namespace upic
         // every pitch mode works.
         bool reversed = false;
 
+        // M5: the material's base pitch - the UPIC's per-slot REF. The
+        // engine's ratio for a sample arc is arcPitch / this, so the
+        // material has ONE unity point. Before M5 the Ref lived on the
+        // arc, so two arcs on the same material could disagree about the
+        // pitch it was recorded at.
+        //
+        // 0 means "not set": a piece written before M5 carries no Ref on
+        // the slot, and the loader then gives the slot the Ref of the
+        // first arc that uses it - so such a piece sounds exactly as it
+        // did. A fresh slot starts at the app's default.
+        double refFreq = upic::kDefaultRefFreq;
+
+        // M5: the slot's level (the user's knob, 0..2) and the material's
+        // own gain (what Normalize sets). Both change the sound, so both
+        // travel with the piece.
+        float level = 1.0f;
+        float gain = 1.0f;
+
+        // M5: the material's loop region - the trim. The frames outside it
+        // are not played. loopEnd = 0 means "to the end of the material".
+        int loopStart = 0;
+        int loopEnd = 0;
+
+        // M5: the fades at the two ends of the loop region (seconds). A
+        // faded loop does not click at the seam.
+        double fadeInSec = 0.0;
+        double fadeOutSec = 0.0;
+
         bool loaded() const
         {
             return data != nullptr && data->getNumSamples() > 0 && data->getNumChannels() > 0;
         }
+
+        // --- the material's loop region (M5: the trim) ---
+
+        int totalFrames() const
+        {
+            return data != nullptr ? data->getNumSamples() : 0;
+        }
+
+        // the first frame of the region (clamped into the material)
+        int regionStart() const
+        {
+            const int n = totalFrames();
+            if (n <= 0) return 0;
+            return juce::jlimit (0, n - 1, loopStart);
+        }
+
+        // the frame after the last one of the region (clamped into the
+        // material; the region is always at least one frame long)
+        int regionEnd() const
+        {
+            const int n = totalFrames();
+            if (n <= 0) return 0;
+            const int e = (loopEnd > 0 ? loopEnd : n);
+            return juce::jlimit (regionStart() + 1, n, e);
+        }
+
+        int regionFrames() const
+        {
+            return juce::jmax (0, regionEnd() - regionStart());
+        }
+
+        // The length of the material as it is played: the region's, not the
+        // whole file's (M5: the trim shortens it).
         double durationSec() const
         {
-            return (data != nullptr && sampleRate > 0)
-                       ? (double) data->getNumSamples() / sampleRate : 0.0;
+            return (regionFrames() > 0 && sampleRate > 0)
+                       ? (double) regionFrames() / sampleRate : 0.0;
+        }
+
+        // --- the material's edits (M5) ---
+
+        // The peak of the region, over both channels.
+        float peakInRegion() const
+        {
+            if (data == nullptr) return 0.0f;
+            const auto& buf = *data;
+            const int a = regionStart(), b = regionEnd();
+            const int ch = juce::jmin (2, buf.getNumChannels());
+            float p = 0.0f;
+            for (int c = 0; c < ch; ++c)
+                for (int i = a; i < b; ++i)
+                    p = juce::jmax (p, std::abs (buf.getSample (c, i)));
+            return p;
+        }
+
+        // Normalize: the material's gain is set so the region's peak sits
+        // just under full scale. It is a gain and not a rewrite of the
+        // audio, so the Reset button can take it back, the undo stack can
+        // step over it, and it travels with the piece.
+        bool normalise()
+        {
+            const float p = peakInRegion();
+            if (! (p > 1.0e-6f)) return false;
+            gain = juce::jlimit (0.01f, 64.0f, 0.99f / p);
+            return true;
+        }
+
+        // The fades at the two ends of the region (a click-free loop).
+        // Without a length, a tenth of the region each.
+        void applyFade (double seconds = 0.0)
+        {
+            const double d = durationSec();
+            const double f = (seconds > 0.0 ? seconds : d * 0.1);
+            fadeInSec  = juce::jlimit (0.0, d * 0.5, f);
+            fadeOutSec = juce::jlimit (0.0, d * 0.5, f);
+        }
+
+        // The material's edits go back to how it was loaded.
+        void resetEdits()
+        {
+            loopStart = 0;
+            loopEnd = 0;
+            fadeInSec = 0.0;
+            fadeOutSec = 0.0;
+            gain = 1.0f;
         }
 
         // v1.33.4 (L15, part 3): the slot's audio as the PCM16 bytes the
@@ -88,6 +197,18 @@ namespace upic
             // v1.33.4 (H7): the slot's direction changes the sound, so it
             // travels with the piece (and with the host state)
             if (reversed) o->setProperty("reversed", true);
+            // M5: the material's Ref (its base pitch), its level, the
+            // normalise gain, the trim and the fades. They all change the
+            // sound, so they travel with the piece (and with the host
+            // state). A Ref of 0 means "not set" - a piece written before
+            // M5 has none, and the loader fills it in.
+            o->setProperty("ref", refFreq);
+            o->setProperty("level", level);
+            o->setProperty("gain", gain);
+            o->setProperty("loopStart", loopStart);
+            o->setProperty("loopEnd", loopEnd);
+            o->setProperty("fadeIn", fadeInSec);
+            o->setProperty("fadeOut", fadeOutSec);
             const int ch = juce::jmin(2, data != nullptr ? data->getNumChannels() : 0);
             const int n = data != nullptr ? data->getNumSamples() : 0;
             o->setProperty("channels", ch);
@@ -113,6 +234,19 @@ namespace upic
             // v1.33.4 (H7): the slot's direction (absent in older pieces ->
             // forwards)
             s.reversed = (bool) v.getProperty ("reversed", false);
+            // M5: the material's Ref (0 = a piece from before M5 - the
+            // loader gives the slot the Ref of the first arc that uses
+            // it), its level, the normalise gain, the trim and the fades.
+            // Every one of them is clamped: a piece is untrusted input.
+            s.refFreq = limits::clampFinite ((double) v.getProperty ("ref", 0.0), 0.0, 20000.0);
+            s.level = limits::clampFinite ((float) v.getProperty ("level", 1.0f), 0.0f, 2.0f);
+            s.gain = limits::clampFinite ((float) v.getProperty ("gain", 1.0f), 0.01f, 64.0f);
+            s.loopStart = juce::jlimit (0, limits::kMaxFramesPerSample,
+                                        (int) v.getProperty ("loopStart", 0));
+            s.loopEnd = juce::jlimit (0, limits::kMaxFramesPerSample,
+                                      (int) v.getProperty ("loopEnd", 0));
+            s.fadeInSec = limits::clampFinite ((double) v.getProperty ("fadeIn", 0.0), 0.0, 600.0);
+            s.fadeOutSec = limits::clampFinite ((double) v.getProperty ("fadeOut", 0.0), 0.0, 600.0);
             const int ch = juce::jlimit(1, 2, (int) v.getProperty("channels", 1));
             // The declared frame count is clamped before anything is
             // allocated: a crafted "frames" value must not be able to ask

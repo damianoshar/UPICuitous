@@ -85,6 +85,7 @@ int upic::runSelfTest()
     upic::runExportChecks (t);
     upic::runSieveChecks (t);
     upic::runTuningChecks (t);   // M4: the Scala tuning import
+    upic::runMaterialChecks (t); // M5: the per-slot Ref and the material's edits
     upic::runEditorChecks (t);
     upic::runSnapshotChecks (t);
     upic::runContinuityChecks (t);
