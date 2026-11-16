@@ -53,8 +53,8 @@ void upic::runDspChecks (upic::SelfTest& t)
         double maxDiff = 0.0;
         for (int i = 0; i <= 2000; ++i)
         {
-            const double t = (double) i / 2000.0 * 9.98;
-            maxDiff = juce::jmax(maxDiff, std::abs(a.freqAt(t) - linearFreqAt(t)));
+            const double tSec = (double) i / 2000.0 * 9.98;
+            maxDiff = juce::jmax(maxDiff, std::abs(a.freqAt(tSec) - linearFreqAt(tSec)));
         }
         check(maxDiff < 1e-9, "the binary-search freqAt matches the linear scan",
               "max diff " + juce::String(maxDiff, 12));
@@ -82,8 +82,8 @@ void upic::runDspChecks (upic::SelfTest& t)
         float maxDiffE = 0.0f;
         for (int i = 0; i <= 2000; ++i)
         {
-            const float t = (float) i / 2000.0f * 0.998f;
-            maxDiffE = juce::jmax(maxDiffE, std::abs(e.valueAt(t) - linearValueAt(t)));
+            const float tSec = (float) i / 2000.0f * 0.998f;
+            maxDiffE = juce::jmax(maxDiffE, std::abs(e.valueAt(tSec) - linearValueAt(tSec)));
         }
         check(maxDiffE < 1e-6f, "the binary-search envelope valueAt matches the linear scan",
               "max diff " + juce::String(maxDiffE, 9));
@@ -423,10 +423,10 @@ void upic::runCursorPathChecks (upic::SelfTest& t)
             double worstF = 0.0, worstI = 0.0;
             for (int k = 0; k <= 1000; ++k)
             {
-                const double t = 0.01 + (double) k * 0.0099;
-                worstF = juce::jmax (worstF, std::abs (a.freqAt (t, c) - a.freqAt (t)));
-                worstI = juce::jmax (worstI, std::abs ((double) a.intensityAt (t, c)
-                                                       - (double) a.intensityAt (t)));
+                const double tSec = 0.01 + (double) k * 0.0099;
+                worstF = juce::jmax (worstF, std::abs (a.freqAt (tSec, c) - a.freqAt (tSec)));
+                worstI = juce::jmax (worstI, std::abs ((double) a.intensityAt (tSec, c)
+                                                       - (double) a.intensityAt (tSec)));
             }
             check (worstF < 1e-9, "the cursor's pitch is the searched pitch",
                    juce::String (worstF));
@@ -441,10 +441,10 @@ void upic::runCursorPathChecks (upic::SelfTest& t)
             double worstF = 0.0, worstI = 0.0;
             for (int k = 1000; k >= 0; --k)
             {
-                const double t = 0.01 + (double) k * 0.0099;
-                worstF = juce::jmax (worstF, std::abs (a.freqAt (t, c) - a.freqAt (t)));
-                worstI = juce::jmax (worstI, std::abs ((double) a.intensityAt (t, c)
-                                                       - (double) a.intensityAt (t)));
+                const double tSec = 0.01 + (double) k * 0.0099;
+                worstF = juce::jmax (worstF, std::abs (a.freqAt (tSec, c) - a.freqAt (tSec)));
+                worstI = juce::jmax (worstI, std::abs ((double) a.intensityAt (tSec, c)
+                                                       - (double) a.intensityAt (tSec)));
             }
             check (worstF < 1e-9, "the cursor's pitch follows the segment backwards too",
                    juce::String (worstF));

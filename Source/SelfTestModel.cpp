@@ -762,19 +762,19 @@ void upic::runSieveChecks (upic::SelfTest& t)
 
         // zone sieve beats global sieve; global grid applies outside the zone
         const std::vector<int> globalR { 0, 7 };
-        double t = 6.0, f = 450.0; // inside the chromatic zone
-        upic::quantizePoint(true, true, 12, globalR, 4.0, 1.0, zones, t, f);
+        double tSec = 6.0, f = 450.0; // inside the chromatic zone
+        upic::quantizePoint(true, true, 12, globalR, 4.0, 1.0, zones, tSec, f);
         check(std::abs(f - 440.0) < 0.5, "zone sieve overrides global (450 -> 440)",
               juce::String(f, 2));
-        check(std::abs(t - 6.0) < 1e-9, "zone time grid 8/s keeps 6.0");
-        t = 2.13; f = 450.0;       // outside -> global sieve {0,7} + global grid 4/s
-        upic::quantizePoint(true, true, 12, globalR, 4.0, 1.0, zones, t, f);
+        check(std::abs(tSec - 6.0) < 1e-9, "zone time grid 8/s keeps 6.0");
+        tSec = 2.13; f = 450.0;       // outside -> global sieve {0,7} + global grid 4/s
+        upic::quantizePoint(true, true, 12, globalR, 4.0, 1.0, zones, tSec, f);
         check(std::abs(f - 392.0) < 0.6, "global sieve outside zone (450 -> 392)",
               juce::String(f, 2));
-        check(std::abs(t - 2.25) < 1e-9, "global time grid snaps 2.13 -> 2.25",
-              juce::String(t, 4));
-        t = 0.0; f = 450.0;        // chromatic snap softened by stickiness 0.5
-        upic::quantizePoint(true, false, 12, { 0 }, 0.0, 0.5, {}, t, f);
+        check(std::abs(tSec - 2.25) < 1e-9, "global time grid snaps 2.13 -> 2.25",
+              juce::String(tSec, 4));
+        tSec = 0.0; f = 450.0;        // chromatic snap softened by stickiness 0.5
+        upic::quantizePoint(true, false, 12, { 0 }, 0.0, 0.5, {}, tSec, f);
         check(std::abs(f - 445.0) < 0.6, "stickiness 0.5 half-snaps (450 -> ~445)",
               juce::String(f, 2));
 
@@ -785,14 +785,14 @@ void upic::runSieveChecks (upic::SelfTest& t)
             zs.t0 = 0; zs.t1 = 10; zs.f0 = 100; zs.f1 = 1000;
             zs.m = 12; zs.remainders = { 0 }; zs.timeGrid = 0; zs.stickiness = 0.0;
             std::vector<upic::SieveZone> zz { zs };
-            t = 5.0; f = 450.0;
-            upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, t, f);
+            tSec = 5.0; f = 450.0;
+            upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, tSec, f);
             check(std::abs(f - 450.0) < 1e-9,
                   "zone stick 0 leaves the pitch free inside the zone",
                   juce::String(f, 2));
             zz[0].stickiness = -1.0;
-            t = 5.0; f = 450.0;
-            upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, t, f);
+            tSec = 5.0; f = 450.0;
+            upic::quantizePoint(true, true, 12, { 0, 7 }, 0.0, 1.0, zz, tSec, f);
             check(std::abs(upic::freqToMidi(f) - 72.0) < 0.05,
                   "zone stick -1 follows the global stick (450 -> C5)",
                   juce::String(f, 2));
@@ -806,10 +806,10 @@ void upic::runSieveChecks (upic::SelfTest& t)
         const int N = 300;
         for (int i = 0; i <= N; ++i)
         {
-            const double t = (double) i / N * 10.0;
-            const double f = 440.0 * std::pow(2.0, 0.8 * std::sin(t))
+            const double tSec = (double) i / N * 10.0;
+            const double f = 440.0 * std::pow(2.0, 0.8 * std::sin(tSec))
                            * (1.0 + (jr.nextFloat() - 0.5f) * 0.01);
-            pts.push_back({ t, f, 1.0f });
+            pts.push_back({ tSec, f, 1.0f });
         }
         const auto orig = pts;
         upic::simplifyArcPoints(pts, 0.01);

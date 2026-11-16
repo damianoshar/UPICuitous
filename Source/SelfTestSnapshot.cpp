@@ -407,8 +407,8 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                     check (std::abs (sc->zoneStickinessForTest (zid)) < 1e-9,
                            "zone menu: a stick value reaches the zone");
                     sc->setStickiness (1.0);
-                    double t = 5.0, f = 450.0;
-                    sc->quantizeXY (t, f);
+                    double tSec = 5.0, f = 450.0;
+                    sc->quantizeXY (tSec, f);
                     check (std::abs (f - 450.0) < 0.5,
                            "a zone's own stick overrides the global stick",
                            juce::String (f, 1) + " Hz");
@@ -417,8 +417,8 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                     sc->applyZoneMenuForTest (zid, ScoreEditor::zoneMenuStickFollow);
                     check (sc->zoneStickinessForTest (zid) < 0.0,
                            "zone menu: follow the global stick");
-                    t = 5.0; f = 450.0;
-                    sc->quantizeXY (t, f);
+                    tSec = 5.0; f = 450.0;
+                    sc->quantizeXY (tSec, f);
                     check (std::abs (f - 440.0) < 0.6,
                            "follow-global uses the global stick",
                            juce::String (f, 1) + " Hz, stick "
@@ -514,22 +514,22 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                     { "Live",   "Live",   "livePitchBox", "sampleBox" },
                     { "PM",     "PM",     "pmOpsBox",     "sampleBox" },
                 };
-                for (auto t : tabs)
+                for (auto tabCheck : tabs)
                 {
-                    if (auto* tab = dynamic_cast<juce::Button*> (find (t.button)))
+                    if (auto* tab = dynamic_cast<juce::Button*> (find (tabCheck.button)))
                     {
                         tab->setToggleState (true, juce::dontSendNotification);
                         tab->onClick();
                     }
                     juce::String detail;
                     check (layoutOk (1280, 800, detail),
-                           juce::String ("tab layout ") + t.tab, detail.trim());
-                    auto* shown = find (t.shown);
-                    auto* hidden = find (t.hidden);
+                           juce::String ("tab layout ") + tabCheck.tab, detail.trim());
+                    auto* shown = find (tabCheck.shown);
+                    auto* hidden = find (tabCheck.hidden);
                     check (shown != nullptr && shown->isVisible(),
-                           juce::String ("tab ") + t.tab + " shows " + t.shown);
+                           juce::String ("tab ") + tabCheck.tab + " shows " + tabCheck.shown);
                     check (hidden != nullptr && ! hidden->isVisible(),
-                           juce::String ("tab ") + t.tab + " hides " + t.hidden);
+                           juce::String ("tab ") + tabCheck.tab + " hides " + tabCheck.hidden);
                 }
                 if (auto* tab = dynamic_cast<juce::Button*> (find ("Osc")))
                 {
@@ -1276,8 +1276,8 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                 // the host's block size is
                 for (int blockSize : { 128, 512 })
                 {
-                    auto mcHolder = std::make_unique<MainComponent>(true);
-                    auto& mcWarp = *mcHolder;
+                    auto mcWarpHolder = std::make_unique<MainComponent>(true);
+                    auto& mcWarp = *mcWarpHolder;
                     mcWarp.setSize (1280, 800);
                     mcWarp.prepareToPlay (512, 44100.0);
                     const auto pg = warpedPage (0.9);
@@ -1632,8 +1632,8 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
             // parsed into a temporary model and swapped in only when it
             // really is a piece.
             {
-                auto mcHolder = std::make_unique<MainComponent>(true);
-                auto& mcM25 = *mcHolder;
+                auto mcM25Holder = std::make_unique<MainComponent>(true);
+                auto& mcM25 = *mcM25Holder;
                 mcM25.setSize (1280, 800);
                 const auto piece = juce::JSON::parse (
                     "{\"pages\":[{\"duration\":30,\"nextArcId\":2,\"arcs\":["

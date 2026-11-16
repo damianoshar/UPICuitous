@@ -162,8 +162,8 @@ void upic::runEditorChecks (upic::SelfTest& t)
         upic::Page zp; zp.durationSec = 10.0;
         ed.bind(&zp, &waves, &ph, nullptr);
         ed.setSieve(true, 12, { 0, 7 }); // global: C/G only
-        double t = 1.0, f = 450.0;
-        ed.quantizeXY(t, f);
+        double tSec = 1.0, f = 450.0;
+        ed.quantizeXY(tSec, f);
         check(std::abs(f - 392.0) < 0.6, "editor global sieve 450 -> 392",
               juce::String(f, 2));
 
@@ -171,23 +171,23 @@ void upic::runEditorChecks (upic::SelfTest& t)
         check(zid > 0 && zp.zones.size() == 1, "editor addZone inserts a zone");
         zp.zones[0].m = 12;
         zp.zones[0].remainders = { 0,1,2,3,4,5,6,7,8,9,10,11 }; // chromatic zone
-        t = 5.0; f = 450.0;
-        ed.quantizeXY(t, f);
+        tSec = 5.0; f = 450.0;
+        ed.quantizeXY(tSec, f);
         check(std::abs(f - 440.0) < 0.5, "editor zone sieve overrides global",
               juce::String(f, 2));
-        t = 1.0; f = 450.0;
-        ed.quantizeXY(t, f);
+        tSec = 1.0; f = 450.0;
+        ed.quantizeXY(tSec, f);
         check(std::abs(f - 392.0) < 0.6, "editor outside zone keeps global sieve",
               juce::String(f, 2));
 
         ed.setTimeGrid(4.0);
-        t = 5.13; f = 500.0; // inside zone (zone grid = 0 -> no time snap)
-        ed.quantizeXY(t, f);
-        check(std::abs(t - 5.13) < 1e-9, "editor zone timeGrid 0 overrides global grid");
-        t = 2.13; f = 500.0; // outside -> global grid snaps
-        ed.quantizeXY(t, f);
-        check(std::abs(t - 2.25) < 1e-9, "editor outside zone global grid snaps 2.13 -> 2.25",
-              juce::String(t, 4));
+        tSec = 5.13; f = 500.0; // inside zone (zone grid = 0 -> no time snap)
+        ed.quantizeXY(tSec, f);
+        check(std::abs(tSec - 5.13) < 1e-9, "editor zone timeGrid 0 overrides global grid");
+        tSec = 2.13; f = 500.0; // outside -> global grid snaps
+        ed.quantizeXY(tSec, f);
+        check(std::abs(tSec - 2.25) < 1e-9, "editor outside zone global grid snaps 2.13 -> 2.25",
+              juce::String(tSec, 4));
 
         ed.deleteZone(zid);
         check(zp.zones.empty(), "editor deleteZone removes");
