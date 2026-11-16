@@ -126,10 +126,6 @@ jobs:
           retention-days: 7
 
   linux:
-    # The Linux and macOS builds are new: they run, but they do not block a
-    # pull request until they have been green for a while. Remove the
-    # continue-on-error once they are.
-    continue-on-error: true
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -214,7 +210,6 @@ jobs:
           echo "the selftest passed"
 
   macos:
-    continue-on-error: true
     # the macOS 14 image was retired on 2026-11-02 - the label now points
     # at a configuration that no runner offers. The arm64 images
     # (macos-15, macos-latest) are often out of capacity for public
