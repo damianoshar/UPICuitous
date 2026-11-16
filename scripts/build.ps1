@@ -53,20 +53,57 @@ function Find-MSBuild {
 }
 
 # ----------------------------------------------------------------- CMake ---
-# JUCE 8 uses the WRITE_BASIC_CONFIG_VERSION_FILE "ExactVersion" mode that
-# CMake 4.4 removed, and WinGet can put its own mingw CMake 4.4 ahead of the
-# Visual Studio one on PATH. Prefer the CMake that ships with VS (the build
-# project's generator), and only fall back to PATH if it is missing.
-function Find-CMake {
+# JUCE 8 writes its package version file with "COMPATIBILITY ExactVersion".
+# CMake 4.3 renamed that template (SamePatchVersion) and only 4.4+ maps the
+# old name onto the new one, so some cmake builds fail the configure with
+# "Bad COMPATIBILITY value used for WRITE_BASIC_CONFIG_VERSION_FILE()".
+# The VS-bundled cmake and the WinGet one on PATH are therefore not
+# interchangeable - prefer one that can configure this project, and keep the
+# other one as a fallback (the configure is retried with it).
+function Test-CMakeSupportsExactVersion([string] $cmakePath) {
+    if (-not $cmakePath) { return $false }
+    try {
+        $exe = (Get-Command $cmakePath -ErrorAction Stop).Source
+        if (-not $exe) { return $false }
+        # .../<root>/bin/cmake.exe -> the root holds share/cmake-<version>
+        $rootDir = Split-Path -Parent (Split-Path -Parent $exe)
+        $share = Join-Path $rootDir "share"
+        if (-not (Test-Path $share)) { return $false }
+        foreach ($d in (Get-ChildItem $share -Directory -Filter "cmake-*" -ErrorAction SilentlyContinue)) {
+            $modules = Join-Path $d.FullName "Modules"
+            # CMake < 4.4: the template still carries the old name
+            if (Test-Path (Join-Path $modules "BasicConfigVersion-ExactVersion.cmake.in")) { return $true }
+            # CMake >= 4.4: the module maps the old name onto the new template
+            $mod = Join-Path $modules "WriteBasicConfigVersionFile.cmake"
+            if ((Test-Path $mod) -and (Select-String -Path $mod -Pattern "SamePatchVersion" -Quiet)) { return $true }
+        }
+    } catch { }
+    return $false
+}
+
+function Get-CMakeCandidates {
+    # The VS-bundled cmake first (it is the build project's own generator),
+    # then the one on PATH (WinGet's mingw build, for instance).
+    $candidates = @()
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path $vswhere) {
         $vsRoot = & $vswhere -latest -products * -property installationPath 2>$null |
                     Select-Object -First 1
         if ($vsRoot) {
-            $cand = Join-Path $vsRoot "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
-            if (Test-Path $cand) { return $cand }
+            $candidates += (Join-Path $vsRoot "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe")
         }
     }
+    $pathCmd = Get-Command cmake -ErrorAction SilentlyContinue
+    if ($pathCmd) { $candidates += $pathCmd.Source }
+    $candidates = @($candidates | Where-Object { Test-Path $_ } | Select-Object -Unique)
+    $capable = @($candidates | Where-Object { Test-CMakeSupportsExactVersion $_ })
+    if ($capable.Count -gt 0) { return $capable }
+    return $candidates
+}
+
+function Find-CMake {
+    $candidates = Get-CMakeCandidates
+    if ($candidates.Count -gt 0) { return $candidates[0] }
     return "cmake"
 }
 
@@ -373,8 +410,18 @@ if (-not $SkipPlugin) {
     Step "Plugin build (Release)"
     $cmake = Find-CMake
     if (-not (Test-Path (Join-Path $root "Builds\Plugin\CMakeCache.txt"))) {
-        & $cmake -S Plugin -B Builds/Plugin -G "Visual Studio 18 2026" -A x64
-        if ($LASTEXITCODE -ne 0) { Die "cmake configure failed" }
+        # The configure is retried with the next cmake when one fails (the
+        # cmake builds are not interchangeable - see Get-CMakeCandidates).
+        $configured = $false
+        foreach ($candidate in (Get-CMakeCandidates)) {
+            Write-Host "    cmake: $candidate" -ForegroundColor DarkGray
+            & $candidate -S Plugin -B Builds/Plugin -G "Visual Studio 18 2026" -A x64
+            if ($LASTEXITCODE -eq 0) { $cmake = $candidate; $configured = $true; break }
+            Write-Host "    that cmake failed the configure - trying the next one" -ForegroundColor Yellow
+            # a half-written cache would poison the next attempt
+            Remove-Item (Join-Path $root "Builds\Plugin\CMakeCache.txt") -Force -ErrorAction SilentlyContinue
+        }
+        if (-not $configured) { Die "cmake configure failed" }
     }
     Remove-StaleVersionResource
 
