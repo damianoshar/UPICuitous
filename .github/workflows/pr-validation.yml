@@ -157,7 +157,11 @@ jobs:
         run: cmake -S . -B Builds/App -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build Builds/App --parallel
+        # not "--parallel" without a number: that uses every core of the
+        # runner, and a runner that gets no CPU cannot keep its heartbeat
+        # up - the job then dies with "the hosted runner lost communication
+        # with the server" half way through the build.
+        run: cmake --build Builds/App --parallel 3
 
       - name: Self-test
         id: selftest
@@ -213,14 +217,24 @@ jobs:
         run: cmake -S . -B Builds/App -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build Builds/App --parallel
+        # three jobs, not one per core: a runner that gets no CPU cannot
+        # keep its heartbeat up, and the job dies half way through
+        run: cmake --build Builds/App --parallel 3
 
       - name: Self-test
         id: selftest
         # the check below reads the log and reports what failed - the step
         # itself does not stop the job, or the log would be lost
         continue-on-error: true
-        run: ./Builds/App/UPICuitous_artefacts/Release/UPICuitous --selftest
+        run: |
+          # on macOS the app is a bundle, so the binary sits inside it
+          APP="./Builds/App/UPICuitous_artefacts/Release/UPICuitous.app/Contents/MacOS/UPICuitous"
+          if [ ! -x "$APP" ]; then
+            echo "the app bundle is not where it should be:"
+            find Builds/App/UPICuitous_artefacts -maxdepth 4
+            exit 1
+          fi
+          "$APP" --selftest
 
       - name: Check the selftest result
         run: |

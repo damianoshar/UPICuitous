@@ -122,4 +122,8 @@ endif()
 # Binary data (none required for now, placeholder)
 # juce_add_binary_data(UPICData SOURCES Resources/*)
 
-install(TARGETS UPICuitous RUNTIME DESTINATION bin)
+# The install rule: a plain executable on Windows and Linux, an app bundle
+# on macOS. The bundle needs its own destination - without it cmake refuses
+# to configure the project on macOS ("install TARGETS given no BUNDLE
+# DESTINATION for MACOSX_BUNDLE executable").
+install(TARGETS UPICuitous RUNTIME DESTINATION bin BUNDLE DESTINATION .)
