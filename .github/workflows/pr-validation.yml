@@ -178,11 +178,30 @@ jobs:
       - name: Check the selftest result
         run: |
           set -euo pipefail
-          LOG="${TMPDIR:-/tmp}/upic_selftest.txt"
-          if [ ! -f "$LOG" ]; then
-            echo "the selftest wrote no log ($LOG)"
+          # The selftest writes its log into the temp directory, but where
+          # that is depends on the platform: JUCE uses $TMPDIR itself on
+          # Linux and $TMPDIR/<app name>/ on macOS. So the log is looked
+          # for in both places, and then anywhere below the temp
+          # directory - the log is the only place the failing check is
+          # named, so it has to be found.
+          LOG=""
+          for candidate in \
+            "${TMPDIR:-/tmp}/upic_selftest.txt" \
+            "${TMPDIR:-/tmp}/UPICuitous/upic_selftest.txt"; do
+            if [ -f "$candidate" ]; then
+              LOG="$candidate"
+              break
+            fi
+          done
+          if [ -z "$LOG" ]; then
+            LOG="$(find "${TMPDIR:-/tmp}" -maxdepth 3 -name upic_selftest.txt -print -quit 2>/dev/null || true)"
+          fi
+          if [ -z "$LOG" ] || [ ! -f "$LOG" ]; then
+            echo "the selftest wrote no log in ${TMPDIR:-/tmp}"
+            find "${TMPDIR:-/tmp}" -maxdepth 3 -name upic_selftest.txt 2>/dev/null || true
             exit 1
           fi
+          echo "the selftest log: $LOG"
           if grep -q '^FAIL' "$LOG"; then
             cat "$LOG"
             exit 1
@@ -239,11 +258,30 @@ jobs:
       - name: Check the selftest result
         run: |
           set -euo pipefail
-          LOG="${TMPDIR:-/tmp}/upic_selftest.txt"
-          if [ ! -f "$LOG" ]; then
-            echo "the selftest wrote no log ($LOG)"
+          # The selftest writes its log into the temp directory, but where
+          # that is depends on the platform: JUCE uses $TMPDIR itself on
+          # Linux and $TMPDIR/<app name>/ on macOS. So the log is looked
+          # for in both places, and then anywhere below the temp
+          # directory - the log is the only place the failing check is
+          # named, so it has to be found.
+          LOG=""
+          for candidate in \
+            "${TMPDIR:-/tmp}/upic_selftest.txt" \
+            "${TMPDIR:-/tmp}/UPICuitous/upic_selftest.txt"; do
+            if [ -f "$candidate" ]; then
+              LOG="$candidate"
+              break
+            fi
+          done
+          if [ -z "$LOG" ]; then
+            LOG="$(find "${TMPDIR:-/tmp}" -maxdepth 3 -name upic_selftest.txt -print -quit 2>/dev/null || true)"
+          fi
+          if [ -z "$LOG" ] || [ ! -f "$LOG" ]; then
+            echo "the selftest wrote no log in ${TMPDIR:-/tmp}"
+            find "${TMPDIR:-/tmp}" -maxdepth 3 -name upic_selftest.txt 2>/dev/null || true
             exit 1
           fi
+          echo "the selftest log: $LOG"
           if grep -q '^FAIL' "$LOG"; then
             cat "$LOG"
             exit 1
