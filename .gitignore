@@ -54,8 +54,11 @@ release-artifacts/
 # Generated JUCE library code (recreated by Projucer/CMake)
 JuceLibraryCode/
 
-# Development documentation (kept locally, not part of the release repo)
+# Development documentation (tracked in the private UPICuitous-docs repo;
+# ignored here so a stray copy never enters the release repo)
+UPICuitous-docs/
 BACKLOG.md
+BACKLOG-FEATURES.md
 BUILDING.md
 IMPLEMENTATION_PLAN.md
 GAP_ANALYSTIS.md

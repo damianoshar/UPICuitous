@@ -67,7 +67,7 @@ yellow edges to trim the material.*
 written - the app, the plugin, the root CMake project, the Android manifest
 and the generated exporters - from one number in `UPICuitous.jucer`. Every
 build checks that the others still agree with it. `-SkipApp` or `-SkipPlugin`
-narrows the run. See `BUILDING.md`
+narrows the run. See `BUILDING.md` in the private `UPICuitous-docs` repository
 for the manual CMake commands, the Android project and troubleshooting.
 
 First run of the standalone: press **Audio** and pick the output device.
@@ -522,15 +522,15 @@ scripts/             build.ps1, install_plugin.ps1, fix_android.ps1,
                      check_juce.ps1, fetch_pluginval.ps1
 Builds/Android/      Android Studio project (Gradle + CMake)
 Builds/VisualStudio2026/  generated Projucer solution (not committed)
-docs/waves/          design notes per wave (index: docs/waves/README.md)
 docs/android-build.md  what the .jucer owns and what the script owns
 python-upic/         tkinter + numpy prototype
 web-upic/            single-file browser sketch
-FUTURE_IDEAS.md      roadmap: MIDI scrub/reverse, FM/PM, FM8 bridge, DAW sync
-TOOLKITS.md          agent toolkits: what is used and why
-known-issues.yaml    the recurring failures: symptom, cause, fix, prevention
-PROGRESS.md          wave log, features, decisions, test inventory
 ```
+
+The development notes - the backlog, the feature plan, the build guide, the
+progress log, the known issues and the per-wave design notes - live in the
+private `UPICuitous-docs` repository. They are not part of this release
+repository.
 
 ## Requirements
 
@@ -540,7 +540,7 @@ PROGRESS.md          wave log, features, decisions, test inventory
   missing; `python Tools/fetch_juce.py` downloads it without git).
 - MinGW is not supported by JUCE 8 - use MSVC.
 - Android: JDK 17, SDK 35, NDK 28.1.13356709, CMake 3.22.1 (see
-  `BUILDING.md`).
+  `BUILDING.md` in the private `UPICuitous-docs` repository).
 
 ## Tests
 
@@ -606,7 +606,8 @@ François-Bernard Mâche's "The UPIC Upside Down" and Brigitte Robindoré's
 "Beyond the Continuum" - and against the official Xenakis dictionary
 entry (Di Scipio, 2023).
 
-Next: see `FUTURE_IDEAS.md` and the Kanso board. The signed playhead,
+Next: see `FUTURE_IDEAS.md` in the private `UPICuitous-docs` repository and
+the Kanso board. The signed playhead,
 MIDI scrub, live reverse and PM voice shipped in v1.25; the FM8 bridge,
 the full FM engine and DAW sync are still flagged as future ideas.
 
