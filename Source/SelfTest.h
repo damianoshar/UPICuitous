@@ -49,6 +49,9 @@ namespace upic
     void runPmPresetChecks (SelfTest& t);
     void runWidgetChecks (SelfTest& t);
     void runLibraryUiChecks (SelfTest& t); // F2/F3: the manager rows
+    void runInterfaceChecks (SelfTest& t); // F5: the disclosure toggles and the strip
+    void runFocusChecks (SelfTest& t);    // F4: the focus views
+    void runViewChecks (SelfTest& t);     // F6: the view commands and the precision
     void runMidiInputChecks (SelfTest& t);
     void runEnvelopeChecks (SelfTest& t);
     void runTransportChecks (SelfTest& t);

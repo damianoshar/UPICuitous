@@ -1362,3 +1362,632 @@ void upic::runLibraryUiChecks (upic::SelfTest& t)
                "library UI: undo removes the step");
     }
 }
+
+//==============================================================================
+// F5 (2026-11-17): the collapsible toolbar groups, the permanent strip and
+// the session-settings round trip.
+void upic::runInterfaceChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+        [&findByName] (juce::Component& c, const juce::String& n) -> juce::Component* {
+            if (c.getName() == n) return &c;
+            for (int i = 0; i < c.getNumChildComponents(); ++i)
+                if (auto* r = findByName (*c.getChildComponent (i), n)) return r;
+            return nullptr;
+        };
+
+    MainComponent mc (true);
+    mc.setSize (1280, 800);
+
+    auto find = [&] (const juce::String& n) { return findByName (mc, n); };
+    auto button = [&] (const juce::String& n)
+    {
+        return dynamic_cast<juce::Button*> (find (n));
+    };
+
+    // --- the disclosure toggle changes the layout ------------------------
+    {
+        auto* inten = find ("intenSlider");       // the levels group's first
+        auto* dur = find ("durSlider");           // a secondary control
+        auto* fold = button ("levelsFoldBtn");
+        check (inten != nullptr && dur != nullptr && fold != nullptr,
+               "F5 the levels group has its controls and its disclosure toggle",
+               juce::String (inten != nullptr ? "inten " : "inten=null ")
+               + (dur != nullptr ? "dur " : "dur=null ")
+               + (fold != nullptr ? "fold " : "fold=null "));
+
+        // the disclosure is a labelled toggle (the reference archive's
+        // "Scrub settings" pattern): the caption is the group's name
+        auto* foldToggle = dynamic_cast<juce::ToggleButton*> (fold);
+        check (foldToggle != nullptr
+               && foldToggle->getButtonText() == MainComponent::groupCaption ("levels"),
+               "F5 the disclosure toggle is labelled with the group's name",
+               foldToggle != nullptr ? foldToggle->getButtonText() : juce::String ("not a toggle"));
+
+        const int rowsExpanded = mc.toolbarRowCountForTest();
+        check (inten != nullptr && dur != nullptr && fold != nullptr
+               && inten->isVisible() && dur->isVisible() && fold->isVisible(),
+               "F5 expanded shows the whole group");
+
+        // collapsed: the group's controls go, the labelled toggle stays
+        if (fold != nullptr) fold->onClick();
+        const int rowsCollapsed = mc.toolbarRowCountForTest();
+        check (mc.groupLevelForTest ("levels") == MainComponent::GroupLevel::collapsed,
+               "F5 the disclosure toggle collapses the group");
+        check (inten != nullptr && ! inten->isVisible()
+               && dur != nullptr && ! dur->isVisible()
+               && fold != nullptr && fold->isVisible(),
+               "F5 collapsed hides the group's controls and keeps the toggle");
+        check (rowsCollapsed <= rowsExpanded,
+               "F5 collapsed does not grow the toolbar",
+               juce::String (rowsCollapsed) + " vs " + juce::String (rowsExpanded));
+
+        // and the same toggle brings the group back
+        if (fold != nullptr) fold->onClick();
+        check (mc.groupLevelForTest ("levels") == MainComponent::GroupLevel::expanded
+               && inten != nullptr && inten->isVisible()
+               && dur != nullptr && dur->isVisible()
+               && fold != nullptr && fold->isVisible(),
+               "F5 the disclosure toggle expands the group again");
+        check (mc.toolbarRowCountForTest() == rowsExpanded,
+               "F5 expanding returns the previous height",
+               juce::String (mc.toolbarRowCountForTest()) + " vs "
+               + juce::String (rowsExpanded));
+
+        auto* restore = button ("restoreGroupsBtn");
+        check (restore != nullptr && restore->isVisible(),
+               "F5 Restore is in the permanent strip");
+        if (restore != nullptr) restore->onClick();
+        check (mc.groupLevelForTest ("levels") == MainComponent::GroupLevel::expanded
+               && inten != nullptr && inten->isVisible()
+               && dur != nullptr && dur->isVisible()
+               && fold != nullptr && fold->isVisible(),
+               "F5 Restore expands every group again");
+        check (mc.toolbarRowCountForTest() == rowsExpanded,
+               "F5 restoring returns the previous height",
+               juce::String (mc.toolbarRowCountForTest()) + " vs "
+               + juce::String (rowsExpanded));
+    }
+
+    // --- the permanent strip survives every level and the minimum size ---
+    {
+        const char* names[] = { "transport", "pages", "file", "tempo", "clock", "voice",
+                                "levels", "pitch", "material", "sieve", "magnets", "page",
+                                "tools", "scrub", "drag", "status" };
+        for (auto* n : names)
+            mc.setGroupLevel (n, MainComponent::GroupLevel::collapsed);
+
+        auto stripOk = [&] (juce::String& detail) -> bool
+        {
+            const auto strip = mc.permanentStripBoundsForTest();
+            bool ok = ! strip.isEmpty();
+            for (auto* n : { "File", "Play", "Stop", "toolBox", "restoreGroupsBtn" })
+            {
+                auto* c = find (n);
+                if (c == nullptr || ! c->isVisible() || ! strip.contains (c->getBounds()))
+                {
+                    ok = false;
+                    detail << n << "="
+                           << (c != nullptr ? c->getBounds().toString() : juce::String ("null"))
+                           << "  ";
+                }
+            }
+            return ok;
+        };
+
+        juce::String d1;
+        const bool ok1 = stripOk (d1);
+        check (ok1, "F5 the permanent strip keeps its controls with every group collapsed", d1);
+
+        mc.setSize (460, 360);  // the app's minimum window
+        juce::String d2;
+        const bool ok2 = stripOk (d2);
+        check (ok2, "F5 the permanent strip keeps its controls at the minimum window", d2);
+
+        mc.setSize (1280, 800);
+        mc.restoreAllGroups();
+        check (mc.groupLevelForTest ("levels") == MainComponent::GroupLevel::expanded,
+               "F5 Restore after a narrow layout brings the groups back");
+    }
+
+    // --- the session settings round trip --------------------------------
+    {
+        mc.restoreAllGroups();
+        mc.setGroupLevel ("scrub", MainComponent::GroupLevel::collapsed);
+        mc.setGroupLevel ("page", MainComponent::GroupLevel::collapsed);
+        const auto v = mc.sessionSettingsToVar();
+        mc.restoreAllGroups();
+        check (mc.groupLevelForTest ("scrub") == MainComponent::GroupLevel::expanded,
+               "F5 Restore clears the disclosure state before the round trip");
+        mc.sessionSettingsFromVar (v);
+        check (mc.groupLevelForTest ("scrub") == MainComponent::GroupLevel::collapsed
+               && mc.groupLevelForTest ("page") == MainComponent::GroupLevel::collapsed,
+               "F5 the disclosure state survives a session-settings round trip");
+        check (v.hasProperty ("showWaveEd") && v.hasProperty ("showHints"),
+               "F5 the session settings carry the view toggles too");
+
+        // the old three-level fold (hidden = 2) is read as "collapsed"
+        juce::var old = juce::JSON::parse ("{\"groups\":{\"scrub\":2,\"levels\":1}}");
+        mc.sessionSettingsFromVar (old);
+        check (mc.groupLevelForTest ("scrub") == MainComponent::GroupLevel::collapsed
+               && mc.groupLevelForTest ("levels") == MainComponent::GroupLevel::collapsed,
+               "F5 the old fold levels load as collapsed");
+        mc.restoreAllGroups();
+    }
+
+    // --- the piece format is untouched ----------------------------------
+    {
+        mc.restoreAllGroups();
+        const auto pieceBefore = mc.pieceToVar();
+        const auto before = juce::JSON::toString (pieceBefore);
+        mc.setGroupLevel ("scrub", MainComponent::GroupLevel::collapsed);
+        const auto pieceAfter = mc.pieceToVar();
+        const auto after = juce::JSON::toString (pieceAfter);
+        juce::String detail;
+        if (before != after)
+        {
+            int i = 0;
+            while (i < before.length() && i < after.length() && before[i] == after[i]) ++i;
+            detail << "first diff at " << i << ": "
+                   << before.substring (juce::jmax (0, i - 40), i + 80) << " VS "
+                   << after.substring (juce::jmax (0, i - 40), i + 80);
+        }
+        check (before == after, "F5 the disclosure state does not enter the piece JSON", detail);
+        check (! mc.pieceToVar().hasProperty ("groups")
+               && ! mc.pieceToVar().hasProperty ("session"),
+               "F5 the piece JSON has no session fields");
+    }
+}
+
+//==============================================================================
+// F4 (2026-11-17): the focus views.
+//
+// A focus view maximises one panel. The permanent strip stays, the other
+// panels and the groups go, and leaving the focus restores the geometry,
+// the scroll positions and the zoom levels exactly.
+void upic::runFocusChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    std::function<juce::Component*(juce::Component&, const juce::String&)> findByNameF4 =
+        [&findByNameF4] (juce::Component& c, const juce::String& n) -> juce::Component* {
+            if (c.getName() == n) return &c;
+            for (int i = 0; i < c.getNumChildComponents(); ++i)
+                if (auto* r = findByNameF4 (*c.getChildComponent (i), n)) return r;
+            return nullptr;
+        };
+
+    MainComponent mc (true);
+    mc.setSize (1280, 800);
+    mc.prepareToPlay (512, 44100.0);
+
+    auto find = [&] (const juce::String& n) { return findByNameF4 (mc, n); };
+    auto* score = find ("score");
+    auto* scoreEd = dynamic_cast<ScoreEditor*> (score);
+    auto* waveEd = find ("waveEd");
+    auto* envEd = find ("envEd");
+    auto* focusBtn = dynamic_cast<juce::Button*> (find ("scoreFocusBtn"));
+    auto* restore = find ("restoreGroupsBtn");
+    auto* inten = find ("intenSlider");
+
+    check (score != nullptr && waveEd != nullptr && envEd != nullptr
+           && focusBtn != nullptr && restore != nullptr && scoreEd != nullptr,
+           "F4 the panels and their focus buttons are there");
+
+    if (score == nullptr || waveEd == nullptr || envEd == nullptr
+        || focusBtn == nullptr || restore == nullptr || scoreEd == nullptr)
+        return;
+
+    // the geometry and the view state before the focus
+    const auto scoreBefore = score->getBounds();
+    const auto waveBefore = waveEd->getBounds();
+    const auto envBefore = envEd->getBounds();
+    scoreEd->zoomIn();
+    scoreEd->zoomIn();
+    scoreEd->fitSelection();
+    const double zoomBefore = scoreEd->getTimeZoom();
+    const double offsetBefore = scoreEd->getTimeOffset();
+    const double freqZoomBefore = scoreEd->getFreqZoom();
+    const double freqOffsetBefore = scoreEd->getFreqOffset();
+
+    // --- into the focus ---
+    focusBtn->onClick();
+    check (mc.focusedPanelForTest() == MainComponent::FocusPanel::score,
+           "F4 the score focus is on");
+    check (focusBtn->getButtonText() == "Exit",
+           "F4 the focus button says Exit while the focus is on",
+           focusBtn->getButtonText());
+    check (score->isVisible() && score->getHeight() > scoreBefore.getHeight()
+           && score->getWidth() >= scoreBefore.getWidth(),
+           "F4 the score takes the space of the other panels",
+           score->getBounds().toString() + " vs " + scoreBefore.toString());
+    check (! waveEd->isVisible() && ! envEd->isVisible(),
+           "F4 the other editors go while the score is focused");
+    check (inten != nullptr && ! inten->isVisible(),
+           "F4 the toolbar groups go while a panel is focused");
+
+    // the permanent strip stays - it is what the focus keeps
+    {
+        const auto strip = mc.permanentStripBoundsForTest();
+        bool ok = ! strip.isEmpty();
+        juce::String detail;
+        for (auto* n : { "File", "Play", "Stop", "toolBox", "restoreGroupsBtn" })
+        {
+            auto* c = find (n);
+            if (c == nullptr || ! c->isVisible() || ! strip.contains (c->getBounds()))
+            {
+                ok = false;
+                detail << n << "="
+                       << (c != nullptr ? c->getBounds().toString() : juce::String ("null"))
+                       << "  ";
+            }
+        }
+        check (ok, "F4 the permanent strip stays while a panel is focused", detail);
+    }
+
+    // the transport still works while focused
+    mc.clickPlayForTest();
+    check (mc.isPlayingForTest(), "F4 the transport works while a panel is focused");
+    mc.clickStopForTest();
+
+    // the view state is untouched by the focus
+    check (scoreEd->getTimeZoom() == zoomBefore
+           && scoreEd->getTimeOffset() == offsetBefore
+           && scoreEd->getFreqZoom() == freqZoomBefore
+           && scoreEd->getFreqOffset() == freqOffsetBefore,
+           "F4 the zoom and the scroll positions survive the focus",
+           juce::String (scoreEd->getTimeZoom(), 4) + "/" + juce::String (scoreEd->getTimeOffset(), 4));
+
+    // --- out of the focus ---
+    focusBtn->onClick();
+    check (mc.focusedPanelForTest() == MainComponent::FocusPanel::none,
+           "F4 the focus is off again");
+    check (focusBtn->getButtonText() == "Focus",
+           "F4 the focus button says Focus again");
+    check (score->getBounds() == scoreBefore
+           && waveEd->getBounds() == waveBefore
+           && envEd->getBounds() == envBefore,
+           "F4 leaving the focus restores the exact geometry",
+           score->getBounds().toString() + " vs " + scoreBefore.toString()
+           + " / " + waveEd->getBounds().toString() + " vs " + waveBefore.toString());
+    check (scoreEd->getTimeZoom() == zoomBefore
+           && scoreEd->getTimeOffset() == offsetBefore,
+           "F4 leaving the focus restores the zoom and the scroll");
+    check (waveEd->isVisible() && envEd->isVisible()
+           && (inten == nullptr || inten->isVisible()),
+           "F4 leaving the focus brings the panels and the groups back");
+
+    // the other two panels have a focus too
+    for (auto* n : { "waveFocusBtn", "envFocusBtn" })
+    {
+        auto* b = dynamic_cast<juce::Button*> (find (n));
+        if (b == nullptr) { check (false, juce::String("F4 the ") + n + " is there"); continue; }
+        b->onClick();
+        const bool focused = mc.focusActiveForTest();
+        b->onClick();
+        check (focused && ! mc.focusActiveForTest(),
+               juce::String("F4 the ") + n + " enters and leaves its focus");
+    }
+
+    // the focus is session state, never piece state
+    {
+        const auto pieceBefore = juce::JSON::toString (mc.pieceToVar());
+        mc.setFocusedPanel (MainComponent::FocusPanel::score);
+        const auto pieceAfter = juce::JSON::toString (mc.pieceToVar());
+        mc.setFocusedPanel (MainComponent::FocusPanel::none);
+        check (pieceBefore == pieceAfter,
+               "F4 the focus view does not enter the piece JSON");
+    }
+}
+
+//==============================================================================
+// F6 (2026-11-17): the view commands, the Fine drawing mode, the live
+// readout and the numeric edit.
+void upic::runViewChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // --- the view commands (a score editor on a page) ---------------------
+    {
+        auto waves = upic::defaultWaveforms();
+        double ph = 0.0;
+        juce::CriticalSection lock;
+        upic::Page pg;
+        pg.durationSec = 12.0;
+        upic::Arc a; a.id = 1;
+        a.points = { { 2.0, 200.0 }, { 6.0, 800.0 } };
+        pg.arcs.push_back (a);
+        ScoreEditor ed;
+        ed.setModelLock (&lock);
+        ed.bind (&pg, &waves, &ph, nullptr);
+        ed.setSize (1000, 400);
+
+        // Zoom In / Zoom Out
+        ed.zoomIn();
+        check (ed.getTimeZoom() > 1.0 && ed.getFreqZoom() > 1.0,
+               "F6 Zoom In raises the zoom",
+               juce::String (ed.getTimeZoom(), 3) + "/" + juce::String (ed.getFreqZoom(), 3));
+        ed.zoomOut();
+        check (std::abs (ed.getTimeZoom() - 1.0) < 1e-9
+               && std::abs (ed.getFreqZoom() - 1.0) < 1e-9,
+               "F6 Zoom Out undoes Zoom In");
+
+        // Fit Page
+        ed.zoomIn();
+        ed.zoomIn();
+        ed.fitPage();
+        check (ed.getTimeZoom() == 1.0 && ed.getTimeOffset() == 0.0
+               && ed.getFreqZoom() == 1.0 && ed.getFreqOffset() == 0.0,
+               "F6 Fit Page goes back to zoom 1 and offset 0",
+               juce::String (ed.getTimeZoom(), 3) + "/" + juce::String (ed.getTimeOffset(), 3));
+
+        // Reset Zoom: 1x, but the centre stays (unlike Fit Page)
+        ed.zoomIn();
+        const double centreBefore = ed.getTimeOffset() + 12.0 / (2.0 * ed.getTimeZoom());
+        ed.resetZoom();
+        const double centreAfter = ed.getTimeOffset() + 12.0 / (2.0 * ed.getTimeZoom());
+        check (ed.getTimeZoom() == 1.0 && ed.getFreqZoom() == 1.0
+               && std::abs (centreAfter - centreBefore) < 1e-9,
+               "F6 Reset Zoom goes back to 1x and keeps the centre",
+               juce::String (centreBefore, 4) + " -> " + juce::String (centreAfter, 4));
+
+        // Fit Selection brackets the selection's time and pitch
+        ed.setSelectedArcs ({ 1 });
+        ed.fitSelection();
+        const double t0 = ed.getTimeOffset();
+        const double t1 = t0 + 12.0 / ed.getTimeZoom();
+        check (t0 <= 2.0 && t1 >= 6.0,
+               "F6 Fit Selection brackets the selection's time",
+               juce::String (t0, 3) + " .. " + juce::String (t1, 3));
+        const double n0 = upic::freqToNormYIn (200.0, ed.ambitusLo(), ed.ambitusHi());
+        const double n1 = upic::freqToNormYIn (800.0, ed.ambitusLo(), ed.ambitusHi());
+        const double f0 = ed.getFreqOffset();
+        const double f1 = f0 + 1.0 / ed.getFreqZoom();
+        check (f0 <= n0 && f1 >= n1,
+               "F6 Fit Selection brackets the selection's pitch",
+               juce::String (f0, 3) + " .. " + juce::String (f1, 3));
+
+        // the readout round-trips through the editor's own mapping
+        {
+            const auto px = 300.0f, py = 120.0f;
+            const double tSec = ed.xToTime (px);
+            const double hz = ed.yToFreq (py);
+            const float xBack = ed.timeToX (tSec);
+            const float yBack = ed.freqToY (hz);
+            check (std::abs (xBack - px) <= 1.0f && std::abs (yBack - py) <= 1.0f,
+                   "F6 the readout round-trips through the editor's mapping",
+                   juce::String (xBack, 2) + "," + juce::String (yBack, 2)
+                   + " vs " + juce::String (px, 2) + "," + juce::String (py, 2));
+        }
+
+        // --- the numeric edit ---
+        ed.fitPage();
+        double anchorT = 0.0, anchorF = 0.0;
+        check (ed.selectionAnchor (anchorT, anchorF),
+               "F6 the selection has an anchor");
+        check (std::abs (anchorT - 2.0) < 1e-9 && std::abs (anchorF - 200.0) < 1e-9,
+               "F6 the anchor is the selection's first point",
+               juce::String (anchorT, 4) + " / " + juce::String (anchorF, 4));
+
+        // the time edit shifts the selection, like a drag does
+        check (ed.setSelectionTime (3.5),
+               "F6 the numeric time edit is accepted");
+        check (std::abs (pg.arcs[0].points[0].t - 3.5) < 1e-9
+               && std::abs (pg.arcs[0].points[1].t - 7.5) < 1e-9,
+               "F6 the numeric time edit shifts every point of the selection",
+               juce::String (pg.arcs[0].points[0].t, 4) + " / "
+               + juce::String (pg.arcs[0].points[1].t, 4));
+
+        // the frequency edit scales it, like a drag does
+        check (ed.setSelectionFreq (400.0),
+               "F6 the numeric frequency edit is accepted");
+        check (std::abs (pg.arcs[0].points[0].freq - 400.0) < 1e-6
+               && std::abs (pg.arcs[0].points[1].freq - 1600.0) < 1e-6,
+               "F6 the numeric frequency edit scales every point of the selection",
+               juce::String (pg.arcs[0].points[0].freq, 3) + " / "
+               + juce::String (pg.arcs[0].points[1].freq, 3));
+
+        // the same edit through a drag: the model state is the same
+        {
+            // the drag moves the selection the way the numeric edit does:
+            // the time shifts and the frequency scales by a ratio
+            upic::Page pg2 = pg;
+            const auto before = pg2.arcs[0].points;
+            std::vector<upic::ArcPoint> expected;
+            for (auto& p : before)
+                expected.push_back ({ juce::jlimit (0.0, pg2.durationSec, p.t + 1.5),
+                                      juce::jlimit (upic::kMinFreq, upic::kMaxFreq, p.freq * 2.0) });
+            std::stable_sort (expected.begin(), expected.end(),
+                              [] (const upic::ArcPoint& x, const upic::ArcPoint& y){ return x.t < y.t; });
+
+            // the same shift and scale through the numeric edit
+            ScoreEditor ed2;
+            ed2.setModelLock (&lock);
+            ed2.bind (&pg2, &waves, &ph, nullptr);
+            ed2.setSize (1000, 400);
+            ed2.setSelectedArcs ({ 1 });
+            const double aT = pg2.arcs[0].points.front().t;
+            const double aF = pg2.arcs[0].points.front().freq;
+            ed2.setSelectionTime (aT + 1.5);
+            ed2.setSelectionFreq (aF * 2.0);
+
+            bool same = pg2.arcs[0].points.size() == expected.size();
+            for (size_t i = 0; same && i < expected.size(); ++i)
+                same = std::abs (pg2.arcs[0].points[i].t - expected[i].t) < 1e-9
+                    && std::abs (pg2.arcs[0].points[i].freq - expected[i].freq) < 1e-6;
+            check (same,
+                   "F6 the numeric edit moves the selection the way a drag does",
+                   pg2.arcs[0].points.size() == expected.size()
+                       ? juce::String (pg2.arcs[0].points[0].t, 4) + "/"
+                           + juce::String (pg2.arcs[0].points[0].freq, 3)
+                       : juce::String ("point count "));
+        }
+    }
+
+    // --- the simplification follows the view, and Fine mode keeps all ----
+    {
+        // a wavy stroke: the RDP simplification drops the small wiggles at
+        // 1x and keeps them at 16x
+        auto stroke = [] (ScoreEditor& ed, std::vector<juce::Point<float>>& pts)
+        {
+            const auto b = ed.getLocalBounds().toFloat();
+            const float x0 = b.getX() + b.getWidth() * 0.15f;
+            const float x1 = b.getX() + b.getWidth() * 0.85f;
+            const float yc = b.getY() + b.getHeight() * 0.30f;
+            const int n = 120;
+            pts.clear();
+            for (int i = 0; i <= n; ++i)
+            {
+                const float u = (float) i / (float) n;
+                pts.push_back ({ x0 + (x1 - x0) * u,
+                                 yc + std::sin (u * 18.0f) * 6.0f });
+            }
+        };
+
+        auto drawStroke = [] (ScoreEditor& ed, const std::vector<juce::Point<float>>& pts)
+        {
+            const auto now = juce::Time::getCurrentTime();
+            const auto src = juce::Desktop::getInstance().getMainMouseSource();
+            juce::MouseEvent down (src, pts.front(), juce::ModifierKeys(), 1.0f,
+                                   0.0f, 0.0f, 0.0f, 0.0f, &ed, &ed, now,
+                                   pts.front(), now, 1, false);
+            ed.mouseDown (down);
+            for (size_t i = 1; i < pts.size(); ++i)
+            {
+                juce::MouseEvent drag (src, pts[i], juce::ModifierKeys(), 1.0f,
+                                       0.0f, 0.0f, 0.0f, 0.0f, &ed, &ed, now,
+                                       pts.front(), now, 1, true);
+                ed.mouseDrag (drag);
+            }
+            juce::MouseEvent up (src, pts.back(), juce::ModifierKeys(), 1.0f,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &ed, &ed, now,
+                                 pts.front(), now, 1, true);
+            ed.mouseUp (up);
+        };
+
+        auto countPoints = [] (ScoreEditor& ed) -> int
+        {
+            return ed.lastArcPointCountForTest();
+        };
+
+        // 1x
+        int at1x = 0, at16x = 0, fine = 0;
+        {
+            auto waves = upic::defaultWaveforms();
+            double ph = 0.0;
+            juce::CriticalSection lock;
+            upic::Page pg;
+            pg.durationSec = 30.0;
+            ScoreEditor ed;
+            ed.setModelLock (&lock);
+            ed.bind (&pg, &waves, &ph, nullptr);
+            ed.setSize (1000, 400);
+            ed.setTool (ScoreEditor::Draw);
+            std::vector<juce::Point<float>> pts;
+            stroke (ed, pts);
+            drawStroke (ed, pts);
+            at1x = countPoints (ed);
+        }
+        // 16x
+        {
+            auto waves = upic::defaultWaveforms();
+            double ph = 0.0;
+            juce::CriticalSection lock;
+            upic::Page pg;
+            pg.durationSec = 30.0;
+            ScoreEditor ed;
+            ed.setModelLock (&lock);
+            ed.bind (&pg, &waves, &ph, nullptr);
+            ed.setSize (1000, 400);
+            ed.setTool (ScoreEditor::Draw);
+            for (int i = 0; i < 8; ++i) ed.zoomIn();   // 1.25^8 = 5.96
+            ed.zoomIn(); ed.zoomIn(); ed.zoomIn();      // 11.6 -> clamped to 16
+            std::vector<juce::Point<float>> pts;
+            stroke (ed, pts);
+            drawStroke (ed, pts);
+            at16x = countPoints (ed);
+        }
+        // Fine mode
+        {
+            auto waves = upic::defaultWaveforms();
+            double ph = 0.0;
+            juce::CriticalSection lock;
+            upic::Page pg;
+            pg.durationSec = 30.0;
+            ScoreEditor ed;
+            ed.setModelLock (&lock);
+            ed.bind (&pg, &waves, &ph, nullptr);
+            ed.setSize (1000, 400);
+            ed.setTool (ScoreEditor::Draw);
+            ed.setFineDrawing (true);
+            std::vector<juce::Point<float>> pts;
+            stroke (ed, pts);
+            drawStroke (ed, pts);
+            fine = countPoints (ed);
+        }
+
+        check (at1x > 0, "F6 the 1x stroke makes an arc", juce::String (at1x));
+        check (at16x > at1x,
+               "F6 a zoomed-in stroke keeps more points than the same stroke at 1x",
+               juce::String (at1x) + " -> " + juce::String (at16x));
+        check (fine > at1x && fine >= at16x,
+               "F6 Fine mode keeps every sampled point",
+               juce::String (at1x) + " / " + juce::String (at16x) + " / " + juce::String (fine));
+    }
+
+    // --- the app's view bar is wired to the commands ----------------------
+    {
+        std::function<juce::Component*(juce::Component&, const juce::String&)> findByNameF6 =
+            [&findByNameF6] (juce::Component& c, const juce::String& n) -> juce::Component* {
+                if (c.getName() == n) return &c;
+                for (int i = 0; i < c.getNumChildComponents(); ++i)
+                    if (auto* r = findByNameF6 (*c.getChildComponent (i), n)) return r;
+                return nullptr;
+            };
+
+        MainComponent mc (true);
+        mc.setSize (1280, 800);
+        auto find = [&] (const juce::String& n) { return findByNameF6 (mc, n); };
+        auto* scoreEd = dynamic_cast<ScoreEditor*> (find ("score"));
+
+        auto* zoomIn = dynamic_cast<juce::Button*> (find ("zoomInBtn"));
+        auto* fit = dynamic_cast<juce::Button*> (find ("fitBtn"));
+        auto* fine = dynamic_cast<juce::Button*> (find ("fineBtn"));
+        auto* readout = find ("readoutLab");
+        check (zoomIn != nullptr && fit != nullptr && fine != nullptr && readout != nullptr
+               && scoreEd != nullptr,
+               "F6 the view bar carries the commands and the readout");
+
+        if (zoomIn != nullptr && fit != nullptr && fine != nullptr && scoreEd != nullptr)
+        {
+            scoreEd->zoomIn();
+            const double z = scoreEd->getTimeZoom();
+            zoomIn->onClick();
+            check (scoreEd->getTimeZoom() > z,
+                   "F6 the view bar's Zoom In reaches the editor",
+                   juce::String (z, 3) + " -> " + juce::String (scoreEd->getTimeZoom(), 3));
+
+            fit->onClick();
+            check (scoreEd->getTimeZoom() == 1.0 && scoreEd->getTimeOffset() == 0.0,
+                   "F6 the view bar's Fit reaches the editor");
+
+            fine->onClick();
+            check (scoreEd->getFineDrawing(),
+                   "F6 the view bar's Fine toggle reaches the editor");
+            fine->onClick();
+            check (! scoreEd->getFineDrawing(),
+                   "F6 the view bar's Fine toggle switches back");
+        }
+    }
+}

@@ -2,10 +2,13 @@
 #include <JuceHeader.h>
 #include <atomic>
 #include <functional>
+#include <map>
+#include <memory>
 #include "UpicModel.h"
 #include "UpicEngine.h"
 #include "ModelSnapshot.h"
 #include "ScoreEditor.h"
+#include "ScoreViewBar.h"
 #include "ArcListPanel.h"
 #include "MidiHub.h"
 #include "WaveformEditor.h"
@@ -411,6 +414,28 @@ public:
     }
     void selectArcsForTest (const std::vector<int>& ids) { score.setSelectedArcs (ids); }
     int selectedArcCountForTest() const { return (int) score.getSelectedArcs().size(); }
+
+    // --- F5 (2026-11-17): the toolbar's disclosure sections --------------
+    // Every group has a disclosure toggle captioned with the group's name
+    // (the "Scrub settings" pattern of the visual refinement): the toggle
+    // is always visible, and it expands or collapses that group's controls.
+    // The state is session state (the levels never enter the piece), and
+    // the permanent strip keeps Menu, Play/Stop, the tool and Restore
+    // visible whatever the groups do.
+    enum class GroupLevel : int { expanded = 0, collapsed = 1 };
+    void setGroupLevel (const juce::String& group, GroupLevel level);
+    GroupLevel groupLevelForTest (const juce::String& group) const;
+    void restoreAllGroups();
+    // The caption of a group's disclosure toggle.
+    static juce::String groupCaption (const juce::String& group);
+    // The session settings' value-tree round trip. The app persists it; the
+    // selftest calls the two functions directly (no file is touched).
+    juce::var sessionSettingsToVar() const;
+    void sessionSettingsFromVar (const juce::var& v);
+    static void setSessionSettingsPersistent (bool on);
+    // The permanent strip's controls, for the layout checks.
+    juce::Rectangle<int> permanentStripBoundsForTest() const { return permanentStripBounds; }
+    int toolbarRowCountForTest() const { return toolbarRows; }
     // v1.33.4 (H7): the global pitch modes (they change the sound, so the
     // selftest checks that they survive a save and a load)
     int samplePitchModeForTest() const { return engine.getSamplePitchMode(); }
@@ -464,6 +489,17 @@ public:
     }
     juce::Rectangle<int> toolbarBoundsForTest() const { return toolbarBounds; }
 
+    // --- F4 (2026-11-17): the focus views --------------------------------
+    // A focus view maximises one panel: the score, the wave editor or the
+    // envelope editor. The permanent strip (Menu, Play/Stop, the tool and
+    // Restore) stays, every other group and the other editors go, and
+    // leaving the focus restores the layout exactly as it was - the panel
+    // sizes, the scroll positions and the zoom levels are untouched.
+    enum class FocusPanel : int { none = 0, score = 1, wave = 2, env = 3 };
+    void setFocusedPanel (FocusPanel p);
+    FocusPanel focusedPanelForTest() const { return focusedPanel; }
+    bool focusActiveForTest() const { return focusedPanel != FocusPanel::none; }
+
     void paint(juce::Graphics& g) override;
     void resized() override;
     void timerCallback() override;
@@ -493,6 +529,13 @@ private:
     void buildLiveInputControls();
     void buildScoreArea();
     void buildEditors();
+
+    // --- F6 (2026-11-17): the view commands and the numeric edit ---------
+    // The numeric edit moves the selected point through the same path as a
+    // drag, so the undo transaction and the model revision see it.
+    void editSelectionTime (double tSec);
+    void editSelectionFreq (double hz);
+    void refreshPointFields();
 
     // v1.33.3: the wavetable's shape buttons wear the colour of the wave
     // they make - the same palette the arcs and the wave table use.
@@ -982,6 +1025,30 @@ private:
     // the same strip)
     juce::TextButton waveTog{ "Wave" }, envTog{ "Env" }, hintsTog{ "Hints" };
     bool showWaveEd = true, showEnvEd = true, showHints = true;
+
+    // F5: the fold state per group (session state) and the strip that keeps
+    // the essential controls reachable at every level.
+    std::map<juce::String, GroupLevel> groupLevels;
+    std::map<juce::String, std::unique_ptr<juce::ToggleButton>> groupToggles;
+    // The controls a fold level hid, so the next layout pass can restore
+    // them before the tab visibility rules run again.
+    std::vector<juce::Component*> foldHidden;
+    juce::TextButton restoreGroupsBtn{ "Restore" };
+    // F4: the focus view (the maximised panel) and the buttons that enter
+    // and leave it. The focus is session state, never piece state.
+    FocusPanel focusedPanel = FocusPanel::none;
+    juce::TextButton scoreFocusBtn{ "Focus" }, waveFocusBtn{ "Focus" },
+                      envFocusBtn{ "Focus" };
+    // F6: the score's view bar (the zoom commands, the readout and the
+    // numeric edit of the selected point).
+    ScoreViewBar viewBar;
+    void updateFocusButtons();
+    juce::Rectangle<int> permanentStripBounds;
+    int toolbarRows = 0;
+    static bool sessionSettingsPersistent;
+    juce::ToggleButton* ensureGroupToggle (const juce::String& group);
+    void saveSessionSettings() const;
+    void loadSessionSettings();
 
     // v1.7 audio settings: an in-app overlay, since Android has no floating
     // dialog windows (a DialogWindow there has no title bar and no close

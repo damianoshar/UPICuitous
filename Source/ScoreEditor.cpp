@@ -152,6 +152,12 @@ std::vector<double> ScoreEditor::lastArcFreqsForTest() const
 void ScoreEditor::applyZoneMenuForTest(int id, int action)
 { applyZoneMenu (id, action); }
 
+int ScoreEditor::lastArcPointCountForTest() const
+{
+    if (page == nullptr || page->arcs.empty()) return 0;
+    return (int) page->arcs.back().points.size();
+}
+
 juce::String ScoreEditor::remaindersTextForTest(const std::vector<int>& r)
 { return remaindersText (r); }
 
@@ -299,6 +305,166 @@ float ScoreEditor::freqToY(double f) const
         double sN = (upic::freqToNormYIn(f, ambitusLo(), ambitusHi()) - freqOffset) * freqZoom;
         return r.getBottom() - (float) sN * r.getHeight();
     }
+
+//==============================================================================
+// F6 (2026-11-17): the view commands.
+//
+// They work on the same fields the cursor-anchored wheel zoom uses, so the
+// anchoring still works after them - and the view's centre is kept, so a
+// zoom in and out returns to where it started.
+void ScoreEditor::zoomBy (double factor)
+{
+    if (page == nullptr) return;
+    const double dur = page->durationSec;
+    const double cT = timeOffset + dur / (2.0 * timeZoom);
+    const double cN = freqOffset + 0.5 / freqZoom;
+    timeZoom = juce::jlimit (1.0, 16.0, timeZoom * factor);
+    freqZoom = juce::jlimit (1.0, 8.0, freqZoom * factor);
+    timeOffset = cT - dur / (2.0 * timeZoom);
+    freqOffset = cN - 0.5 / freqZoom;
+    if (onViewChanged) onViewChanged();
+    repaint();
+}
+
+void ScoreEditor::zoomIn()  { zoomBy (1.25); }
+void ScoreEditor::zoomOut() { zoomBy (1.0 / 1.25); }
+
+void ScoreEditor::fitPage()
+{
+    timeZoom = 1.0; timeOffset = 0.0;
+    freqZoom = 1.0; freqOffset = 0.0;
+    if (onViewChanged) onViewChanged();
+    repaint();
+}
+
+void ScoreEditor::resetZoom()
+{
+    if (page == nullptr) return;
+    // back to 1x, but the view's centre stays where it was (unlike Fit
+    // Page, which goes to the start of the page)
+    const double dur = page->durationSec;
+    const double cT = timeOffset + dur / (2.0 * timeZoom);
+    const double cN = freqOffset + 0.5 / freqZoom;
+    timeZoom = 1.0; freqZoom = 1.0;
+    timeOffset = cT - dur / 2.0;
+    freqOffset = cN - 0.5;
+    if (onViewChanged) onViewChanged();
+    repaint();
+}
+
+void ScoreEditor::fitSelection()
+{
+    if (page == nullptr) { fitPage(); return; }
+
+    double t0 = 0.0, t1 = 0.0, f0 = 0.0, f1 = 0.0;
+    bool any = false;
+    for (auto& a : page->arcs)
+    {
+        if (! isSel (a.id)) continue;
+        for (auto& p : a.points)
+        {
+            if (! any) { t0 = t1 = p.t; f0 = f1 = p.freq; any = true; continue; }
+            t0 = juce::jmin (t0, p.t); t1 = juce::jmax (t1, p.t);
+            f0 = juce::jmin (f0, p.freq); f1 = juce::jmax (f1, p.freq);
+        }
+    }
+    if (! any) { fitPage(); return; }
+
+    // the selection fills 80% of the view (a margin on each side)
+    const double dur = page->durationSec;
+    const double tSpan = juce::jmax (1e-6, t1 - t0);
+    timeZoom = juce::jlimit (1.0, 16.0, 0.8 * dur / tSpan);
+    timeOffset = t0 - 0.1 * (dur / timeZoom);
+
+    // the pitch: the norm space (logarithmic) the editor maps through
+    const double n0 = upic::freqToNormYIn (f0, ambitusLo(), ambitusHi());
+    const double n1 = upic::freqToNormYIn (f1, ambitusLo(), ambitusHi());
+    const double nSpan = juce::jmax (1e-6, n1 - n0);
+    freqZoom = juce::jlimit (1.0, 8.0, 0.8 / nSpan);
+    freqOffset = n0 - 0.1 * (1.0 / freqZoom);
+
+    if (onViewChanged) onViewChanged();
+    repaint();
+}
+
+void ScoreEditor::setFineDrawing (bool on)
+{
+    fineDrawing = on;
+    if (onViewChanged) onViewChanged();
+}
+
+//==============================================================================
+// F6: the numeric edit of the selection.
+//
+// The fields move the selected arcs the same way a drag does: the time is
+// shifted and the frequency is scaled by a ratio. The undo transaction and
+// the model revision see it, because it goes through the same path.
+bool ScoreEditor::selectionAnchor (double& tSec, double& hz) const
+{
+    if (page == nullptr) return false;
+    for (auto& a : page->arcs)
+    {
+        if (! isSel (a.id) || a.points.empty()) continue;
+        tSec = a.points.front().t;
+        hz = a.points.front().freq;
+        return true;
+    }
+    return false;
+}
+
+bool ScoreEditor::setSelectionTime (double tSec)
+{
+    if (page == nullptr || selArcs.empty()) return false;
+    double aT = 0.0, aF = 0.0;
+    if (! selectionAnchor (aT, aF)) return false;
+    const double dt = tSec - aT;
+    if (std::abs (dt) < 1e-9) return false;
+
+    const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+    for (auto& a : page->arcs)
+    {
+        if (! isSel (a.id)) continue;
+        for (auto& p : a.points)
+            p.t = juce::jlimit (0.0, page->durationSec, p.t + dt);
+        std::stable_sort (a.points.begin(), a.points.end(),
+                          [] (const upic::ArcPoint& x, const upic::ArcPoint& y){ return x.t < y.t; });
+    }
+    notify();
+    if (onViewChanged) onViewChanged();
+    return true;
+}
+
+bool ScoreEditor::setSelectionFreq (double hz)
+{
+    if (page == nullptr || selArcs.empty()) return false;
+    double aT = 0.0, aF = 0.0;
+    if (! selectionAnchor (aT, aF)) return false;
+    const double ratio = hz / juce::jmax (1e-6, aF);
+    if (std::abs (ratio - 1.0) < 1e-9) return false;
+
+    const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+    for (auto& a : page->arcs)
+    {
+        if (! isSel (a.id)) continue;
+        for (auto& p : a.points)
+            p.freq = juce::jlimit (upic::kMinFreq, upic::kMaxFreq, p.freq * ratio);
+    }
+    notify();
+    if (onViewChanged) onViewChanged();
+    return true;
+}
+
+void ScoreEditor::mouseMove (const juce::MouseEvent& e)
+{
+    // F6: the live readout - the cursor's position through the editor's
+    // own mapping (the same one the hit tests use).
+    if (onCursorMove != nullptr && page != nullptr)
+    {
+        const auto r = plotArea();
+        if (r.contains (e.position))
+            onCursorMove (xToTime (e.position.x), yToFreq (e.position.y));
+    }
+}
 
 void ScoreEditor::quantizeXY(double& t, double& f) const
 {
@@ -1131,11 +1297,15 @@ void ScoreEditor::mouseDrag(const juce::MouseEvent& e)
         if (movingArc)
         {
             const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
-            const float dx = e.position.x - moveStartPos.x;
+            // F6: Alt = fine movement. It is the same path with a quarter
+            // of the sensitivity - not a second code path.
+            const float fine = e.mods.isAltDown() ? 0.25f : 1.0f;
+            const float dx = (e.position.x - moveStartPos.x) * fine;
+            const float dy = (e.position.y - moveStartPos.y) * fine;
             double dt = xToTime(moveStartPos.x + dx) - xToTime(moveStartPos.x);
             // freq ratio from end/start pixel positions (log view correct)
             const double f0 = juce::jmax(1.0, yToFreq(moveStartPos.y));
-            const double f1 = juce::jmax(1.0, yToFreq(e.position.y));
+            const double f1 = juce::jmax(1.0, yToFreq(moveStartPos.y + dy));
             const double ratio = f1 / f0;
             for (auto& a : page->arcs)
             {
@@ -2072,7 +2242,18 @@ void ScoreEditor::commitStroke()
             lastT = t;
         }
         // simplify the raw freehand curve to a manageable control-point count
-        upic::simplifyArcPoints(a.points, kSimplifyEps);
+        //
+        // F6: the tolerance follows the view. At a higher zoom the same
+        // normalized error is fewer pixels on the screen, so the curve has
+        // to keep more of its points (the stroke is what gets saved, so this
+        // is not only a drawing detail). Fine mode skips the simplification
+        // altogether - every sampled point is kept.
+        if (! fineDrawing)
+        {
+            const double zoom = juce::jmax (1.0, juce::jmax (timeZoom, freqZoom));
+            upic::simplifyArcPoints (a.points,
+                                     juce::jmax (kMinSimplifyEps, kSimplifyEps / zoom));
+        }
         // v1.33.4 (H13): the piece format caps the points of an arc, so a
         // very detailed stroke is thinned out evenly (the shape survives)
         // instead of being cut off when the piece is loaded again.

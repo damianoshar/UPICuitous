@@ -153,6 +153,10 @@ public:
 
     std::vector<double> lastArcFreqsForTest() const;
 
+    // F6: how many points the last committed stroke kept (the
+    // simplification's tolerance depends on the view).
+    int lastArcPointCountForTest() const;
+
     // v1.33.2: the zone menu actions are testable directly.
     void applyZoneMenuForTest (int id, int action);
 
@@ -231,6 +235,40 @@ public:
 
     float freqToY(double f) const;
 
+    // F4/F6: the view's zoom and scroll state. It is session state (the
+    // focus view must not change it, and the piece never carries it).
+    double getTimeZoom() const { return timeZoom; }
+    double getTimeOffset() const { return timeOffset; }
+    double getFreqZoom() const { return freqZoom; }
+    double getFreqOffset() const { return freqOffset; }
+
+    // --- F6 (2026-11-17): the view commands and the drawing precision ---
+    // The commands work on the same zoom/offset fields the cursor-anchored
+    // wheel zoom uses, so the anchoring still works after them.
+    void zoomIn();
+    void zoomOut();
+    void fitPage();       // the whole page, from its start
+    void fitSelection();  // the selection fills the view
+    void resetZoom();     // back to 1x, the view's centre stays
+    void zoomBy (double factor);
+
+    // The Fine drawing mode: the stroke is not simplified, so every
+    // sampled point is kept.
+    void setFineDrawing (bool on);
+    bool getFineDrawing() const { return fineDrawing; }
+
+    // The numeric edit of the selection: it moves the selected arcs the
+    // same way a drag does (a time shift and a frequency ratio), so the
+    // undo transaction and the model revision see it.
+    bool selectionAnchor (double& tSec, double& hz) const;
+    bool setSelectionTime (double tSec);
+    bool setSelectionFreq (double hz);
+
+    // The live readout: the cursor's position in the editor's own mapping.
+    std::function<void(double tSec, double fHz)> onCursorMove;
+    // The view changed (the app refreshes its view bar).
+    std::function<void()> onViewChanged;
+
     // --- quantization used by draw/line/remagnetize (zone-aware, sticky) ---
     void quantizeXY(double& t, double& f) const;
 
@@ -284,6 +322,9 @@ public:
     void mouseDrag(const juce::MouseEvent& e) override;
 
     void mouseUp(const juce::MouseEvent& e) override;
+
+    // F6: the live readout of the cursor's position.
+    void mouseMove(const juce::MouseEvent& e) override;
 
     bool keyPressed(const juce::KeyPress& k) override;
 
@@ -348,6 +389,7 @@ private:
     bool showHints = true;       // v1.7: instruction lines on/off
     double timeZoom = 1.0, timeOffset = 0.0;
     double freqZoom = 1.0, freqOffset = 0.0; // pitch view window in norm space
+    bool fineDrawing = false;   // F6: the stroke is not simplified
 
     bool drawing = false, movingArc = false;
     bool selectingMarquee = false, marqueeAdditive = false;
@@ -380,6 +422,9 @@ private:
     // M4: the tuning the drawing snaps to (12-TET by default).
     upic::Tuning tuning;
     static constexpr double kSimplifyEps = 0.006; // RDP tolerance (normalized box)
+    // F6: the tolerance never falls below this (a stroke always keeps a
+    // reasonable shape, however far the view is zoomed in).
+    static constexpr double kMinSimplifyEps = 0.0004;
 
     // pen pressure of an event -> intensity multiplier (1 = no pressure info)
     static float pressureOf(const juce::MouseEvent& e);

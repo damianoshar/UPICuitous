@@ -8,6 +8,222 @@
 //==============================================================================
 // The layout: where every control sits, and how the window is painted.
 
+bool MainComponent::sessionSettingsPersistent = false;
+
+namespace
+{
+    // F5: the session settings live beside the app's other preferences. The
+    // selftest never enables this, so the checks do not touch the user's
+    // file; Main.cpp turns it on for the app.
+    juce::ApplicationProperties& sessionProperties()
+    {
+        static juce::ApplicationProperties props;
+        static bool initialised = false;
+        if (! initialised)
+        {
+            juce::PropertiesFile::Options o;
+            o.applicationName = "UPICuitous";
+            o.folderName = "UPICuitous";
+            o.filenameSuffix = "settings";
+            o.osxLibrarySubFolder = "Application Support";
+            props.setStorageParameters (o);
+            initialised = true;
+        }
+        return props;
+    }
+}
+
+void MainComponent::setSessionSettingsPersistent (bool on)
+{
+    sessionSettingsPersistent = on;
+}
+
+void MainComponent::saveSessionSettings() const
+{
+    if (! sessionSettingsPersistent) return;
+    if (auto* s = sessionProperties().getUserSettings())
+    {
+        s->setValue ("session", juce::JSON::toString (sessionSettingsToVar()));
+        sessionProperties().saveIfNeeded();
+    }
+}
+
+void MainComponent::loadSessionSettings()
+{
+    if (! sessionSettingsPersistent) return;
+    if (auto* s = sessionProperties().getUserSettings())
+    {
+        const auto text = s->getValue ("session");
+        if (text.isNotEmpty())
+            sessionSettingsFromVar (juce::JSON::parse (text));
+    }
+}
+
+juce::var MainComponent::sessionSettingsToVar() const
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("showWaveEd", showWaveEd);
+    o->setProperty ("showEnvEd", showEnvEd);
+    o->setProperty ("showHints", showHints);
+    // F4: the focus view is session state too (never piece state).
+    o->setProperty ("focus", (int) focusedPanel);
+    auto* g = new juce::DynamicObject();
+    for (const auto& kv : groupLevels)
+        g->setProperty (kv.first, (int) kv.second);
+    o->setProperty ("groups", juce::var (g));
+    return juce::var (o);
+}
+
+void MainComponent::sessionSettingsFromVar (const juce::var& v)
+{
+    if (! v.isObject()) return;
+    showWaveEd = (bool) v.getProperty ("showWaveEd", true);
+    showEnvEd  = (bool) v.getProperty ("showEnvEd", true);
+    showHints  = (bool) v.getProperty ("showHints", true);
+    waveTog.setToggleState (showWaveEd, juce::dontSendNotification);
+    envTog.setToggleState (showEnvEd, juce::dontSendNotification);
+    hintsTog.setToggleState (showHints, juce::dontSendNotification);
+    score.setShowHints (showHints);
+    focusedPanel = (FocusPanel) juce::jlimit (0, 3,
+                                (int) v.getProperty ("focus", 0));
+    updateFocusButtons();
+    groupLevels.clear();
+    if (auto* g = v.getProperty ("groups", juce::var()).getDynamicObject())
+        for (const auto& p : g->getProperties())
+        {
+            // The old three-level fold (expanded 0, compact 1, hidden 2)
+            // is read as the two-level disclosure: the compact and the
+            // hidden levels both mean "collapsed".
+            const int raw = (int) p.value;
+            groupLevels[p.name.toString()] =
+                (raw == (int) GroupLevel::expanded) ? GroupLevel::expanded
+                                                    : GroupLevel::collapsed;
+        }
+    resized();
+}
+
+//==============================================================================
+// F4 (2026-11-17): the focus views.
+//
+// A focus view maximises one panel. The permanent strip (Menu, Play/Stop,
+// the tool and Restore) stays, every other group and the other panels go.
+// Nothing about the model's view state is touched: the panel sizes, the
+// scroll positions and the zoom levels are the same when the focus is left,
+// because the layout is computed from the same inputs again.
+void MainComponent::updateFocusButtons()
+{
+    auto set = [this] (juce::TextButton& b, bool on, const juce::String& what)
+    {
+        b.setButtonText (on ? "Exit" : "Focus");
+        b.setTooltip (on ? "Leave the " + what + " focus view"
+                          : "Maximise the " + what + " (and restore it)");
+    };
+    set (scoreFocusBtn, focusedPanel == FocusPanel::score, "score");
+    set (waveFocusBtn,  focusedPanel == FocusPanel::wave,  "wavetable");
+    set (envFocusBtn,   focusedPanel == FocusPanel::env,   "envelope");
+}
+
+void MainComponent::setFocusedPanel (FocusPanel p)
+{
+    if (focusedPanel == p) return;
+    focusedPanel = p;
+    updateFocusButtons();
+    resized();
+}
+
+//==============================================================================
+// F6: the numeric edit of the selected point.
+//
+// The fields move the selection through the same mutation path as a drag,
+// and the whole edit is one undo transaction - so the undo stack and the
+// model revision see it exactly as they see a drag.
+void MainComponent::editSelectionTime (double tSec)
+{
+    beginEdit ("Move the point");
+    const bool ok = score.setSelectionTime (tSec);
+    if (! ok) { endEdit(); return; }
+    endEdit();
+    refreshPointFields();
+}
+
+void MainComponent::editSelectionFreq (double hz)
+{
+    beginEdit ("Tune the point");
+    const bool ok = score.setSelectionFreq (hz);
+    if (! ok) { endEdit(); return; }
+    endEdit();
+    refreshPointFields();
+}
+
+void MainComponent::refreshPointFields()
+{
+    double t = 0.0, f = 0.0;
+    const bool has = score.selectionAnchor (t, f);
+    viewBar.setPointFields (has, t, f);
+}
+
+MainComponent::GroupLevel MainComponent::groupLevelForTest (const juce::String& group) const
+{
+    const auto it = groupLevels.find (group);
+    return it != groupLevels.end() ? it->second : GroupLevel::expanded;
+}
+
+void MainComponent::setGroupLevel (const juce::String& group, GroupLevel level)
+{
+    groupLevels[group] = level;
+    resized();
+}
+
+void MainComponent::restoreAllGroups()
+{
+    groupLevels.clear();
+    resized();
+}
+
+juce::ToggleButton* MainComponent::ensureGroupToggle (const juce::String& group)
+{
+    const auto it = groupToggles.find (group);
+    if (it != groupToggles.end()) return it->second.get();
+
+    auto b = std::make_unique<juce::ToggleButton>();
+    b->setName (group + "FoldBtn");
+    b->setButtonText (groupCaption (group));
+    b->setTooltip ("Show or hide the " + groupCaption (group).toLowerCase() + " controls");
+    b->onClick = [this, group]
+    {
+        const auto cur = groupLevelForTest (group);
+        setGroupLevel (group, cur == GroupLevel::expanded ? GroupLevel::collapsed
+                                                          : GroupLevel::expanded);
+    };
+    auto* raw = b.get();
+    groupToggles[group] = std::move (b);
+    addAndMakeVisible (*raw);
+    return raw;
+}
+
+juce::String MainComponent::groupCaption (const juce::String& group)
+{
+    // F5: the caption of a group's disclosure toggle. The scrub section
+    // keeps the reference archive's wording ("Scrub settings").
+    if (group == "scrub")  return "Scrub settings";
+    if (group == "transport") return "Transport";
+    if (group == "pages")  return "Pages";
+    if (group == "file")   return "File";
+    if (group == "tempo")  return "Tempo";
+    if (group == "clock")  return "Clock";
+    if (group == "voice")  return "Voice";
+    if (group == "levels") return "Levels";
+    if (group == "pitch")  return "Pitch";
+    if (group == "material") return "Material";
+    if (group == "sieve")  return "Sieve";
+    if (group == "magnets") return "Magnets";
+    if (group == "page")   return "Page";
+    if (group == "tools")  return "Tools";
+    if (group == "drag")   return "Drag";
+    if (group == "status") return "Status";
+    return group;
+}
+
 void MainComponent::buildScoreArea()
 {
     // --- score ---
@@ -16,6 +232,35 @@ void MainComponent::buildScoreArea()
     timeLab.setName("timeLab");
     waveEd.setName("waveEd");
     envEd.setName("envEd");
+
+    // --- F6 (2026-11-17): the score's view bar ---
+    // The view commands, the Fine drawing toggle, the live readout and the
+    // numeric edit of the selected point.
+    addAndMakeVisible (viewBar);
+    viewBar.zoomInBtn.setName ("zoomInBtn");
+    viewBar.zoomOutBtn.setName ("zoomOutBtn");
+    viewBar.fitBtn.setName ("fitBtn");
+    viewBar.fitSelBtn.setName ("fitSelBtn");
+    viewBar.resetBtn.setName ("resetZoomBtn");
+    viewBar.fineBtn.setName ("fineBtn");
+    viewBar.readoutLab.setName ("readoutLab");
+    viewBar.timeEdit.setName ("pointTimeEdit");
+    viewBar.freqEdit.setName ("pointFreqEdit");
+    viewBar.onZoomIn  = [this]{ score.zoomIn(); };
+    viewBar.onZoomOut = [this]{ score.zoomOut(); };
+    viewBar.onFit     = [this]{ score.fitPage(); };
+    viewBar.onFitSel  = [this]{ score.fitSelection(); };
+    viewBar.onReset   = [this]{ score.resetZoom(); };
+    viewBar.onFineToggle = [this]{
+        score.setFineDrawing (! score.getFineDrawing());
+        viewBar.setFineState (score.getFineDrawing());
+    };
+    viewBar.onTimeEdit = [this] (double seconds){ editSelectionTime (seconds); };
+    viewBar.onFreqEdit = [this] (double hz){ editSelectionFreq (hz); };
+    score.onCursorMove = [this] (double tSec, double fHz){ viewBar.setReadout (tSec, fHz); };
+    score.onViewChanged = [this]{ refreshPointFields(); };
+    viewBar.setFineState (score.getFineDrawing());
+
     // every editor mutates the same model the timer copies into the audio
     // snapshot, so they all share the message-thread model lock
     score.setModelLock(&dataLock);
@@ -149,7 +394,7 @@ void MainComponent::buildScoreArea()
     score.onScrubDragRelease = [this](double /*t*/){
         // intentionally no-op: releasing a drag does not start playback
     };
-    score.onSelect = [this](int id){ syncControlsToArc(id); updateStatus(); };
+    score.onSelect = [this](int id){ syncControlsToArc(id); updateStatus(); refreshPointFields(); };
     // v1.33.4 (H13): the editor refuses an edit that the piece format
     // cannot hold and says why.
     score.onNotice = [this](const juce::String& m){ flash (m); };
@@ -196,6 +441,33 @@ void MainComponent::buildEditors()
     addAndMakeVisible(eFlat); addAndMakeVisible(ePerc); addAndMakeVisible(eSwell); addAndMakeVisible(eGate); addAndMakeVisible(eStr);
     addAndMakeVisible(assignBtn); addAndMakeVisible(delArcBtn); addAndMakeVisible(muteArcBtn);
     addAndMakeVisible(voiceLab); addAndMakeVisible(waveLab); addAndMakeVisible(envLab); addAndMakeVisible(toolLab);
+
+    // --- F4 (2026-11-17): the focus views -------------------------------
+    // One button per panel: it maximises the panel (the permanent strip
+    // stays, the other panels and the groups go) and the same button leaves
+    // the focus again. The focus is a layout state - the panel sizes, the
+    // scroll positions and the zoom levels are not touched by it.
+    for (auto* b : { &scoreFocusBtn, &waveFocusBtn, &envFocusBtn })
+    {
+        addAndMakeVisible (b);
+        b->setTooltip ("Maximise this panel (and restore it)");
+    }
+    scoreFocusBtn.setName ("scoreFocusBtn");
+    waveFocusBtn.setName ("waveFocusBtn");
+    envFocusBtn.setName ("envFocusBtn");
+    scoreFocusBtn.onClick = [this]{
+        setFocusedPanel (focusedPanel == FocusPanel::score ? FocusPanel::none
+                                                           : FocusPanel::score);
+    };
+    waveFocusBtn.onClick = [this]{
+        setFocusedPanel (focusedPanel == FocusPanel::wave ? FocusPanel::none
+                                                          : FocusPanel::wave);
+    };
+    envFocusBtn.onClick = [this]{
+        setFocusedPanel (focusedPanel == FocusPanel::env ? FocusPanel::none
+                                                         : FocusPanel::env);
+    };
+    updateFocusButtons();
 
     auto curW = [this]() -> upic::Waveform* {
         for (auto& w : waveforms) if (w.id == selWave) return &w;
@@ -348,6 +620,9 @@ void MainComponent::updateWaveButtonColours()
 
 MainComponent::~MainComponent()
 {
+    // F5: remember the fold levels and the view toggles (the app only; the
+    // selftest never enables the file).
+    saveSessionSettings();
     stopOscReceiver();
     // v1.33.4 (M28): the worker must be gone before the members it could
     // touch are. It is asked to stop first - a render checks the flag
@@ -384,6 +659,12 @@ void MainComponent::paint(juce::Graphics& g)
 
 void MainComponent::resized()
 {
+    // F5: a previous fold pass hid some controls. Put them back before the
+    // tab visibility rules below run again - they decide which controls the
+    // current material actually shows, and the fold is applied on top.
+    for (auto* c : foldHidden) if (c != nullptr) c->setVisible (true);
+    foldHidden.clear();
+
     // All sizes below are *design units* (dp). On high-density displays the
     // whole component tree is placed in dp space (Main.cpp sets the JUCE
     // global scale factor to the display density), so controls keep a
@@ -501,24 +782,26 @@ void MainComponent::resized()
     // the same line when there is room for it.
     std::vector<FlowGroup> groups;
 
-    // transport
-    groups.push_back ({ "transport", { F(&playBtn, 90), F(&stopBtn, 70), F(&loopBtn, 64),
+    // transport: Play and Stop live in the permanent strip (F5), so they stay
+    // reachable at every fold level.
+    groups.push_back ({ "transport", { F(&loopBtn, 64),
                                         F(&seqBtn, 60), F(&revPlayBtn, 64), F(&pressBtn, 96),
                                         F(&scrubBtn, 72) } });
 
     // the pages and the files
     groups.push_back ({ "pages", { FL(&pageLab, 40, &pageBox, 150),
                                    F(&pageAddBtn, 30), F(&pageDupBtn, 46), F(&pageDelBtn, 30) } });
-    groups.push_back ({ "file", { F(&menuBtn, 74), F(&settingsBtn, 78), F(&clearBtn, 64) } });
+    // F5: Menu is in the permanent strip; the file group keeps the rest.
+    groups.push_back ({ "file", { F(&settingsBtn, 78), F(&clearBtn, 64) } });
 
     // the tempo and the clock
     groups.push_back ({ "tempo", { FL(&tempoLab, 40, &tempoSlider, 140) } });
     groups.push_back ({ "clock", { F(&timeLab, 150) } });
 
-    // the voice: what is drawn (the tool, the carrier wave, the envelope)
+    // the voice: what is drawn (the carrier wave, the envelope). The tool
+    // selector lives in the permanent strip (F5).
     {
         FlowGroup voice { "voice", {} };
-        voice.items.push_back (FL (&toolLab, 36, &toolBox, 120));
         if (showWaveCtl)
             voice.items.push_back (FL (&waveLab, 42, &waveBox, 140));
         voice.items.push_back (FL (&envLab, 34, &envBox, 140));
@@ -620,6 +903,59 @@ void MainComponent::resized()
                                              [this] (const FlowItem& it){ return it.comp == &audioBtn; }),
                              grp.items.end());
 
+    // F5 (2026-11-17): the permanent strip. These controls stay reachable
+    // whatever the groups do: the menu, the transport, the active tool and
+    // the Restore button. It is a flow group of its own, so it wraps inside
+    // itself on a narrow window instead of pushing controls out.
+    std::vector<FlowGroup> stripGroups;
+    stripGroups.push_back ({ "permanent", { F(&menuBtn, 74), F(&playBtn, 90),
+                                            F(&stopBtn, 70),
+                                            FL(&toolLab, 36, &toolBox, 120),
+                                            F(&restoreGroupsBtn, 84) } });
+
+    // F5: apply the session's fold level to every group. The disclosure
+    // toggle (captioned with the group's name) is the group's first item,
+    // so it is always visible - a collapsed group can be brought back
+    // without the Restore button. A collapsed group's controls and its card
+    // go, and the controls are hidden so they cannot float over the bare
+    // canvas.
+    //
+    // F4: a focus view hides every group - the permanent strip is what
+    // stays. The session's own fold levels are not touched, so leaving the
+    // focus brings the groups back exactly as they were.
+    const bool anyFocus = focusedPanel != FocusPanel::none;
+    for (auto& t : groupToggles)
+        t.second->setVisible (false);
+    std::vector<FlowGroup> shownGroups;
+    for (auto& grp : groups)
+    {
+        const auto level = anyFocus ? GroupLevel::collapsed : groupLevelForTest (grp.name);
+
+        auto* fold = ensureGroupToggle (grp.name);
+        fold->setVisible (true);
+        fold->setToggleState (level == GroupLevel::expanded, juce::dontSendNotification);
+
+        FlowGroup shown { grp.name, {} };
+        // the disclosure is measured like any other control (the caption's
+        // own width plus the tick)
+        shown.items.push_back (F (fold, 60));
+
+        if (level == GroupLevel::expanded)
+        {
+            for (auto& it : grp.items)
+                shown.items.push_back (it);
+        }
+        else
+        {
+            for (auto& it : grp.items)
+            {
+                if (it.comp != nullptr) { it.comp->setVisible (false); foldHidden.push_back (it.comp); }
+                if (it.label != nullptr) { it.label->setVisible (false); foldHidden.push_back (it.label); }
+            }
+        }
+        shownGroups.push_back (std::move (shown));
+    }
+
     auto b = getLocalBounds().reduced(8);
     const int rowH36 = 36, minScoreH = 150, minEdH = 110, wantEdH = 300;
     // Landscape (wider than tall): voice controls become a slim strip under
@@ -647,8 +983,9 @@ void MainComponent::resized()
         return w;
     };
 
-    auto flowGroups = [&] (juce::Rectangle<int> area, float sc, bool place,
-                           std::vector<ToolbarCard>* rects) -> int
+    auto flowGroups = [&] (const std::vector<FlowGroup>& list, juce::Rectangle<int> area,
+                           float sc, bool place, std::vector<ToolbarCard>* rects,
+                           int& groupColour) -> int
     {
         const int rh2 = (int) std::lround (rowH36 * sc);
         const int g2  = juce::jmax (1, (int) std::lround (2.0f * sc));
@@ -656,8 +993,7 @@ void MainComponent::resized()
         const int right = area.getRight();
         int x = area.getX(), y = area.getY();
 
-        int groupColour = 0;
-        for (auto& grp : groups)
+        for (auto& grp : list)
         {
             const int gw = (int) std::lround ((float) groupWidth (grp) * sc);
             // does the group fit on the current line?
@@ -714,21 +1050,28 @@ void MainComponent::resized()
 
     // the hints sidebar: the long explanations that used to sit in the
     // toolbar's rows get their own column on the right - the spare space
-    // on a large screen. The "Hints" toggle shows and hides it.
-    const int sidebarW = (showHints && getWidth() >= 820) ? 260 : 0;
+    // on a large screen. The "Hints" toggle shows and hides it. A focus
+    // view has no room for it (F4).
+    const int sidebarW = (! anyFocus && showHints && getWidth() >= 820) ? 260 : 0;
 
     // fit-shrink: wrapping is scale-dependent, so settle by iteration
     float s = 1.0f;
-    int topRowsTotal = 0;
+    int topRowsTotal = 0, stripRows = 0;
     for (int iter = 0; ; ++iter)
     {
         auto area = b;
         if (sidebarW > 0) area.removeFromRight (sidebarW + 8);
-        topRowsTotal = flowGroups (area, s, false, nullptr);
+        int colour = 0;
+        stripRows = flowGroups (stripGroups, area, s, false, nullptr, colour);
+        topRowsTotal = stripRows
+                     + flowGroups (shownGroups, area, s, false, nullptr, colour);
         const int minH = topRowsTotal * (int) std::lround (rowH36 * s) + 6
                        + (int) std::lround (minScoreH * s)
                        + (int) std::lround (26.0f * s) // Osc|Sample|Live tab strip
-                       + (anyEditors ? (int) std::lround (minEdH * s) + 6 : 0)
+                       // F6: the view bar's row comes out of the editors'
+                       // height, so the canvas keeps its space
+                       + (anyEditors ? (int) std::lround (minEdH * s) + 6
+                                        + (int) std::lround (26.0f * s) : 0)
                        + (stripMode ? (int) std::lround (34.0f * s) : 0);
         if (minH <= b.getHeight() || iter >= 8) break;
         s *= 0.92f;
@@ -749,7 +1092,13 @@ void MainComponent::resized()
         if (sidebarW > 0)
             area.removeFromRight (8);   // the gap between the groups and the sidebar
 
-        flowGroups (area, s, true, &toolbarGroups);
+        // F5: the permanent strip is its own card row (or rows, when the
+        // window is narrow), above the folding groups.
+        permanentStripBounds = area.removeFromTop (stripRows * (int) std::lround (rowH36 * s));
+        int colour = 0;
+        flowGroups (stripGroups, permanentStripBounds, s, true, &toolbarGroups, colour);
+        flowGroups (shownGroups, area, s, true, &toolbarGroups, colour);
+        toolbarRows = topRowsTotal;
 
         // the two explanation labels live in the sidebar now
         const bool sidebarOn = sidebarW > 0;
@@ -757,7 +1106,7 @@ void MainComponent::resized()
         kbdHintLab.setVisible (sidebarOn);
         if (sidebarOn)
         {
-            toolbarGroups.push_back ({ sidebar, (int) groups.size() });
+            toolbarGroups.push_back ({ sidebar, colour });
             auto sb = sidebar.reduced (6, 4);
             const int matLines = lineCount (matHintLab.getText());
             const int kbdLines = lineCount (kbdHintLab.getText());
@@ -777,7 +1126,138 @@ void MainComponent::resized()
     }
 
     // bottom: waveform editor | envelope editor | voice buttons
+    //
+    // F4: a focus view short-circuits all of this - the focused panel takes
+    // the whole area below the toolbar, the other panels and the groups go.
+    // The branch is placed after the helpers (the editor placement and the
+    // tab strip), so both paths use the same code.
+    auto placeEditor = [&] (juce::Rectangle<int> col, juce::Component& editor,
+                           LibraryManager& manager, juce::Component* const* btns,
+                           const int* ideal, int n, juce::Component* focusBtn)
+    {
+        // F2/F3: two header rows - the bank manager (selector, swatch and
+        // commands) and the preset buttons. The editor takes the rest.
+        manager.setBounds(col.removeFromTop((int) std::lround(26.0f * s)).reduced(2));
+        auto t = col.removeFromTop((int) std::lround(26.0f * s));
+        // F4: the focus button sits at the right end of the preset row.
+        if (focusBtn != nullptr)
+            focusBtn->setBounds (t.removeFromRight ((int) std::lround (64.0f * s)).reduced (1));
+        int idealSum = 0;
+        for (int i = 0; i < n; ++i)
+            idealSum += ideal[i];
+        const int avail = t.getWidth();
+        for (int i = 0; i < n; ++i)
+        {
+            const int rem = t.getWidth();
+            if (rem <= 0) break;
+            const int w = juce::jlimit(1, rem, (int) std::lround((double)avail
+                                        * (double)ideal[i]
+                                        / (double)juce::jmax(1, idealSum)));
+            btns[i]->setBounds(t.removeFromLeft(w).reduced(1));
+        }
+        editor.setBounds(col.reduced(2));
+    };
+
+    // v1.8 one strip directly above the canvas: each material is a tab and
+    // its own canvas layer - Osc | Sample | Live - with the v1.7 view
+    // toggles at the right end of the same strip
+    auto placeTabStrip = [&] (juce::Rectangle<int> tabs)
+    {
+        matPmTog.setVisible (true);
+        arcListBtn.setVisible (true);
+        matOscTog.setBounds(tabs.removeFromLeft((int) std::lround(56.0f * s)).reduced(1));
+        matSampleTog.setBounds(tabs.removeFromLeft((int) std::lround(76.0f * s)).reduced(1));
+        matLiveTog.setBounds(tabs.removeFromLeft((int) std::lround(56.0f * s)).reduced(1));
+        if (tabs.getWidth() >= (int) std::lround (40.0f * s)) matPmTog.setBounds (tabs.removeFromLeft ((int) std::lround (40.0f * s)).reduced (1));
+        else matPmTog.setVisible (false);
+        // F4: the score's focus button sits at the right end of the score's
+        // own row (the canvas may not be covered by a control - the layout
+        // is a pure tiling).
+        if (tabs.getWidth() >= (int) std::lround (60.0f * s))
+            scoreFocusBtn.setBounds (tabs.removeFromRight ((int) std::lround (60.0f * s)).reduced (1));
+        else scoreFocusBtn.setVisible (false);
+        hintsTog.setBounds(tabs.removeFromRight((int) std::lround(56.0f * s)).reduced(1));
+        envTog.setBounds(tabs.removeFromRight((int) std::lround(46.0f * s)).reduced(1));
+        waveTog.setBounds(tabs.removeFromRight((int) std::lround(52.0f * s)).reduced(1));
+        // v1.21: the arc list toggle sits with the other view toggles
+        if (tabs.getWidth() >= (int) std::lround (52.0f * s)) arcListBtn.setBounds (tabs.removeFromRight ((int) std::lround (52.0f * s)).reduced (1));
+        else arcListBtn.setVisible (false);
+    };
+
+    juce::Component* wbtns[7] = { &wSine, &wSaw, &wSqr, &wTri, &wNoise, &wSmooth, &wNorm };
+    const int wideal[] = { 30, 30, 30, 30, 44, 48, 34 };
+    juce::Component* ebtns[5] = { &eFlat, &ePerc, &eSwell, &eGate, &eStr };
+    const int eideal[] = { 40, 40, 44, 40, 34 };
+
+    // --- F4: the focus view ---------------------------------------------
+    if (focusedPanel != FocusPanel::none)
+    {
+        const bool focusScore = focusedPanel == FocusPanel::score;
+        const bool focusWave  = focusedPanel == FocusPanel::wave;
+        const bool focusEnv   = focusedPanel == FocusPanel::env;
+
+        // the panels that are not focused go; the focus buttons of the
+        // hidden panels go with them (the focused one says Exit).
+        waveEd.setVisible (false); envEd.setVisible (false);
+        waveLib.setVisible (false); envLib.setVisible (false);
+        for (auto* w : wbtns) w->setVisible (false);
+        for (auto* eb : ebtns) eb->setVisible (false);
+        scoreFocusBtn.setVisible (focusScore);
+        waveFocusBtn.setVisible (focusWave);
+        envFocusBtn.setVisible (focusEnv);
+        score.setVisible (focusScore);
+        arcListPanel.setVisible (false);
+        voiceLab.setVisible (false);
+        assignBtn.setVisible (false);
+        delArcBtn.setVisible (false);
+        muteArcBtn.setVisible (false);
+        matHintLab.setVisible (false);
+        kbdHintLab.setVisible (false);
+
+        if (focusScore)
+        {
+            // the material tabs belong to the score: they stay with it
+            b.removeFromBottom(6);
+            placeTabStrip (b.removeFromTop ((int) std::lround (26.0f * s)));
+            // F6: the view bar keeps its own row, under the canvas
+            viewBar.setVisible (true);
+            viewBar.setLayoutScale (s);
+            viewBar.setBounds (b.removeFromBottom ((int) std::lround (26.0f * s)));
+            score.setBounds (b);
+        }
+        else
+        {
+            // the editors have no material tabs - the whole area is theirs
+            matOscTog.setVisible (false); matSampleTog.setVisible (false);
+            matLiveTog.setVisible (false); matPmTog.setVisible (false);
+            hintsTog.setVisible (false); envTog.setVisible (false);
+            waveTog.setVisible (false); arcListBtn.setVisible (false);
+            scoreFocusBtn.setVisible (false);
+            viewBar.setVisible (false);
+            if (focusWave)
+            {
+                waveEd.setVisible (true); waveLib.setVisible (true);
+                for (auto* w : wbtns) w->setVisible (true);
+                placeEditor (b, waveEd, waveLib, wbtns, wideal, 7, &waveFocusBtn);
+            }
+            else
+            {
+                envEd.setVisible (true); envLib.setVisible (true);
+                for (auto* eb : ebtns) eb->setVisible (true);
+                placeEditor (b, envEd, envLib, ebtns, eideal, 5, &envFocusBtn);
+            }
+        }
+
+        layoutOverlays (s);
+        repaint();
+        return;
+    }
+
     const int stripH = stripMode ? (int) std::lround(34.0f * s) : 0;
+    // F6: the score's view bar has its own row, directly under the canvas.
+    // The row comes out of the editors' height, so the canvas keeps the
+    // space it had (the canvas is the app's main work area).
+    const int viewBarH = (int) std::lround (26.0f * s);
     // a single visible editor gets a little less height than two side by side
     const float wantEdHNow = (showWaveEd && showEnvEd) ? wantEdH : 240.0f;
     int edH = anyEditors ? (int) std::lround(wantEdHNow * s) : 0;
@@ -785,6 +1265,17 @@ void MainComponent::resized()
     if (anyEditors)
         edH = juce::jmin(edH, juce::jmax((int) std::lround(minEdH * s), budget));
     auto bottom = b.removeFromBottom(edH + stripH);
+
+    // F6: the view bar sits between the canvas and the editors. When the
+    // editors are there, its row comes out of their height, so the canvas
+    // keeps the space it had; when they are hidden, the row comes out of
+    // the canvas's own area (there is nothing else to give).
+    viewBar.setVisible (true);
+    viewBar.setLayoutScale (s);
+    if (anyEditors)
+        viewBar.setBounds (bottom.removeFromTop (viewBarH));
+    else
+        viewBar.setBounds (b.removeFromBottom (viewBarH));
 
     juce::Rectangle<int> vcol, vstrip;
     if (stripMode)
@@ -813,43 +1304,28 @@ void MainComponent::resized()
     else if (showWaveEd) waveCol = bottom;
     else if (showEnvEd)  envCol  = bottom;
 
-    auto placeEditor = [&](juce::Rectangle<int> col, juce::Component& editor,
-                           LibraryManager& manager, juce::Component* const* btns,
-                           const int* ideal, int n)
-    {
-        // F2/F3: two header rows - the bank manager (selector, swatch and
-        // commands) and the preset buttons. The editor takes the rest.
-        manager.setBounds(col.removeFromTop((int) std::lround(26.0f * s)).reduced(2));
-        auto t = col.removeFromTop((int) std::lround(26.0f * s));
-        int idealSum = 0;
-        for (int i = 0; i < n; ++i)
-            idealSum += ideal[i];
-        const int avail = t.getWidth();
-        for (int i = 0; i < n; ++i)
-        {
-            const int rem = t.getWidth();
-            if (rem <= 0) break;
-            const int w = juce::jlimit(1, rem, (int) std::lround((double)avail
-                                        * (double)ideal[i]
-                                        / (double)juce::jmax(1, idealSum)));
-            btns[i]->setBounds(t.removeFromLeft(w).reduced(1));
-        }
-        editor.setBounds(col.reduced(2));
-    };
-
-    juce::Component* wbtns[7] = { &wSine, &wSaw, &wSqr, &wTri, &wNoise, &wSmooth, &wNorm };
-    const int wideal[] = { 30, 30, 30, 30, 44, 48, 34 };
     waveEd.setVisible(showWaveEd);
     waveLib.setVisible(showWaveEd);
     for (auto* w : wbtns) w->setVisible(showWaveEd);
-    if (showWaveEd) placeEditor(waveCol, waveEd, waveLib, wbtns, wideal, 7);
+    if (showWaveEd) placeEditor(waveCol, waveEd, waveLib, wbtns, wideal, 7, &waveFocusBtn);
 
-    juce::Component* ebtns[5] = { &eFlat, &ePerc, &eSwell, &eGate, &eStr };
-    const int eideal[] = { 40, 40, 44, 40, 34 };
     envEd.setVisible(showEnvEd);
     envLib.setVisible(showEnvEd);
     for (auto* eb : ebtns) eb->setVisible(showEnvEd);
-    if (showEnvEd) placeEditor(envCol, envEd, envLib, ebtns, eideal, 5);
+    if (showEnvEd) placeEditor(envCol, envEd, envLib, ebtns, eideal, 5, &envFocusBtn);
+    // F4: leaving a focus view restores everything the focus hid.
+    score.setVisible (true);
+    voiceLab.setVisible (true);
+    assignBtn.setVisible (true);
+    delArcBtn.setVisible (true);
+    muteArcBtn.setVisible (true);
+    matOscTog.setVisible (true); matSampleTog.setVisible (true);
+    matLiveTog.setVisible (true); hintsTog.setVisible (true);
+    envTog.setVisible (true); waveTog.setVisible (true);
+    // the focus buttons: the panels carry their own
+    scoreFocusBtn.setVisible (true);
+    waveFocusBtn.setVisible (showWaveEd);
+    envFocusBtn.setVisible (showEnvEd);
     // voice controls: side column (portrait with editors) or slim strip
     if (stripMode)
     {
@@ -874,22 +1350,7 @@ void MainComponent::resized()
     // v1.8 one strip directly above the canvas: each material is a tab and
     // its own canvas layer - Osc | Sample | Live - with the v1.7 view
     // toggles at the right end of the same strip
-    {
-        auto tabs = b.removeFromTop((int) std::lround(26.0f * s));
-        matPmTog.setVisible (true);
-        arcListBtn.setVisible (true);
-        matOscTog.setBounds(tabs.removeFromLeft((int) std::lround(56.0f * s)).reduced(1));
-        matSampleTog.setBounds(tabs.removeFromLeft((int) std::lround(76.0f * s)).reduced(1));
-        matLiveTog.setBounds(tabs.removeFromLeft((int) std::lround(56.0f * s)).reduced(1));
-        if (tabs.getWidth() >= (int) std::lround (40.0f * s)) matPmTog.setBounds (tabs.removeFromLeft ((int) std::lround (40.0f * s)).reduced (1));
-        else matPmTog.setVisible (false);
-        hintsTog.setBounds(tabs.removeFromRight((int) std::lround(56.0f * s)).reduced(1));
-        envTog.setBounds(tabs.removeFromRight((int) std::lround(46.0f * s)).reduced(1));
-        waveTog.setBounds(tabs.removeFromRight((int) std::lround(52.0f * s)).reduced(1));
-        // v1.21: the arc list toggle sits with the other view toggles
-        if (tabs.getWidth() >= (int) std::lround (52.0f * s)) arcListBtn.setBounds (tabs.removeFromRight ((int) std::lround (52.0f * s)).reduced (1));
-        else arcListBtn.setVisible (false);
-    }
+    placeTabStrip (b.removeFromTop ((int) std::lround (26.0f * s)));
 
     // v1.21: the arc list takes the right side of the canvas
     if (showArcList)

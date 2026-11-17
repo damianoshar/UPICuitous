@@ -48,6 +48,8 @@
       <FILE id="libMgr01" name="LibraryManager.h" compile="0" resource="0"
             file="Source/LibraryManager.h"/>
       <FILE id="sEdr05" name="ScoreEditor.h" compile="0" resource="0" file="Source/ScoreEditor.h"/>
+      <FILE id="sVbr01" name="ScoreViewBar.h" compile="0" resource="0"
+            file="Source/ScoreViewBar.h"/>
       <FILE id="sEdc30" name="ScoreEditor.cpp" compile="1" resource="0" file="Source/ScoreEditor.cpp"/>
       <FILE id="wEdr06" name="WaveformEditor.h" compile="0" resource="0"
             file="Source/WaveformEditor.h"/>

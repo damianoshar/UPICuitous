@@ -138,13 +138,18 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                 check (kbd != nullptr && mat != nullptr
                        && kbd->getBounds().getY() > mat->getBounds().getY(),
                        "v1.33.3 the material hint sits above the shortcut list");
-                // the groups share a line: the transport and the pages
-                // are two groups, and they sit on the same line
-                check (play != nullptr && page != nullptr
-                       && play->getBounds().getY() == page->getBounds().getY(),
-                       "v1.33.3 two groups share one line",
-                       play != nullptr && page != nullptr
-                         ? play->getBounds().toString() + " vs " + page->getBounds().toString()
+                // F5: Play lives in the permanent strip above the groups;
+                // the groups still share their lines (the transport's loop
+                // and the pages sit side by side).
+                auto* loop = find ("loopBtn");
+                check (play != nullptr && loop != nullptr && page != nullptr
+                       && play->getBounds().getBottom() <= loop->getBounds().getY()
+                       && loop->getBounds().getY() == page->getBounds().getY(),
+                       "F5 the permanent strip sits above two groups on one line",
+                       play != nullptr && loop != nullptr && page != nullptr
+                         ? play->getBounds().toString() + " / "
+                           + loop->getBounds().toString() + " vs "
+                           + page->getBounds().toString()
                          : juce::String());
 
                 // no button may be narrower than its own text

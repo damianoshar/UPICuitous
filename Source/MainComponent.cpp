@@ -121,6 +121,9 @@ MainComponent::MainComponent(bool pluginMode)
     refreshBoxes();
     refreshScoreBinding();
     updateStatus();
+    // F5: the session's fold levels and view toggles, before the first
+    // layout pass (the app persists them; the selftest does not).
+    loadSessionSettings();
     setSize(1280, 800);
 }
 
@@ -134,6 +137,14 @@ void MainComponent::buildTransportControls()
     addAndMakeVisible(audioBtn); addAndMakeVisible(clearBtn);
     addAndMakeVisible(settingsBtn);
     settingsBtn.setName("settingsBtn");
+
+    // F5 (2026-11-17): the permanent strip's Restore button. The strip keeps
+    // Menu, Play/Stop, the tool selector and this button reachable at every
+    // fold level, so a hidden group is never lost.
+    addAndMakeVisible (restoreGroupsBtn);
+    restoreGroupsBtn.setName ("restoreGroupsBtn");
+    restoreGroupsBtn.setTooltip ("Expand every toolbar group again");
+    restoreGroupsBtn.onClick = [this]{ restoreAllGroups(); };
     loopBtn.setName("loopBtn");
     seqBtn.setName("seqBtn");
     if (pluginMode_) audioBtn.setVisible(false);
@@ -766,6 +777,7 @@ void MainComponent::buildToolbarControls()
 
     // --- sliders ---
     addAndMakeVisible(durSlider); addAndMakeVisible(masterSlider); addAndMakeVisible(intenSlider);
+    durSlider.setName ("durSlider");
     addAndMakeVisible(pageLab); addAndMakeVisible(durLab); addAndMakeVisible(masterLab); addAndMakeVisible(intenLab);
     addAndMakeVisible(timeLab); addAndMakeVisible(statusLab);
 

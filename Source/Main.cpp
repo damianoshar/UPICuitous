@@ -21,6 +21,10 @@ public:
             quit();
             return;
         }
+        // F5: the app remembers the toolbar's fold levels and the view
+        // toggles. The plugin leaves the file alone (a host session owns its
+        // own window), and the selftest never enables it.
+        MainComponent::setSessionSettingsPersistent (true);
         mainWindow.reset(new MainWindow(getApplicationName()));
 
         // v1.33.4 (L15, part 3): the crash recovery. The snapshot of the
