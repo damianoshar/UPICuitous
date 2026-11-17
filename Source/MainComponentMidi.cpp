@@ -112,7 +112,7 @@ void MainComponent::handleMidiActivity (const MidiHub::Activity& a)
     {
         if (a.type == MidiHub::kTypeNoteOn || a.value > 63)
         {
-            if (isPlaying.load (std::memory_order_relaxed)) stopPlayback();
+            if (transportActive()) stopPlayback();
             else startPlayback();
         }
     }
@@ -128,13 +128,13 @@ void MainComponent::handleMidiActivity (const MidiHub::Activity& a)
                                  && midi.matches (bs, a);
         if (a.type == MidiHub::kTypeNoteOn)
         {
-            if (! isScrubNote && ! isPlaying.load (std::memory_order_relaxed)) startPlayback();
+            if (! isScrubNote && ! transportActive()) startPlayback();
         }
         else if (a.type == MidiHub::kTypeNoteOff)
         {
             // the release of a scrub note does not stop the transport
             const bool scrubNoteOff = bs.bound && bs.note && a.number == bs.number;
-            if (! scrubNoteOff && isPlaying.load (std::memory_order_relaxed)) stopPlayback();
+            if (! scrubNoteOff && transportActive()) stopPlayback();
         }
     }
 }
@@ -293,8 +293,7 @@ void MainComponent::applyHostTransport()
     if (scrubActive) return;
 
     const bool hostPlaying = hostTransportPlaying.load (std::memory_order_relaxed);
-    const bool appPlaying = isPlaying.load (std::memory_order_relaxed)
-                         || wantsStop.load (std::memory_order_relaxed);
+    const bool appPlaying = transportActive();
 
     // the host's position, inside the current page (the page loops under the
     // host's transport)
@@ -352,7 +351,7 @@ void MainComponent::updateMidiScrub()
     const double v = juce::jlimit (-4.0, 4.0, scrubVelocity);
     if (std::abs(v) > 0.05)
     {
-        if (! isPlaying.load (std::memory_order_relaxed))
+        if (! transportActive())
         {
             prevPlayRate.store (playRate.load (std::memory_order_relaxed), std::memory_order_relaxed);
             startPlayback();
@@ -364,7 +363,7 @@ void MainComponent::updateMidiScrub()
             dirChangeSerial.fetch_add (1, std::memory_order_relaxed);
         }
     }
-    else if (isPlaying.load (std::memory_order_relaxed))
+    else if (transportActive())
     {
         // the jog is over: the transport stops and the speed goes back to the
         // app's own (the Rev toggle's speed), so the next playback is normal

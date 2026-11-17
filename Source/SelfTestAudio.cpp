@@ -2106,3 +2106,404 @@ void upic::runMaterialChecks (upic::SelfTest& t)
         }
     }
 }
+
+//==============================================================================
+// F1 (2026-11-17): the transport state machine. The four states and their
+// legal transitions are Stopped -> Starting (Play) -> Playing -> Stopping
+// (Stop) -> Stopped. Play inside Starting/Playing and Stop inside Stopped/
+// Stopping are no-ops; Play inside Stopping cancels the fade with the same
+// 30 ms gain envelope. The envelope belongs to the score only, so a live
+// microphone is not faded by the transport. The stop leaves the voice pool
+// empty and the playhead where the fade ended; the double-click rewind is
+// kept, but only for a real double click.
+void upic::runTransportStateChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    using TS = MainComponent::TransportState;
+
+    // A 1 Hz square is a constant for the ~100 ms these checks span (the
+    // first half-cycle is 0.5 s), so every change in the output is the
+    // transport's gain envelope, not the waveform.
+    const juce::String squarePiece =
+        "{\"master\":1,\"pages\":[{\"duration\":4,\"nextArcId\":2,\"arcs\":["
+        "{\"id\":1,\"mode\":0,\"waveformId\":2,\"envelopeId\":0,\"intensity\":1,"
+        "\"points\":[{\"t\":0,\"f\":1},{\"t\":4,\"f\":1}]}]}]}";
+
+    auto mcHolder = std::make_unique<MainComponent>(true);
+    auto& mc = *mcHolder;
+    mc.setSize (1280, 800);
+    mc.prepareToPlay (512, 44100.0);
+
+    juce::AudioBuffer<float> out (2, 512);
+    juce::AudioSourceChannelInfo info (&out, 0, out.getNumSamples());
+
+    auto render = [&] (float* first = nullptr, float* last = nullptr) -> float
+    {
+        out.clear();
+        mc.getNextAudioBlock (info);
+        if (first != nullptr) *first = out.getSample (0, 0);
+        if (last != nullptr)  *last  = out.getSample (0, out.getNumSamples() - 1);
+        float peak = 0.0f;
+        for (int c = 0; c < out.getNumChannels(); ++c)
+            for (int i = 0; i < out.getNumSamples(); ++i)
+                peak = juce::jmax (peak, std::abs (out.getSample (c, i)));
+        return peak;
+    };
+
+    auto tailPeak = [&] (int n)
+    {
+        float peak = 0.0f;
+        const int start = juce::jmax (0, out.getNumSamples() - n);
+        for (int c = 0; c < out.getNumChannels(); ++c)
+            for (int i = start; i < out.getNumSamples(); ++i)
+                peak = juce::jmax (peak, std::abs (out.getSample (c, i)));
+        return peak;
+    };
+
+    // Every state must agree with the three questions the rest of the code
+    // asks of it: active, stopping, and neither.
+    auto stateIsLegal = [&mc] (TS s)
+    {
+        switch (s)
+        {
+            case TS::stopped:  return ! mc.isPlayingForTest() && ! mc.stopPendingForTest();
+            case TS::starting:
+            case TS::playing:  return mc.isPlayingForTest() && ! mc.stopPendingForTest();
+            case TS::stopping: return mc.isPlayingForTest() && mc.stopPendingForTest();
+        }
+        return false;
+    };
+
+    auto stateName = [] (TS s)
+    {
+        switch (s)
+        {
+            case TS::stopped:  return juce::String ("Stopped");
+            case TS::starting: return juce::String ("Starting");
+            case TS::playing:  return juce::String ("Playing");
+            case TS::stopping: return juce::String ("Stopping");
+        }
+        return juce::String ("?");
+    };
+
+    // --- the state machine, one block at a time -------------------------
+    {
+        check (mc.loadFromVar (juce::JSON::parse (squarePiece)),
+               "F1: the square test piece loads");
+
+        // absorb the load's model-change block while stopped
+        render();
+
+        check (mc.transportStateForTest() == TS::stopped
+               && ! mc.isPlayingForTest() && ! mc.stopPendingForTest(),
+               "F1: the transport starts stopped",
+               stateName (mc.transportStateForTest()));
+
+        const int reset0 = mc.engineResetCountForTest();
+
+        mc.clickPlayForTest();
+        check (mc.transportStateForTest() == TS::starting
+               && mc.isPlayingForTest() && ! mc.stopPendingForTest(),
+               "F1: Play enters Starting",
+               stateName (mc.transportStateForTest()));
+        check (mc.engineResetCountForTest() == reset0 + 1,
+               "F1: a fresh Play re-anchors the voices",
+               juce::String (mc.engineResetCountForTest() - reset0) + " reset(s)");
+
+        mc.clickPlayForTest();
+        check (mc.transportStateForTest() == TS::starting
+               && mc.engineResetCountForTest() == reset0 + 1,
+               "F1: a second Play while Starting is a no-op",
+               juce::String (mc.engineResetCountForTest() - reset0) + " reset(s)");
+
+        float first = 0.0f, last = 0.0f;
+        const float peak0 = render (&first, &last);
+        check (std::abs (first) < 0.01f,
+               "F1: the start fade begins at silence",
+               juce::String (first, 4));
+        check (peak0 > 0.1f && last > 0.1f,
+               "F1: the start fade rises",
+               "peak " + juce::String (peak0, 3));
+
+        // The fade is one sample-by-sample ramp: a block boundary must not
+        // step more than one fade step (plus the waveform's own slope).
+        float prevLast = last;
+        float maxStep = 0.0f;
+        for (int b = 0; b < 2; ++b)
+        {
+            render (&first, &last);
+            maxStep = juce::jmax (maxStep, std::abs (first - prevLast));
+            prevLast = last;
+        }
+        check (maxStep < 0.05f,
+               "F1: the start fade has no step at a block boundary",
+               juce::String (maxStep, 4));
+        check (mc.transportStateForTest() == TS::playing,
+               "F1: Starting becomes Playing when the fade completes",
+               stateName (mc.transportStateForTest()));
+
+        mc.clickPlayForTest();
+        check (mc.transportStateForTest() == TS::playing
+               && mc.engineResetCountForTest() == reset0 + 1,
+               "F1: a second Play while Playing is a no-op",
+               juce::String (mc.engineResetCountForTest() - reset0) + " reset(s)");
+
+        mc.stopPlaybackForTest();
+        check (mc.transportStateForTest() == TS::stopping
+               && mc.isPlayingForTest() && mc.stopPendingForTest(),
+               "F1: Stop enters Stopping",
+               stateName (mc.transportStateForTest()));
+
+        mc.stopPlaybackForTest();
+        check (mc.transportStateForTest() == TS::stopping,
+               "F1: a second Stop while Stopping is a no-op",
+               stateName (mc.transportStateForTest()));
+
+        // 3 blocks cover the 30 ms ramp (1323 samples at 44.1 kHz)
+        render(); render(); render();
+        check (mc.transportStateForTest() == TS::stopped
+               && ! mc.isPlayingForTest() && ! mc.stopPendingForTest(),
+               "F1: Stopping becomes Stopped when the fade completes",
+               stateName (mc.transportStateForTest()));
+
+        const float silentPeak = render();
+        check (silentPeak < 1.0e-6f && tailPeak (256) < 1.0e-6f,
+               "F1: the stop fade reaches silence",
+               "peak " + juce::String (silentPeak, 6));
+
+        const int seeksAtIdle = mc.seekCountForTest();
+        mc.stopPlaybackForTest();
+        check (mc.transportStateForTest() == TS::stopped
+               && mc.seekCountForTest() == seeksAtIdle,
+               "F1: Stop while Stopped is a no-op",
+               stateName (mc.transportStateForTest()));
+    }
+
+    // --- Play during Stopping cancels the fade, continuously -------------
+    {
+        mc.clickPlayForTest();
+        for (int b = 0; b < 3; ++b) render();
+        check (mc.transportStateForTest() == TS::playing,
+               "F1: the transport plays again for the cancel check",
+               stateName (mc.transportStateForTest()));
+
+        mc.stopPlaybackForTest();
+        float stopLast = 0.0f;
+        render (nullptr, &stopLast);
+        check (stopLast > 0.1f && stopLast < 0.95f,
+               "F1: the stop fade is under way",
+               juce::String (stopLast, 3));
+
+        mc.clickPlayForTest();
+        check (mc.transportStateForTest() == TS::playing
+               && ! mc.stopPendingForTest(),
+               "F1: Play during Stopping cancels the fade",
+               stateName (mc.transportStateForTest()));
+
+        float resumeFirst = 0.0f;
+        render (&resumeFirst);
+        check (std::abs (resumeFirst - stopLast) < 0.02f,
+               "F1: the cancelled fade is continuous",
+               juce::String (stopLast, 3) + " -> " + juce::String (resumeFirst, 3));
+        check (resumeFirst > 0.1f && resumeFirst < 0.95f,
+               "F1: the cancelled fade resumes from where it was",
+               juce::String (resumeFirst, 3));
+
+        for (int b = 0; b < 2; ++b) render();
+        check (mc.transportStateForTest() == TS::playing,
+               "F1: the cancelled fade ramps back to Playing",
+               stateName (mc.transportStateForTest()));
+
+        mc.stopPlaybackForTest();
+        for (int b = 0; b < 4; ++b) render();
+        check (mc.transportStateForTest() == TS::stopped,
+               "F1: the transport settles after the cancel",
+               stateName (mc.transportStateForTest()));
+    }
+
+    // --- the voice pool: no stuck voice after the stop -------------------
+    {
+        const juce::String pmPiece =
+            "{\"master\":1,\"pages\":[{\"duration\":4,\"nextArcId\":2,\"arcs\":["
+            "{\"id\":1,\"mode\":3,\"intensity\":1,\"pmRatio\":1,\"pmIndex\":1,"
+            "\"points\":[{\"t\":0,\"f\":220},{\"t\":4,\"f\":220}]}]}]}";
+        check (mc.loadFromVar (juce::JSON::parse (pmPiece)),
+               "F1: the PM test piece loads");
+        render(); // absorb the load
+
+        mc.clickPlayForTest();
+        render();
+        check (mc.activeVoiceCountForTest() > 0,
+               "F1: playing allocates a PM voice",
+               juce::String (mc.activeVoiceCountForTest()) + " voice(s)");
+
+        mc.stopPlaybackForTest();
+        for (int b = 0; b < 4; ++b) render();
+        check (mc.activeVoiceCountForTest() == 0,
+               "F1: Stopped leaves the voice pool empty",
+               juce::String (mc.activeVoiceCountForTest()) + " voice(s)");
+    }
+
+    // --- 100 rapid clicks with blocks interleaved ------------------------
+    {
+        check (mc.loadFromVar (juce::JSON::parse (squarePiece)),
+               "F1: the stress piece loads");
+        render(); // absorb the load
+
+        int illegal = 0;
+        bool finite = true;
+        for (int i = 0; i < 100; ++i)
+        {
+            if (i % 2 == 0) mc.clickPlayForTest();
+            else            mc.stopPlaybackForTest();
+
+            if (! stateIsLegal (mc.transportStateForTest()))
+                ++illegal;
+
+            if (i % 3 == 0)
+            {
+                out.clear();
+                mc.getNextAudioBlock (info);
+                for (int c = 0; c < out.getNumChannels(); ++c)
+                    for (int k = 0; k < out.getNumSamples(); ++k)
+                        if (! std::isfinite (out.getSample (c, k)))
+                            finite = false;
+            }
+        }
+
+        // end on a Stop and let the last fade (and any start ramp) settle
+        mc.stopPlaybackForTest();
+        for (int b = 0; b < 8; ++b) render();
+
+        check (illegal == 0,
+               "F1: 100 rapid Play/Stop clicks keep a legal state",
+               juce::String (illegal) + " illegal state(s)");
+        check (mc.transportStateForTest() == TS::stopped
+               && mc.activeVoiceCountForTest() == 0,
+               "F1: 100 rapid clicks leave no stuck voice",
+               stateName (mc.transportStateForTest()) + ", "
+                   + juce::String (mc.activeVoiceCountForTest()) + " voice(s)");
+        check (finite,
+               "F1: the stress run produced no NaN or infinity");
+    }
+
+    // --- Play at the end of a page ---------------------------------------
+    {
+        const juce::String shortPiece =
+            "{\"master\":1,\"pages\":[{\"duration\":0.1,\"nextArcId\":2,\"arcs\":["
+            "{\"id\":1,\"mode\":0,\"waveformId\":2,\"envelopeId\":0,\"intensity\":1,"
+            "\"points\":[{\"t\":0,\"f\":1},{\"t\":0.1,\"f\":1}]}]}]}";
+        check (mc.loadFromVar (juce::JSON::parse (shortPiece)),
+               "F1: the short page loads");
+
+        // the loop is a component setting, not a piece field: turn it off
+        // and publish, or the page would loop instead of ending
+        std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+            [&findByName] (juce::Component& c, const juce::String& n) -> juce::Component*
+            {
+                if (c.getName() == n) return &c;
+                for (int i = 0; i < c.getNumChildComponents(); ++i)
+                    if (auto* r = findByName (*c.getChildComponent (i), n)) return r;
+                return nullptr;
+            };
+        auto* loopBtn = dynamic_cast<juce::ToggleButton*> (findByName (mc, "loopBtn"));
+        if (loopBtn != nullptr)
+        {
+            loopBtn->setToggleState (false, juce::dontSendNotification);
+            if (loopBtn->onClick) loopBtn->onClick();
+        }
+        mc.timerCallback(); // publish the new loopPage to the audio snapshot
+        render();           // absorb the change
+
+        mc.clickPlayForTest();
+        int blocks = 0;
+        while (mc.transportStateForTest() != TS::stopped && blocks < 40)
+        {
+            render();
+            ++blocks;
+        }
+        check (mc.transportStateForTest() == TS::stopped,
+               "F1: the page end stops the transport",
+               stateName (mc.transportStateForTest()) + " after "
+                   + juce::String (blocks) + " block(s)");
+        check (mc.publishedPlayheadForTest() >= 0.099,
+               "F1: the page end leaves the playhead at the end",
+               juce::String (mc.publishedPlayheadForTest(), 4));
+
+        const int seeksAtEnd = mc.seekCountForTest();
+        mc.clickPlayForTest();
+        check (mc.transportStateForTest() == TS::starting
+               && mc.seekCountForTest() == seeksAtEnd + 1,
+               "F1: Play at the end of a page rewinds",
+               juce::String (mc.seekCountForTest() - seeksAtEnd) + " seek(s)");
+        check (mc.playheadForTest() == 0.0,
+               "F1: the rewind moves the message playhead to 0",
+               juce::String (mc.playheadForTest(), 4));
+
+        render();
+        check (mc.publishedPlayheadForTest() < 0.05,
+               "F1: the rewind renders from the page start",
+               juce::String (mc.publishedPlayheadForTest(), 4));
+
+        mc.stopPlaybackForTest();
+        for (int b = 0; b < 4; ++b) render();
+    }
+
+    // --- double-click Stop rewinds, but only a real double click ---------
+    {
+        check (mc.loadFromVar (juce::JSON::parse (squarePiece)),
+               "F1: the rewind piece loads");
+        render(); // absorb the load
+
+        mc.seekPlayheadForTest (1.0);
+        mc.clickPlayForTest();
+        render();
+
+        const int seeksBeforeSingle = mc.seekCountForTest();
+        mc.clickStopForTest();
+        check (mc.seekCountForTest() == seeksBeforeSingle
+               && mc.playheadForTest() == 1.0,
+               "F1: a single Stop does not rewind",
+               juce::String (mc.seekCountForTest() - seeksBeforeSingle) + " seek(s)");
+        for (int b = 0; b < 4; ++b) render();
+
+        // a second Stop more than 400 ms later is not a double-click
+        juce::Thread::sleep (450);
+        const int seeksBeforeSlow = mc.seekCountForTest();
+        mc.clickStopForTest();
+        check (mc.seekCountForTest() == seeksBeforeSlow
+               && mc.playheadForTest() == 1.0,
+               "F1: a second Stop after 400 ms does not rewind",
+               juce::String (mc.seekCountForTest() - seeksBeforeSlow) + " seek(s)");
+
+        // a Play between the two Stops breaks the pair
+        mc.clickPlayForTest();
+        mc.clickStopForTest();
+        mc.clickPlayForTest();
+        mc.clickStopForTest();
+        check (mc.seekCountForTest() == seeksBeforeSlow
+               && mc.playheadForTest() == 1.0,
+               "F1: Play between two Stops prevents the rewind",
+               juce::String (mc.seekCountForTest() - seeksBeforeSlow) + " seek(s)");
+        for (int b = 0; b < 4; ++b) render();
+
+        mc.clickPlayForTest();
+        render();
+        const int seeksBeforeDouble = mc.seekCountForTest();
+        mc.clickStopForTest();
+        juce::Thread::sleep (50);
+        mc.clickStopForTest();
+        check (mc.seekCountForTest() == seeksBeforeDouble + 1,
+               "F1: a real double-click rewinds",
+               juce::String (mc.seekCountForTest() - seeksBeforeDouble) + " seek(s)");
+        check (mc.playheadForTest() == 0.0,
+               "F1: the double-click rewind sets the playhead to 0",
+               juce::String (mc.playheadForTest(), 4));
+
+        for (int b = 0; b < 4; ++b) render();
+    }
+}

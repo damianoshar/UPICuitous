@@ -275,8 +275,7 @@ bool MainComponent::loadFromVar(const juce::var& v)
         stopPlayback();
         // stopPlayback only starts a fade while playing: make the stop immediate
         // here, since the piece (and possibly its pages) is about to be replaced
-        isPlaying.store(false);
-        wantsStop.store(false);
+        transportState.store ((int) TransportState::stopped, std::memory_order_relaxed);
         waveforms = std::move (newWaves);
         envelopes = std::move (newEnvelopes);
         pages = std::move (newPages);

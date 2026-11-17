@@ -70,11 +70,15 @@ public:
 
     void mixMonitorInput (float* left, float* right, int numSamples);
     void applyScoreFade (float* scoreLeft, float* scoreRight, int numSamples,
-                         int fadeSamples, bool rendered, bool modelChanged);
+                         int fadeSamples, bool rendered, bool modelChanged,
+                         bool transportStarting);
     void mixMasterGain (float* left, float* right, const float* scoreLeft,
                         const float* scoreRight, int numSamples);
-    void applyStopFade (float* left, float* right, int numSamples, bool stopping,
-                        double sampleRate);
+    // F1: one gain envelope for both transport edges (start and stop). It is
+    // applied to the score, not the monitor input: stopping the transport
+    // must not fade a live microphone.
+    void applyTransportGain (float* scoreLeft, float* scoreRight, int numSamples,
+                             double sampleRate, bool scoreAudible);
     void renderScrubPreview (const ModelSnapshot& snap, AudioBlock& block, double previewGain);
     void renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& block, double freezeGain);
 
@@ -302,15 +306,40 @@ public:
     int samplePitchModeForTest() const { return engine.getSamplePitchMode(); }
     int livePitchModeForTest() const { return engine.getLivePitchMode(); }
     double playheadForTest() const { return playheadSec; }
+    double publishedPlayheadForTest() const
+    {
+        return playheadPublished.load (std::memory_order_relaxed);
+    }
     // v1.33.4 (M24): the peak the input tap saw on a channel - the plugin
     // smoke test checks that the host's right input channel reaches the app
     // even when the host's output is mono.
     float inputTapPeakForTest (int channel) const;
     bool externalScrubActiveForTest() const { return externalScrubActive; }
-    bool isPlayingForTest() const { return isPlaying.load (std::memory_order_relaxed); }
+    // --- F1: the transport state machine (2026-11-17) ---
+    // Stopped -> Starting (Play) -> Playing; Playing -> Stopping (Stop) ->
+    // Stopped. Play while Starting/Playing is a no-op; Stop while Stopped/
+    // Stopping is a no-op; Play while Stopping cancels the fade with the
+    // same gain envelope. The audio thread completes the two edges.
+    enum class TransportState : int { stopped = 0, starting = 1, playing = 2, stopping = 3 };
+    bool isPlayingForTest() const { return transportActive(); }
     // v1.33.4 (H3): the stop the app asked for is still running (the
     // fade-out) - the audio thread is the one that ends it.
-    bool stopPendingForTest() const { return wantsStop.load (std::memory_order_relaxed); }
+    bool stopPendingForTest() const { return transportStopping(); }
+    TransportState transportStateForTest() const { return transport(); }
+    int engineResetCountForTest() const
+    {
+        return engineResetSerial.load (std::memory_order_relaxed);
+    }
+    int seekCountForTest() const
+    {
+        return seekSerial.load (std::memory_order_relaxed);
+    }
+    int activeVoiceCountForTest() const { return engine.activeVoiceCountForTest(); }
+    void startPlaybackForTest() { startPlayback(); }
+    void stopPlaybackForTest() { stopPlayback(); }
+    void seekPlayheadForTest (double t) { seekPlayhead (t); }
+    void clickPlayForTest() { playBtn.onClick(); }
+    void clickStopForTest() { stopBtn.onClick(); }
     void injectOscMessageForTest (const juce::OSCMessage& m) { osc.handleMessageForTest (m); }
     void updateExternalScrubForTest (double nowMs) { updateExternalScrub (nowMs); }
 
@@ -569,7 +598,13 @@ private:
     int    seenDirChangeSerial = 0;
     int    dirFadeOutRemaining = 0;
     int    dirFadeInRemaining  = 0;
-    std::atomic<bool> isPlaying { false };
+    // --- F1: the transport state (published to the audio thread) ---
+    // The message thread owns the user's transitions; the audio thread reads
+    // the state and completes the two edges: Starting -> Playing when the
+    // fade-in reaches 1.0, Stopping -> Stopped when the fade-out reaches 0.
+    // The compare-exchange in the audio thread means a Play that cancels a
+    // stop is never overwritten by the fade's completion.
+    std::atomic<int> transportState { (int) TransportState::stopped };
     // v1.33.4 (L15): the piece differs from what was last written
     std::atomic<bool> pieceDirty { false };
     // --- v1.33.4 (L15, part 2): the undo stack (the message thread only) ---
@@ -744,13 +779,17 @@ private:
     double stickiness = 1.0;            // 0..1 snap strength ("Stickiness" slider)
     double timeGrid = 0.0;              // time grid in divisions/sec (0 = off)
 
-    // --- v1.2 click-free stop: output ramps to silence over kStopFadeSec ---
+    // --- F1: one click-free gain envelope for the transport's two edges ---
+    // 30 ms, the length the stop fade has always had. The page-end fade uses
+    // the same constant. The envelope state is audio-thread only: the
+    // message thread publishes the state, the audio thread counts the ramp.
     static constexpr double kStopFadeSec = 0.03;
-    std::atomic<bool> wantsStop { false };
-    // The fade position - the audio thread owns it (it counts the samples
-    // down); the message thread only asks for the stop.
-    int stopFadePos = 0;
-    int stopFadeTotal = 0;
+    float transportGain = 0.0f;       // the gain the last sample used
+    float transportRampFrom = 0.0f;   // the edge the current ramp started at
+    float transportRampTo = 0.0f;
+    int transportRampPos = 0;
+    int transportRampTotal = 0;       // 0 = no ramp pending
+    int transportSeenState = (int) TransportState::stopped;
 
     int drawSampleId = 1;               // sample slot of the current draw voice (set by pushVoice)
 
@@ -1007,6 +1046,15 @@ private:
     void bumpPageEpoch();             // message: the audio adopts the page
     void requestEngineReset();        // message: drop voices on the next block
     double displayPlayhead() const;   // the playhead the UI shows
+    // F1: the state and the three questions the rest of the code asks of it.
+    // `active` includes Stopping: the audio thread is still rendering the
+    // fade, and the playhead is still the audio thread's.
+    TransportState transport() const
+    {
+        return (TransportState) transportState.load (std::memory_order_relaxed);
+    }
+    bool transportActive() const { return transport() != TransportState::stopped; }
+    bool transportStopping() const { return transport() == TransportState::stopping; }
     void pushVoice();                 // UI -> ScoreEditor current voice
     bool prepareWaveEdit();           // v1.27: fork the wavetable for a selection
     void syncControlsToArc(int arcId); // load an arc into the toolbar

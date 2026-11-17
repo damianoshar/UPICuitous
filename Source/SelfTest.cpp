@@ -97,6 +97,7 @@ int upic::runSelfTest()
     upic::runMidiInputChecks (t);
     upic::runEnvelopeChecks (t);
     upic::runTransportChecks (t);
+    upic::runTransportStateChecks (t);
     upic::runChooserChecks (t);
 
     t.log << "\n" << (t.failures == 0 ? "ALL CHECKS PASSED" : juce::String(t.failures) + " CHECK(S) FAILED") << "\n";

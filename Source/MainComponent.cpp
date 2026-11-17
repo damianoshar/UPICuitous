@@ -180,7 +180,7 @@ void MainComponent::buildTransportControls()
         {
             prevPlayRate.store(now, std::memory_order_relaxed);
             playRate.store(nxt, std::memory_order_relaxed);
-            if (isPlaying.load(std::memory_order_relaxed))
+            if (transportActive())
                 dirChangeSerial.fetch_add(1, std::memory_order_relaxed);
         }
     };

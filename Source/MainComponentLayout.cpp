@@ -50,7 +50,7 @@ void MainComponent::buildScoreArea()
     // v1.18: the audio thread owns the playhead while playing; the editor
     // draws the published value and asks the audio thread to move on scrub
     score.setPlayheadSource(
-        [this]{ return isPlaying.load(std::memory_order_relaxed)
+        [this]{ return transportActive()
                         ? playheadPublished.load(std::memory_order_relaxed)
                         : playheadSec; },
         [this](double t){ seekPlayhead(t); });
@@ -69,7 +69,7 @@ void MainComponent::buildScoreArea()
         scrubRate.store(rate, std::memory_order_relaxed);
         lastScrubT = t;
         lastScrubMs = nowMs;
-        if (!isPlaying.load(std::memory_order_relaxed) && scrubAudition)
+        if (!transportActive() && scrubAudition)
         {
             scrubPreviewPlayhead.store(t, std::memory_order_relaxed);
             scrubPreviewRemaining.store(scrubPreviewLen, std::memory_order_relaxed);

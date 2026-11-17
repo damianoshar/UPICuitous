@@ -86,13 +86,38 @@ void MainComponent::requestEngineReset()
 
 double MainComponent::displayPlayhead() const
 {
-    return isPlaying.load(std::memory_order_relaxed)
+    return transportActive()
                ? playheadPublished.load(std::memory_order_relaxed)
                : playheadSec;
 }
 
 void MainComponent::startPlayback()
 {
+    const auto state = transport();
+
+    // F1: Play while the transport is starting or playing is a no-op. The
+    // accepted decision (2026-11-17) is explicit: a restart is its own
+    // command, not something a second Play click can do by accident. The
+    // old code reset the engine here, which cut every voice and re-anchored
+    // it mid-phrase - the reported "Start/Stop" bug.
+    if (state == TransportState::starting || state == TransportState::playing)
+        return;
+
+    // Play while the stop fade is still running: cancel it with the SAME
+    // gain envelope. The fade had not finished, so the engine was not reset
+    // and the voices still hold their positions; the gain simply ramps back
+    // up from where the fade reached. (The old code cleared wantsStop and
+    // forced the next block to full gain - a step at the block boundary.)
+    if (state == TransportState::stopping)
+    {
+        lastStopClickMs = -1.0e9; // a Stop after this Play is a single click
+        transportState.store ((int) TransportState::playing, std::memory_order_relaxed);
+        score.setPlaying (true);
+        playBtn.setButtonText ("Playing...");
+        return;
+    }
+
+    // Stopped: a fresh start.
     // a Stop click after Play is a fresh single click, not a double-click
     lastStopClickMs = -1.0e9;
     bool hasLive = false;
@@ -113,8 +138,7 @@ void MainComponent::startPlayback()
             seekPlayhead(0.0);
         }
         requestEngineReset(); // re-anchor every voice at the playhead
-        isPlaying.store(true);
-        wantsStop.store(false);   // cancel any pending fade-out
+        transportState.store ((int) TransportState::starting, std::memory_order_relaxed);
         for (auto& a : curPage().arcs)
             if (a.mode == 2 && ! a.muted) { hasLive = true; break; }
     }
@@ -129,28 +153,30 @@ void MainComponent::stopPlayback(bool fromAudio)
 {
     {
         juce::ScopedLock l(dataLock);
-        if (isPlaying.load())
+        const auto state = transport();
+        if (state == TransportState::starting || state == TransportState::playing)
         {
-            // click-free stop (UPISketch "playback now fades out smoothly"):
-            // keep rendering and ramp the output to silence over kStopFadeSec,
-            // then the audio callback halts on its own.
-            wantsStop.store(true);
+            // F1: the stop is a state, not a flag. The audio thread keeps
+            // rendering and ramps the score to silence over kStopFadeSec,
+            // then halts on its own (Stopping -> Stopped).
+            transportState.store ((int) TransportState::stopping, std::memory_order_relaxed);
         }
-        else
+        else if (state == TransportState::stopped)
         {
-            wantsStop.store(false); // idle: clear any stale stop request
-            // Only the stop posted by the audio thread knows where the fade /
-            // page end landed - syncing on a plain Stop click while idle would
-            // overwrite a scrub with the last playback position.
+            // Idle: a plain Stop click is a no-op. Only the stop posted by
+            // the audio thread knows where the fade / page end landed -
+            // syncing on a plain Stop click while idle would overwrite a
+            // scrub with the last playback position.
             if (fromAudio)
             {
                 const double p = playheadPublished.load(std::memory_order_relaxed);
                 if (p > 0.0) playheadSec = p;
             }
         }
+        // Stopping: a second Stop is a no-op - the fade is already running.
     }
-    score.setPlaying(isPlaying.load() || wantsStop.load());
-    playBtn.setButtonText("Play"); // reusable at once (startPlayback cancels the fade)
+    score.setPlaying(transportActive());
+    playBtn.setButtonText("Play"); // reusable at once (Play cancels the fade)
 }
 
 //==============================================================================
@@ -201,9 +227,20 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
         revBufFrames.store(juce::jmax(1024, (int) std::lround(revBufSec * audioSampleRate())));
         revRestart.store(true, std::memory_order_relaxed);
     }
-    stopFadeTotal = juce::jmax(1, (int) std::ceil(kStopFadeSec * audioSampleRate()));
-    stopFadePos = 0;
-    wantsStop.store(false);
+    // F1: a device/host restart is not a transport edge. Keep the state the
+    // user asked for, but start the envelope at its target so the first
+    // block does not ramp from a stale gain. A fade in progress is over -
+    // its audio context is gone.
+    {
+        auto s = transport();
+        if (s == TransportState::starting || s == TransportState::stopping)
+            s = (s == TransportState::starting) ? TransportState::playing
+                                                : TransportState::stopped;
+        transportState.store ((int) s, std::memory_order_relaxed);
+        transportGain = (s == TransportState::playing) ? 1.0f : 0.0f;
+        transportRampTotal = 0;
+        transportSeenState = (int) s;
+    }
     // v1.33.4 (M21): the score and freeze buffers are sized here, on the
     // message thread, for the LARGEST block a host may send. They used to
     // be grown inside the audio callback, which is a malloc on the audio
@@ -267,8 +304,8 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 
     bool rendered = false;
     bool modelChanged = false;
-    const bool playingAtStart = isPlaying.load(std::memory_order_relaxed);
-    const bool stopping = wantsStop.load(std::memory_order_relaxed);
+    const bool playingAtStart = transportActive();
+    const bool transportStarting = (transport() == TransportState::starting);
     {
         // v1.18 (wave 15): no lock on the audio thread. Take the newest
         // immutable model snapshot and render from it - the message thread
@@ -405,7 +442,14 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     }
 
     // v1.15: fade the score in/out, so that no block boundary can click
-    applyScoreFade (SL, SR, n, scoreFadeN, rendered, modelChanged);
+    applyScoreFade (SL, SR, n, scoreFadeN, rendered, modelChanged, transportStarting);
+
+    // F1: the transport's one gain envelope (start and stop) belongs to the
+    // score, not the monitor input - stopping must not fade a live mic.
+    // `scoreAudible` is the same condition applyScoreFade fades in on: a
+    // model-change block is silent, and the start fade must not be spent on
+    // it (the first audible block would begin part-way up the ramp).
+    applyTransportGain (SL, SR, n, sr, rendered && ! modelChanged);
 
     // add the score to the output (the monitor mix is already in there)
     mixMasterGain (L, R, SL, SR, n);
@@ -414,10 +458,6 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     // audio thread (the message thread never touches the engine any more)
     if (modelChanged)
         engine.reset();
-
-    // Click-free manual stop: keep rendering the page for kStopFadeSec while
-    // the output ramps to silence, then halt (playhead keeps its position).
-    applyStopFade (L, R, n, stopping, sr);
 }
 
 //==============================================================================
@@ -440,11 +480,19 @@ void MainComponent::mixMonitorInput (float* L, float* R, int n)
 }
 
 void MainComponent::applyScoreFade (float* SL, float* SR, int n, int scoreFadeN,
-                                    bool rendered, bool modelChanged)
+                                    bool rendered, bool modelChanged,
+                                    bool transportStarting)
 {
     if (rendered && ! modelChanged)
     {
-        if (scoreGain < 1.0f)
+        if (transportStarting)
+        {
+            // F1: the transport's gain envelope fades the start in. A second
+            // fade here would make the first 30 ms twice as long and the two
+            // ramps would multiply; one envelope owns both transport edges.
+            scoreGain = 1.0f;
+        }
+        else if (scoreGain < 1.0f)
         {
             for (int i = 0; i < n; ++i)
             {
@@ -589,33 +637,87 @@ void MainComponent::renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& b,
     }
 }
 
-void MainComponent::applyStopFade (float* L, float* R, int n, bool stopping, double sr){
-    if (stopping && isPlaying.load(std::memory_order_relaxed))
+void MainComponent::applyTransportGain (float* SL, float* SR, int n, double sr,
+                                        bool scoreAudible)
+{
+    const int state = transportState.load (std::memory_order_relaxed);
+
+    // The first block after a load (and any block the score fades out of) is
+    // silent. Hold the envelope at 0 and let the first audible block start
+    // the ramp: spending the fade on silence would make that block begin
+    // part-way up and step. The score fade owns the silent block's tail.
+    if (state == (int) TransportState::starting && ! scoreAudible)
     {
-        for (int i = 0; i < n; ++i)
+        transportGain = 0.0f;
+        transportRampTotal = 0;
+        transportSeenState = -1; // the next block re-evaluates the edge
+        return;
+    }
+
+    const int fadeSamples = juce::jmax (1, (int) std::lround (kStopFadeSec * sr));
+
+    // A state change starts ONE ramp from wherever the gain is. That is what
+    // makes a rapid sequence continuous: Play during Stopping ramps up from
+    // the faded value instead of stepping back to 1.0 at the block boundary.
+    if (state != transportSeenState)
+    {
+        transportSeenState = state;
+        const float target = (state == (int) TransportState::starting
+                           || state == (int) TransportState::playing) ? 1.0f : 0.0f;
+        if (target != transportGain)
         {
-            const double rSec = (double) juce::jmax(0, stopFadeTotal - stopFadePos) / sr;
-            const float g = (float) upic::stopFadeGain(rSec, (double) stopFadeTotal / sr);
-            L[i] *= g;
-            if (R != nullptr) R[i] *= g;
-            ++stopFadePos;
+            transportRampFrom = transportGain;
+            transportRampTo = target;
+            transportRampPos = 0;
+            transportRampTotal = fadeSamples;
         }
-        if (stopFadePos >= stopFadeTotal)
+        else
         {
-            isPlaying.store(false);
-            wantsStop.store(false);
-            stopFadePos = 0;
+            transportRampTotal = 0;
+        }
+    }
+
+    for (int i = 0; i < n; ++i)
+    {
+        if (transportRampTotal > 0)
+        {
+            ++transportRampPos;
+            const float k = juce::jmin (1.0f, (float) transportRampPos
+                                                / (float) transportRampTotal);
+            transportGain = transportRampFrom
+                          + (transportRampTo - transportRampFrom) * k;
+            if (transportRampPos >= transportRampTotal)
+            {
+                transportGain = transportRampTo;
+                transportRampTotal = 0;
+            }
+        }
+        SL[i] *= transportGain;
+        if (SR != nullptr) SR[i] *= transportGain;
+    }
+
+    // Complete the two edges. The compare-exchange is the race fix: a Play
+    // that cancelled the stop has already stored Playing, and the fade's
+    // completion must neither overwrite that nor reset the voices.
+    if (state == (int) TransportState::starting && transportGain >= 1.0f)
+    {
+        int expected = (int) TransportState::starting;
+        transportState.compare_exchange_strong (expected,
+                                                (int) TransportState::playing,
+                                                std::memory_order_relaxed);
+    }
+    else if (state == (int) TransportState::stopping && transportGain <= 0.0f)
+    {
+        int expected = (int) TransportState::stopping;
+        if (transportState.compare_exchange_strong (expected,
+                                                    (int) TransportState::stopped,
+                                                    std::memory_order_relaxed))
+        {
             engine.reset();
             // UI must not be touched from the audio thread -> SafePointer.
             juce::Component::SafePointer<MainComponent> sp(this);
             juce::MessageManager::callAsync([sp]{ if (sp != nullptr) sp->stopPlayback(true); });
         }
-    }
-    else
-    {
-        // no fade pending: the audio thread owns the counter, so it is the
-        // one that resets it (the message thread only asks for the stop)
-        stopFadePos = 0;
     }
 }
 
@@ -677,7 +779,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
     {
         if (snap.pages.empty())
         {
-            isPlaying.store(false); wantsStop.store(false);
+            transportState.store ((int) TransportState::stopped,
+                                  std::memory_order_relaxed);
             engine.reset(); publishPlayhead(); return;
         }
         // the message thread may have deleted a page since the last snapshot
@@ -687,7 +790,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
 
         if (pg.durationSec < 0.001)
         {
-            isPlaying.store(false); wantsStop.store(false);
+            transportState.store ((int) TransportState::stopped,
+                                  std::memory_order_relaxed);
             engine.reset(); publishPlayhead(); return;
         }
 
@@ -708,7 +812,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                     else
                     {
                         audioPlayhead = 0.0;
-                        isPlaying.store(false); wantsStop.store(false);
+                        transportState.store ((int) TransportState::stopped,
+                                              std::memory_order_relaxed);
                         playheadAtEnd.store(false, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
                         juce::Component::SafePointer<MainComponent> sp(this);
@@ -738,7 +843,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                 else
                 {
                     audioPlayhead = 0.0;
-                    isPlaying.store(false); wantsStop.store(false);
+                    transportState.store ((int) TransportState::stopped,
+                                          std::memory_order_relaxed);
                     playheadAtEnd.store(false, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
                     juce::Component::SafePointer<MainComponent> sp(this);
@@ -758,7 +864,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                     else
                     {
                         audioPlayhead = pg.durationSec;
-                        isPlaying.store(false); wantsStop.store(false);
+                        transportState.store ((int) TransportState::stopped,
+                                              std::memory_order_relaxed);
                         playheadAtEnd.store(true, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
                         juce::Component::SafePointer<MainComponent> sp(this);
@@ -777,7 +884,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                 else
                 {
                     audioPlayhead = pg.durationSec;
-                    isPlaying.store(false); wantsStop.store(false);
+                    transportState.store ((int) TransportState::stopped,
+                                          std::memory_order_relaxed);
                     playheadAtEnd.store(true, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
                     juce::Component::SafePointer<MainComponent> sp(this);

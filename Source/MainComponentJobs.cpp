@@ -117,7 +117,7 @@ void MainComponent::undo()
 
     // the piece is replaced through the normal loader, so the same checks
     // and the same limits apply as to a loaded piece
-    const bool wasPlaying = isPlaying.load (std::memory_order_relaxed);
+    const bool wasPlaying = transportActive();
     if (! loadFromVar (upic::pieceToVar (entry.model)))
     {
         flash ("The undo could not be applied");
@@ -152,7 +152,7 @@ void MainComponent::redo()
     redoStack.pop_back();
     redoBytes -= entry.bytes;
 
-    const bool wasPlaying = isPlaying.load (std::memory_order_relaxed);
+    const bool wasPlaying = transportActive();
     if (! loadFromVar (upic::pieceToVar (entry.model)))
     {
         flash ("The redo could not be applied");

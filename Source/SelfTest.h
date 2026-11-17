@@ -50,6 +50,7 @@ namespace upic
     void runMidiInputChecks (SelfTest& t);
     void runEnvelopeChecks (SelfTest& t);
     void runTransportChecks (SelfTest& t);
+    void runTransportStateChecks (SelfTest& t);
     void runChooserChecks (SelfTest& t);
 
     // Runs every check and returns the number of failures (0 = all passed).

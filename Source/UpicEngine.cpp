@@ -74,6 +74,19 @@ void UpicEngine::prepareLiveVocoderMemory(int voices)
 void UpicEngine::reset()
 { releaseSampleSlots(); releaseLiveSlots(); releasePmSlots(); }
 
+int UpicEngine::activeVoiceCountForTest() const noexcept
+{
+    // The oscillator phase slots are not counted: the phase is free-running
+    // state that survives a reset on purpose (v1.15), so a stopped piece
+    // still has one. The sounding pools - sample, PM and live - are the
+    // ones a stuck voice would live in, and reset() empties them.
+    int count = 0;
+    for (const auto& s : sampleVoices) if (s.id >= 0) ++count;
+    for (const auto& s : pmVoices)     if (s.id >= 0) ++count;
+    for (const auto& s : liveShift)    if (s.id >= 0) ++count;
+    return count;
+}
+
 void UpicEngine::resetLiveVoices()
 { releaseLiveSlots(); }
 

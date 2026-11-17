@@ -117,7 +117,7 @@ void MainComponent::refreshScoreBinding()
     score.bind(&curPage(), &waveforms, &playheadSec, [this]{
         markModelChanged(); updateStatus(); refreshBoxes(); });
     pushVoice();
-    score.setPlaying(isPlaying);
+    score.setPlaying(transportActive());
     waveEd.bind(&waveforms, &selWave, [this]{ markModelChanged(); });
     envEd.bind(&envelopes, &selEnv, [this]{ markModelChanged(); });
     // v1.33.4 (L15, part 2): the undo transaction for the envelope editor

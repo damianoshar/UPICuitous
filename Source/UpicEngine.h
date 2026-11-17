@@ -287,6 +287,13 @@ public:
     // the gain the guard is applying to an arc (1.0 = untouched)
     float guardGainForTest (int id) const noexcept;
 
+    // F1: how many SOUNDING voice slots are live (an id >= 0). The
+    // oscillator phase slots are free-running state and survive a reset on
+    // purpose, so they are not counted. The transport's stop fade must leave
+    // the sample/PM/live pools empty once the state is Stopped; the selftest
+    // checks that no voice is stuck after a rapid Play/Stop sequence.
+    int activeVoiceCountForTest() const noexcept;
+
 
 private:
     double sampleRate = 44100.0;
