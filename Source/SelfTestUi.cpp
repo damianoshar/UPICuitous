@@ -964,8 +964,8 @@ void upic::runEnvelopeChecks (upic::SelfTest& t)
                   juce::String(ed->pointCount()));
 
             // the two buttons are in the header and follow the selection
-            auto* addB = dynamic_cast<juce::Button*>(findByName(mc, "envAddBtn"));
-            auto* delB = dynamic_cast<juce::Button*>(findByName(mc, "envDelBtn"));
+            auto* addB = dynamic_cast<juce::Button*>(findByName(mc, "envPointAddBtn"));
+            auto* delB = dynamic_cast<juce::Button*>(findByName(mc, "envPointDelBtn"));
             check(addB != nullptr && delB != nullptr && addB->isVisible() && delB->isVisible()
                   && ed->getLocalBounds().contains(addB->getBounds())
                   && ed->getLocalBounds().contains(delB->getBounds()),
@@ -977,4 +977,388 @@ void upic::runEnvelopeChecks (upic::SelfTest& t)
         }
     }
 
+}
+
+//==============================================================================
+// F2/F3 (2026-11-17): the two library manager rows. The buttons, the
+// selector text (names and use counts), the rename and replacement modes,
+// the enabled states at the caps and the undo step per command.
+void upic::runLibraryUiChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+        [&findByName](juce::Component& c, const juce::String& n) -> juce::Component* {
+            if (c.getName() == n) return &c;
+            for (int i = 0; i < c.getNumChildComponents(); ++i)
+                if (auto* r = findByName (*c.getChildComponent (i), n)) return r;
+            return nullptr;
+        };
+    auto button = [&findByName] (juce::Component& c, const juce::String& n)
+    {
+        return dynamic_cast<juce::Button*> (findByName (c, n));
+    };
+    auto combo = [&findByName] (juce::Component& c, const juce::String& n)
+    {
+        return dynamic_cast<juce::ComboBox*> (findByName (c, n));
+    };
+    auto editor = [&findByName] (juce::Component& c, const juce::String& n)
+    {
+        return dynamic_cast<juce::TextEditor*> (findByName (c, n));
+    };
+    auto selectItem = [] (juce::ComboBox& box, const juce::String& prefix) -> bool
+    {
+        for (int i = 0; i < box.getNumItems(); ++i)
+            if (box.getItemText (i).startsWith (prefix))
+            {
+                box.setSelectedId (box.getItemId (i), juce::sendNotificationSync);
+                return true;
+            }
+        return false;
+    };
+
+    auto makePiece = [](int waveCount, int envCount) -> juce::var
+    {
+        upic::PieceModel m;
+        for (int i = 0; i < waveCount; ++i)
+        {
+            upic::Waveform w (10 + i, "Wave " + juce::String (10 + i),
+                              upic::paletteColour (i));
+            w.makeSine();
+            m.waveforms.push_back (w);
+        }
+        for (int i = 0; i < envCount; ++i)
+        {
+            upic::Envelope e (20 + i, "Env " + juce::String (20 + i),
+                              upic::paletteColour (i + 1));
+            e.presetFlat();
+            m.envelopes.push_back (e);
+        }
+        upic::Page pg;
+        pg.durationSec = 4.0;
+        pg.nextArcId = 3;
+        upic::Arc a;
+        a.id = 1; a.mode = 0; a.waveformId = 10; a.envelopeId = 20;
+        a.pmIndexEnv = 21; a.intensity = 0.8f;
+        a.points = { { 0.0, 220.0 }, { 2.0, 440.0 } };
+        pg.arcs.push_back (a);
+        upic::Arc b;
+        b.id = 2; b.mode = 0; b.waveformId = 10; b.envelopeId = 20;
+        b.intensity = 0.8f;
+        b.points = { { 0.0, 330.0 }, { 2.0, 660.0 } };
+        pg.arcs.push_back (b);
+        m.pages.push_back (pg);
+        return upic::pieceToVar (m);
+    };
+
+    MainComponent mc (true);
+    mc.setSize (1280, 800);
+
+    auto* waveBox      = combo (mc, "waveEditBox");
+    auto* waveNew      = button (mc, "waveNewBtn");
+    auto* waveDup      = button (mc, "waveDupBtn");
+    auto* waveRename   = button (mc, "waveRenameBtn");
+    auto* waveDel      = button (mc, "waveDelBtn");
+    auto* waveUnique   = button (mc, "waveUniqueBtn");
+    auto* waveNameEd   = editor (mc, "waveRenameEdit");
+    auto* waveNameOk   = button (mc, "waveRenameOk");
+    auto* waveNameNo   = button (mc, "waveRenameCancel");
+    auto* waveReplace  = combo (mc, "waveReplaceBox");
+    auto* waveDelOk    = button (mc, "waveDeleteOk");
+    auto* waveDelNo    = button (mc, "waveDeleteCancel");
+
+    auto* envBox       = combo (mc, "envEditBox");
+    auto* envNew       = button (mc, "envNewBtn");
+    auto* envDup       = button (mc, "envDupBtn");
+    auto* envRename    = button (mc, "envRenameBtn");
+    auto* envDel       = button (mc, "envDelBtn");
+    auto* envUnique    = button (mc, "envUniqueBtn");
+    auto* envNameEd    = editor (mc, "envRenameEdit");
+    auto* envNameOk    = button (mc, "envRenameOk");
+    auto* envNameNo    = button (mc, "envRenameCancel");
+    auto* envReplace   = combo (mc, "envReplaceBox");
+    auto* envDelOk     = button (mc, "envDeleteOk");
+    auto* envDelNo     = button (mc, "envDeleteCancel");
+
+    auto* waveLibRow = findByName (mc, "waveLib");
+    auto* envLibRow  = findByName (mc, "envLib");
+
+    check (waveBox != nullptr && envBox != nullptr
+           && waveNew != nullptr && waveDup != nullptr && waveRename != nullptr
+           && waveDel != nullptr && waveUnique != nullptr
+           && waveNameEd != nullptr && waveNameOk != nullptr && waveNameNo != nullptr
+           && waveReplace != nullptr && waveDelOk != nullptr && waveDelNo != nullptr,
+           "library UI: the wavetable manager controls exist");
+    check (envNew != nullptr && envDup != nullptr && envRename != nullptr
+           && envDel != nullptr && envUnique != nullptr
+           && envNameEd != nullptr && envNameOk != nullptr && envNameNo != nullptr
+           && envReplace != nullptr && envDelOk != nullptr && envDelNo != nullptr,
+           "library UI: the envelope manager controls exist");
+    check (waveLibRow != nullptr && envLibRow != nullptr,
+           "library UI: the manager rows are in the component tree");
+    if (waveBox == nullptr || envBox == nullptr || waveNew == nullptr
+        || waveDel == nullptr || waveUnique == nullptr || waveLibRow == nullptr)
+        return;
+
+    check (waveLibRow->getBounds().getHeight() > 10
+           && waveLibRow->getLocalBounds().contains (waveBox->getBounds()),
+           "library UI: the selector sits in the manager row",
+           waveLibRow->getBounds().toString() + " / " + waveBox->getBounds().toString());
+
+    const bool loaded = mc.loadFromVar (makePiece (3, 3));
+    check (loaded, "library UI: the test piece loads");
+
+    // --- the initial rows -------------------------------------------------
+    {
+        check (waveBox->getNumItems() == 3 && envBox->getNumItems() == 3,
+               "library UI: the selectors list the bank",
+               juce::String (waveBox->getNumItems()) + "/"
+               + juce::String (envBox->getNumItems()));
+        check (waveBox->getText().startsWith ("10: Wave 10")
+               && waveBox->getText().contains ("(2 uses)"),
+               "library UI: the selector shows the name and the use count",
+               waveBox->getText());
+        check (waveDel->isEnabled() && waveNew->isEnabled()
+               && waveUnique->isEnabled(),
+               "library UI: Delete and Make unique follow the selection");
+        check (mc.selectedLibraryWaveForTest() == 10
+               && mc.selectedLibraryEnvelopeForTest() == 20,
+               "library UI: the managers start on the model's selection");
+    }
+
+    // --- New and Duplicate ------------------------------------------------
+    {
+        const int depth0 = mc.undoDepth();
+        waveNew->onClick();
+        const int fresh = mc.selectedWaveformIdForTest();
+        check (mc.waveformCountForTest() == 4 && fresh == 13
+               && mc.waveformIdForTest (3) == 13,
+               "library UI: New adds a wavetable and selects it",
+               juce::String (mc.waveformCountForTest()) + "/" + juce::String (fresh));
+        check (mc.undoDepth() == depth0 + 1,
+               "library UI: New is one undo step");
+        check (waveBox->getNumItems() == 4
+               && waveBox->getText().startsWith ("13:")
+               && waveBox->getText().contains ("(0 uses)"),
+               "library UI: the new wavetable is in the selector, unused",
+               waveBox->getText());
+        check (! waveUnique->isEnabled(),
+               "library UI: Make unique is disabled for an unused wavetable");
+
+        const int depth1 = mc.undoDepth();
+        waveDup->onClick();
+        const int dup = mc.selectedWaveformIdForTest();
+        check (mc.waveformCountForTest() == 5 && dup != fresh
+               && mc.undoDepth() == depth1 + 1,
+               "library UI: Duplicate adds one wavetable in one undo step",
+               juce::String (mc.waveformCountForTest()) + "/" + juce::String (dup));
+        check (waveBox->getText().contains ("copy"),
+               "library UI: the duplicate's name says it is a copy",
+               waveBox->getText());
+    }
+
+    // --- Rename -----------------------------------------------------------
+    {
+        waveRename->onClick();
+        check (mc.waveLibraryRenameModeForTest()
+               && waveNameEd->isVisible() && waveNameOk->isVisible()
+               && ! waveBox->isVisible() && ! waveNew->isVisible(),
+               "library UI: Rename switches the row to the name editor");
+        const int depth0 = mc.undoDepth();
+        const int count0 = mc.waveformCountForTest();
+
+        waveNameEd->setText ("   ", false);
+        waveNameOk->onClick();
+        check (mc.waveLibraryRenameModeForTest()
+               && mc.waveformCountForTest() == count0
+               && mc.undoDepth() == depth0
+               && mc.flashMessageForTest().isNotEmpty(),
+               "library UI: an empty name keeps the editor open and explains",
+               mc.flashMessageForTest());
+
+        waveNameEd->setText ("Wave 11", false);
+        waveNameOk->onClick();
+        check (mc.waveLibraryRenameModeForTest()
+               && mc.undoDepth() == depth0
+               && mc.flashMessageForTest().containsIgnoreCase ("already"),
+               "library UI: a duplicate name keeps the editor open",
+               mc.flashMessageForTest());
+
+        waveNameEd->setText ("  Lead  ", false);
+        waveNameOk->onClick();
+        check (! mc.waveLibraryRenameModeForTest()
+               && waveBox->isVisible() && ! waveNameEd->isVisible()
+               && mc.undoDepth() == depth0 + 1,
+               "library UI: a valid rename ends the mode in one undo step");
+        bool namedLead = false;
+        for (int i = 0; i < mc.waveformCountForTest(); ++i)
+            if (mc.waveformNameForTest (i) == "Lead") namedLead = true;
+        check (namedLead, "library UI: the new name reaches the model");
+
+        waveRename->onClick();
+        waveNameEd->setText ("Nope", false);
+        waveNameNo->onClick();
+        check (! mc.waveLibraryRenameModeForTest()
+               && waveBox->isVisible()
+               && mc.undoDepth() == depth0 + 1,
+               "library UI: Cancel leaves the name and the undo stack alone");
+    }
+
+    // --- Delete an unused wavetable: no replacement asked -----------------
+    {
+        const int count0 = mc.waveformCountForTest();
+        const int depth0 = mc.undoDepth();
+        waveDel->onClick();
+        check (! mc.waveLibraryDeleteModeForTest()
+               && mc.waveformCountForTest() == count0 - 1
+               && mc.undoDepth() == depth0 + 1,
+               "library UI: Delete of an unused wavetable needs no replacement",
+               juce::String (mc.waveformCountForTest()) + "/"
+               + juce::String (mc.undoDepth()));
+    }
+
+    // --- Delete a used wavetable: the replacement picker ------------------
+    {
+        check (selectItem (*waveBox, "10:"),
+               "library UI: the used wavetable is selectable");
+        check (mc.selectedWaveformIdForTest() == 10
+               && mc.selectedLibraryWaveForTest() == 10,
+               "library UI: the selector reaches the model and the manager",
+               juce::String (mc.selectedWaveformIdForTest()) + "/"
+               + juce::String (mc.selectedLibraryWaveForTest()));
+
+        const int depth0 = mc.undoDepth();
+        const int count0 = mc.waveformCountForTest();
+        waveDel->onClick();
+        check (mc.waveLibraryDeleteModeForTest()
+               && waveReplace->isVisible() && waveDelOk->isVisible()
+               && ! waveBox->isVisible() && ! waveDel->isVisible(),
+               "library UI: Delete of a used wavetable asks for a replacement");
+        check (waveReplace->getNumItems() == count0 - 1,
+               "library UI: the picker excludes the wavetable being deleted",
+               juce::String (waveReplace->getNumItems()) + " of "
+               + juce::String (count0));
+        check (selectItem (*waveReplace, "11:"),
+               "library UI: a replacement can be chosen");
+
+        waveDelOk->onClick();
+        check (! mc.waveLibraryDeleteModeForTest()
+               && mc.waveformCountForTest() == count0 - 1
+               && mc.undoDepth() == depth0 + 1,
+               "library UI: the replacement delete is one undo step");
+        check (mc.arcWaveformIdForTest (1) == 11
+               && mc.arcWaveformIdForTest (2) == 11
+               && mc.selectedWaveformIdForTest() == 11,
+               "library UI: the arcs and the selection follow the replacement",
+               juce::String (mc.arcWaveformIdForTest (1)) + "/"
+               + juce::String (mc.selectedWaveformIdForTest()));
+        check (waveBox->getText().startsWith ("11:")
+               && waveBox->getText().contains ("(2 uses)"),
+               "library UI: the selector follows the replacement and its uses",
+               waveBox->getText());
+    }
+
+    // --- Cancel a delete --------------------------------------------------
+    {
+        const int count0 = mc.waveformCountForTest();
+        const int depth0 = mc.undoDepth();
+        waveDel->onClick();
+        check (mc.waveLibraryDeleteModeForTest(),
+               "library UI: the delete mode is open before the cancel");
+        waveDelNo->onClick();
+        check (! mc.waveLibraryDeleteModeForTest()
+               && mc.waveformCountForTest() == count0
+               && mc.undoDepth() == depth0,
+               "library UI: Cancel leaves the bank and the undo stack alone");
+    }
+
+    // --- the envelope manager: New, Rename, Delete -----------------------
+    {
+        const int depth0 = mc.undoDepth();
+        envNew->onClick();
+        const int fresh = mc.selectedEnvelopeIdForTest();
+        check (mc.envelopeCountForTest() == 4 && fresh == 23
+               && mc.undoDepth() == depth0 + 1,
+               "library UI: New adds an envelope and selects it",
+               juce::String (mc.envelopeCountForTest()) + "/" + juce::String (fresh));
+        check (envBox->getText().startsWith ("23:")
+               && envBox->getText().contains ("(0 uses)")
+               && ! envUnique->isEnabled(),
+               "library UI: the new envelope is unused",
+               envBox->getText());
+
+        envRename->onClick();
+        envNameEd->setText ("Shape", false);
+        envNameOk->onClick();
+        bool named = false;
+        for (int i = 0; i < mc.envelopeCountForTest(); ++i)
+            if (mc.envelopeNameForTest (i) == "Shape") named = true;
+        check (! mc.envLibraryRenameModeForTest() && named,
+               "library UI: the envelope rename reaches the model");
+        check (envNameNo->isVisible() == false,
+               "library UI: the envelope rename row is back to the selector");
+
+        check (selectItem (*envBox, "20:"),
+               "library UI: the used envelope is selectable");
+        const int depth1 = mc.undoDepth();
+        const int count1 = mc.envelopeCountForTest();
+        envDel->onClick();
+        check (mc.envLibraryDeleteModeForTest() && envReplace->isVisible(),
+               "library UI: Delete of a used envelope asks for a replacement");
+        check (selectItem (*envReplace, "22:"),
+               "library UI: an envelope replacement can be chosen");
+        envDelOk->onClick();
+        check (! mc.envLibraryDeleteModeForTest()
+               && mc.envelopeCountForTest() == count1 - 1
+               && mc.undoDepth() == depth1 + 1,
+               "library UI: the envelope replacement delete is one undo step");
+        check (mc.arcEnvelopeIdForTest (1) == 22
+               && mc.arcEnvelopeIdForTest (2) == 22
+               && mc.arcPmIndexEnvForTest (1) == 21,
+               "library UI: the amp references move and the PM reference stays");
+        check (mc.selectedEnvelopeIdForTest() == 22
+               && envBox->getText().startsWith ("22:"),
+               "library UI: the envelope selector follows the replacement",
+               envBox->getText());
+    }
+
+    // --- the last asset: Delete is disabled ------------------------------
+    {
+        const bool oneLoaded = mc.loadFromVar (makePiece (1, 1));
+        check (oneLoaded && mc.waveformCountForTest() == 1
+               && mc.envelopeCountForTest() == 1,
+               "library UI: the one-asset piece loads");
+        check (! waveDel->isEnabled() && ! envDel->isEnabled(),
+               "library UI: the last wavetable and envelope cannot be deleted");
+        const int depth0 = mc.undoDepth();
+        waveDel->onClick();
+        envDel->onClick();
+        check (mc.waveformCountForTest() == 1 && mc.envelopeCountForTest() == 1
+               && mc.undoDepth() == depth0,
+               "library UI: the disabled delete buttons do nothing");
+    }
+
+    // --- undo restores the manager row -----------------------------------
+    {
+        const bool threeLoaded = mc.loadFromVar (makePiece (3, 3));
+        check (threeLoaded && waveBox->getNumItems() == 3,
+               "library UI: the three-asset piece reloads");
+        const int depth0 = mc.undoDepth();
+        waveNew->onClick();
+        check (mc.waveformCountForTest() == 4
+               && waveBox->getNumItems() == 4,
+               "library UI: New grows the row");
+        mc.undo();
+        check (mc.waveformCountForTest() == 3
+               && waveBox->getNumItems() == 3
+               && mc.selectedWaveformIdForTest() == 10,
+               "library UI: undo rebuilds the row and its selection",
+               juce::String (waveBox->getNumItems()) + "/"
+               + juce::String (mc.selectedWaveformIdForTest()));
+        check (mc.undoDepth() == depth0,
+               "library UI: undo removes the step");
+    }
 }

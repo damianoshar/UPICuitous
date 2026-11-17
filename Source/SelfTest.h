@@ -35,6 +35,7 @@ namespace upic
     void runTransformChecks (SelfTest& t);
     void runUntrustedPieceChecks (SelfTest& t);
     void runModelMathChecks (SelfTest& t);
+    void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runExportChecks (SelfTest& t);
     void runSieveChecks (SelfTest& t);
     void runTuningChecks (SelfTest& t);   // M4: the Scala tuning import
@@ -47,6 +48,7 @@ namespace upic
     void runPanelChecks (SelfTest& t);
     void runPmPresetChecks (SelfTest& t);
     void runWidgetChecks (SelfTest& t);
+    void runLibraryUiChecks (SelfTest& t); // F2/F3: the manager rows
     void runMidiInputChecks (SelfTest& t);
     void runEnvelopeChecks (SelfTest& t);
     void runTransportChecks (SelfTest& t);

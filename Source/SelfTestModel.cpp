@@ -1122,3 +1122,516 @@ void upic::runTuningChecks (upic::SelfTest& t)
                "tuning: the 12-tone sieve is unchanged");
     }
 }
+
+//==============================================================================
+// F2/F3 (2026-11-17): the wavetable and envelope libraries. The bank
+// commands, the use counts (every page, both envelope slots), the reference
+// rewrite on delete, the caps, the fork-on-edit, the undo transaction and
+// the JSON round trip.
+void upic::runLibraryModelChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // A small piece with a known bank: waves 10/11/12, envelopes 20/21/22.
+    // Page 0's arc 1 uses env 20 and PM env 21; the other arcs use env 20.
+    // Two pages make the "every page" half of the use count testable.
+    auto makePiece = [](int waveCount, int envCount, int pageCount, bool withArcs) -> juce::var
+    {
+        upic::PieceModel m;
+        for (int i = 0; i < waveCount; ++i)
+        {
+            upic::Waveform w (10 + i, "Wave " + juce::String (10 + i),
+                              upic::paletteColour (i));
+            w.makeSine();
+            m.waveforms.push_back (w);
+        }
+        for (int i = 0; i < envCount; ++i)
+        {
+            upic::Envelope e (20 + i, "Env " + juce::String (20 + i),
+                              upic::paletteColour (i + 1));
+            e.presetFlat();
+            m.envelopes.push_back (e);
+        }
+        for (int p = 0; p < pageCount; ++p)
+        {
+            upic::Page pg;
+            pg.durationSec = 4.0;
+            pg.nextArcId = 3;
+            if (withArcs)
+            {
+                upic::Arc a;
+                a.id = 1; a.mode = 0; a.waveformId = 10; a.envelopeId = 20;
+                a.pmIndexEnv = (p == 0 ? 21 : 0); a.intensity = 0.8f;
+                a.points = { { 0.0, 220.0 }, { 2.0, 440.0 } };
+                pg.arcs.push_back (a);
+
+                upic::Arc b;
+                b.id = 2; b.mode = 0; b.waveformId = 10; b.envelopeId = 20;
+                b.intensity = 0.8f;
+                b.points = { { 0.0, 330.0 }, { 2.0, 660.0 } };
+                pg.arcs.push_back (b);
+            }
+            m.pages.push_back (pg);
+        }
+        return upic::pieceToVar (m);
+    };
+
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
+
+    auto load = [&mc, &check, &makePiece] (int w, int e, int p, bool arcs)
+    {
+        const bool ok = mc.loadFromVar (makePiece (w, e, p, arcs));
+        check (ok, "library test piece loads",
+               juce::String (w) + "/" + juce::String (e) + "/" + juce::String (p));
+    };
+    auto edit = [&mc] (const juce::String& label, const std::function<bool()>& fn)
+    {
+        mc.beginEdit (label);
+        const bool ok = fn();
+        mc.endEdit();
+        return ok;
+    };
+    auto waveIndex = [&mc] (int id)
+    {
+        for (int i = 0; i < mc.waveformCountForTest(); ++i)
+            if (mc.waveformIdForTest (i) == id) return i;
+        return -1;
+    };
+    auto envIndex = [&mc] (int id)
+    {
+        for (int i = 0; i < mc.envelopeCountForTest(); ++i)
+            if (mc.envelopeIdForTest (i) == id) return i;
+        return -1;
+    };
+
+    // --- the bank and its use counts -------------------------------------
+    {
+        load (3, 3, 2, true);
+        check (mc.waveformCountForTest() == 3 && mc.envelopeCountForTest() == 3,
+               "library: the loaded bank has the piece's assets",
+               juce::String (mc.waveformCountForTest()) + "/"
+               + juce::String (mc.envelopeCountForTest()));
+        check (mc.libraryWaveItemCountForTest() == 3
+               && mc.libraryEnvelopeItemCountForTest() == 3,
+               "library: the managers list every asset",
+               juce::String (mc.libraryWaveItemCountForTest()) + "/"
+               + juce::String (mc.libraryEnvelopeItemCountForTest()));
+        check (mc.waveformUseCountForTest (10) == 4
+               && mc.waveformUseCountForTest (11) == 0
+               && mc.waveformUseCountForTest (12) == 0,
+               "library: wave use counts span every page",
+               juce::String (mc.waveformUseCountForTest (10)));
+        check (mc.envelopeUseCountForTest (20) == 4
+               && mc.envelopeUseCountForTest (21) == 1
+               && mc.envelopeUseCountForTest (22) == 0,
+               "library: envelope use counts include the PM index slot",
+               juce::String (mc.envelopeUseCountForTest (20)) + "/"
+               + juce::String (mc.envelopeUseCountForTest (21)));
+        check (mc.selectedWaveformIdForTest() == 10
+               && mc.selectedLibraryWaveForTest() == 10
+               && mc.selectedEnvelopeIdForTest() == 20
+               && mc.selectedLibraryEnvelopeForTest() == 20,
+               "library: the managers follow the model's selection");
+        check (mc.libraryWaveUsesForTest (0) == 4
+               && mc.libraryEnvelopeUsesForTest (0) == 4,
+               "library: the manager rows show the use counts");
+    }
+
+    // --- Make unique: the fork is one undo step --------------------------
+    {
+        load (3, 3, 2, true);
+        mc.selectWaveformForTest (10);
+        mc.selectArcsForTest ({ 1 });
+        const int before = mc.waveformCountForTest();
+        const int depth0 = mc.undoDepth();
+        const bool ok = edit ("Make the wavetable unique",
+                              [&mc]{ return mc.libraryMakeWaveUnique(); });
+        const int fresh = mc.selectedWaveformIdForTest();
+        check (ok && mc.waveformCountForTest() == before + 1 && fresh != 10,
+               "library: Make unique gives the selection a private wavetable",
+               juce::String (fresh));
+        check (mc.waveformUseCountForTest (fresh) == 1
+               && mc.waveformUseCountForTest (10) == 3,
+               "library: only the selected arcs move to the fork",
+               juce::String (mc.waveformUseCountForTest (fresh)) + "/"
+               + juce::String (mc.waveformUseCountForTest (10)));
+        check (mc.arcWaveformIdForTest (1) == fresh
+               && mc.arcWaveformIdForTest (2) == 10
+               && mc.pageArcWaveformIdForTest (1, 1) == 10,
+               "library: the fork rewrites only the current page's selection");
+        check (mc.undoDepth() == depth0 + 1,
+               "library: Make unique is one undo step",
+               juce::String (mc.undoDepth()) + " vs " + juce::String (depth0 + 1));
+        mc.undo();
+        check (mc.waveformCountForTest() == before
+               && mc.arcWaveformIdForTest (1) == 10
+               && mc.waveformUseCountForTest (10) == 4,
+               "library: undo restores the shared wavetable");
+        mc.redo();
+        check (mc.waveformCountForTest() == before + 1
+               && mc.arcWaveformIdForTest (1) == fresh,
+               "library: redo restores the fork");
+    }
+
+    // --- Duplicate --------------------------------------------------------
+    {
+        load (3, 3, 2, true);
+        mc.selectWaveformForTest (11);
+        const float src = mc.waveformSampleForTest (11, 256);
+        const int depth0 = mc.undoDepth();
+        const bool ok = edit ("Duplicate the wavetable",
+                              [&mc]{ return mc.libraryDuplicateWave(); });
+        const int dup = mc.selectedWaveformIdForTest();
+        const int idx = waveIndex (dup);
+        check (ok && mc.waveformCountForTest() == 4 && dup != 11,
+               "library: Duplicate adds a wavetable and selects it",
+               juce::String (dup));
+        check (idx >= 0 && mc.waveformNameForTest (idx) == "Wave 11 copy",
+               "library: the duplicate is named after its source",
+               idx >= 0 ? mc.waveformNameForTest (idx) : juce::String ("missing"));
+        check (std::abs (mc.waveformSampleForTest (dup, 256) - src) < 1e-6f,
+               "library: the duplicate copies the shape");
+        check (mc.waveformUseCountForTest (dup) == 0,
+               "library: the duplicate starts unused");
+        check (mc.undoDepth() == depth0 + 1,
+               "library: Duplicate is one undo step");
+    }
+
+    // --- Rename: trimmed, unique, case-insensitive -----------------------
+    {
+        load (3, 3, 2, true);
+        mc.selectWaveformForTest (10);
+        const int depth0 = mc.undoDepth();
+        const bool ok = edit ("Rename the wavetable",
+                              [&mc]{ return mc.libraryRenameWave ("  Lead  "); });
+        check (ok && mc.waveformNameForTest (waveIndex (10)) == "Lead",
+               "library: Rename trims the name",
+               mc.waveformNameForTest (waveIndex (10)));
+        check (mc.undoDepth() == depth0 + 1,
+               "library: Rename is one undo step");
+
+        const int depth1 = mc.undoDepth();
+        const bool empty = edit ("Rename the wavetable",
+                                 [&mc]{ return mc.libraryRenameWave ("   "); });
+        check (! empty && mc.undoDepth() == depth1
+               && mc.waveformNameForTest (waveIndex (10)) == "Lead"
+               && mc.flashMessageForTest().isNotEmpty(),
+               "library: an empty name is refused and explained",
+               mc.flashMessageForTest());
+
+        mc.selectWaveformForTest (11);
+        const bool dup = edit ("Rename the wavetable",
+                               [&mc]{ return mc.libraryRenameWave ("lead"); });
+        check (! dup && mc.undoDepth() == depth1
+               && mc.waveformNameForTest (waveIndex (11)) == "Wave 11",
+               "library: a duplicate name is refused (case-insensitive)",
+               mc.flashMessageForTest());
+        const bool unique = edit ("Rename the wavetable",
+                                  [&mc]{ return mc.libraryRenameWave ("Bass"); });
+        check (unique && mc.waveformNameForTest (waveIndex (11)) == "Bass"
+               && mc.undoDepth() == depth1 + 1,
+               "library: a unique name is accepted");
+    }
+
+    // --- Delete a used wavetable: the replacement rewrites every page ----
+    {
+        load (3, 3, 2, true);
+        mc.selectWaveformForTest (10);
+        const int depth0 = mc.undoDepth();
+        const bool ok = edit ("Delete the wavetable",
+                              [&mc]{ return mc.libraryDeleteWave (11); });
+        check (ok && mc.waveformCountForTest() == 2
+               && waveIndex (10) < 0 && mc.selectedWaveformIdForTest() == 11,
+               "library: Delete removes the wavetable and selects the replacement",
+               juce::String (mc.waveformCountForTest()) + "/"
+               + juce::String (mc.selectedWaveformIdForTest()));
+        check (mc.arcWaveformIdForTest (1) == 11
+               && mc.arcWaveformIdForTest (2) == 11
+               && mc.pageArcWaveformIdForTest (1, 1) == 11
+               && mc.pageArcWaveformIdForTest (1, 2) == 11,
+               "library: the replacement is rewritten on every page");
+        check (mc.waveformUseCountForTest (11) == 4
+               && mc.waveformUseCountForTest (12) == 0,
+               "library: the replacement inherits the uses",
+               juce::String (mc.waveformUseCountForTest (11)));
+        check (mc.undoDepth() == depth0 + 1,
+               "library: Delete is one undo step");
+        mc.undo();
+        check (mc.waveformCountForTest() == 3
+               && mc.arcWaveformIdForTest (1) == 10
+               && mc.pageArcWaveformIdForTest (1, 1) == 10,
+               "library: undo restores the deleted wavetable and its references");
+        mc.redo();
+        check (mc.waveformCountForTest() == 2
+               && mc.arcWaveformIdForTest (1) == 11,
+               "library: redo restores the replacement");
+    }
+
+    // --- Delete refusals -------------------------------------------------
+    {
+        load (3, 3, 2, true);
+        mc.selectWaveformForTest (10);
+        const bool bad = edit ("Delete the wavetable",
+                               [&mc]{ return mc.libraryDeleteWave (999); });
+        check (! bad && mc.waveformCountForTest() == 3
+               && mc.flashMessageForTest().isNotEmpty(),
+               "library: a missing replacement is refused and explained",
+               mc.flashMessageForTest());
+        const bool self = edit ("Delete the wavetable",
+                                [&mc]{ return mc.libraryDeleteWave (10); });
+        check (! self && mc.waveformCountForTest() == 3,
+               "library: a wavetable cannot replace itself");
+
+        mc.selectWaveformForTest (12);
+        const bool unused = edit ("Delete the wavetable",
+                                  [&mc]{ return mc.libraryDeleteWave (-1); });
+        check (unused && mc.waveformCountForTest() == 2 && waveIndex (12) < 0,
+               "library: an unused wavetable deletes without a replacement");
+        check (mc.selectedWaveformIdForTest() == 10,
+               "library: the selection falls back after an unused delete",
+               juce::String (mc.selectedWaveformIdForTest()));
+    }
+
+    {
+        load (1, 1, 1, true);
+        mc.selectWaveformForTest (10);
+        const bool last = edit ("Delete the wavetable",
+                                [&mc]{ return mc.libraryDeleteWave (-1); });
+        check (! last && mc.waveformCountForTest() == 1
+               && mc.flashMessageForTest().containsIgnoreCase ("last"),
+               "library: the last wavetable cannot be deleted",
+               mc.flashMessageForTest());
+    }
+
+    // --- Envelope delete: the amp slot and the PM slot -------------------
+    {
+        load (3, 3, 2, true);
+        mc.selectEnvelopeForTest (20);
+        const int depth0 = mc.undoDepth();
+        const bool ok = edit ("Delete the envelope",
+                              [&mc]{ return mc.libraryDeleteEnvelope (22); });
+        check (ok && mc.envelopeCountForTest() == 2
+               && envIndex (20) < 0 && mc.selectedEnvelopeIdForTest() == 22,
+               "library: Delete removes the envelope and selects the replacement",
+               juce::String (mc.envelopeCountForTest()) + "/"
+               + juce::String (mc.selectedEnvelopeIdForTest()));
+        check (mc.arcEnvelopeIdForTest (1) == 22
+               && mc.arcEnvelopeIdForTest (2) == 22
+               && mc.pageArcEnvelopeIdForTest (1, 1) == 22
+               && mc.pageArcEnvelopeIdForTest (1, 2) == 22,
+               "library: the envelope replacement is rewritten on every page");
+        check (mc.arcPmIndexEnvForTest (1) == 21,
+               "library: deleting the amp envelope leaves the PM slot alone",
+               juce::String (mc.arcPmIndexEnvForTest (1)));
+        check (mc.envelopeUseCountForTest (22) == 4
+               && mc.envelopeUseCountForTest (21) == 1,
+               "library: the envelope replacement inherits the amp uses");
+        check (mc.undoDepth() == depth0 + 1,
+               "library: envelope Delete is one undo step");
+        mc.undo();
+        check (mc.envelopeCountForTest() == 3
+               && mc.arcEnvelopeIdForTest (1) == 20
+               && mc.pageArcEnvelopeIdForTest (1, 1) == 20,
+               "library: undo restores the deleted envelope");
+    }
+
+    {
+        load (3, 3, 2, true);
+        mc.selectEnvelopeForTest (21);
+        const bool ok = edit ("Delete the envelope",
+                              [&mc]{ return mc.libraryDeleteEnvelope (22); });
+        check (ok && mc.envelopeCountForTest() == 2
+               && mc.arcPmIndexEnvForTest (1) == 22
+               && mc.pageArcPmIndexEnvForTest (0, 1) == 22
+               && mc.pageArcPmIndexEnvForTest (1, 1) == 0,
+               "library: deleting a PM envelope rewrites the PM slot on every page",
+               juce::String (mc.arcPmIndexEnvForTest (1)));
+        check (mc.arcEnvelopeIdForTest (1) == 20,
+               "library: deleting the PM envelope leaves the amp slot alone");
+    }
+
+    {
+        load (1, 1, 1, true);
+        mc.selectEnvelopeForTest (20);
+        const bool last = edit ("Delete the envelope",
+                                [&mc]{ return mc.libraryDeleteEnvelope (-1); });
+        check (! last && mc.envelopeCountForTest() == 1
+               && mc.flashMessageForTest().containsIgnoreCase ("last"),
+               "library: the last envelope cannot be deleted",
+               mc.flashMessageForTest());
+    }
+
+    // --- the caps ---------------------------------------------------------
+    {
+        load (upic::limits::kMaxWaveforms, upic::limits::kMaxEnvelopes, 1, true);
+        check (mc.waveformCountForTest() == upic::limits::kMaxWaveforms
+               && mc.envelopeCountForTest() == upic::limits::kMaxEnvelopes,
+               "library: a piece at the caps loads",
+               juce::String (mc.waveformCountForTest()) + "/"
+               + juce::String (mc.envelopeCountForTest()));
+
+        const int depth0 = mc.undoDepth();
+        const bool newWave = edit ("New wavetable",
+                                   [&mc]{ return mc.libraryNewWave(); });
+        check (! newWave && mc.waveformCountForTest() == upic::limits::kMaxWaveforms
+               && mc.undoDepth() == depth0
+               && mc.flashMessageForTest().contains ("200"),
+               "library: New refuses at the wavetable cap and explains",
+               mc.flashMessageForTest());
+        const bool dupWave = edit ("Duplicate the wavetable",
+                                   [&mc]{ return mc.libraryDuplicateWave(); });
+        check (! dupWave && mc.waveformCountForTest() == upic::limits::kMaxWaveforms,
+               "library: Duplicate refuses at the wavetable cap");
+
+        const bool newEnv = edit ("New envelope",
+                                  [&mc]{ return mc.libraryNewEnvelope(); });
+        check (! newEnv && mc.envelopeCountForTest() == upic::limits::kMaxEnvelopes
+               && mc.flashMessageForTest().contains ("50"),
+               "library: New refuses at the envelope cap and explains",
+               mc.flashMessageForTest());
+        const bool dupEnv = edit ("Duplicate the envelope",
+                                  [&mc]{ return mc.libraryDuplicateEnvelope(); });
+        check (! dupEnv && mc.envelopeCountForTest() == upic::limits::kMaxEnvelopes,
+               "library: Duplicate refuses at the envelope cap");
+
+        // The fork is a creation too: Make unique must obey the cap.
+        mc.selectArcsForTest ({ 1 });
+        mc.selectWaveformForTest (10);
+        const bool uniqueWave = edit ("Make the wavetable unique",
+                                      [&mc]{ return mc.libraryMakeWaveUnique(); });
+        check (! uniqueWave && mc.waveformCountForTest() == upic::limits::kMaxWaveforms
+               && mc.flashMessageForTest().contains ("200"),
+               "library: Make unique refuses at the wavetable cap",
+               mc.flashMessageForTest());
+
+        mc.selectEnvelopeForTest (20);
+        const bool uniqueEnv = edit ("Make the envelope unique",
+                                     [&mc]{ return mc.libraryMakeEnvelopeUnique(); });
+        check (! uniqueEnv && mc.envelopeCountForTest() == upic::limits::kMaxEnvelopes
+               && mc.flashMessageForTest().contains ("50"),
+               "library: Make unique refuses at the envelope cap",
+               mc.flashMessageForTest());
+
+        // The editors use the same fork: a shared edit is cancelled, and
+        // the cancelled transaction leaves no undo step.
+        std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+            [&findByName](juce::Component& c, const juce::String& n) -> juce::Component* {
+                if (c.getName() == n) return &c;
+                for (int i = 0; i < c.getNumChildComponents(); ++i)
+                    if (auto* r = findByName (*c.getChildComponent (i), n)) return r;
+                return nullptr;
+            };
+        auto* waveEd = dynamic_cast<WaveformEditor*> (findByName (mc, "waveEd"));
+        auto* envEd = dynamic_cast<EnvelopeEditor*> (findByName (mc, "envEd"));
+        const int depth1 = mc.undoDepth();
+        check (waveEd != nullptr && ! waveEd->beginEdit(),
+               "library: the wavetable editor cancels a fork at the cap");
+        check (envEd != nullptr && ! envEd->beginEdit(),
+               "library: the envelope editor cancels a fork at the cap",
+               juce::String (mc.envelopeCountForTest()) + "/"
+               + juce::String (mc.selectedEnvelopeIdForTest()) + "/"
+               + juce::String (mc.envelopeUseCountForTest (20)) + "/"
+               + juce::String (mc.selectedArcCountForTest()));
+        check (mc.undoDepth() == depth1,
+               "library: a cancelled fork leaves no undo step");
+    }
+
+    // --- the envelope editor forks a shared envelope before an edit ------
+    {
+        load (3, 3, 2, true);
+        mc.selectEnvelopeForTest (20);
+        mc.selectArcsForTest ({ 1 });
+
+        std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+            [&findByName](juce::Component& c, const juce::String& n) -> juce::Component* {
+                if (c.getName() == n) return &c;
+                for (int i = 0; i < c.getNumChildComponents(); ++i)
+                    if (auto* r = findByName (*c.getChildComponent (i), n)) return r;
+                return nullptr;
+            };
+        auto* envEd = dynamic_cast<EnvelopeEditor*> (findByName (mc, "envEd"));
+        const int before = mc.envelopeCountForTest();
+        const int depth0 = mc.undoDepth();
+        const bool started = envEd != nullptr && envEd->beginEdit();
+        const int fresh = mc.selectedEnvelopeIdForTest();
+        check (started && mc.envelopeCountForTest() == before + 1 && fresh != 20,
+               "library: editing a shared envelope forks it",
+               juce::String (mc.envelopeCountForTest()) + "/" + juce::String (fresh));
+        check (mc.arcEnvelopeIdForTest (1) == fresh
+               && mc.arcEnvelopeIdForTest (2) == 20
+               && mc.pageArcEnvelopeIdForTest (1, 1) == 20,
+               "library: only the selected arc moves to the envelope fork");
+        const int points0 = envEd != nullptr ? envEd->pointCount() : -1;
+        const bool added = envEd != nullptr && envEd->addPoint();
+        if (envEd != nullptr) envEd->endEdit();
+        check (added && envEd->pointCount() == points0 + 1,
+               "library: the fork is the envelope the edit changes",
+               juce::String (points0) + " -> "
+               + juce::String (envEd != nullptr ? envEd->pointCount() : -1));
+        check (mc.undoDepth() == depth0 + 1,
+               "library: the envelope fork and its edit are one undo step",
+               juce::String (mc.undoDepth()) + " vs " + juce::String (depth0 + 1));
+        mc.undo();
+        check (mc.envelopeCountForTest() == before
+               && mc.arcEnvelopeIdForTest (1) == 20
+               && mc.selectedEnvelopeIdForTest() == 20,
+               "library: undo removes the fork and its edit");
+    }
+
+    // --- one JSON round trip with a renamed and a new asset ---------------
+    {
+        load (3, 3, 2, true);
+        mc.selectWaveformForTest (10);
+        const bool renamed = edit ("Rename the wavetable",
+                                   [&mc]{ return mc.libraryRenameWave ("Lead"); });
+        const bool addedWave = edit ("New wavetable",
+                                     [&mc]{ return mc.libraryNewWave(); });
+        const int freshWave = mc.selectedWaveformIdForTest();
+        mc.selectEnvelopeForTest (20);
+        const bool renamedEnv = edit ("Rename the envelope",
+                                      [&mc]{ return mc.libraryRenameEnvelope ("Shape"); });
+        const bool addedEnv = edit ("New envelope",
+                                    [&mc]{ return mc.libraryNewEnvelope(); });
+        const int freshEnv = mc.selectedEnvelopeIdForTest();
+        check (renamed && addedWave && renamedEnv && addedEnv,
+               "library: the round-trip setup commands succeed");
+
+        const auto saved = mc.pieceToVar();
+        MainComponent mc2 (true);
+        const bool loaded = mc2.loadFromVar (saved);
+        auto waveIndex2 = [&mc2] (int id)
+        {
+            for (int i = 0; i < mc2.waveformCountForTest(); ++i)
+                if (mc2.waveformIdForTest (i) == id) return i;
+            return -1;
+        };
+        auto envIndex2 = [&mc2] (int id)
+        {
+            for (int i = 0; i < mc2.envelopeCountForTest(); ++i)
+                if (mc2.envelopeIdForTest (i) == id) return i;
+            return -1;
+        };
+        check (loaded && mc2.waveformCountForTest() == 4
+               && mc2.envelopeCountForTest() == 4,
+               "library: the bank survives a JSON round trip",
+               juce::String (mc2.waveformCountForTest()) + "/"
+               + juce::String (mc2.envelopeCountForTest()));
+        check (mc2.waveformNameForTest (waveIndex2 (10)) == "Lead"
+               && mc2.waveformNameForTest (waveIndex2 (freshWave)).startsWith ("Wave "),
+               "library: the renamed and new wavetables survive the round trip",
+               mc2.waveformNameForTest (waveIndex2 (10)));
+        check (mc2.envelopeNameForTest (envIndex2 (20)) == "Shape"
+               && mc2.envelopeIdForTest (envIndex2 (freshEnv)) == freshEnv,
+               "library: the renamed and new envelopes survive the round trip",
+               mc2.envelopeNameForTest (envIndex2 (20)));
+        check (mc2.waveformUseCountForTest (10) == 4
+               && mc2.waveformUseCountForTest (freshWave) == 0
+               && mc2.envelopeUseCountForTest (20) == 4
+               && mc2.envelopeUseCountForTest (freshEnv) == 0,
+               "library: the use counts are rebuilt after a load");
+    }
+}

@@ -24,6 +24,58 @@ const upic::Page& MainComponent::curPage() const
     return pages[(size_t)idx];
 }
 
+//==============================================================================
+// F2/F3 (2026-11-17): the library helpers. The banks are small and the
+// operations are message-thread only, so a linear scan is the clearest way
+// to find an id or a name (and it cannot drift from the vector order).
+namespace
+{
+    template <typename Bank>
+    int nextBankId (const Bank& bank)
+    {
+        int id = 0;
+        for (const auto& x : bank)
+            id = juce::jmax (id, x.id + 1);
+        return id;
+    }
+
+    template <typename Bank>
+    bool bankHasName (const Bank& bank, const juce::String& name, const void* except)
+    {
+        for (const auto& x : bank)
+            if ((const void*) &x != except && x.name.equalsIgnoreCase (name))
+                return true;
+        return false;
+    }
+
+    template <typename Bank>
+    juce::String uniqueBankName (const Bank& bank, const juce::String& base)
+    {
+        if (! bankHasName (bank, base, nullptr)) return base;
+        for (int n = 2; ; ++n)
+        {
+            const auto candidate = base + " " + juce::String (n);
+            if (! bankHasName (bank, candidate, nullptr)) return candidate;
+        }
+    }
+}
+
+//==============================================================================
+void MainComponent::refreshLibraryBoxes()
+{
+    std::vector<LibraryManager::Item> waveItems;
+    waveItems.reserve (waveforms.size());
+    for (const auto& w : waveforms)
+        waveItems.push_back ({ w.id, w.name, w.colour, waveUseCount (w.id) });
+    waveLib.setItems (waveItems, selWave);
+
+    std::vector<LibraryManager::Item> envItems;
+    envItems.reserve (envelopes.size());
+    for (const auto& e : envelopes)
+        envItems.push_back ({ e.id, e.name, e.colour, envelopeUseCount (e.id) });
+    envLib.setItems (envItems, selEnv);
+}
+
 void MainComponent::refreshBoxes()
 {
     arcListDirty = true; // v1.21: the panel's rows follow the model
@@ -67,12 +119,11 @@ void MainComponent::refreshBoxes()
     envBox.clear(juce::dontSendNotification);
     for (size_t i = 0; i < envelopes.size(); ++i)
         envBox.addItem(juce::String(envelopes[i].id) + ": " + envelopes[i].name, (int)i + 1);
-    waveEditBox.clear(juce::dontSendNotification);
-    for (size_t i = 0; i < waveforms.size(); ++i)
-        waveEditBox.addItem(juce::String(waveforms[i].id) + ": " + waveforms[i].name, (int)i + 1);
-    envEditBox.clear(juce::dontSendNotification);
-    for (size_t i = 0; i < envelopes.size(); ++i)
-        envEditBox.addItem(juce::String(envelopes[i].id) + ": " + envelopes[i].name, (int)i + 1);
+
+    // F2/F3 (2026-11-17): the managers own the editor selectors. The item
+    // text carries the use count (arcs on every page, both envelope slots
+    // for the envelope bank); the swatch shows the selected asset's colour.
+    refreshLibraryBoxes();
 
     pmIndexEnvBox.clear (juce::dontSendNotification);
     // ComboBox item ids must be > 0: id 1 is the plain amp envelope, the
@@ -102,8 +153,6 @@ void MainComponent::refreshBoxes()
     auto findIdx = [](auto& vec, int id){ for (size_t i = 0; i < vec.size(); ++i) if (vec[i].id == id) return (int)i; return 0; };
     waveBox.setSelectedId(findIdx(waveforms, selWave) + 1, juce::dontSendNotification);
     envBox.setSelectedId(findIdx(envelopes, selEnv) + 1, juce::dontSendNotification);
-    waveEditBox.setSelectedId(findIdx(waveforms, selWave) + 1, juce::dontSendNotification);
-    envEditBox.setSelectedId(findIdx(envelopes, selEnv) + 1, juce::dontSendNotification);
     updateStatus();
 }
 
@@ -120,8 +169,19 @@ void MainComponent::refreshScoreBinding()
     score.setPlaying(transportActive());
     waveEd.bind(&waveforms, &selWave, [this]{ markModelChanged(); });
     envEd.bind(&envelopes, &selEnv, [this]{ markModelChanged(); });
-    // v1.33.4 (L15, part 2): the undo transaction for the envelope editor
-    envEd.setOnEditStart([this]{ beginEdit ("Edit the envelope"); });
+    // v1.33.4 (L15, part 2): the undo transaction for the envelope editor.
+    // F3 (2026-11-17): a shared envelope forks first, exactly like the
+    // wavetable; the fork is part of the same undo step.
+    envEd.setOnEditStart([this]{
+        beginEdit ("Edit the envelope");
+        bool forked = false;
+        if (! forkEnvelopeForSelection (forked))
+        {
+            endEdit(); // the bank is full: the edit is cancelled
+            return false;
+        }
+        return true;
+    });
     envEd.setOnEditEnd([this]{ endEdit(); });
     updateSampleView();
     score.repaint(); waveEd.repaint(); envEd.repaint();
@@ -138,6 +198,7 @@ bool MainComponent::prepareWaveEdit()
     if (ids.empty()) return true;
 
     bool forked = false;
+    bool changed = false;
     {
         const juce::ScopedLock l(dataLock);
         upic::Waveform* src = nullptr;
@@ -164,6 +225,16 @@ bool MainComponent::prepareWaveEdit()
 
         if (shared)
         {
+            // F2 (2026-11-17): the fork creates a wavetable, so it obeys the
+            // same cap as New and Duplicate. A full bank refuses the edit
+            // and says why instead of growing past the piece format's limit.
+            if ((int) waveforms.size() >= upic::limits::kMaxWaveforms)
+            {
+                flash ("A piece holds at most " + juce::String (upic::limits::kMaxWaveforms)
+                       + " wavetables (the limit) - the edit was cancelled");
+                return false;
+            }
+
             upic::Waveform copy = *src;
             int newId = 0;
             for (const auto& w : waveforms) newId = juce::jmax(newId, w.id + 1);
@@ -182,15 +253,22 @@ bool MainComponent::prepareWaveEdit()
             waveforms.push_back(copy);
             selWave = newId;
             forked = true;
+            changed = true;
         }
 
         // All selected arcs follow the wave that is about to change.
         for (auto& a : curPage().arcs)
             if (std::find(ids.begin(), ids.end(), a.id) != ids.end())
-                a.waveformId = selWave;
+            {
+                if (a.waveformId != selWave)
+                {
+                    a.waveformId = selWave;
+                    changed = true;
+                }
+            }
     }
 
-    if (forked)
+    if (changed)
     {
         refreshBoxes();
         pushVoice();
@@ -199,6 +277,404 @@ bool MainComponent::prepareWaveEdit()
         markModelChanged();
     }
     score.repaint();
+    return true;
+}
+
+//==============================================================================
+// F2/F3 (2026-11-17): the wavetable and envelope library commands.
+//
+// Every command works on the asset selected in the bank. The caller (the
+// LibraryManager wiring in MainComponent) opens one undo transaction around
+// the command; a delete rewrites every reference inside that one snapshot,
+// not one transaction per reference.
+
+int MainComponent::waveUseCount (int id) const
+{
+    const juce::ScopedLock l (dataLock);
+    int n = 0;
+    for (const auto& pg : pages)
+        for (const auto& a : pg.arcs)
+            if (a.waveformId == id) ++n;
+    return n;
+}
+
+int MainComponent::envelopeUseCount (int id) const
+{
+    const juce::ScopedLock l (dataLock);
+    int n = 0;
+    for (const auto& pg : pages)
+        for (const auto& a : pg.arcs)
+        {
+            if (a.envelopeId == id) ++n;
+            // F3: the PM index envelope is a reference too. Counting only
+            // the amp slot is the silent re-point L13 was about.
+            if (a.pmIndexEnv == id) ++n;
+        }
+    return n;
+}
+
+void MainComponent::afterLibraryChange()
+{
+    refreshBoxes();
+    pushVoice();
+    updateWaveButtonColours();
+    waveEd.repaint();
+    envEd.repaint();
+    score.repaint();
+    markModelChanged();
+    publishModelSnapshot();
+}
+
+//==============================================================================
+bool MainComponent::libraryNewWave()
+{
+    if ((int) waveforms.size() >= upic::limits::kMaxWaveforms)
+    {
+        flash ("A piece holds at most " + juce::String (upic::limits::kMaxWaveforms)
+               + " wavetables (the limit) - delete one before adding another");
+        return false;
+    }
+
+    {
+        const juce::ScopedLock l (dataLock);
+        const int id = nextBankId (waveforms);
+        upic::Waveform w (id, uniqueBankName (waveforms, "Wave " + juce::String (id)),
+                          upic::paletteColour (id));
+        w.makeSine();
+        waveforms.push_back (w);
+        selWave = id;
+    }
+    afterLibraryChange();
+    return true;
+}
+
+bool MainComponent::libraryDuplicateWave()
+{
+    if ((int) waveforms.size() >= upic::limits::kMaxWaveforms)
+    {
+        flash ("A piece holds at most " + juce::String (upic::limits::kMaxWaveforms)
+               + " wavetables (the limit) - delete one before duplicating one");
+        return false;
+    }
+
+    {
+        const juce::ScopedLock l (dataLock);
+        const upic::Waveform* src = nullptr;
+        for (const auto& w : waveforms)
+            if (w.id == selWave) { src = &w; break; }
+        if (src == nullptr) return false;
+
+        upic::Waveform copy = *src;
+        copy.id = nextBankId (waveforms);
+        copy.name = uniqueBankName (waveforms, src->name + " copy");
+        waveforms.push_back (copy);
+        selWave = copy.id;
+    }
+    afterLibraryChange();
+    return true;
+}
+
+bool MainComponent::libraryRenameWave (const juce::String& newName)
+{
+    const auto name = newName.trim();
+    if (name.isEmpty())
+    {
+        flash ("A wavetable needs a name");
+        return false;
+    }
+
+    {
+        const juce::ScopedLock l (dataLock);
+        upic::Waveform* w = nullptr;
+        for (auto& x : waveforms)
+            if (x.id == selWave) { w = &x; break; }
+        if (w == nullptr) return false;
+        if (bankHasName (waveforms, name, w))
+        {
+            flash ("Another wavetable is already called \"" + name + "\"");
+            return false;
+        }
+        w->name = name;
+    }
+    afterLibraryChange();
+    return true;
+}
+
+bool MainComponent::libraryDeleteWave (int replacementId)
+{
+    if ((int) waveforms.size() <= 1)
+    {
+        flash ("The last wavetable cannot be deleted - a piece needs one");
+        return false;
+    }
+
+    const int id = selWave;
+    bool exists = false;
+    for (const auto& w : waveforms)
+        if (w.id == id) { exists = true; break; }
+    if (! exists) return false;
+
+    const int uses = waveUseCount (id);
+    bool replacementOk = false;
+    if (uses > 0)
+    {
+        if (replacementId == id) replacementId = -1;
+        for (const auto& w : waveforms)
+            if (w.id == replacementId) { replacementOk = true; break; }
+        if (! replacementOk)
+        {
+            flash ("Choose a wavetable to replace the one being deleted");
+            return false;
+        }
+    }
+
+    {
+        const juce::ScopedLock l (dataLock);
+        if (uses > 0)
+            for (auto& pg : pages)
+                for (auto& a : pg.arcs)
+                    if (a.waveformId == id)
+                        a.waveformId = replacementId;
+
+        waveforms.erase (std::remove_if (waveforms.begin(), waveforms.end(),
+                                         [id] (const upic::Waveform& w) { return w.id == id; }),
+                         waveforms.end());
+
+        if (uses > 0)
+            selWave = replacementId;
+        else
+            selWave = waveforms.empty() ? 0 : waveforms.front().id;
+    }
+    afterLibraryChange();
+    return true;
+}
+
+bool MainComponent::libraryMakeWaveUnique()
+{
+    if (drawMatMode != 0 && drawMatMode != 3)
+    {
+        flash ("Make unique applies to the Osc and PM tabs");
+        return false;
+    }
+    if (score.getSelectedArcs().empty())
+    {
+        flash ("Select the arcs that should get their own wavetable");
+        return false;
+    }
+
+    const auto rev = modelRevision.load (std::memory_order_relaxed);
+    if (! prepareWaveEdit()) return false;
+    if (modelRevision.load (std::memory_order_relaxed) == rev)
+    {
+        flash ("The selected arcs already have their own wavetable");
+        return false;
+    }
+    publishModelSnapshot();
+    updateWaveButtonColours();
+    waveEd.repaint();
+    return true;
+}
+
+//==============================================================================
+bool MainComponent::libraryNewEnvelope()
+{
+    if ((int) envelopes.size() >= upic::limits::kMaxEnvelopes)
+    {
+        flash ("A piece holds at most " + juce::String (upic::limits::kMaxEnvelopes)
+               + " envelopes (the limit) - delete one before adding another");
+        return false;
+    }
+
+    {
+        const juce::ScopedLock l (dataLock);
+        const int id = nextBankId (envelopes);
+        upic::Envelope e (id, uniqueBankName (envelopes, "Envelope " + juce::String (id)),
+                          upic::paletteColour (id));
+        e.presetFlat();
+        envelopes.push_back (e);
+        selEnv = id;
+    }
+    afterLibraryChange();
+    return true;
+}
+
+bool MainComponent::libraryDuplicateEnvelope()
+{
+    if ((int) envelopes.size() >= upic::limits::kMaxEnvelopes)
+    {
+        flash ("A piece holds at most " + juce::String (upic::limits::kMaxEnvelopes)
+               + " envelopes (the limit) - delete one before duplicating one");
+        return false;
+    }
+
+    {
+        const juce::ScopedLock l (dataLock);
+        const upic::Envelope* src = nullptr;
+        for (const auto& e : envelopes)
+            if (e.id == selEnv) { src = &e; break; }
+        if (src == nullptr) return false;
+
+        upic::Envelope copy = *src;
+        copy.id = nextBankId (envelopes);
+        copy.name = uniqueBankName (envelopes, src->name + " copy");
+        envelopes.push_back (copy);
+        selEnv = copy.id;
+    }
+    afterLibraryChange();
+    return true;
+}
+
+bool MainComponent::libraryRenameEnvelope (const juce::String& newName)
+{
+    const auto name = newName.trim();
+    if (name.isEmpty())
+    {
+        flash ("An envelope needs a name");
+        return false;
+    }
+
+    {
+        const juce::ScopedLock l (dataLock);
+        upic::Envelope* e = nullptr;
+        for (auto& x : envelopes)
+            if (x.id == selEnv) { e = &x; break; }
+        if (e == nullptr) return false;
+        if (bankHasName (envelopes, name, e))
+        {
+            flash ("Another envelope is already called \"" + name + "\"");
+            return false;
+        }
+        e->name = name;
+    }
+    afterLibraryChange();
+    return true;
+}
+
+bool MainComponent::libraryDeleteEnvelope (int replacementId)
+{
+    if ((int) envelopes.size() <= 1)
+    {
+        flash ("The last envelope cannot be deleted - a piece needs one");
+        return false;
+    }
+
+    const int id = selEnv;
+    bool exists = false;
+    for (const auto& e : envelopes)
+        if (e.id == id) { exists = true; break; }
+    if (! exists) return false;
+
+    const int uses = envelopeUseCount (id);
+    bool replacementOk = false;
+    if (uses > 0)
+    {
+        if (replacementId == id) replacementId = -1;
+        for (const auto& e : envelopes)
+            if (e.id == replacementId) { replacementOk = true; break; }
+        if (! replacementOk)
+        {
+            flash ("Choose an envelope to replace the one being deleted");
+            return false;
+        }
+    }
+
+    {
+        const juce::ScopedLock l (dataLock);
+        if (uses > 0)
+            for (auto& pg : pages)
+                for (auto& a : pg.arcs)
+                {
+                    if (a.envelopeId == id) a.envelopeId = replacementId;
+                    if (a.pmIndexEnv == id) a.pmIndexEnv = replacementId;
+                }
+
+        envelopes.erase (std::remove_if (envelopes.begin(), envelopes.end(),
+                                         [id] (const upic::Envelope& e) { return e.id == id; }),
+                         envelopes.end());
+
+        if (uses > 0)
+            selEnv = replacementId;
+        else
+            selEnv = envelopes.empty() ? 0 : envelopes.front().id;
+    }
+    afterLibraryChange();
+    return true;
+}
+
+bool MainComponent::forkEnvelopeForSelection (bool& forked)
+{
+    forked = false;
+    const auto ids = score.getSelectedArcs();
+    if (ids.empty()) return true;
+
+    {
+        const juce::ScopedLock l (dataLock);
+        upic::Envelope* src = nullptr;
+        for (auto& e : envelopes)
+            if (e.id == selEnv) { src = &e; break; }
+        if (src == nullptr) return false;
+
+        bool shared = false;
+        for (size_t p = 0; p < pages.size() && ! shared; ++p)
+            for (const auto& a : pages[p].arcs)
+            {
+                const bool refsAmp = (a.envelopeId == selEnv);
+                const bool refsPm  = (a.pmIndexEnv == selEnv);
+                if (! refsAmp && ! refsPm) continue;
+                const bool selected = (p == (size_t) currentPage
+                                       && std::find (ids.begin(), ids.end(), a.id) != ids.end());
+                // A PM-index reference is not the amp slot the edit is
+                // about, so even a selected arc's PM use makes the envelope
+                // shared: the fork leaves that use on the original.
+                if (! selected || refsPm) { shared = true; break; }
+            }
+
+        if (! shared) return true;
+
+        if ((int) envelopes.size() >= upic::limits::kMaxEnvelopes)
+        {
+            flash ("A piece holds at most " + juce::String (upic::limits::kMaxEnvelopes)
+                   + " envelopes (the limit) - the edit was cancelled");
+            return false;
+        }
+
+        upic::Envelope copy = *src;
+        copy.id = nextBankId (envelopes);
+        copy.name = uniqueBankName (envelopes, src->name + " copy");
+        envelopes.push_back (copy);
+        selEnv = copy.id;
+        for (auto& a : curPage().arcs)
+            if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
+                a.envelopeId = selEnv;
+        forked = true;
+    }
+
+    if (forked)
+    {
+        refreshBoxes();
+        pushVoice();
+        envEd.repaint();
+        markModelChanged();
+    }
+    return true;
+}
+
+bool MainComponent::libraryMakeEnvelopeUnique()
+{
+    if (score.getSelectedArcs().empty())
+    {
+        flash ("Select the arcs that should get their own envelope");
+        return false;
+    }
+
+    bool forked = false;
+    if (! forkEnvelopeForSelection (forked)) return false;
+    if (! forked)
+    {
+        flash ("The selected arcs already have their own envelope");
+        return false;
+    }
+    publishModelSnapshot();
     return true;
 }
 
@@ -249,16 +725,10 @@ void MainComponent::syncControlsToArc(int arcId)
             // reflect voice in boxes
             for (size_t i = 0; i < waveforms.size(); ++i)
                 if (waveforms[i].id == a.waveformId)
-                {
                     waveBox.setSelectedId((int)i + 1, juce::dontSendNotification);
-                    waveEditBox.setSelectedId((int)i + 1, juce::dontSendNotification);
-                }
             for (size_t i = 0; i < envelopes.size(); ++i)
                 if (envelopes[i].id == a.envelopeId)
-                {
                     envBox.setSelectedId((int)i + 1, juce::dontSendNotification);
-                    envEditBox.setSelectedId((int)i + 1, juce::dontSendNotification);
-                }
             int pmIdx = 1;
             for (size_t j = 0; j < envelopes.size(); ++j)
                 if (envelopes[j].id == a.pmIndexEnv) { pmIdx = (int) j + 2; break; }

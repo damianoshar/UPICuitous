@@ -21,20 +21,20 @@ class EnvelopeEditor : public juce::Component
 public:
     EnvelopeEditor()
     {
-        addBtn.setName("envAddBtn");
-        delBtn.setName("envDelBtn");
+        addBtn.setName("envPointAddBtn");
+        delBtn.setName("envPointDelBtn");
         addBtn.setButtonText("+");
         delBtn.setButtonText("-");
         addBtn.setTooltip("Add a point - tap the curve first to place it");
         delBtn.setTooltip("Remove the selected point(s)");
         addBtn.onClick = [this] {
             // v1.33.4 (L15, part 2): the undo transaction
-            if (onEditStart) onEditStart();
+            if (onEditStart && ! onEditStart()) return;
             if (addPoint()) notify();
             if (onEditEnd) onEditEnd();
         };
         delBtn.onClick = [this] {
-            if (onEditStart) onEditStart();
+            if (onEditStart && ! onEditStart()) return;
             if (removePoint()) notify();
             if (onEditEnd) onEditEnd();
         };
@@ -54,9 +54,14 @@ public:
     void setModelLock(juce::CriticalSection* l) { modelLock = l; }
 
     // v1.33.4 (L15, part 2): the undo transaction - the owner keeps the
-    // state from before the edit.
-    void setOnEditStart(std::function<void()> cb) { onEditStart = std::move(cb); }
+    // state from before the edit. F3: it may also fork a shared envelope
+    // first, and return false to cancel the edit (the bank is full).
+    void setOnEditStart(std::function<bool()> cb) { onEditStart = std::move(cb); }
     void setOnEditEnd(std::function<void()> cb) { onEditEnd = std::move(cb); }
+    // F3: the header buttons and the preset buttons use the same transaction
+    // (and the same fork) as the curve itself.
+    bool beginEdit() { return onEditStart ? onEditStart() : true; }
+    void endEdit() { if (onEditEnd) onEditEnd(); }
 
     // --- the point API (the buttons and the selftest use the same calls) ---
 
@@ -275,19 +280,34 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
-        auto* env = current(); if (!env) return;
         auto plot = plotRect();
         if (!plot.contains(e.position)) return;
-        const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
-        // v1.33.4 (L15, part 2): the undo transaction - the state from before
-        // the envelope is edited.
-        if (onEditStart) onEditStart();
-        if (e.mods.isRightButtonDown())
+        auto* env = current(); if (!env) return;
+        const bool right = e.mods.isRightButtonDown();
+        const bool additive = e.mods.isCommandDown() || e.mods.isShiftDown()
+                              || e.mods.isCtrlDown();
+        const int hit = nearest(e.position, plot, right ? 12.0f : 10.0f);
+        // F3 (2026-11-17): the owner may fork a shared envelope before the
+        // first point moves. Only a real edit does that - a tap on the curve
+        // just places the insertion spot, and an additive click that only
+        // deselects changes no point (a fork there would be an undo step and
+        // a new envelope for nothing). The fork has to happen before the
+        // model lock and before `current()`: it appends to the envelope
+        // vector (which may reallocate) and takes dataLock itself.
+        const bool willEdit = right ? (hit >= 0 && env->points.size() > 2)
+                                    : (hit >= 0 && (! additive || ! isSelected (hit)));
+        if (willEdit && onEditStart && ! onEditStart()) return;
+        if (willEdit)
         {
-            int idx = nearest(e.position, plot);
-            if (idx >= 0 && env->points.size() > 2)
+            env = current(); // the fork replaced the one we were looking at
+            if (!env) return;
+        }
+        const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+        if (right)
+        {
+            if (hit >= 0 && env->points.size() > 2)
             {
-                env->points.erase(env->points.begin() + idx);
+                env->points.erase(env->points.begin() + hit);
                 sortPts(env);
                 clearSelection(); candX = -1.0f;
                 dragBase.clear();
@@ -296,9 +316,7 @@ public:
             }
             return;
         }
-        const bool additive = e.mods.isCommandDown() || e.mods.isShiftDown()
-                              || e.mods.isCtrlDown();
-        int idx = nearest(e.position, plot, 10.0f);
+        int idx = hit;
         if (idx >= 0)
         {
             if (additive)
@@ -372,9 +390,15 @@ public:
 
     void mouseDoubleClick(const juce::MouseEvent& e) override
     {
-        auto* env = current(); if (!env) return;
         auto plot = plotRect();
-        if (!plot.contains(e.position) || (int)env->points.size() >= kMaxPoints) return;
+        if (!plot.contains(e.position)) return;
+        auto* env = current(); if (!env) return;
+        if ((int) env->points.size() >= kMaxPoints) return;
+        // F3 (2026-11-17): a double-click inserts a point - a real edit, so
+        // it forks a shared envelope and opens its own undo transaction
+        // (the same rule as the + button).
+        if (onEditStart && ! onEditStart()) return;
+        env = current(); if (!env) return; // the fork may have replaced it
         const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
         upic::EnvPoint p{
             juce::jlimit(0.0f, 1.0f, (e.position.x - plot.getX()) / plot.getWidth()),
@@ -407,7 +431,7 @@ private:
     int* selected = nullptr;
     std::function<void()> onChange;
     // v1.33.4 (L15, part 2): the undo transaction
-    std::function<void()> onEditStart;
+    std::function<bool()> onEditStart;
     std::function<void()> onEditEnd;
     juce::CriticalSection* modelLock = nullptr;
     juce::CriticalSection dummyLock;

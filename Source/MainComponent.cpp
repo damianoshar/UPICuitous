@@ -622,7 +622,8 @@ void MainComponent::buildCombos()
     // --- combos ---
     addAndMakeVisible(pageBox); addAndMakeVisible(toolBox);
     addAndMakeVisible(waveBox); addAndMakeVisible(envBox);
-    addAndMakeVisible(waveEditBox); addAndMakeVisible(envEditBox);
+    // F2/F3: the editor selectors live in the LibraryManager rows (see
+    // buildEditors), which places them; they are not added here.
     addAndMakeVisible(pageAddBtn); addAndMakeVisible(pageDupBtn); addAndMakeVisible(pageDelBtn);
 
     toolBox.setName ("toolBox"); // the tool selector displays its SVG beside the selected tool
@@ -714,6 +715,7 @@ void MainComponent::buildToolbarControls()
         }
         publishModelSnapshot();
         score.repaint();
+        refreshLibraryBoxes(); // F2: the use counts moved
     };
     auto applyEnvToSelection = [this]{
         pushVoice();
@@ -729,6 +731,7 @@ void MainComponent::buildToolbarControls()
         }
         publishModelSnapshot();
         score.repaint();
+        refreshLibraryBoxes(); // F3: the use counts moved
     };
     waveBox.onChange = applyWaveToSelection;
     envBox.onChange = applyEnvToSelection;
@@ -746,6 +749,7 @@ void MainComponent::buildToolbarControls()
             publishModelSnapshot();
         }
         pushVoice();
+        refreshLibraryBoxes(); // F3: a PM-index reference is a use too
     };
 
     waveEditBox.onChange = [this]{

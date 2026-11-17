@@ -82,6 +82,7 @@ int upic::runSelfTest()
     upic::runTransformChecks (t);
     upic::runUntrustedPieceChecks (t);
     upic::runModelMathChecks (t);
+upic::runLibraryModelChecks (t);
     upic::runExportChecks (t);
     upic::runSieveChecks (t);
     upic::runTuningChecks (t);   // M4: the Scala tuning import
@@ -94,6 +95,7 @@ int upic::runSelfTest()
     upic::runPanelChecks (t);
     upic::runPmPresetChecks (t);
     upic::runWidgetChecks (t);
+upic::runLibraryUiChecks (t);
     upic::runMidiInputChecks (t);
     upic::runEnvelopeChecks (t);
     upic::runTransportChecks (t);

@@ -10,6 +10,7 @@
 #include "MidiHub.h"
 #include "WaveformEditor.h"
 #include "EnvelopeEditor.h"
+#include "LibraryManager.h"
 #include "OverlayPanels.h"
 #include "OscScrubReceiver.h"
 #include "JobRunner.h"
@@ -162,6 +163,24 @@ public:
     void undo();
     void redo();
 
+    // --- F2/F3 (2026-11-17): the wavetable and envelope libraries ---
+    //
+    // Each command is one user action: the caller wraps it in beginEdit/
+    // endEdit, so the undo stack gets one snapshot per command (a delete
+    // rewrites every reference in the same snapshot). A refusal returns
+    // false and flashes the reason - the bank is never silently truncated.
+    bool libraryNewWave();
+    bool libraryDuplicateWave();
+    bool libraryRenameWave (const juce::String& newName);
+    bool libraryDeleteWave (int replacementId); // -1 when nothing uses it
+    bool libraryMakeWaveUnique();
+
+    bool libraryNewEnvelope();
+    bool libraryDuplicateEnvelope();
+    bool libraryRenameEnvelope (const juce::String& newName);
+    bool libraryDeleteEnvelope (int replacementId);
+    bool libraryMakeEnvelopeUnique();
+
     // v1.33.4 (M22): how many model snapshots were published (the timer
     // publishes only when the model changed). The selftest watches it.
     int modelSnapshotPublishCount() const { return snapshotPublishCount.load (std::memory_order_relaxed); }
@@ -301,6 +320,97 @@ public:
     int zoneCountForTest() const { return (int) curPage().zones.size(); }
     int pageCountForTest() const { return (int) pages.size(); }
     juce::String flashMessageForTest() const { return flashMsg; }
+    // --- F2/F3: the wavetable and envelope libraries ---
+    int waveformCountForTest() const { return (int) waveforms.size(); }
+    int envelopeCountForTest() const { return (int) envelopes.size(); }
+    int selectedWaveformIdForTest() const { return selWave; }
+    int selectedEnvelopeIdForTest() const { return selEnv; }
+    int waveformIdForTest (int i) const
+    {
+        return i >= 0 && i < (int) waveforms.size() ? waveforms[(size_t) i].id : -1;
+    }
+    int envelopeIdForTest (int i) const
+    {
+        return i >= 0 && i < (int) envelopes.size() ? envelopes[(size_t) i].id : -1;
+    }
+    juce::String waveformNameForTest (int i) const
+    {
+        return i >= 0 && i < (int) waveforms.size() ? waveforms[(size_t) i].name : juce::String();
+    }
+    juce::String envelopeNameForTest (int i) const
+    {
+        return i >= 0 && i < (int) envelopes.size() ? envelopes[(size_t) i].name : juce::String();
+    }
+    float waveformSampleForTest (int id, int i) const
+    {
+        for (const auto& w : waveforms)
+            if (w.id == id && i >= 0 && i < (int) w.samples.size())
+                return w.samples[(size_t) i];
+        return 0.0f;
+    }
+    int waveformUseCountForTest (int id) const { return waveUseCount (id); }
+    int envelopeUseCountForTest (int id) const { return envelopeUseCount (id); }
+    // F2/F3: the library manager's own state (the UI checks) and the arc
+    // references (the delete tests).
+    void selectWaveformForTest (int id)
+    {
+        selWave = id;
+        waveEd.bind (&waveforms, &selWave, [this]{ markModelChanged(); });
+        refreshBoxes();
+        pushVoice();
+    }
+    void selectEnvelopeForTest (int id)
+    {
+        selEnv = id;
+        envEd.bind (&envelopes, &selEnv, [this]{ markModelChanged(); });
+        refreshBoxes();
+        pushVoice();
+    }
+    int selectedLibraryWaveForTest() const { return waveLib.selectedAssetId(); }
+    int selectedLibraryEnvelopeForTest() const { return envLib.selectedAssetId(); }
+    int libraryWaveItemCountForTest() const { return waveLib.itemCountForTest(); }
+    int libraryEnvelopeItemCountForTest() const { return envLib.itemCountForTest(); }
+    int libraryWaveUsesForTest (int index) const { return waveLib.usesForTest (index); }
+    int libraryEnvelopeUsesForTest (int index) const { return envLib.usesForTest (index); }
+    bool waveLibraryRenameModeForTest() const { return waveLib.isRenameModeForTest(); }
+    bool waveLibraryDeleteModeForTest() const { return waveLib.isDeleteModeForTest(); }
+    bool envLibraryRenameModeForTest() const { return envLib.isRenameModeForTest(); }
+    bool envLibraryDeleteModeForTest() const { return envLib.isDeleteModeForTest(); }
+    int arcWaveformIdForTest (int arcId) const
+    {
+        for (const auto& a : curPage().arcs) if (a.id == arcId) return a.waveformId;
+        return -1;
+    }
+    int arcEnvelopeIdForTest (int arcId) const
+    {
+        for (const auto& a : curPage().arcs) if (a.id == arcId) return a.envelopeId;
+        return -1;
+    }
+    int arcPmIndexEnvForTest (int arcId) const
+    {
+        for (const auto& a : curPage().arcs) if (a.id == arcId) return a.pmIndexEnv;
+        return -1;
+    }
+    int pageArcWaveformIdForTest (int page, int arcId) const
+    {
+        if (page < 0 || page >= (int) pages.size()) return -1;
+        for (const auto& a : pages[(size_t) page].arcs) if (a.id == arcId) return a.waveformId;
+        return -1;
+    }
+    int pageArcEnvelopeIdForTest (int page, int arcId) const
+    {
+        if (page < 0 || page >= (int) pages.size()) return -1;
+        for (const auto& a : pages[(size_t) page].arcs) if (a.id == arcId) return a.envelopeId;
+        return -1;
+    }
+    int pageArcPmIndexEnvForTest (int page, int arcId) const
+    {
+        if (page < 0 || page >= (int) pages.size()) return -1;
+        for (const auto& a : pages[(size_t) page].arcs) if (a.id == arcId) return a.pmIndexEnv;
+        return -1;
+    }
+    void selectArcsForTest (const std::vector<int>& ids) { score.setSelectedArcs (ids); }
+    int selectedArcCountForTest() const { return (int) score.getSelectedArcs().size(); }
     // v1.33.4 (H7): the global pitch modes (they change the sound, so the
     // selftest checks that they survive a save and a load)
     int samplePitchModeForTest() const { return engine.getSamplePitchMode(); }
@@ -1028,6 +1138,9 @@ private:
     ScoreEditor score;
     WaveformEditor waveEd;
     EnvelopeEditor envEd;
+    // F2/F3: the two bank managers. They own the placement of the editor
+    // selectors (waveEditBox/envEditBox) and the bank commands.
+    LibraryManager waveLib { "wave" }, envLib { "env" };
     juce::TextButton wSine{ "Sine" }, wSaw{ "Saw" }, wSqr{ "Sqr" }, wTri{ "Tri" }, wNoise{ "Noise" }, wSmooth{ "Smooth" }, wNorm{ "Norm" };
     juce::TextButton eFlat{ "Flat" }, ePerc{ "Perc" }, eSwell{ "Swell" }, eGate{ "Gate" }, eStr{ "Strings" };
     juce::TextButton assignBtn{ "Assign to sel." }, delArcBtn{ "Del sel." }, muteArcBtn{ "Mute sel." };
@@ -1057,6 +1170,14 @@ private:
     bool transportStopping() const { return transport() == TransportState::stopping; }
     void pushVoice();                 // UI -> ScoreEditor current voice
     bool prepareWaveEdit();           // v1.27: fork the wavetable for a selection
+    // F3 (2026-11-17): fork the selected arcs' envelope when it is shared.
+    // `forked` says whether a copy was made; false is returned only when the
+    // bank is full and the edit has to be cancelled.
+    bool forkEnvelopeForSelection (bool& forked);
+    int waveUseCount (int id) const;
+    int envelopeUseCount (int id) const;
+    void refreshLibraryBoxes();       // the two manager rows (names + use counts)
+    void afterLibraryChange();        // refresh the UI and publish the model
     void syncControlsToArc(int arcId); // load an arc into the toolbar
     void updateSampleView();
     void updateRevButton();       // v1.19: the Reverse button follows the slot

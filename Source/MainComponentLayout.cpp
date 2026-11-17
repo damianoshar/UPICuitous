@@ -15,6 +15,7 @@ void MainComponent::buildScoreArea()
     score.setName("score");
     timeLab.setName("timeLab");
     waveEd.setName("waveEd");
+    envEd.setName("envEd");
     // every editor mutates the same model the timer copies into the audio
     // snapshot, so they all share the message-thread model lock
     score.setModelLock(&dataLock);
@@ -23,9 +24,14 @@ void MainComponent::buildScoreArea()
     waveEd.setOnEditStart([this]{
         // v1.33.4 (L15, part 2): the undo transaction - the state from
         // before the wavetable is edited (the fork of the selection
-        // included).
+        // included). A refusal (a read-only tab) drops the transaction.
         beginEdit ("Edit the wavetable");
-        return prepareWaveEdit();
+        if (! prepareWaveEdit())
+        {
+            endEdit();
+            return false;
+        }
+        return true;
     });
     waveEd.setOnEditEnd([this]{ endEdit(); });
     // M5: the material's trim (the loop region) is dragged in the material
@@ -174,6 +180,10 @@ void MainComponent::buildEditors()
 {
     // --- wave/env editors ---
     addAndMakeVisible(waveEd); addAndMakeVisible(envEd);
+    // F2/F3 (2026-11-17): the bank manager rows own the editor selectors.
+    waveLib.setSelector(waveEditBox);
+    envLib.setSelector(envEditBox);
+    addAndMakeVisible(waveLib); addAndMakeVisible(envLib);
     addAndMakeVisible(wSine); addAndMakeVisible(wSaw); addAndMakeVisible(wSqr); addAndMakeVisible(wTri);
     addAndMakeVisible(wNoise); addAndMakeVisible(wSmooth); addAndMakeVisible(wNorm);
     wSine.setName("wSine");
@@ -207,7 +217,9 @@ void MainComponent::buildEditors()
         }
         waveEd.repaint();
         score.repaint();
+        markModelChanged();
         publishModelSnapshot();
+        waveEd.endEdit();
     };
     wSine.onClick = [editWave]{ editWave([](upic::Waveform& w){ w.makeSine(); }); };
     wSaw.onClick = [editWave]{ editWave([](upic::Waveform& w){ w.makeSaw(); w.smooth(1); }); };
@@ -220,11 +232,23 @@ void MainComponent::buildEditors()
 
     // v1.33.4 (M22): the envelope presets change the model, so they mark it
     // as changed - the status timer publishes the snapshot only then.
-    eFlat.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetFlat(); envEd.repaint(); markModelChanged(); } };
-    ePerc.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetPercussive(); envEd.repaint(); markModelChanged(); } };
-    eSwell.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetSwell(); envEd.repaint(); markModelChanged(); } };
-    eGate.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetGate(); envEd.repaint(); markModelChanged(); } };
-    eStr.onClick = [this, curE]{ const juce::ScopedLock l(dataLock); if (auto* e = curE()) { e->presetStrings(); envEd.repaint(); markModelChanged(); } };
+    // F3 (2026-11-17): a shared envelope forks before the preset changes it.
+    auto editEnv = [this, curE](std::function<void(upic::Envelope&)> fn) {
+        if (! envEd.beginEdit()) return;
+        {
+            const juce::ScopedLock l(dataLock);
+            if (auto* e = curE()) fn(*e);
+        }
+        envEd.repaint();
+        markModelChanged();
+        publishModelSnapshot();
+        envEd.endEdit();
+    };
+    eFlat.onClick = [editEnv]{ editEnv([](upic::Envelope& e){ e.presetFlat(); }); };
+    ePerc.onClick = [editEnv]{ editEnv([](upic::Envelope& e){ e.presetPercussive(); }); };
+    eSwell.onClick = [editEnv]{ editEnv([](upic::Envelope& e){ e.presetSwell(); }); };
+    eGate.onClick = [editEnv]{ editEnv([](upic::Envelope& e){ e.presetGate(); }); };
+    eStr.onClick = [editEnv]{ editEnv([](upic::Envelope& e){ e.presetStrings(); }); };
 
     assignBtn.onClick = [this]{
         juce::ScopedLock l(dataLock);
@@ -256,6 +280,38 @@ void MainComponent::buildEditors()
             if (std::find(ids.begin(), ids.end(), a.id) != ids.end()) a.muted = ! a.muted;
         score.repaint(); updateStatus();
     };
+
+    // F2/F3 (2026-11-17): one undo transaction per bank command. A refusal
+    // returns false (the manager stays put; the model has flashed why), and
+    // endEdit drops the empty snapshot.
+    auto bankEdit = [this](const juce::String& label, const std::function<bool()>& fn) -> bool {
+        beginEdit(label);
+        const bool ok = fn();
+        endEdit();
+        return ok;
+    };
+
+    waveLib.onNew        = [this, bankEdit]{ return bankEdit("New wavetable",
+                                        [this]{ return libraryNewWave(); }); };
+    waveLib.onDuplicate  = [this, bankEdit]{ return bankEdit("Duplicate the wavetable",
+                                        [this]{ return libraryDuplicateWave(); }); };
+    waveLib.onRename     = [this, bankEdit](const juce::String& name){ return bankEdit("Rename the wavetable",
+                                        [this, name]{ return libraryRenameWave(name); }); };
+    waveLib.onDelete     = [this, bankEdit](int replacementId){ return bankEdit("Delete the wavetable",
+                                        [this, replacementId]{ return libraryDeleteWave(replacementId); }); };
+    waveLib.onMakeUnique = [this, bankEdit]{ return bankEdit("Make the wavetable unique",
+                                        [this]{ return libraryMakeWaveUnique(); }); };
+
+    envLib.onNew        = [this, bankEdit]{ return bankEdit("New envelope",
+                                       [this]{ return libraryNewEnvelope(); }); };
+    envLib.onDuplicate  = [this, bankEdit]{ return bankEdit("Duplicate the envelope",
+                                       [this]{ return libraryDuplicateEnvelope(); }); };
+    envLib.onRename     = [this, bankEdit](const juce::String& name){ return bankEdit("Rename the envelope",
+                                       [this, name]{ return libraryRenameEnvelope(name); }); };
+    envLib.onDelete     = [this, bankEdit](int replacementId){ return bankEdit("Delete the envelope",
+                                       [this, replacementId]{ return libraryDeleteEnvelope(replacementId); }); };
+    envLib.onMakeUnique = [this, bankEdit]{ return bankEdit("Make the envelope unique",
+                                       [this]{ return libraryMakeEnvelopeUnique(); }); };
 
     voiceLab.setText("VOICE (new + assign)", juce::dontSendNotification);
     voiceLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
@@ -758,35 +814,24 @@ void MainComponent::resized()
     else if (showEnvEd)  envCol  = bottom;
 
     auto placeEditor = [&](juce::Rectangle<int> col, juce::Component& editor,
-                           juce::Component& box, juce::Component* const* btns,
+                           LibraryManager& manager, juce::Component* const* btns,
                            const int* ideal, int n)
     {
+        // F2/F3: two header rows - the bank manager (selector, swatch and
+        // commands) and the preset buttons. The editor takes the rest.
+        manager.setBounds(col.removeFromTop((int) std::lround(26.0f * s)).reduced(2));
         auto t = col.removeFromTop((int) std::lround(26.0f * s));
-        int idealTotal = 0, idealSum = 0;
+        int idealSum = 0;
         for (int i = 0; i < n; ++i)
-        {
-            idealTotal += (int) std::lround(ideal[i] * s);
-            idealSum   += ideal[i];
-        }
-        const int boxMin = (int) std::lround(100.0f * s);
-        // dropdown stays compact so the preset buttons get the row's spare
-        // width; on narrow layouts the box steps aside so the buttons stay
-        // visible (never below 40dp)
-        const int boxMax = (int) std::lround(150.0f * s);
-        const bool fits = t.getWidth() - idealTotal >= boxMin;
-        const int boxW = fits ? juce::jlimit(40, juce::jmax(40, t.getWidth() - n),
-                                             juce::jlimit(boxMin, boxMax, t.getWidth() * 40 / 100))
-                              : juce::jlimit(40, juce::jmax(40, t.getWidth() - n),
-                                             juce::jmin(boxMin, t.getWidth() / 3));
-        box.setBounds(t.removeFromLeft(boxW).reduced(2));
-        // buttons share the row's spare width in their ideal proportions
+            idealSum += ideal[i];
         const int avail = t.getWidth();
-        const int weights = fits ? juce::jmax(1, idealSum) : n;
         for (int i = 0; i < n; ++i)
         {
             const int rem = t.getWidth();
-            const int w = fits ? juce::jlimit(1, rem, (int) std::lround((double) avail * (double) ideal[i] / (double) weights))
-                               : juce::jmax(1, rem / (n - i));
+            if (rem <= 0) break;
+            const int w = juce::jlimit(1, rem, (int) std::lround((double)avail
+                                        * (double)ideal[i]
+                                        / (double)juce::jmax(1, idealSum)));
             btns[i]->setBounds(t.removeFromLeft(w).reduced(1));
         }
         editor.setBounds(col.reduced(2));
@@ -795,16 +840,16 @@ void MainComponent::resized()
     juce::Component* wbtns[7] = { &wSine, &wSaw, &wSqr, &wTri, &wNoise, &wSmooth, &wNorm };
     const int wideal[] = { 30, 30, 30, 30, 44, 48, 34 };
     waveEd.setVisible(showWaveEd);
-    waveEditBox.setVisible(showWaveEd);
+    waveLib.setVisible(showWaveEd);
     for (auto* w : wbtns) w->setVisible(showWaveEd);
-    if (showWaveEd) placeEditor(waveCol, waveEd, waveEditBox, wbtns, wideal, 7);
+    if (showWaveEd) placeEditor(waveCol, waveEd, waveLib, wbtns, wideal, 7);
 
     juce::Component* ebtns[5] = { &eFlat, &ePerc, &eSwell, &eGate, &eStr };
     const int eideal[] = { 40, 40, 44, 40, 34 };
     envEd.setVisible(showEnvEd);
-    envEditBox.setVisible(showEnvEd);
+    envLib.setVisible(showEnvEd);
     for (auto* eb : ebtns) eb->setVisible(showEnvEd);
-    if (showEnvEd) placeEditor(envCol, envEd, envEditBox, ebtns, eideal, 5);
+    if (showEnvEd) placeEditor(envCol, envEd, envLib, ebtns, eideal, 5);
     // voice controls: side column (portrait with editors) or slim strip
     if (stripMode)
     {

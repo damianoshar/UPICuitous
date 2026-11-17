@@ -25,6 +25,7 @@ public:
     // v1.33.4 (L15, part 2): the end of the edit (the undo transaction)
     void setOnEditEnd(std::function<void()> cb) { onEditEnd = std::move(cb); }
     bool beginEdit() { return onEditStart ? onEditStart() : true; }
+    void endEdit() { if (onEditEnd) onEditEnd(); }
 
     // M5: the material's trim is an edit of its own - the undo
     // transaction, the end of it, and the model's publication.
