@@ -9,6 +9,7 @@
 #include "ModelSnapshot.h"
 #include "ScoreEditor.h"
 #include "ScoreViewBar.h"
+#include "Knob.h"
 #include "ArcListPanel.h"
 #include "MidiHub.h"
 #include "WaveformEditor.h"
@@ -672,6 +673,24 @@ private:
         juce::Font getLabelFont (juce::Label& l) override
         { return withDefaultMetrics (juce::FontOptions (l.getFont().getHeight() * uiScale)); }
 
+        // F11: the knob's horizontal fallback draws its own track and its
+        // own value text, so the slider's area is the track's area - the
+        // drag and the drawing then agree.
+        juce::Slider::SliderLayout getSliderLayout (juce::Slider& slider) override
+        {
+            if (auto* knob = dynamic_cast<upic::Knob*> (&slider))
+                if (knob->isFallback())
+                {
+                    juce::Slider::SliderLayout layout;
+                    layout.sliderBounds = knob->fallbackTrackArea()
+                                              .reduced (upic::Knob::kTrackInset, 0);
+                    layout.textBoxBounds = {};
+                    return layout;
+                }
+
+            return juce::LookAndFeel_V4::getSliderLayout (slider);
+        }
+
         // the V4 default, but with the app's scale: the toggle's text then
         // never has to wrap onto a second line
         void drawToggleButton (juce::Graphics& g, juce::ToggleButton& button,
@@ -955,7 +974,10 @@ private:
     // v1.31 (U4): the UPIC's wave page could be digitised from a
     // recording. This turns the selected slot into a wavetable.
     juce::TextButton waveFromSlotBtn{ "Slot -> Wave" };
-    juce::Slider inGainSlider;
+    // F11 (2026-11-18): the toolbar's continuous amounts are knobs (a
+    // rotary slider). The OSC port fields stay horizontal sliders - they
+    // live in the settings overlay, not in the toolbar.
+    upic::Knob inGainSlider;
     juce::Label inGainLab{ {}, "In" };
     bool inputEnabled = false;
     std::atomic<float> inputGain{ 0.8f };
@@ -1002,19 +1024,19 @@ private:
     // scrub audition controls
     juce::Label scrubLenLab{ {}, "Scrub len" }, scrubCrossLab{ {}, "Crossfade" }, scrubTailLab{ {}, "Release tail" };
     juce::Label scrubGrainLab{ {}, "Hold grain" };
-    juce::Slider scrubLenSlider, scrubCrossSlider, scrubTailSlider, scrubGrainSlider;
+    upic::Knob scrubLenSlider, scrubCrossSlider, scrubTailSlider, scrubGrainSlider;
     juce::Label grainLab{ {}, "Grain" };
-    juce::Slider grainSlider;
+    upic::Knob grainSlider;
 
     // drag-edit smoothing controls
     juce::ToggleButton muteDragBtn{ "Mute drag" };
     juce::Label dragSmoothLab{ {}, "Smooth" };
-    juce::Slider dragSmoothSlider;
+    upic::Knob dragSmoothSlider;
 
     juce::ComboBox pageBox, toolBox, waveBox, envBox, waveEditBox, envEditBox, pmIndexEnvBox, pmPresetBox, pmOpsBox;
     juce::TextButton pmImportBtn{ "Import" }, pmExportBtn{ "Export" };
     juce::TextButton pageAddBtn{ "+" }, pageDupBtn{ "Dup" }, pageDelBtn{ "-" };
-    juce::Slider durSlider, masterSlider, intenSlider, pmRatioSlider, pmIndexSlider, pmFeedbackSlider, tempoSlider;
+    upic::Knob durSlider, masterSlider, intenSlider, pmRatioSlider, pmIndexSlider, pmFeedbackSlider, tempoSlider;
     juce::Label pageLab{ {}, "Page" }, durLab{ {}, "Dur" }, masterLab{ {}, "Master" }, intenLab{ {}, "Inten" };
     juce::Label timeLab, statusLab;
 
@@ -1075,7 +1097,7 @@ private:
     // signal (an amplitude LFO or a frequency LFO). These live on the Osc
     // tab's material row and apply to the selected arcs.
     juce::ComboBox modUseBox;
-    juce::Slider modRateSlider, modDepthSlider;
+    upic::Knob modRateSlider, modDepthSlider;
     juce::Label modUseLab{ {}, "Wave as" }, modRateLab{ {}, "Rate" },
               modDepthLab{ {}, "Depth" };
 
@@ -1089,7 +1111,7 @@ private:
     // to the arc's pitch, not to one material, and it applies to the
     // selected arcs.
     juce::ToggleButton stepBtn{ "Stepped" };
-    juce::Slider stepDivSlider;
+    upic::Knob stepDivSlider;
     juce::Label stepDivLab{ {}, "Div/oct" };
 
     // v1.33: the frequency spaces (the UPIC's four frequency tables). The
@@ -1106,7 +1128,7 @@ private:
     juce::Label ambitusLab{ {}, "Ambitus" };
 
     // v1.33: the page's acceleration - a tempo sweep across the page.
-    juce::Slider warpSlider;
+    upic::Knob warpSlider;
     juce::Label warpLab{ {}, "Accel" };
 
     // v1.27: Clear is destructive, so it asks first. An in-app overlay keeps
@@ -1128,7 +1150,7 @@ private:
     // the SAMPLE tab's Granular control). It only affects the granular live
     // pitch mode; Tape and Phase vocoder ignore it.
     juce::Label liveGrainLab{ {}, "Grain" };
-    juce::Slider liveGrainSlider;
+    upic::Knob liveGrainSlider;
 
     // --- UI: material (sample pitch-shift) row ---
     juce::ComboBox sampleBox;
@@ -1136,7 +1158,7 @@ private:
     // v1.19 (wave 17): the selected slot plays backwards. Session-only (the
     // piece format is untouched), like the pitch modes and the grid.
     juce::TextButton revBtn{ "Rev" };
-    juce::Slider refSlider;
+    upic::Knob refSlider;
     juce::Label slotLab{ {}, "Slot" }, refLab{ {}, "Ref" }, matHintLab;
     // v1.10: how SAMPLE-tab arcs transpose the slot (session-only, like the
     // live pitch mode): varispeed (the original behaviour) stays the default
@@ -1147,7 +1169,7 @@ private:
     // user's knob (it changes the sound, so it travels with the piece); the
     // three buttons edit the material itself - the normalise gain, the
     // fades and the trim (the trim is dragged in the material view).
-    juce::Slider levelSlider;
+    upic::Knob levelSlider;
     juce::Label levelLab{ {}, "Level" };
     juce::TextButton normMatBtn{ "Norm" }, fadeMatBtn{ "Fade" }, resetMatBtn{ "Reset" };
 
@@ -1197,8 +1219,8 @@ private:
     // --- UI: v1.2 magnetic-sieve row (preset library, stickiness, time grid,
     //     procedural arc generators) + shortcut/wheel hint line ---
     juce::ComboBox sievePresetBox, gridBox, genBox;
-    juce::Slider stickSlider;
-    juce::Label pmRatioLab{ {}, "Ratio" }, pmIndexLab{ {}, "Index" }, pmIndexEnvLab{ {}, "IdxEnv" }, pmFeedbackLab{ {}, "Fdbk" }, pmPresetLab{ {}, "Preset" }, pmOpsLab{ {}, "Ops" }, tempoLab{ {}, "Tempo" }, stickLab{ {}, "Stick (global)" }, gridLab{ {}, "T-grid (global)" }, genLab{ {}, "Gen" }, sieveMLab{ {}, "m" }, sieveRLab{ {}, "R" };
+    upic::Knob stickSlider;
+    juce::Label pmRatioLab{ {}, "Ratio" }, pmIndexLab{ {}, "Index" }, pmIndexEnvLab{ {}, "IdxEnv" }, pmFeedbackLab{ {}, "Fdbk" }, pmPresetLab{ {}, "Preset" }, pmOpsLab{ {}, "Ops" }, tempoLab{ {}, "BPM" }, stickLab{ {}, "Stick (global)" }, gridLab{ {}, "T-grid (global)" }, genLab{ {}, "Gen" }, sieveMLab{ {}, "m" }, sieveRLab{ {}, "R" };
     juce::Label kbdHintLab;
 
     // --- UI: editors ---

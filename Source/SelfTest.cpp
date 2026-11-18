@@ -99,6 +99,7 @@ upic::runLibraryModelChecks (t);
     upic::runInterfaceChecks (t);
     upic::runFocusChecks (t);
     upic::runViewChecks (t);
+    upic::runKnobChecks (t);
     upic::runMidiInputChecks (t);
     upic::runEnvelopeChecks (t);
     upic::runTransportChecks (t);

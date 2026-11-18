@@ -102,14 +102,12 @@ void MainComponent::buildSieveControls()
                           "the sound and a control signal at once.");
     modRateSlider.setRange (0.05, 20.0, 0.05);
     modRateSlider.setValue (1.0, juce::dontSendNotification);
-    modRateSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 18);
     modRateSlider.setNumDecimalPlacesToDisplay (2);
     modRateSlider.setTextValueSuffix (" Hz");
     modRateSlider.setTooltip ("The LFO's rate: 1 Hz is one sweep over a\n"
                               "second of score time.");
     modDepthSlider.setRange (0.0, 1.0, 0.01);
     modDepthSlider.setValue (0.0, juce::dontSendNotification);
-    modDepthSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 18);
     modDepthSlider.setNumDecimalPlacesToDisplay (2);
     modDepthSlider.setTooltip ("How deep the modulation goes: 1 is an octave\n"
                               "of pitch, or a full swing of the amplitude.");
@@ -176,7 +174,6 @@ void MainComponent::buildSieveControls()
 
     stickSlider.setRange(0.0, 1.0, 0.05);
     stickSlider.setValue(1.0, juce::dontSendNotification);
-    stickSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 72, 18);
     stickSlider.onValueChange = [this]{
         stickiness = stickSlider.getValue();
         score.setStickiness(stickiness);
@@ -254,7 +251,6 @@ void MainComponent::buildStepControls()
                         "of discrete steps. Off = the continuum.");
     stepDivSlider.setRange (1.0, 99.0, 1.0);
     stepDivSlider.setValue (12.0, juce::dontSendNotification);
-    stepDivSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 40, 18);
     stepDivSlider.setTooltip ("Equal divisions per octave: 12 is the\n"
                               "chromatic scale, 19 and 31 the tempered\n"
                               "ones, 7 the diatonic one.");
@@ -327,7 +323,6 @@ void MainComponent::buildFrequencyControls()
     warpSlider.setName("warpSlider");
     warpSlider.setRange (-0.9, 0.9, 0.05);
     warpSlider.setValue (0.0, juce::dontSendNotification);
-    warpSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 18);
     warpSlider.setNumDecimalPlacesToDisplay (2);
     warpSlider.setTooltip ("The page's acceleration: the page's own time runs\n"
                             "at a varying rate. Positive starts slow and speeds\n"
@@ -668,7 +663,6 @@ void MainComponent::buildMaterialTabs()
     refSlider.setName("refSlider");
     refSlider.setNormalisableRange(juce::NormalisableRange<double>(20.0, 4000.0, 0.01, 0.4));
     refSlider.setValue(upic::kDefaultRefFreq, juce::dontSendNotification);
-    refSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 72, 18);
     refSlider.setTextValueSuffix(" Hz");
     refSlider.setTooltip("Reference pitch: the 1x pitch of the material and the grid's 1x.\n"
                          "On the Sample tab it is the SLOT's Ref (the material's base\n"
@@ -714,7 +708,7 @@ void MainComponent::buildMaterialTabs()
     };
     tempoSlider.setNormalisableRange (juce::NormalisableRange<double> (40.0, 240.0, 1.0, 0.5));
     tempoSlider.setValue (120.0, juce::dontSendNotification);
-    tempoSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 18);
+    tempoSlider.setName ("tempoSlider");
     tempoSlider.onValueChange = [this]{ const juce::ScopedLock sl (dataLock); curPage().tempoBpm = (double) tempoSlider.getValue(); refreshBoxes(); };
 }
 
@@ -723,14 +717,11 @@ void MainComponent::buildPmControls()
     pmRatioSlider.setName ("pmRatioSlider");
     pmRatioSlider.setNormalisableRange (juce::NormalisableRange<double> (0.1, 32.0, 0.01, 0.4));
     pmRatioSlider.setValue (2.0, juce::dontSendNotification);
-    pmRatioSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 18);
     pmIndexSlider.setName ("pmIndexSlider");
     pmIndexSlider.setNormalisableRange (juce::NormalisableRange<double> (0.0, 20.0, 0.01, 0.4));
     pmIndexSlider.setValue (1.5, juce::dontSendNotification);
-    pmIndexSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 18);
     pmFeedbackSlider.setNormalisableRange (juce::NormalisableRange<double> (0.0, 1.0, 0.001, 0.4));
     pmFeedbackSlider.setValue (0.0, juce::dontSendNotification);
-    pmFeedbackSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 18);
     pmFeedbackSlider.onValueChange = [this]{
         if (! score.getSelectedArcs().empty())
         {
@@ -953,7 +944,6 @@ void MainComponent::buildSampleControls()
     levelSlider.setName("levelSlider");
     levelSlider.setNormalisableRange (juce::NormalisableRange<double> (0.0, 2.0, 0.01, 0.2));
     levelSlider.setValue (1.0, juce::dontSendNotification);
-    levelSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 18);
     levelSlider.setTooltip ("The slot's level - how loud the material is "
                             "(1 = as it was loaded)");
     levelSlider.onValueChange = [this]{
@@ -1048,7 +1038,6 @@ void MainComponent::buildLiveInputControls()
     inGainSlider.setName("inGainSlider");
     inGainSlider.setRange(0.0, 1.0, 0.01);
     inGainSlider.setValue(0.8, juce::dontSendNotification);
-    inGainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 72, 18);
     inGainSlider.onValueChange = [this]{ inputGain = (float) inGainSlider.getValue(); };
 
     // v1.31 (U4): the digitised wave page. The real UPIC could fill the
@@ -1064,7 +1053,10 @@ void MainComponent::buildLiveInputControls()
 
     slotLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     slotLab.setColour(juce::Label::textColourId, juce::Colour(0xffc9c9d4));
-    pmRatioLab.setText ("Ratio", juce::dontSendNotification); pmIndexLab.setText ("Index", juce::dontSendNotification); tempoLab.setText ("Tempo", juce::dontSendNotification); tempoLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
+    pmRatioLab.setText ("Ratio", juce::dontSendNotification); pmIndexLab.setText ("Index", juce::dontSendNotification);
+    // F11: the tempo group's disclosure toggle is captioned "Tempo", so the
+    // control's own label carries the unit instead of repeating it.
+    tempoLab.setText ("BPM", juce::dontSendNotification); tempoLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     refLab.setColour(juce::Label::textColourId, juce::Colour(0xffc9c9d4));
     samplePitchLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     samplePitchLab.setColour(juce::Label::textColourId, juce::Colour(0xffc9c9d4));

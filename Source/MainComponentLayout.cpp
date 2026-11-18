@@ -677,6 +677,9 @@ void MainComponent::resized()
         juce::Component* comp  = nullptr; int w = 0;
         bool flex = false;       // takes the rest of the line (the status)
         int minSlice = 0;
+        // F11: a knob's width depends on the narrow layout's fallback (the
+        // horizontal slider needs more room than the rotary one).
+        bool knob = false;
     };
     struct FlowGroup
     {
@@ -732,6 +735,14 @@ void MainComponent::resized()
               { return fitItem (l, lw, c, w); };
     auto FX = [&] (juce::Component* c, int minSlice)
     { FlowItem it; it.comp = c; it.flex = true; it.minSlice = minSlice; return it; };
+    // F11: a knob is a square control, so it needs a square's width - not
+    // the long track the horizontal slider needed.
+    auto FK = [&] (juce::Component* l, int lw, upic::Knob* c)
+    {
+        auto it = fitItem (l, lw, c, upic::Knob::kDesignSize);
+        it.knob = true;
+        return it;
+    };
 
     // v1.21: the material row shows the CURRENT tab's material - the tab IS
     // the material (v1.8). The other tab's controls are hidden, not left in
@@ -795,7 +806,7 @@ void MainComponent::resized()
     groups.push_back ({ "file", { F(&settingsBtn, 78), F(&clearBtn, 64) } });
 
     // the tempo and the clock
-    groups.push_back ({ "tempo", { FL(&tempoLab, 40, &tempoSlider, 140) } });
+    groups.push_back ({ "tempo", { FK(&tempoLab, 40, &tempoSlider) } });
     groups.push_back ({ "clock", { F(&timeLab, 150) } });
 
     // the voice: what is drawn (the carrier wave, the envelope). The tool
@@ -809,15 +820,15 @@ void MainComponent::resized()
     }
     // ... and how it sounds: the intensity, the duration and the master
     // gain are one theme, so they stay together in their own group.
-    groups.push_back ({ "levels", { FL (&intenLab, 40, &intenSlider, 180),
-                                    FL (&durLab, 30, &durSlider, 160),
-                                    FL (&masterLab, 52, &masterSlider, 180) } });
+    groups.push_back ({ "levels", { FK (&intenLab, 40, &intenSlider),
+                                    FK (&durLab, 30, &durSlider),
+                                    FK (&masterLab, 52, &masterSlider) } });
     // the pitch: the snap, the discrete step (the arc's pitch moves
     // through a temperament) and the arc's frequency space (the UPIC's
     // four tables). The step belongs to the arc's voice, not to one
     // material, so it shows in every tab.
     groups.push_back ({ "pitch", { F(&snapBtn, 68), F(&stepBtn, 76),
-                                   FL (&stepDivLab, 52, &stepDivSlider, 110),
+                                   FK (&stepDivLab, 52, &stepDivSlider),
                                    FL (&spaceLab, 44, &spaceBox, 170) } });
 
     // the material: the current tab's own controls
@@ -826,37 +837,37 @@ void MainComponent::resized()
         if (showSampleCtl)
             mat.items = { FL(&slotLab, 34, &sampleBox, 180),
                           F(&loadSampleBtn, 110), F(&revBtn, 64),
-                          FL(&refLab, 34, &refSlider, 210),
-                          FL(&levelLab, 34, &levelSlider, 110),
+                          FK(&refLab, 34, &refSlider),
+                          FK(&levelLab, 34, &levelSlider),
                           FL(&samplePitchLab, 34, &samplePitchBox, 180),
-                          FL(&grainLab, 40, &grainSlider, 100),
+                          FK(&grainLab, 40, &grainSlider),
                           // M5: the material's own edits (the normalise, the
                           // fades and the reset; the trim is dragged in the
                           // material view)
                           F(&normMatBtn, 64), F(&fadeMatBtn, 64), F(&resetMatBtn, 64),
-                          FL(&inGainLab, 30, &inGainSlider, 140), F(&monBtn, 64), F(&capBtn, 84),
+                          FK(&inGainLab, 30, &inGainSlider), F(&monBtn, 64), F(&capBtn, 84),
                           F(&waveFromSlotBtn, 110) };
         else if (showLiveCtl)
-            mat.items = { FL(&refLab, 34, &refSlider, 210),
+            mat.items = { FK(&refLab, 34, &refSlider),
                           FL(&livePitchLab, 42, &livePitchBox, 180),
-                          FL(&liveGrainLab, 40, &liveGrainSlider, 120),
+                          FK(&liveGrainLab, 40, &liveGrainSlider),
                           FL(&liveRevLab, 52, &liveRevLenBox, 90),
                           F(&liveRevBtn, 64) };
         else if (showPmCtl)
             mat.items = { FL(&pmOpsLab, 34, &pmOpsBox, 80),
                           FL(&pmPresetLab, 44, &pmPresetBox, 180),
-                          FL(&pmRatioLab, 40, &pmRatioSlider, 150),
-                          FL(&pmIndexLab, 40, &pmIndexSlider, 150),
+                          FK(&pmRatioLab, 40, &pmRatioSlider),
+                          FK(&pmIndexLab, 40, &pmIndexSlider),
                           FL(&pmIndexEnvLab, 46, &pmIndexEnvBox, 120),
-                          FL(&pmFeedbackLab, 42, &pmFeedbackSlider, 130),
+                          FK(&pmFeedbackLab, 42, &pmFeedbackSlider),
                           F(&pmImportBtn, 64), F(&pmExportBtn, 64) };
         else
             // v1.31 (U1): the Osc tab's material group carries the polyagogy
             // controls - what the arc's drawn wave does besides being the
             // timbre.
             mat.items = { FL(&modUseLab, 56, &modUseBox, 150),
-                          FL(&modRateLab, 34, &modRateSlider, 120),
-                          FL(&modDepthLab, 40, &modDepthSlider, 110) };
+                          FK(&modRateLab, 34, &modRateSlider),
+                          FK(&modDepthLab, 40, &modDepthSlider) };
         groups.push_back (mat);
     }
 
@@ -869,13 +880,13 @@ void MainComponent::resized()
     // v1.33: the GLOBAL magnets - the stick and the time grid. Every
     // page and every sieve zone follows these two (a zone can set its
     // own m/R and its own time grid, but not its own stick).
-    groups.push_back ({ "magnets", { FL(&stickLab, 84, &stickSlider, 160),
+    groups.push_back ({ "magnets", { FK(&stickLab, 84, &stickSlider),
                                      FL(&gridLab, 86, &gridBox, 84) } });
 
     // v1.33: the page's frequency settings - its ambitus, its
     // acceleration and its four frequency spaces (the UPIC's tables)
     groups.push_back ({ "page", { FL(&ambitusLab, 58, &ambitusBox, 170),
-                                  FL(&warpLab, 40, &warpSlider, 120),
+                                  FK(&warpLab, 40, &warpSlider),
                                   FL(&spaceDefLab[0], 46, &spaceDefBox[0], 120),
                                   FL(&spaceDefLab[1], 46, &spaceDefBox[1], 120),
                                   FL(&spaceDefLab[2], 46, &spaceDefBox[2], 120),
@@ -885,12 +896,12 @@ void MainComponent::resized()
     groups.push_back ({ "tools", { FL(&genLab, 36, &genBox, 220) } });
 
     // the scrub's parameters and the arc dragging
-    groups.push_back ({ "scrub", { FL(&scrubLenLab, 60, &scrubLenSlider, 130),
-                                   FL(&scrubCrossLab, 70, &scrubCrossSlider, 130),
-                                   FL(&scrubTailLab, 60, &scrubTailSlider, 130),
-                                   FL(&scrubGrainLab, 70, &scrubGrainSlider, 110) } });
+    groups.push_back ({ "scrub", { FK(&scrubLenLab, 60, &scrubLenSlider),
+                                   FK(&scrubCrossLab, 70, &scrubCrossSlider),
+                                   FK(&scrubTailLab, 60, &scrubTailSlider),
+                                   FK(&scrubGrainLab, 70, &scrubGrainSlider) } });
     groups.push_back ({ "drag", { F(&muteDragBtn, 90),
-                                  FL(&dragSmoothLab, 70, &dragSmoothSlider, 130) } });
+                                  FK(&dragSmoothLab, 70, &dragSmoothSlider) } });
 
     // the status line: it takes the rest of its line
     groups.push_back ({ "status", { FX (&statusLab, 220) } });
@@ -975,11 +986,21 @@ void MainComponent::resized()
     // pass must agree exactly, or a line lands on top of the next one.
     const int groupGapDp = 6;
 
-    auto groupWidth = [&] (const FlowGroup& g) -> int
+    auto groupWidth = [&] (const FlowGroup& g, float sc) -> int
     {
         int w = 0;
         for (auto& it : g.items)
-            w += it.flex ? it.minSlice : (it.labelW + it.w);
+        {
+            if (it.flex)
+            {
+                w += it.minSlice;
+                continue;
+            }
+            // F11: the knob's fallback is wider than the knob.
+            const int compW = (it.knob && upic::Knob::shouldFallBack (sc))
+                                ? upic::Knob::kFallbackDesignWidth : it.w;
+            w += it.labelW + compW;
+        }
         return w;
     };
 
@@ -995,7 +1016,7 @@ void MainComponent::resized()
 
         for (auto& grp : list)
         {
-            const int gw = (int) std::lround ((float) groupWidth (grp) * sc);
+            const int gw = (int) std::lround ((float) groupWidth (grp, sc) * sc);
             // does the group fit on the current line?
             if (x > area.getX() && x + gw + gap > right) { x = area.getX(); y += rh2; }
             const int gx = x, gy = y;
@@ -1024,7 +1045,20 @@ void MainComponent::resized()
                     continue;
                 }
                 const int lw = (int) std::lround ((float) it.labelW * sc);
-                const int cw = (int) std::lround ((float) it.w * sc);
+                // F11: a knob that is too small to read falls back to the
+                // horizontal slider (decision 14), and the fallback needs
+                // more room. The rule depends on the scale alone, so the
+                // counting pass and the placing pass agree.
+                bool knobFallback = false;
+                if (it.knob && it.comp != nullptr)
+                {
+                    knobFallback = upic::Knob::shouldFallBack (sc);
+                    if (auto* knob = dynamic_cast<upic::Knob*> (it.comp))
+                        knob->setFallback (knobFallback);
+                }
+                const int cwDp = (it.knob && knobFallback) ? upic::Knob::kFallbackDesignWidth
+                                                            : it.w;
+                const int cw = (int) std::lround ((float) cwDp * sc);
                 // a group that is wider than the line wraps inside itself
                 if (x > area.getX() && x + lw + cw > right)
                 {

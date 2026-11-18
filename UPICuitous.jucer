@@ -17,6 +17,8 @@
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>
       <FILE id="sTu16" name="SelfTestUi.cpp" compile="1" resource="0" file="Source/SelfTestUi.cpp"/>
+      <FILE id="sTk17" name="SelfTestKnob.cpp" compile="1" resource="0"
+            file="Source/SelfTestKnob.cpp"/>
       <FILE id="aCnt17" name="AllocCounter.h" compile="0" resource="0" file="Source/AllocCounter.h"/>
       <FILE id="mCcpp2" name="MainComponent.cpp" compile="1" resource="0"
             file="Source/MainComponent.cpp"/>
@@ -50,6 +52,8 @@
       <FILE id="sEdr05" name="ScoreEditor.h" compile="0" resource="0" file="Source/ScoreEditor.h"/>
       <FILE id="sVbr01" name="ScoreViewBar.h" compile="0" resource="0"
             file="Source/ScoreViewBar.h"/>
+      <FILE id="kNOb01" name="Knob.h" compile="0" resource="0"
+            file="Source/Knob.h"/>
       <FILE id="sEdc30" name="ScoreEditor.cpp" compile="1" resource="0" file="Source/ScoreEditor.cpp"/>
       <FILE id="wEdr06" name="WaveformEditor.h" compile="0" resource="0"
             file="Source/WaveformEditor.h"/>

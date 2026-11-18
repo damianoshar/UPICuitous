@@ -89,14 +89,18 @@ MainComponent::MainComponent(bool pluginMode)
     // Theme all slider groups after their builders run. Previously Scrub,
     // Drag smooth, Sample grain and Live grain retained the transparent
     // JUCE value boxes instead of the Master Volume treatment.
-    for (auto* slider : { &durSlider, &masterSlider, &intenSlider,
-                          &refSlider, &tempoSlider, &pmRatioSlider,
-                          &pmIndexSlider, &pmFeedbackSlider, &stickSlider,
-                          &inGainSlider, &scrubLenSlider, &scrubCrossSlider,
-                          &scrubTailSlider, &scrubGrainSlider, &grainSlider,
-                          &dragSmoothSlider, &liveGrainSlider, &oscPortSlider,
-                          &oscMcPortSlider, &modRateSlider, &modDepthSlider,
-                          &stepDivSlider, &warpSlider, &levelSlider })
+    // F11: the toolbar's amounts are knobs now, but the palette is the
+    // slider's own - the knob draws with the same colours.
+    const std::vector<juce::Slider*> themedSliders = {
+        &durSlider, &masterSlider, &intenSlider,
+        &refSlider, &tempoSlider, &pmRatioSlider,
+        &pmIndexSlider, &pmFeedbackSlider, &stickSlider,
+        &inGainSlider, &scrubLenSlider, &scrubCrossSlider,
+        &scrubTailSlider, &scrubGrainSlider, &grainSlider,
+        &dragSmoothSlider, &liveGrainSlider, &oscPortSlider,
+        &oscMcPortSlider, &modRateSlider, &modDepthSlider,
+        &stepDivSlider, &warpSlider, &levelSlider };
+    for (auto* slider : themedSliders)
         applyMasterVolumeSliderTheme (*slider);
     // Icon-only controls remain discoverable with mouse/pen hover. Preserve
     // any more specific tooltips that the individual controls already set.
@@ -204,11 +208,14 @@ void MainComponent::buildTransportControls()
 
     for (auto* s : { &scrubLenSlider, &scrubCrossSlider, &scrubTailSlider, &scrubGrainSlider })
     {
-        s->setSliderStyle(juce::Slider::LinearHorizontal);
-        s->setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
+        // F11: the knob draws its own value (and takes a typed value on a
+        // double click), so it has no text box.
         s->setNumDecimalPlacesToDisplay(0);
         addAndMakeVisible(s);
     }
+    scrubLenSlider.setName ("scrubLenSlider");
+    scrubCrossSlider.setName ("scrubCrossSlider");
+    scrubGrainSlider.setName ("scrubGrainSlider");
     for (auto* l : { &scrubLenLab, &scrubCrossLab, &scrubTailLab, &scrubGrainLab })
     {
         l->setJustificationType(juce::Justification::centredRight);
@@ -248,9 +255,8 @@ void MainComponent::buildTransportControls()
     grainLab.setColour(juce::Label::textColourId, juce::Colours::white);
     grainLab.setColour(juce::Label::backgroundColourId, juce::Colour(0xff2a2a32));
     addAndMakeVisible(grainLab);
-    grainSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    grainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
     grainSlider.setNumDecimalPlacesToDisplay(0);
+    grainSlider.setName ("grainSlider");
     grainSlider.setTextValueSuffix(" ms");
     grainSlider.setRange(5.0, 500.0, 1.0);
     grainSlider.setValue((double) sampleGrainMs, juce::dontSendNotification);
@@ -272,9 +278,8 @@ void MainComponent::buildTransportControls()
     dragSmoothLab.setColour(juce::Label::textColourId, juce::Colours::white);
     dragSmoothLab.setColour(juce::Label::backgroundColourId, juce::Colour(0xff2a2a32));
     addAndMakeVisible(dragSmoothLab);
-    dragSmoothSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    dragSmoothSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
     dragSmoothSlider.setNumDecimalPlacesToDisplay(0);
+    dragSmoothSlider.setName ("dragSmoothSlider");
     dragSmoothSlider.setTextValueSuffix(" ms");
     dragSmoothSlider.setRange(0.0, 1000.0, 1.0);
     dragSmoothSlider.setValue((double) dragSmoothMs.load(), juce::dontSendNotification);
@@ -514,8 +519,6 @@ void MainComponent::buildLiveControls()
     liveGrainLab.setColour(juce::Label::textColourId, juce::Colours::white);
     liveGrainLab.setColour(juce::Label::backgroundColourId, juce::Colour(0xff2a2a32));
     liveGrainSlider.setName("liveGrainSlider");
-    liveGrainSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    liveGrainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 56, 18);
     liveGrainSlider.setNumDecimalPlacesToDisplay(0);
     liveGrainSlider.setTextValueSuffix(" ms");
     liveGrainSlider.setRange(5.0, 500.0, 1.0);
@@ -818,14 +821,9 @@ void MainComponent::buildToolbarControls()
         publishModelSnapshot();
         score.repaint();
     };
-    // all numeric sliders share the same right-aligned value box, so the rows
-    // read as one column instead of mixing left and right text boxes
-    durSlider.setTextBoxStyle    (juce::Slider::TextBoxRight, false, 72, 18);
-    masterSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 18);
-    intenSlider.setTextBoxStyle  (juce::Slider::TextBoxRight, false, 72, 18);
-    // v1.31 (U2): the duration now reaches "720.000 s", so its value box
-    // needs a little more room than the shared 72 px.
-    durSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 92, 18);
+    // F11 (2026-11-18): the levels are knobs now. The knob draws its own
+    // value on its face (and takes a typed value on a double click), so the
+    // old right-aligned value boxes are gone.
     // The full numeric-slider palette is applied once in the constructor,
     // after every control group (including Scrub and overlays) is built.
 }

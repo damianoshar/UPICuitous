@@ -52,6 +52,7 @@ namespace upic
     void runInterfaceChecks (SelfTest& t); // F5: the disclosure toggles and the strip
     void runFocusChecks (SelfTest& t);    // F4: the focus views
     void runViewChecks (SelfTest& t);     // F6: the view commands and the precision
+    void runKnobChecks (SelfTest& t);     // F11: the knob row
     void runMidiInputChecks (SelfTest& t);
     void runEnvelopeChecks (SelfTest& t);
     void runTransportChecks (SelfTest& t);
