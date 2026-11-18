@@ -1543,6 +1543,60 @@ void upic::runInterfaceChecks (upic::SelfTest& t)
                && ! mc.pieceToVar().hasProperty ("session"),
                "F5 the piece JSON has no session fields");
     }
+
+    // --- v1.34.4: the Voice section's Duplicate and Select all ------------
+    // The canvas context menu's arc commands are buttons too, beside the
+    // New / Assign row.
+    {
+        auto* dup = button ("dupArcBtn");
+        auto* sel = button ("selectAllBtn");
+        check (dup != nullptr && sel != nullptr
+               && dup->isVisible() && sel->isVisible(),
+               "v1.34.4 the Voice section carries Duplicate and Select all");
+
+        // a piece with two arcs: Select all picks both, Duplicate copies
+        // the selection
+        upic::PieceModel m;
+        {
+            upic::Waveform w (10, "Wave 10", upic::paletteColour (0));
+            w.makeSine();
+            m.waveforms.push_back (w);
+            upic::Envelope e (20, "Env 20", upic::paletteColour (1));
+            e.presetFlat();
+            m.envelopes.push_back (e);
+        }
+        upic::Page pg;
+        pg.durationSec = 4.0;
+        pg.nextArcId = 3;
+        for (int i = 1; i <= 2; ++i)
+        {
+            upic::Arc a;
+            a.id = i; a.mode = 0; a.waveformId = 10; a.envelopeId = 20;
+            a.intensity = 0.8f;
+            a.points = { { 0.0, 220.0 + 110.0 * (double) i },
+                         { 2.0, 440.0 + 220.0 * (double) i } };
+            pg.arcs.push_back (a);
+        }
+        m.pages.push_back (pg);
+
+        if (mc.loadFromVar (upic::pieceToVar (m)))
+        {
+            mc.selectArcsForTest ({ 1 });
+            const int arcsBefore = mc.arcCountForTest();
+            if (sel != nullptr) sel->onClick();
+            check (arcsBefore == 2 && mc.selectedArcCountForTest() == arcsBefore,
+                   "v1.34.4 the Voice Select all button selects every arc",
+                   juce::String (mc.selectedArcCountForTest()) + " of "
+                     + juce::String (arcsBefore));
+            // Duplicate copies the selection - one arc selected, one copy
+            mc.selectArcsForTest ({ 1 });
+            if (dup != nullptr) dup->onClick();
+            check (mc.arcCountForTest() == arcsBefore + 1,
+                   "v1.34.4 the Voice Duplicate button copies the selection",
+                   juce::String (mc.arcCountForTest()) + " vs "
+                     + juce::String (arcsBefore));
+        }
+    }
 }
 
 //==============================================================================

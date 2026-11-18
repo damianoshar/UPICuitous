@@ -140,7 +140,7 @@ void MainComponent::buildSieveControls()
     //     procedural arc generators + persistent shortcut/wheel hint ---
     addAndMakeVisible(sievePresetBox); addAndMakeVisible(stickSlider);
     addAndMakeVisible(gridBox); addAndMakeVisible(genBox);
-    addAndMakeVisible(stickLab); addAndMakeVisible(gridLab); addAndMakeVisible(genLab);
+    addAndMakeVisible(stickLab); addAndMakeVisible(gridLab);
     addAndMakeVisible(sieveMLab); addAndMakeVisible(sieveRLab);
     sieveMLab.setName("sieveMLab"); sieveRLab.setName("sieveRLab");
     addAndMakeVisible(kbdHintLab);
@@ -1072,6 +1072,7 @@ void MainComponent::buildLiveInputControls()
     timeLab.setColour(juce::Label::textColourId, juce::Colours::white);
     timeLab.setFont(juce::Font(juce::FontOptions(13.0f, juce::Font::bold)));
     timeLab.setJustificationType(juce::Justification::centredRight);
+    statusLab.setName ("statusLab");
     statusLab.setColour(juce::Label::textColourId, juce::Colour(0xff9a9aa5));
     statusLab.setFont(juce::Font(juce::FontOptions(12.5f, juce::Font::bold)));
     statusLab.setJustificationType(juce::Justification::centredRight);

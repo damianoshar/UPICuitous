@@ -218,7 +218,8 @@ juce::String MainComponent::groupCaption (const juce::String& group)
     if (group == "sieve")  return "Sieve";
     if (group == "magnets") return "Magnets";
     if (group == "page")   return "Page";
-    if (group == "tools")  return "Tools";
+    if (group == "accel")  return "Acceleration";
+    if (group == "tools")  return "Generator";
     if (group == "drag")   return "Drag";
     if (group == "status") return "Status";
     return group;
@@ -440,6 +441,13 @@ void MainComponent::buildEditors()
         b->setTooltip ("Apply " + b->getButtonText() + " shape");
     addAndMakeVisible(eFlat); addAndMakeVisible(ePerc); addAndMakeVisible(eSwell); addAndMakeVisible(eGate); addAndMakeVisible(eStr);
     addAndMakeVisible(assignBtn); addAndMakeVisible(delArcBtn); addAndMakeVisible(muteArcBtn);
+    // v1.34.4: the arc commands the canvas context menu had (Duplicate,
+    // Select all) are buttons in the Voice section as well.
+    addAndMakeVisible(dupArcBtn); addAndMakeVisible(selectAllBtn);
+    dupArcBtn.setName ("dupArcBtn");
+    selectAllBtn.setName ("selectAllBtn");
+    dupArcBtn.setTooltip ("Duplicate the selected arc(s) (Ctrl+D)");
+    selectAllBtn.setTooltip ("Select every arc on this page (Ctrl+A)");
     addAndMakeVisible(voiceLab); addAndMakeVisible(waveLab); addAndMakeVisible(envLab); addAndMakeVisible(toolLab);
 
     // --- F4 (2026-11-17): the focus views -------------------------------
@@ -551,6 +559,16 @@ void MainComponent::buildEditors()
         for (auto& a : curPage().arcs)
             if (std::find(ids.begin(), ids.end(), a.id) != ids.end()) a.muted = ! a.muted;
         score.repaint(); updateStatus();
+    };
+    // v1.34.4: the context menu's Duplicate and Select all are buttons now.
+    dupArcBtn.onClick = [this]{
+        score.duplicateSelected();
+        updateStatus(); refreshBoxes(); refreshPointFields();
+    };
+    selectAllBtn.onClick = [this]{
+        score.selectAll();
+        syncControlsToArc (score.getSelectedArc());
+        updateStatus(); refreshPointFields();
     };
 
     // F2/F3 (2026-11-17): one undo transaction per bank command. A refusal
@@ -680,6 +698,19 @@ void MainComponent::resized()
         // F11: a knob's width depends on the narrow layout's fallback (the
         // horizontal slider needs more room than the rotary one).
         bool knob = false;
+        // v1.34.3: the caption sits beside the control on the control row
+        // (not above it) - the compact "Wave: [box]" in the Voice card.
+        bool inlineLabel = false;
+        // v1.34.3: this cell starts a new line in its card (the Pitch
+        // buttons stay above the frequency-space dropdown).
+        bool newLine = false;
+        // v1.34.3: sit at the top of the line instead of its bottom (the
+        // Pitch dropdown under the buttons would otherwise drop to the
+        // knob's baseline, leaving a tall gap above it).
+        bool topAlign = false;
+        // v1.34.4: this knob spans the card's rows - it takes the right
+        // column and its disc is cut in half by the row boundary.
+        bool spansRows = false;
     };
     struct FlowGroup
     {
@@ -735,6 +766,13 @@ void MainComponent::resized()
     auto F  = [&] (juce::Component* c, int w) { return fitItem (nullptr, 0, c, w); };
     auto FL = [&] (juce::Component* l, int lw, juce::Component* c, int w)
               { return fitItem (l, lw, c, w); };
+    // v1.34.3: a label on the control row, to the left of its control.
+    auto FI = [&] (juce::Component* l, int lw, juce::Component* c, int w)
+    {
+        auto it = fitItem (l, lw, c, w);
+        it.inlineLabel = true;
+        return it;
+    };
     auto FX = [&] (juce::Component* c, int minSlice)
     { FlowItem it; it.comp = c; it.flex = true; it.minSlice = minSlice; return it; };
     // F11: a knob is a vertical card cell now - the caption above, the
@@ -790,9 +828,9 @@ void MainComponent::resized()
     for (auto* c : oscModCtl) c->setVisible (! showSampleCtl && ! showLiveCtl && ! showPmCtl);
 
     // --- the toolbar's groups ---
-    // v1.33.3: the groups keep their order and their internal grouping, but
-    // a group no longer needs a row of its own: the next group continues on
-    // the same line when there is room for it.
+    // v1.33.3: the groups keep their internal grouping and wrap onto the
+    // next line when there is no room. v1.34.2: the card order is set by
+    // the rank table at the end (the user's order).
     std::vector<FlowGroup> groups;
 
     // transport: Play and Stop live in the permanent strip (F5), so they stay
@@ -802,13 +840,18 @@ void MainComponent::resized()
                                         F(&scrubBtn, 72) } });
 
     // the pages and the files
-    groups.push_back ({ "pages", { FL(&pageLab, 40, &pageBox, 150),
+    // v1.34.2: the page selector's caption went; the group header already
+    // says "Pages", so the box is the card's first cell.
+    groups.push_back ({ "pages", { F(&pageBox, 150),
                                    F(&pageAddBtn, 30), F(&pageDupBtn, 46), F(&pageDelBtn, 30) } });
     // F5: Menu is in the permanent strip; the file group keeps the rest.
     groups.push_back ({ "file", { F(&settingsBtn, 78), F(&clearBtn, 64) } });
 
     // the tempo and the clock
     groups.push_back ({ "tempo", { FK(&tempoLab, 40, &tempoSlider) } });
+    // v1.34.3: acceleration gets a card of its own (the Page card keeps
+    // only its ambitus and its four frequency spaces).
+    groups.push_back ({ "accel", { FK (&warpLab, 40, &warpSlider) } });
     groups.push_back ({ "clock", { F(&timeLab, 150) } });
 
     // the voice: what is drawn (the carrier wave, the envelope). The tool
@@ -816,8 +859,8 @@ void MainComponent::resized()
     {
         FlowGroup voice { "voice", {} };
         if (showWaveCtl)
-            voice.items.push_back (FL (&waveLab, 42, &waveBox, 140));
-        voice.items.push_back (FL (&envLab, 34, &envBox, 140));
+            voice.items.push_back (FI (&waveLab, 42, &waveBox, 140));
+        voice.items.push_back (FI (&envLab, 34, &envBox, 140));
         groups.push_back (voice);
     }
     // ... and how it sounds: the intensity, the duration and the master
@@ -828,10 +871,21 @@ void MainComponent::resized()
     // the pitch: the snap, the discrete step (the arc's pitch moves
     // through a temperament) and the arc's frequency space (the UPIC's
     // four tables). The step belongs to the arc's voice, not to one
-    // material, so it shows in every tab.
-    groups.push_back ({ "pitch", { F(&snapBtn, 68), F(&stepBtn, 76),
-                                   FK (&stepDivLab, 52, &stepDivSlider),
-                                   FL (&spaceLab, 44, &spaceBox, 170) } });
+    // material, so it shows in every tab. v1.34.4: the card is two
+    // columns - the buttons over the frequency-space dropdown on the
+    // left, the division knob spanning both rows on the right.
+    {
+        FlowGroup pitch { "pitch", {} };
+        pitch.items.push_back (F (&snapBtn, 68));
+        pitch.items.push_back (F (&stepBtn, 76));
+        auto stepDiv = FK (&stepDivLab, 52, &stepDivSlider);
+        stepDiv.spansRows = true;
+        pitch.items.push_back (stepDiv);
+        auto pitchSpace = FL (&spaceLab, 44, &spaceBox, 170);
+        pitchSpace.newLine = true;
+        pitch.items.push_back (pitchSpace);
+        groups.push_back (pitch);
+    }
 
     // the material: the current tab's own controls
     {
@@ -876,8 +930,8 @@ void MainComponent::resized()
     // v1.33: the sieve is its own section. It quantises the pitch; it
     // is not a tool and it is not a page setting.
     groups.push_back ({ "sieve", { F(&sieveBtn, 64), F(&sievePresetBox, 150),
-                                   FL(&sieveMLab, 18, &sieveMEdit, 52),
-                                   FL(&sieveRLab, 18, &sieveREdit, 84) } });
+                                   FI(&sieveMLab, 18, &sieveMEdit, 52),
+                                   FI(&sieveRLab, 18, &sieveREdit, 84) } });
 
     // v1.33: the GLOBAL magnets - the stick and the time grid. Every
     // page and every sieve zone follows these two (a zone can set its
@@ -885,17 +939,18 @@ void MainComponent::resized()
     groups.push_back ({ "magnets", { FK(&stickLab, 84, &stickSlider),
                                      FL(&gridLab, 86, &gridBox, 84) } });
 
-    // v1.33: the page's frequency settings - its ambitus, its
-    // acceleration and its four frequency spaces (the UPIC's tables)
-    groups.push_back ({ "page", { FL(&ambitusLab, 58, &ambitusBox, 170),
-                                  FK(&warpLab, 40, &warpSlider),
-                                  FL(&spaceDefLab[0], 46, &spaceDefBox[0], 120),
-                                  FL(&spaceDefLab[1], 46, &spaceDefBox[1], 120),
-                                  FL(&spaceDefLab[2], 46, &spaceDefBox[2], 120),
-                                  FL(&spaceDefLab[3], 46, &spaceDefBox[3], 120) } });
+    // v1.33: the page's frequency settings - its ambitus and its four
+    // frequency spaces (the UPIC's tables). v1.34.3: the acceleration
+    // moved to its own card.
+    groups.push_back ({ "page", { FI(&ambitusLab, 58, &ambitusBox, 170),
+                                  FI(&spaceDefLab[0], 46, &spaceDefBox[0], 120),
+                                  FI(&spaceDefLab[1], 46, &spaceDefBox[1], 120),
+                                  FI(&spaceDefLab[2], 46, &spaceDefBox[2], 120),
+                                  FI(&spaceDefLab[3], 46, &spaceDefBox[3], 120) } });
 
-    // v1.33: the tools (procedural generators)
-    groups.push_back ({ "tools", { FL(&genLab, 36, &genBox, 220) } });
+    // v1.34.3: the tools card is the Generator; its caption is the title,
+    // so the "Gen" label above the dropdown is gone.
+    groups.push_back ({ "tools", { F(&genBox, 220) } });
 
     // the scrub's parameters and the arc dragging
     groups.push_back ({ "scrub", { FK(&scrubLenLab, 60, &scrubLenSlider),
@@ -905,8 +960,28 @@ void MainComponent::resized()
     groups.push_back ({ "drag", { F(&muteDragBtn, 90),
                                   FK(&dragSmoothLab, 70, &dragSmoothSlider) } });
 
-    // the status line: it takes the rest of its line
-    groups.push_back ({ "status", { FX (&statusLab, 220) } });
+    // the status line: its card is measured to the one-line text
+    groups.push_back ({ "status", { FX (&statusLab, kStatusMinWidthDp) } });
+
+    // v1.34.2: the user's card order. A rank table keeps the order in one
+    // place - the groups above are built where their controls are easiest
+    // to describe, and the material card depends on the active tab. The
+    // status line stays last: it is the flexible card that fills a row.
+    static const char* const cardOrder[] = {
+        "transport", "pages", "file", "voice", "sieve", "tools", "tempo",
+        "accel", "levels", "material", "magnets", "scrub", "drag", "pitch",
+        "page", "clock", "status"
+    };
+    auto cardRank = [] (const juce::String& name) -> int
+    {
+        for (int i = 0; i < (int) juce::numElementsInArray (cardOrder); ++i)
+            if (name == cardOrder[i])
+                return i;
+        return (int) juce::numElementsInArray (cardOrder);
+    };
+    std::stable_sort (groups.begin(), groups.end(),
+                      [&] (const FlowGroup& a, const FlowGroup& b)
+                      { return cardRank (a.name) < cardRank (b.name); });
 
     // the Hints view toggle owns the sidebar (below): the two explanation
     // labels are no longer part of the flow.
@@ -1065,6 +1140,7 @@ void MainComponent::resized()
     const int cardPadX = 4, cardPadY = 3, cardGap = 6, cardHeaderH = 20;
     const int cardCellGap = 4, cardRowGap = 4;
     const int cardControlH = 26;   // the row a button / dropdown occupies
+    const int kInlineGapDp = 4;    // label-to-control gap on an inline cell
 
     // v1.34.1: a card is only as tall as its tallest cell. A knob's cell is
     // 90dp (caption, disc, pill); a plain control is a caption row over one
@@ -1090,26 +1166,118 @@ void MainComponent::resized()
         juce::Font f (juce::FontOptions (15.0f));
         return juce::GlyphArrangement::getStringWidthInt (f, grp.header->getButtonText()) + 44;
     };
-    auto isFlexGroup = [] (const FlowGroup& grp) -> bool
-    {
-        for (auto& it : grp.items)
-            if (it.flex) return true;
-        return false;
-    };
     auto makeCells = [&] (const FlowGroup& grp) -> std::vector<CardCell>
     {
         std::vector<CardCell> cells;
         for (auto& it : grp.items)
         {
             CardCell c { it, 0 };
-            if (it.flex) c.widthDp = it.minSlice;
+            // v1.34.5: the status card is measured to its one-line text
+            // instead of stretching to the row's end. neededWidth (in
+            // design units, like widthDp) carries the label's own text,
+            // so the label's 5+5 px border and a little air are added.
+            if (it.flex)
+                c.widthDp = juce::jmax (it.minSlice, neededWidth (it.comp) + 16);
             else if (it.knob)
                 c.widthDp = juce::jmax (upic::Knob::kCellWidth, captionWidthDp (it.label));
+            else if (it.inlineLabel)
+                c.widthDp = it.labelW + kInlineGapDp + it.w;
             else
                 c.widthDp = juce::jmax (it.w, it.labelW + 4);
             cells.push_back (c);
         }
+        // v1.34.3: a card's knobs sit at its right end - the plain
+        // controls keep their order, then the knobs keep theirs.
+        std::stable_partition (cells.begin(), cells.end(),
+                               [] (const CardCell& c) { return ! c.item.knob; });
         return cells;
+    };
+
+    // v1.34.4: the height a cell needs - the same rule the card's rows use.
+    auto cardCellHeight = [&] (const CardCell& c, float sc) -> int
+    {
+        const int captionH = juce::jmax (8, (int) std::lround ((float) upic::Knob::kCellCaptionH * sc));
+        const int ctrlH = juce::jmax (14, (int) std::lround ((float) cardControlH * sc));
+        if (c.item.flex) return ctrlH;
+        if (c.item.knob) return juce::jmax (8, (int) std::lround ((float) upic::Knob::kCellHeight * sc));
+        return (c.item.label != nullptr && ! c.item.inlineLabel ? captionH : 0) + ctrlH;
+    };
+
+    // v1.34.4: a knob that spans the card's rows (the Pitch card) takes the
+    // right column; the other cells share the left one and the knob's disc
+    // is cut in half by the boundary between their rows.
+    struct CardLine { int width = 0, height = 0; std::vector<size_t> cells; };
+    struct SpannerLayout
+    {
+        int index = -1;
+        int knobW = 0, knobH = 0, half = 0, bodyH = 0, leftW = 0;
+        std::vector<CardLine> lines;
+    };
+    auto layoutSpanner = [&] (const std::vector<CardCell>& cells, float sc, int maxW,
+                               int gap) -> SpannerLayout
+    {
+        SpannerLayout out;
+        for (size_t i = 0; i < cells.size(); ++i)
+            if (cells[i].item.spansRows) { out.index = (int) i; break; }
+        if (out.index < 0)
+            return out;
+
+        const auto& sp = cells[(size_t) out.index];
+        out.knobW = juce::jmax (8, (int) std::lround ((float) sp.widthDp * sc));
+        out.knobH = juce::jmax (8, (int) std::lround ((float) upic::Knob::kCellHeight * sc));
+        const int capH = juce::jmax (8, (int) std::lround ((float) upic::Knob::kCellCaptionH * sc));
+        const int pillH = juce::jmax (6, (int) std::lround ((float) upic::Knob::kCellPillH * sc));
+        const int knobGap = juce::jmax (1, (int) std::lround ((float) upic::Knob::kCellGap * sc));
+        const int side = juce::jmax (0, juce::jmin (out.knobW,
+                                                    out.knobH - capH - pillH - 2 * knobGap));
+        out.half = capH + knobGap + side / 2;   // the disc's middle
+
+        const int leftMax = juce::jmax (8, maxW - out.knobW - gap);
+        CardLine cur;
+        int curW = 0, curH = 0;
+        auto closeLine = [&]
+        {
+            if (! cur.cells.empty())
+            {
+                cur.width = curW;
+                cur.height = curH;
+                out.lines.push_back (cur);
+            }
+            cur = CardLine();
+            curW = 0;
+            curH = 0;
+        };
+        for (size_t i = 0; i < cells.size(); ++i)
+        {
+            if ((int) i == out.index) continue;
+            const auto& c = cells[i];
+            const int cw = juce::jmax (8, (int) std::lround ((float) c.widthDp * sc));
+            const int ch = cardCellHeight (c, sc);
+            if (c.item.newLine && curW > 0) closeLine();
+            if (curW > 0 && curW + gap + cw > leftMax) closeLine();
+            curW += (curW > 0 ? gap : 0) + cw;
+            curH = juce::jmax (curH, ch);
+            cur.cells.push_back (i);
+        }
+        closeLine();
+
+        // the first row reaches the knob's disc middle; the rows below share
+        // what is left, so the knob bridges the boundary
+        int used = 0;
+        for (size_t li = 0; li < out.lines.size(); ++li)
+        {
+            auto& line = out.lines[li];
+            int h = line.height;
+            if (li == 0)
+                h = juce::jmax (h, out.half);
+            else
+                h = juce::jmax (h, (out.knobH - used) / (int) (out.lines.size() - li));
+            line.height = h;
+            used += h;
+            out.leftW = juce::jmax (out.leftW, line.width);
+        }
+        out.bodyH = juce::jmax (out.knobH, used);
+        return out;
     };
 
     struct CardMetrics { int width = 0, height = 0; };
@@ -1128,15 +1296,36 @@ void MainComponent::resized()
         {
             if (c.item.flex) return ctrlH;
             if (c.item.knob) return juce::jmax (8, (int) std::lround ((float) upic::Knob::kCellHeight * sc));
-            return (c.item.label != nullptr ? captionH : 0) + ctrlH;
+            return (c.item.label != nullptr && ! c.item.inlineLabel ? captionH : 0) + ctrlH;
         };
 
         const auto cells = makeCells (grp);
         int lineW = 0, widest = 0, bodyH = 0, lineH = 0;
+
+        // v1.34.4: the Pitch card's knob spans the card's rows - the card
+        // is two columns: the controls on the left, the knob on the right.
+        const auto spanner = layoutSpanner (cells, sc, innerMax, gap);
+        if (spanner.index >= 0)
+        {
+            const int headerPx = (int) std::lround ((float) headerWidthDp (grp) * sc);
+            CardMetrics m;
+            m.width = juce::jmin (maxW, juce::jmax (spanner.leftW + gap + spanner.knobW,
+                                                    headerPx) + 2 * padX);
+            m.height = headerH + 2 * padY + spanner.bodyH;
+            return m;
+        }
+
         for (auto& c : cells)
         {
             const int cw = juce::jmax (8, (int) std::lround ((float) c.widthDp * sc));
             const int ch = cellH (c);
+            if (c.item.newLine && lineW > 0)
+            {
+                widest = juce::jmax (widest, lineW);
+                bodyH += lineH + rowGap;
+                lineW = 0;
+                lineH = 0;
+            }
             if (lineW > 0 && lineW + gap + cw > innerMax)
             {
                 widest = juce::jmax (widest, lineW);
@@ -1171,7 +1360,7 @@ void MainComponent::resized()
         {
             if (c.item.flex) return ctrlH;
             if (c.item.knob) return juce::jmax (8, knobH);
-            return (c.item.label != nullptr ? captionH : 0) + ctrlH;
+            return (c.item.label != nullptr && ! c.item.inlineLabel ? captionH : 0) + ctrlH;
         };
 
         if (grp.header != nullptr)
@@ -1185,6 +1374,75 @@ void MainComponent::resized()
 
         // first, pack the cells into lines and learn each line's height
         const auto cells = makeCells (grp);
+
+        // v1.34.4: the Pitch card's knob spans the card's rows - it takes
+        // the right column and the other cells share the left one.
+        const auto spanner = layoutSpanner (cells, sc, body.getWidth(), gap);
+        if (spanner.index >= 0)
+        {
+            const auto& knobItem = cells[(size_t) spanner.index].item;
+            juce::String caption;
+            if (auto* lab = dynamic_cast<juce::Label*> (knobItem.label))
+                caption = lab->getText();
+            if (auto* knob = dynamic_cast<upic::Knob*> (knobItem.comp))
+            {
+                knob->setDesignScale (sc);
+                knob->setCellCaption (caption);
+                knob->setFallback (upic::Knob::shouldFallBack (sc));
+            }
+            if (knobItem.comp != nullptr)
+                knobItem.comp->setBounds (body.getRight() - spanner.knobW, body.getY(),
+                                          spanner.knobW,
+                                          juce::jmin (spanner.knobH, body.getHeight()));
+            if (knobItem.label != nullptr)
+                knobItem.label->setVisible (false);
+
+            // the left column: the rows are flush, so the knob bridges them
+            int rowY = body.getY();
+            for (const auto& line : spanner.lines)
+            {
+                int x = body.getX();
+                for (auto ci : line.cells)
+                {
+                    const auto& c = cells[ci];
+                    const auto& item = c.item;
+                    const int cw = juce::jmin (
+                        juce::jmax (8, (int) std::lround ((float) c.widthDp * sc)),
+                        juce::jmax (8, body.getWidth() - spanner.knobW - gap));
+
+                    if (item.flex)
+                    {
+                        if (item.comp != nullptr)
+                            item.comp->setBounds (x, rowY, cw, line.height);
+                    }
+                    else if (item.inlineLabel)
+                    {
+                        const int gapPx = juce::jmax (2, (int) std::lround ((float) kInlineGapDp * sc));
+                        const int lw = juce::jmin ((int) std::lround ((float) item.labelW * sc),
+                                                   juce::jmax (0, cw - gapPx));
+                        const int cy = rowY + (line.height - ctrlH) / 2;
+                        if (item.label != nullptr)
+                            item.label->setBounds (x, cy, lw, ctrlH);
+                        if (item.comp != nullptr)
+                            item.comp->setBounds (x + lw + gapPx, cy,
+                                                  juce::jmax (1, cw - lw - gapPx), ctrlH);
+                    }
+                    else
+                    {
+                        const int capH = (item.label != nullptr ? captionH : 0);
+                        const int cy = rowY + (line.height - (capH + ctrlH)) / 2;
+                        if (item.label != nullptr)
+                            item.label->setBounds (x, cy, cw, capH);
+                        if (item.comp != nullptr)
+                            item.comp->setBounds (x, cy + capH, cw, ctrlH);
+                    }
+                    x += cw + gap;
+                }
+                rowY += line.height;
+            }
+            return;
+        }
+
         struct PlacedCell { const CardCell* cell; int x, y, w, lineH; };
         std::vector<PlacedCell> placed;
         size_t lineStart = 0;
@@ -1205,6 +1463,8 @@ void MainComponent::resized()
             const int cw = juce::jmin (juce::jmax (8, (int) std::lround ((float) c.widthDp * sc)),
                                        juce::jmax (8, body.getWidth()));
             const int ch = cellH (c);
+            if (c.item.newLine && x > body.getX())
+                closeLine();
             if (x > body.getX() && x + cw > body.getRight())
                 closeLine();
             placed.push_back ({ &c, x, y, cw, ch });
@@ -1212,6 +1472,11 @@ void MainComponent::resized()
             lineH = juce::jmax (lineH, ch);
         }
         closeLine();
+
+        // v1.34.3: a card whose only cell is a knob centres it under the
+        // header instead of hugging the left edge (Tempo, Acceleration).
+        if (placed.size() == 1 && placed[0].cell->item.knob)
+            placed[0].x = body.getX() + (body.getWidth() - placed[0].w) / 2;
 
         // then place everything against its line's bottom, so the controls
         // and value pills line up however tall the neighbour is
@@ -1222,8 +1487,10 @@ void MainComponent::resized()
 
             if (item.flex)
             {
+                // v1.34.5: the status label owns the card's whole body -
+                // the measured cell can be narrower than the header.
                 if (item.comp != nullptr)
-                    item.comp->setBounds (p.x, p.y, p.w, p.lineH);
+                    item.comp->setBounds (body.getX(), p.y, body.getWidth(), p.lineH);
             }
             else if (item.knob)
             {
@@ -1241,12 +1508,26 @@ void MainComponent::resized()
                 if (item.label != nullptr)
                     item.label->setVisible (false);
             }
+            else if (item.inlineLabel)
+            {
+                const int gapPx = juce::jmax (2, (int) std::lround ((float) kInlineGapDp * sc));
+                const int lw = juce::jmin ((int) std::lround ((float) item.labelW * sc),
+                                           juce::jmax (0, p.w - gapPx));
+                const int cellY = item.topAlign ? p.y : bottom - ctrlH;
+                if (item.label != nullptr)
+                    item.label->setBounds (p.x, cellY, lw, ctrlH);
+                if (item.comp != nullptr)
+                    item.comp->setBounds (p.x + lw + gapPx, cellY,
+                                          juce::jmax (1, p.w - lw - gapPx), ctrlH);
+            }
             else
             {
+                const int labelY = item.topAlign ? p.y : bottom - ctrlH - captionH;
+                const int compY  = item.topAlign ? p.y + captionH : bottom - ctrlH;
                 if (item.label != nullptr)
-                    item.label->setBounds (p.x, bottom - ctrlH - captionH, p.w, captionH);
+                    item.label->setBounds (p.x, labelY, p.w, captionH);
                 if (item.comp != nullptr)
-                    item.comp->setBounds (p.x, bottom - ctrlH, p.w, ctrlH);
+                    item.comp->setBounds (p.x, compY, p.w, ctrlH);
             }
         }
     };
@@ -1258,25 +1539,22 @@ void MainComponent::resized()
         const int gap = juce::jmax (2, (int) std::lround ((float) cardGap * sc));
         int rows = 0;
 
-        struct Card { const FlowGroup* grp; int w, h; bool flex; };
+        struct Card { const FlowGroup* grp; int w, h; };
         std::vector<Card> cards;
         cards.reserve (list.size());
         for (auto& grp : list)
         {
             const auto m = cardMetrics (grp, sc, area.getWidth());
-            cards.push_back ({ &grp, m.width, m.height, isFlexGroup (grp) });
+            cards.push_back ({ &grp, m.width, m.height });
         }
 
-        // v1.34.1: the fixed cards are packed in order; a flex card (the
-        // status) then fills the first row from the end that still has room
-        // for it, instead of always taking a full row of its own. That is
-        // what removes the isolated last card and the dead space beside it.
+        // v1.34.5: every card keeps its own width - the status card is
+        // measured to its text, so it packs into a row like the others
+        // instead of being stretched over the rest of the line.
         std::vector<std::vector<size_t>> rowCards;
         std::vector<int> rowW, rowH;
-        std::vector<size_t> flexCards;
         for (size_t i = 0; i < cards.size(); ++i)
         {
-            if (cards[i].flex) { flexCards.push_back (i); continue; }
             if (rowCards.empty() || rowW.back() + gap + cards[i].w > area.getWidth())
             {
                 rowCards.push_back ({});
@@ -1287,32 +1565,6 @@ void MainComponent::resized()
             rowW.back() += (rowCards.back().size() > 1 ? gap : 0) + cards[i].w;
             rowH.back() = juce::jmax (rowH.back(), cards[i].h);
         }
-        for (auto fi : flexCards)
-        {
-            bool done = false;
-            for (int r = (int) rowCards.size() - 1; r >= 0 && ! done; --r)
-            {
-                const int used = rowW[(size_t) r];
-                const int remaining = area.getWidth() - used - (used > 0 ? gap : 0);
-                // v1.34.1: the status is one label, so it can take a narrower
-                // slice of the row rather than forcing a full row of its own.
-                // Below a readable minimum it still gets its own row.
-                const int minFlex = juce::jmax (8, (int) std::lround (140.0f * sc));
-                if (remaining >= juce::jmin (cards[fi].w, minFlex))
-                {
-                    rowCards[(size_t) r].push_back (fi);
-                    rowW[(size_t) r] += (used > 0 ? gap : 0) + remaining;
-                    rowH[(size_t) r] = juce::jmax (rowH[(size_t) r], cards[fi].h);
-                    done = true;
-                }
-            }
-            if (! done)
-            {
-                rowCards.push_back ({ fi });
-                rowW.push_back (area.getWidth());
-                rowH.push_back (cards[fi].h);
-            }
-        }
 
         int y = area.getY();
         for (size_t r = 0; r < rowCards.size(); ++r)
@@ -1320,10 +1572,7 @@ void MainComponent::resized()
             int x = area.getX();
             for (auto k : rowCards[r])
             {
-                // the flex card takes the rest of its row; everything else
-                // keeps its own width and its own height
-                const int cw = cards[k].flex ? juce::jmax (1, area.getRight() - x)
-                                             : cards[k].w;
+                const int cw = cards[k].w;
                 const juce::Rectangle<int> card (x, y, cw, cards[k].h);
                 if (rects != nullptr)
                     rects->push_back ({ card, groupColour, cards[k].grp->name });
@@ -1573,6 +1822,8 @@ void MainComponent::resized()
         assignBtn.setVisible (false);
         delArcBtn.setVisible (false);
         muteArcBtn.setVisible (false);
+        dupArcBtn.setVisible (false);
+        selectAllBtn.setVisible (false);
         matHintLab.setVisible (false);
         kbdHintLab.setVisible (false);
 
@@ -1688,6 +1939,8 @@ void MainComponent::resized()
     assignBtn.setVisible (true);
     delArcBtn.setVisible (true);
     muteArcBtn.setVisible (true);
+    dupArcBtn.setVisible (true);
+    selectAllBtn.setVisible (true);
     matOscTog.setVisible (true); matSampleTog.setVisible (true);
     matLiveTog.setVisible (true); hintsTog.setVisible (true);
     envTog.setVisible (true); waveTog.setVisible (true);
@@ -1700,10 +1953,12 @@ void MainComponent::resized()
     {
         auto v = vstrip.reduced(4);
         voiceLab.setBounds(v.removeFromLeft((int) std::lround(140.0f * s)).reduced(2));
-        const int bw = juce::jmax(1, v.getWidth() / 3);
+        const int bw = juce::jmax(1, v.getWidth() / 5);
         assignBtn.setBounds(v.removeFromLeft(bw).reduced(2));
         delArcBtn.setBounds(v.removeFromLeft(bw).reduced(2));
-        muteArcBtn.setBounds(v.reduced(2));
+        muteArcBtn.setBounds(v.removeFromLeft(bw).reduced(2));
+        dupArcBtn.setBounds(v.removeFromLeft(bw).reduced(2));
+        selectAllBtn.setBounds(v.reduced(2));
     }
     else
     {
@@ -1713,6 +1968,11 @@ void MainComponent::resized()
         assignBtn.setBounds(row.removeFromLeft(row.getWidth()/2).reduced(2));
         delArcBtn.setBounds(row.removeFromLeft(row.getWidth()/2).reduced(2));
         muteArcBtn.setBounds(row.reduced(2));
+        // v1.34.4: the second row carries Duplicate and Select all.
+        auto row2 = v.removeFromTop((int) std::lround (26.0f * s));
+        const int bw2 = juce::jmax (1, row2.getWidth() / 2);
+        dupArcBtn.setBounds(row2.removeFromLeft(bw2).reduced(2));
+        selectAllBtn.setBounds(row2.reduced(2));
     }
 
     b.removeFromBottom(6);

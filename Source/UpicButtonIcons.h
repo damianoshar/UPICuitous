@@ -18,7 +18,7 @@ inline const ButtonMapping buttonMappings[] = {
     {"Save", "save"}, {"Load", "folder-open"}, {"Render WAV", "file-music"},
     {"Stems", "layers"}, {"Audio", "headphones"},
     {"pageAddBtn", "plus"}, {"pageDupBtn", "copy"}, {"pageDelBtn", "minus"},
-    {"+", "plus"}, {"-", "minus"}, {"Dup", "copy"},
+    {"Dup", "copy"},
     {"Loop", "repeat"}, {"Seq", "sequence"}, {"Pressure", "hand"},
     {"Scrub", "scrub"}, {"Snap", "magnet"}, {"Rev", "reverse"},
     {"Stepped", "sequence"}, {"Mute drag", "volume-x"},
@@ -75,8 +75,45 @@ inline bool compactShapeButton (const juce::TextButton& button)
         || label == "Swell" || label == "Gate" || label == "Strings";
 }
 
+// v1.34.3: the user asked for these buttons to keep the icon on the same
+// row as the caption, even when JUCE would stack a small symbol above the
+// text. The list is explicit; every other button keeps the adaptive rule.
+inline bool inlineIcon (const juce::Button& button)
+{
+    static const char* const labels[] = {
+        "Osc", "Sample", "Live", "PM", "Arcs", "Wave", "Env", "Hints",
+        "Reset", "Flat", "Perc", "Swell", "Gate", "Strings",
+        "Sine", "Saw", "Sqr", "Tri", "Noise", "Smooth", "Norm"
+    };
+    for (auto* l : labels)
+        if (button.getButtonText() == l || button.getName() == l)
+            return true;
+    return false;
+}
+
+// v1.34.3: the library windows' buttons keep their captions on one line -
+// JUCE's TextButton fallback wraps to two lines when the width is tight.
+inline bool singleLineText (const juce::Button& button)
+{
+    const juce::String name = button.getName();
+    const juce::String text = button.getButtonText();
+    return name.endsWith ("NewBtn") || name.endsWith ("DupBtn")
+        || name.endsWith ("RenameBtn") || name.endsWith ("DelBtn")
+        || name.endsWith ("UniqueBtn")
+        || text == "New" || text == "Dup" || text == "Rename"
+        || text == "Delete" || text == "Unique";
+}
+
+// v1.34.4: the zoom bar's Reset keeps its caption alone - the button is
+// too narrow for an icon and a caption side by side.
+inline bool noIcon (const juce::Button& button)
+{
+    return button.getName() == "resetZoomBtn";
+}
+
 inline const juce::Drawable* drawableFor (const juce::Button& button)
 {
+    if (noIcon (button)) return nullptr;
     const auto name = iconName (button);
     return name.isNotEmpty() ? find (name) : nullptr;
 }

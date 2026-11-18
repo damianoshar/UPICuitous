@@ -230,10 +230,10 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                            loose.trim());
                 }
 
-                // v1.34.1: a card is only as tall as its tallest cell, and
-                // the status fills the remaining width of a row instead of
-                // always taking a full row of its own. The large window has
-                // room for both effects.
+                // v1.34.1: a card is only as tall as its tallest cell.
+                // v1.34.5: the status card is measured to its one-line text
+                // - it hugs its label instead of stretching over the rest
+                // of the row, and the label keeps the whole string.
                 {
                     mc.setSize (1920, 1080);
                     const auto transport = mc.toolbarCardBoundsForGroupForTest ("transport");
@@ -244,17 +244,88 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                            "v1.34.1 the compact cards are shorter than the knob cards",
                            transport.toString() + " vs " + levels.toString());
 
-                    bool sharesRow = false;
-                    for (int i = 0; i < mc.toolbarCardCountForTest(); ++i)
+                    auto* statusLabel = dynamic_cast<juce::Label*> (find ("statusLab"));
+                    const auto statusFont = statusLabel != nullptr
+                        ? mc.getLookAndFeel().getLabelFont (*statusLabel)
+                        : juce::Font (juce::FontOptions{});
+                    const int statusTextW = statusLabel != nullptr
+                        ? juce::GlyphArrangement::getStringWidthInt (statusFont, statusLabel->getText())
+                        : 0;
+                    check (status.getHeight() > 0 && status.getWidth() > 0
+                           && statusLabel != nullptr
+                           // the card is only as wide as its label (and the
+                           // card's padding) - it does not fill the row
+                           && status.getWidth() <= statusLabel->getWidth() + 24
+                           // the label's text area holds the whole string on
+                           // one line (the Label's own border takes 5+5 px)
+                           && statusLabel->getWidth() + 10 >= statusTextW,
+                           "v1.34.5 the status card is measured to its one-line text",
+                           status.toString() + " / "
+                             + (statusLabel != nullptr ? statusLabel->getBounds().toString()
+                                                      : juce::String())
+                             + " / text " + juce::String (statusTextW));
+
+                    // the card follows its text: a longer status gets a
+                    // wider card, and the label keeps the whole string
+                    if (statusLabel != nullptr)
                     {
-                        const auto other = mc.toolbarCardBoundsForTest (i);
-                        if (other.getY() == status.getY() && other != status)
-                            sharesRow = true;
+                        const juce::String longText ("Page 1/1 | 12 arcs | 3 zone(s)  --  "
+                                                    "Sel #7 v3 e4 int 0.80 [12.3-45.6s]");
+                        const juce::String wasText = statusLabel->getText();
+                        statusLabel->setText (longText, juce::dontSendNotification);
+                        mc.resized();
+                        const auto card2 = mc.toolbarCardBoundsForGroupForTest ("status");
+                        const int need2 = juce::GlyphArrangement::getStringWidthInt (
+                            mc.getLookAndFeel().getLabelFont (*statusLabel), longText);
+                        check (card2.getWidth() >= need2 - 24
+                               && card2.getWidth() <= need2 + 80
+                               && statusLabel->getWidth() + 10 >= need2,
+                               "v1.34.5 the status card grows with its text",
+                               card2.toString() + " / need " + juce::String (need2)
+                                 + " / label " + statusLabel->getBounds().toString());
+                        statusLabel->setText (wasText, juce::dontSendNotification);
+                        mc.resized();
                     }
-                    check (status.getHeight() > 0 && sharesRow
-                           && status.getWidth() > 0,
-                           "v1.34.1 the status fills the rest of a row",
-                           status.toString());
+
+                    // v1.34.3: the cards follow the user's order - the
+                    // acceleration card sits after the tempo, the drag card
+                    // after the scrub settings, the status last.
+                    {
+                        const char* order[] = { "transport", "pages", "file", "voice",
+                                                "sieve", "tools", "tempo", "accel",
+                                                "levels", "material", "magnets", "scrub",
+                                                "drag", "pitch", "page", "clock", "status" };
+                        bool inOrder = true;
+                        juce::String detail;
+                        for (int i = 0; i + 1 < (int) juce::numElementsInArray (order); ++i)
+                        {
+                            const auto a = mc.toolbarCardBoundsForGroupForTest (order[i]);
+                            const auto b = mc.toolbarCardBoundsForGroupForTest (order[i + 1]);
+                            const bool ok = ! a.isEmpty() && ! b.isEmpty()
+                                          && (a.getY() < b.getY()
+                                              || (a.getY() == b.getY() && a.getX() < b.getX()));
+                            if (! ok)
+                            {
+                                inOrder = false;
+                                detail << order[i] << a.toString() << " before "
+                                       << order[i + 1] << b.toString() << "  ";
+                            }
+                        }
+                        check (inOrder, "v1.34.3 the cards follow the user's order",
+                               detail.trim());
+                    }
+
+                    // v1.34.3: the cards carry the user's captions.
+                    {
+                        auto* gen  = dynamic_cast<juce::ToggleButton*> (find ("toolsFoldBtn"));
+                        auto* acc  = dynamic_cast<juce::ToggleButton*> (find ("accelFoldBtn"));
+                        auto* scr  = dynamic_cast<juce::ToggleButton*> (find ("scrubFoldBtn"));
+                        check (gen != nullptr && acc != nullptr && scr != nullptr
+                               && gen->getButtonText() == "Generator"
+                               && acc->getButtonText() == "Acceleration"
+                               && scr->getButtonText() == "Scrub settings",
+                               "v1.34.3 the cards carry the user's captions");
+                    }
                     mc.setSize (1280, 800);
                 }
             }

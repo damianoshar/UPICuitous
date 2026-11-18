@@ -783,7 +783,7 @@ void MainComponent::buildToolbarControls()
     // --- sliders ---
     addAndMakeVisible(durSlider); addAndMakeVisible(masterSlider); addAndMakeVisible(intenSlider);
     durSlider.setName ("durSlider");
-    addAndMakeVisible(pageLab); addAndMakeVisible(durLab); addAndMakeVisible(masterLab); addAndMakeVisible(intenLab);
+    addAndMakeVisible(durLab); addAndMakeVisible(masterLab); addAndMakeVisible(intenLab);
     addAndMakeVisible(timeLab); addAndMakeVisible(statusLab);
 
     // v1.31 (U2): the page duration runs from the UPIC's micro-time end
@@ -1026,6 +1026,35 @@ void MainComponent::timerCallback()
         else s += "draw curves; assign voice per arc.";
     }
     statusLab.setText(s, juce::dontSendNotification);
+    // v1.34.5: the status card is measured to its text. Re-flow the cards
+    // when the string needs materially more or less room (a selection, a
+    // job, an indicator); the band keeps the per-tick drag updates - which
+    // only move a digit - from re-laying out. The re-flow is async: the
+    // timer holds the model lock, and layout reads the UI only.
+    if (! statusLayoutPending && statusLab.getWidth() > 0)
+    {
+        const float sc = appLaf.uiScale;
+        const int textW = juce::GlyphArrangement::getStringWidthInt (
+            appLaf.getLabelFont (statusLab), s);
+        const int need = juce::jmax (
+            (int) std::lround ((float) kStatusMinWidthDp * sc),
+            textW + (int) std::lround (22.0f * sc));
+        const int have = statusLab.getWidth();
+        if (need > have + juce::jmax (8, have / 6)
+            || need < have - juce::jmax (16, have / 4))
+        {
+            statusLayoutPending = true;
+            juce::MessageManager::callAsync (
+                [safe = juce::Component::SafePointer<MainComponent> (this)]
+                {
+                    if (safe != nullptr)
+                    {
+                        safe->statusLayoutPending = false;
+                        safe->resized();
+                    }
+                });
+        }
+    }
     score.repaint();
 
     // v1.16: publish the latency the host has to compensate. The host can

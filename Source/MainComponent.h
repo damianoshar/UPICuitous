@@ -583,6 +583,18 @@ private:
             const auto* icon = upic::buttonIcons::drawableFor (button);
             if (icon == nullptr)
             {
+                if (upic::buttonIcons::singleLineText (button))
+                {
+                    const auto font = buttonFont();
+                    g.setFont (font);
+                    g.setColour (button.findColour (button.getToggleState()
+                        ? juce::TextButton::textColourOnId : juce::TextButton::textColourOffId));
+                    if (! button.isEnabled()) g.setOpacity (0.5f);
+                    g.drawFittedText (button.getButtonText(),
+                                      button.getLocalBounds().reduced (3, 0),
+                                      juce::Justification::centred, 1, 0.55f);
+                    return;
+                }
                 juce::LookAndFeel_V4::drawButtonText (g, button, highlighted, down);
                 return;
             }
@@ -618,19 +630,38 @@ private:
             const int estimatedLabelWidth = juce::roundToInt (
                 font.getHeight() * 0.58f * (float) label.length());
             const bool compactPreset = upic::buttonIcons::compactShapeButton (button);
-            const bool sideBySide = ! compactPreset
-                && bounds.getWidth() >= estimatedLabelWidth + sideIconSize + 12;
+            const bool forceInline = upic::buttonIcons::inlineIcon (button);
+            const bool sideBySide = forceInline
+                || (! compactPreset
+                    && bounds.getWidth() >= estimatedLabelWidth + sideIconSize + 12);
 
             if (sideBySide && sideIconSize > 0)
             {
-                const int iconX = 4;
+                // v1.34.4: the wave and env window's buttons centre the
+                // icon+caption block - the icon sits right before the text.
+                int iconX = 4;
+                juce::Rectangle<int> textArea;
+                if (forceInline)
+                {
+                    const int textW = juce::GlyphArrangement::getStringWidthInt (font, label);
+                    const int blockW = juce::jmin (bounds.getWidth() - 4,
+                                                  sideIconSize + 3 + textW);
+                    iconX = (bounds.getWidth() - blockW) / 2;
+                    textArea = juce::Rectangle<int> (iconX + sideIconSize + 3, bounds.getY(),
+                                                     juce::jmax (1, blockW - sideIconSize - 3),
+                                                     bounds.getHeight());
+                }
+                else
+                {
+                    textArea = bounds.withTrimmedLeft (iconX + sideIconSize + 3)
+                                       .withTrimmedRight (2);
+                }
                 const int iconY = (bounds.getHeight() - sideIconSize) / 2;
                 icon->drawWithin (g, { (float) iconX, (float) iconY,
                                        (float) sideIconSize, (float) sideIconSize },
                                   juce::RectanglePlacement::centred,
                                   button.isEnabled() ? 1.0f : 0.42f);
-                drawLabel (bounds.withTrimmedLeft (iconX + sideIconSize + 3)
-                                 .withTrimmedRight (2), font);
+                drawLabel (textArea, font);
                 return;
             }
 
@@ -653,7 +684,14 @@ private:
             }
 
             // Very small controls retain the readable original text rather
-            // than silently becoming pictogram-only buttons.
+            // than silently becoming pictogram-only buttons. v1.34.3: the
+            // caption stays on one line where the user asked for it (the
+            // zoom Reset is the visible case) - JUCE's default wraps to 2.
+            if (upic::buttonIcons::singleLineText (button))
+            {
+                drawLabel (button.getLocalBounds().reduced (3, 0), font);
+                return;
+            }
             juce::LookAndFeel_V4::drawButtonText (g, button, highlighted, down);
         }
 
@@ -680,6 +718,36 @@ private:
         juce::Font getComboBoxFont (juce::ComboBox&) override { return buttonFont(); }
         juce::Font getLabelFont (juce::Label& l) override
         { return withDefaultMetrics (juce::FontOptions (l.getFont().getHeight() * uiScale)); }
+
+        // v1.34.5: the status line stays on one line. Label's default draw
+        // wraps to a second line whenever the label happens to be tall
+        // enough, which the shrink-to-fit layout can produce; the status
+        // card is measured to that single line instead.
+        void drawLabel (juce::Graphics& g, juce::Label& label) override
+        {
+            if (label.getName() != "statusLab")
+            {
+                juce::LookAndFeel_V4::drawLabel (g, label);
+                return;
+            }
+
+            g.fillAll (label.findColour (juce::Label::backgroundColourId));
+            if (label.isBeingEdited())
+            {
+                juce::LookAndFeel_V4::drawLabel (g, label);
+                return;
+            }
+
+            const auto alpha = label.isEnabled() ? 1.0f : 0.5f;
+            const juce::Font font (getLabelFont (label));
+            g.setColour (label.findColour (juce::Label::textColourId)
+                              .withMultipliedAlpha (alpha));
+            g.setFont (font);
+            const auto textArea = getLabelBorderSize (label)
+                                      .subtractedFrom (label.getLocalBounds());
+            g.drawFittedText (label.getText(), textArea,
+                              label.getJustificationType(), 1, 0.55f);
+        }
 
         // F11: the knob's horizontal fallback draws its own track and its
         // own value text, so the slider's area is the track's area - the
@@ -1046,8 +1114,12 @@ private:
     juce::TextButton pmImportBtn{ "Import" }, pmExportBtn{ "Export" };
     juce::TextButton pageAddBtn{ "+" }, pageDupBtn{ "Dup" }, pageDelBtn{ "-" };
     upic::Knob durSlider, masterSlider, intenSlider, pmRatioSlider, pmIndexSlider, pmFeedbackSlider, tempoSlider;
-    juce::Label pageLab{ {}, "Page" }, durLab{ {}, "Dur" }, masterLab{ {}, "Master" }, intenLab{ {}, "Inten" };
+    juce::Label durLab{ {}, "Dur" }, masterLab{ {}, "Master" }, intenLab{ {}, "Inten" };
     juce::Label timeLab, statusLab;
+    // v1.34.5: the status card is measured to its text, so a materially
+    // different status string re-flows the cards once (async, coalesced).
+    bool statusLayoutPending = false;
+    static constexpr int kStatusMinWidthDp = 220;
 
     juce::ToggleButton snapBtn{ "Snap" };
     // v1.8 one strip: each material is a tab AND its own canvas layer
@@ -1229,7 +1301,7 @@ private:
     //     procedural arc generators) + shortcut/wheel hint line ---
     juce::ComboBox sievePresetBox, gridBox, genBox;
     upic::Knob stickSlider;
-    juce::Label pmRatioLab{ {}, "Ratio" }, pmIndexLab{ {}, "Index" }, pmIndexEnvLab{ {}, "IdxEnv" }, pmFeedbackLab{ {}, "Fdbk" }, pmPresetLab{ {}, "Preset" }, pmOpsLab{ {}, "Ops" }, tempoLab{ {}, "BPM" }, stickLab{ {}, "Stick (global)" }, gridLab{ {}, "T-grid (global)" }, genLab{ {}, "Gen" }, sieveMLab{ {}, "m" }, sieveRLab{ {}, "R" };
+    juce::Label pmRatioLab{ {}, "Ratio" }, pmIndexLab{ {}, "Index" }, pmIndexEnvLab{ {}, "IdxEnv" }, pmFeedbackLab{ {}, "Fdbk" }, pmPresetLab{ {}, "Preset" }, pmOpsLab{ {}, "Ops" }, tempoLab{ {}, "BPM" }, stickLab{ {}, "Stick (global)" }, gridLab{ {}, "T-grid (global)" }, sieveMLab{ {}, "m" }, sieveRLab{ {}, "R" };
     juce::Label kbdHintLab;
 
     // --- UI: editors ---
@@ -1242,6 +1314,9 @@ private:
     juce::TextButton wSine{ "Sine" }, wSaw{ "Saw" }, wSqr{ "Sqr" }, wTri{ "Tri" }, wNoise{ "Noise" }, wSmooth{ "Smooth" }, wNorm{ "Norm" };
     juce::TextButton eFlat{ "Flat" }, ePerc{ "Perc" }, eSwell{ "Swell" }, eGate{ "Gate" }, eStr{ "Strings" };
     juce::TextButton assignBtn{ "Assign to sel." }, delArcBtn{ "Del sel." }, muteArcBtn{ "Mute sel." };
+    // v1.34.4: the arc commands the canvas context menu had (Duplicate,
+    // Select all) are buttons in the Voice section as well.
+    juce::TextButton dupArcBtn{ "Duplicate" }, selectAllBtn{ "Select all" };
     juce::Label voiceLab, waveLab{ {}, "Wave" }, envLab{ {}, "Env" }, toolLab{ {}, "Tool" };
 
     upic::Page& curPage();
