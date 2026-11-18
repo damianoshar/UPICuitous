@@ -23,6 +23,7 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
         bool written = false;
         juce::Image img(juce::Image::RGB, 1280, 800, true);
         juce::Rectangle<int> scoreBounds;
+        juce::Rectangle<int> stripBounds;
         {
             juce::Graphics g(img);
             auto mcHolder = std::make_unique<MainComponent>();
@@ -1736,6 +1737,7 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                 scoreBounds = sc->getBounds();
                 sc->setShowGrid(false); // grid off so pixel probes hit zone/strip paint
             }
+            stripBounds = mc.permanentStripBoundsForTest();
 
             // in-process identity check: which binary made this object?
             auto exe = juce::File::getSpecialLocation(juce::File::currentExecutableFile);
@@ -1822,7 +1824,10 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
             // v1.33.3: the whole window uses one dark surface. Pure
             // black sections made the cards look like they left holes
             // and shadows wherever the background showed through.
-            const auto toolbarBgPx = img.getPixelAt (900, 100);
+            // v1.34: the toolbar is cards now, so probe the gap between
+            // the permanent strip and the first card row.
+            const auto toolbarBgPx = img.getPixelAt (stripBounds.getX() + 2,
+                                                     stripBounds.getBottom() + 2);
             const auto windowBgPx  = img.getPixelAt (4, 500);
             const auto scoreBgPx   = img.getPixelAt (scoreBounds.getX() + 2,
                                                      scoreBounds.getY() + 2);

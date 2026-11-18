@@ -13,9 +13,12 @@ namespace upic {
 // the shape and the drawing change.
 //
 // The look follows the EQ reference: a dark, slightly glossy disc, a thin
-// arc just outside it (the unfilled track, then the value's accent), a
-// coloured dot on the arc, and the value in its own dark pill beside the
-// knob. The group's label stays to the left.
+// arc just outside it (the unfilled track, then the value's accent) and a
+// coloured dot on the arc. In the toolbar's cards the knob is a vertical
+// cell: the caption sits above the disc and the value in its own dark pill
+// below it (the reference's "cutoff / resonance" cells). A knob without a
+// caption keeps the older horizontal arrangement, so the control can still
+// be used outside a card.
 //
 // A narrow layout cannot read a knob, so the control falls back to the
 // horizontal slider (decision 14): the same drawing as the reference
@@ -36,6 +39,14 @@ public:
     // The width a knob item needs: the knob, the gap and the value box.
     static constexpr int preferredWidth() { return kDesignSize + kValueGap + kValueWidth; }
     static constexpr int kFallbackDesignWidth = 124;
+    // The card cell: caption above, a large disc, the value box below.
+    static constexpr int kCellDesignSize = 56;
+    static constexpr int kCellCaptionH = 14;
+    static constexpr int kCellPillH = 16;
+    static constexpr int kCellGap = 2;
+    static constexpr int kCellWidth = 60;
+    static constexpr int kCellHeight = kCellCaptionH + kCellGap
+                                      + kCellDesignSize + kCellGap + kCellPillH;
     // Below this many pixels the knob is too small to read, so the control
     // falls back to the horizontal slider.
     static constexpr float kMinRotaryPixels = 28.0f;
@@ -66,6 +77,47 @@ public:
         valueEditor.onFocusLost = [this] { cancelValueEntry(); };
     }
 
+    // --- the toolbar card's cell -----------------------------------------
+    // The layout gives every knob in a card its caption (the group's label).
+    // The knob then draws the caption above the disc and the value below -
+    // the reference's vertical cell. An empty caption keeps the horizontal
+    // arrangement.
+    void setCellCaption (const juce::String& text)
+    {
+        if (cellCaption == text)
+            return;
+        cellCaption = text;
+        repaint();
+    }
+    const juce::String& getCellCaption() const noexcept { return cellCaption; }
+    bool hasCellCaption() const noexcept { return cellCaption.isNotEmpty(); }
+
+    // The layout's scale. The cell is taller than the old row, so the
+    // control cannot derive the scale from its own height in cell mode.
+    void setDesignScale (float scale)
+    {
+        const float s = juce::jlimit (0.3f, 2.5f, scale);
+        if (designScale == s)
+            return;
+        designScale = s;
+        repaint();
+    }
+    float getDesignScale() const noexcept { return designScale; }
+
+    // The knob's square inside the cell: below the caption, above the pill.
+    juce::Rectangle<int> cellKnobArea() const
+    {
+        const auto b = getLocalBounds();
+        const float sc = uiScale();
+        const int capH = (int) std::lround ((float) kCellCaptionH * sc);
+        const int gap = juce::jmax (1, (int) std::lround ((float) kCellGap * sc));
+        const int pillH = (int) std::lround ((float) kCellPillH * sc);
+        const int side = juce::jmax (0, juce::jmin (b.getWidth(),
+                                                    b.getHeight() - capH - pillH - 2 * gap));
+        return juce::Rectangle<int> (b.getX() + (b.getWidth() - side) / 2,
+                                     b.getY() + capH + gap, side, side);
+    }
+
     // --- the narrow layout's fallback ------------------------------------
     bool isFallback() const noexcept { return fallback; }
 
@@ -85,26 +137,49 @@ public:
     // The layout's decision: is the knob big enough to read?
     static bool shouldFallBack (float layoutScale) noexcept
     {
-        return (float) kDesignSize * layoutScale < kMinRotaryPixels;
+        return (float) kCellDesignSize * layoutScale < kMinRotaryPixels;
     }
 
     // The track's area in the fallback - the value text takes the right end.
     // The LookAndFeel gives the slider the same area, so the drag and the
-    // drawing agree.
+    // drawing agree. In a cell the caption and the pill take the top and the
+    // bottom, so the track sits between them.
     juce::Rectangle<int> fallbackTrackArea() const
     {
         const auto b = getLocalBounds();
+        if (hasCellCaption())
+        {
+            const float sc = uiScale();
+            const int capH = (int) std::lround ((float) kCellCaptionH * sc);
+            const int gap = juce::jmax (1, (int) std::lround ((float) kCellGap * sc));
+            const int pillH = (int) std::lround ((float) kCellPillH * sc);
+            return b.withTrimmedTop (capH + gap).withTrimmedBottom (pillH + gap)
+                    .withTrimmedLeft (2).withTrimmedRight (2);
+        }
+
         const int textW = juce::jmin ((int) std::lround ((float) b.getWidth() * 0.42f),
                                       (int) std::lround (58.0f * uiScale()));
         return b.withTrimmedRight (juce::jmax (20, textW));
     }
 
-    // The value's box - the reference's pill. In the rotary layout it sits
-    // to the right of the knob's square; in the fallback it sits beside the
-    // track. The layout gives the knob the room for both.
+    // The value's box - the reference's pill. In a card cell it sits below
+    // the knob (the reference's vertical cell); without a caption it stays
+    // beside the knob or the fallback's track.
     juce::Rectangle<int> valuePillArea() const
     {
         const auto b = getLocalBounds();
+        const float sc = uiScale();
+        if (hasCellCaption())
+        {
+            const float side = (float) cellKnobArea().getWidth();
+            const int pillH = juce::jmax (6, (int) std::lround ((float) kCellPillH * sc));
+            const int pillW = juce::jmin (b.getWidth() - 2,
+                                          juce::jmax ((int) side,
+                                                      (int) std::lround (56.0f * sc)));
+            return juce::Rectangle<int> (b.getCentreX() - pillW / 2, b.getBottom() - pillH,
+                                         pillW, pillH);
+        }
+
         const int side = juce::jmin (b.getWidth(), b.getHeight());
         const int gap = juce::jmax (2, (int) std::lround ((float) kValueGap * uiScale()));
         const int pillH = juce::jmax (4, (int) std::lround ((float) side * 0.58f));
@@ -241,25 +316,86 @@ public:
 
 private:
     bool fallback = false;
+    juce::String cellCaption;
+    float designScale = 0.0f;
     juce::TextEditor valueEditor;
 
-    // The layout's scale, read from the control's own size (the layout
-    // gives every control a design-unit size and scales it).
+    // The layout's scale: the card cell sets it explicitly; without one the
+    // control derives it from its own size (the layout gives every control a
+    // design-unit size and scales it).
     float uiScale() const noexcept
     {
+        if (designScale > 0.0f)
+            return designScale;
         return juce::jlimit (0.5f, 2.0f, (float) getHeight() / 32.0f);
     }
 
     void paintRotary (juce::Graphics& g, float opacity)
     {
+        if (hasCellCaption())
+        {
+            paintCell (g, opacity);
+            return;
+        }
+
         const auto b = getLocalBounds().toFloat();
         const float side = juce::jmin (b.getWidth(), b.getHeight());
         if (side < 10.0f)
             return;
 
-        const float sc = uiScale();
         // the knob's own square; the value's pill takes the rest of the bounds
         const auto knob = b.withWidth (side);
+        paintDisc (g, knob, opacity);
+
+        // the value, in its own box beside the knob
+        paintValuePill (g, valuePillArea(), opacity);
+    }
+
+    // The reference's vertical cell: caption, large disc, value below.
+    void paintCell (juce::Graphics& g, float opacity)
+    {
+        const auto b = getLocalBounds();
+        if (b.getWidth() < 8 || b.getHeight() < 8)
+            return;
+
+        paintCaption (g, opacity);
+
+        const auto knob = cellKnobArea().toFloat();
+        if (knob.getWidth() >= 10.0f)
+            paintDisc (g, knob, opacity);
+
+        paintValuePill (g, valuePillArea(), opacity);
+    }
+
+    void paintCaption (juce::Graphics& g, float opacity)
+    {
+        if (! hasCellCaption())
+            return;
+
+        const auto b = getLocalBounds();
+        const float sc = uiScale();
+        const int capH = (int) std::lround ((float) kCellCaptionH * sc);
+        if (capH < 6)
+            return;
+
+        const float base = juce::jlimit (7.0f, 13.0f, 10.5f * sc);
+        juce::Font font (juce::FontOptions (base, juce::Font::bold));
+        g.setColour (findColour (juce::Slider::textBoxTextColourId)
+                          .withMultipliedAlpha (opacity * 0.86f));
+        g.setFont (font);
+        g.drawFittedText (cellCaption, b.withHeight (capH).reduced (1, 0),
+                          juce::Justification::centred, 1, 1.0f);
+    }
+
+    // The disc, its track, the value's arc and the dot - shared by the
+    // horizontal knob and the card cell.
+    void paintDisc (juce::Graphics& g, juce::Rectangle<float> knob, float opacity)
+    {
+        const float side = juce::jmin (knob.getWidth(), knob.getHeight());
+        if (side < 10.0f)
+            return;
+
+        const float sc = uiScale();
         const auto centre = knob.getCentre();
 
         const float arcThickness = juce::jmax (1.5f, 2.0f * sc);
@@ -307,13 +443,12 @@ private:
                                       centre.y + radius * std::sin (to - juce::MathConstants<float>::halfPi));
         g.setColour (accent.withMultipliedAlpha (opacity));
         g.fillEllipse (tip.x - dot * 0.5f, tip.y - dot * 0.5f, dot, dot);
-
-        // the value, in its own box beside the knob
-        paintValuePill (g, valuePillArea(), opacity);
     }
 
     void paintFallback (juce::Graphics& g, float opacity)
     {
+        paintCaption (g, opacity);
+
         const auto area = fallbackTrackArea();
         if (area.getWidth() < 8)
             return;

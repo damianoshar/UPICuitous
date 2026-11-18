@@ -685,6 +685,8 @@ void MainComponent::resized()
     {
         juce::String name;
         std::vector<FlowItem> items;
+        // v1.34: the card's title row - the group's disclosure toggle.
+        juce::ToggleButton* header = nullptr;
     };
 
     // --- the width a control needs for its WHOLE text ---
@@ -735,11 +737,11 @@ void MainComponent::resized()
               { return fitItem (l, lw, c, w); };
     auto FX = [&] (juce::Component* c, int minSlice)
     { FlowItem it; it.comp = c; it.flex = true; it.minSlice = minSlice; return it; };
-    // F11: a knob needs the knob's square plus the room for its value box -
-    // not the long track the horizontal slider needed.
+    // F11: a knob is a vertical card cell now - the caption above, the
+    // large disc, the value below. The cell's default width is the knob's.
     auto FK = [&] (juce::Component* l, int lw, upic::Knob* c)
     {
-        auto it = fitItem (l, lw, c, upic::Knob::preferredWidth());
+        auto it = fitItem (l, lw, c, upic::Knob::kCellWidth);
         it.knob = true;
         return it;
     };
@@ -946,10 +948,9 @@ void MainComponent::resized()
         fold->setVisible (true);
         fold->setToggleState (level == GroupLevel::expanded, juce::dontSendNotification);
 
-        FlowGroup shown { grp.name, {} };
-        // the disclosure is measured like any other control (the caption's
-        // own width plus the tick)
-        shown.items.push_back (F (fold, 60));
+        // v1.34: the disclosure is the card's header, not an item in the
+        // card's flow.
+        FlowGroup shown { grp.name, {}, fold };
 
         if (level == GroupLevel::expanded)
         {
@@ -979,34 +980,22 @@ void MainComponent::resized()
     const bool anyEditors = showWaveEd || showEnvEd;
     const bool stripMode  = landscape || ! anyEditors;
 
-    // --- the flow ---
-    // The groups are placed in order. A group moves to the next line only
-    // when the current one has no room for it; a group that is wider than
-    // the whole line wraps inside itself. The counting pass and the placing
-    // pass must agree exactly, or a line lands on top of the next one.
+    // --- the permanent strip's flow ---------------------------------------
+    // The strip stays a compact row of controls above the cards (it is the
+    // menu + transport + tool + Restore, not a tool group).
     const int groupGapDp = 6;
 
-    auto groupWidth = [&] (const FlowGroup& g, float sc) -> int
+    auto groupWidth = [&] (const FlowGroup& g) -> int
     {
         int w = 0;
         for (auto& it : g.items)
-        {
-            if (it.flex)
-            {
-                w += it.minSlice;
-                continue;
-            }
-            // F11: the knob's fallback is wider than the knob.
-            const int compW = (it.knob && upic::Knob::shouldFallBack (sc))
-                                ? upic::Knob::kFallbackDesignWidth : it.w;
-            w += it.labelW + compW;
-        }
+            w += it.flex ? it.minSlice : it.labelW + it.w;
         return w;
     };
 
-    auto flowGroups = [&] (const std::vector<FlowGroup>& list, juce::Rectangle<int> area,
-                           float sc, bool place, std::vector<ToolbarCard>* rects,
-                           int& groupColour) -> int
+    auto flowStrip = [&] (const std::vector<FlowGroup>& list, juce::Rectangle<int> area,
+                          float sc, bool place, std::vector<ToolbarCard>* rects,
+                          int& groupColour) -> int
     {
         const int rh2 = (int) std::lround (rowH36 * sc);
         const int g2  = juce::jmax (1, (int) std::lround (2.0f * sc));
@@ -1016,13 +1005,10 @@ void MainComponent::resized()
 
         for (auto& grp : list)
         {
-            const int gw = (int) std::lround ((float) groupWidth (grp, sc) * sc);
+            const int gw = (int) std::lround ((float) groupWidth (grp) * sc);
             // does the group fit on the current line?
             if (x > area.getX() && x + gw + gap > right) { x = area.getX(); y += rh2; }
             const int gx = x, gy = y;
-            // a wide group wraps inside itself: every line it touches gets
-            // its own card, or the middle of the group would sit on the bare
-            // background and a bounding box would paint over the line gaps
             int segX = gx, segY = gy;
             auto closeSegment = [&]()
             {
@@ -1045,21 +1031,7 @@ void MainComponent::resized()
                     continue;
                 }
                 const int lw = (int) std::lround ((float) it.labelW * sc);
-                // F11: a knob that is too small to read falls back to the
-                // horizontal slider (decision 14), and the fallback needs
-                // more room. The rule depends on the scale alone, so the
-                // counting pass and the placing pass agree.
-                bool knobFallback = false;
-                if (it.knob && it.comp != nullptr)
-                {
-                    knobFallback = upic::Knob::shouldFallBack (sc);
-                    if (auto* knob = dynamic_cast<upic::Knob*> (it.comp))
-                        knob->setFallback (knobFallback);
-                }
-                const int cwDp = (it.knob && knobFallback) ? upic::Knob::kFallbackDesignWidth
-                                                            : it.w;
-                const int cw = (int) std::lround ((float) cwDp * sc);
-                // a group that is wider than the line wraps inside itself
+                const int cw = (int) std::lround ((float) it.w * sc);
                 if (x > area.getX() && x + lw + cw > right)
                 {
                     closeSegment();
@@ -1082,24 +1054,293 @@ void MainComponent::resized()
         return (y - area.getY()) / rh2 + 1;
     };
 
+    // --- the cards ---------------------------------------------------------
+    // v1.34 (2026-11-18): every group is a card, like the EQ reference. The
+    // card's header is the group's disclosure toggle; its cells are the
+    // group's controls. A knob's cell is vertical (caption above, large
+    // disc, value below); a labelled control keeps its label as the
+    // caption; a bare control sits on the card's control row. The cards
+    // wrap into rows - there is no scrolling - and a card that is wider
+    // than the window wraps its own cells inside itself.
+    const int cardPadX = 4, cardPadY = 3, cardGap = 6, cardHeaderH = 20;
+    const int cardCellGap = 4;
+
+    struct CardCell { FlowItem item; int widthDp = 0; };
+
+    auto captionWidthDp = [] (juce::Component* l) -> int
+    {
+        if (auto* lab = dynamic_cast<juce::Label*> (l))
+        {
+            juce::Font f (juce::FontOptions (10.5f, juce::Font::bold));
+            return juce::GlyphArrangement::getStringWidthInt (f, lab->getText()) + 8;
+        }
+        return 0;
+    };
+    auto headerWidthDp = [] (const FlowGroup& grp) -> int
+    {
+        if (grp.header == nullptr)
+            return 0;
+        juce::Font f (juce::FontOptions (15.0f));
+        return juce::GlyphArrangement::getStringWidthInt (f, grp.header->getButtonText()) + 44;
+    };
+    auto isFlexGroup = [] (const FlowGroup& grp) -> bool
+    {
+        for (auto& it : grp.items)
+            if (it.flex) return true;
+        return false;
+    };
+    auto groupCellHeightDp = [&] (const FlowGroup& grp) -> int
+    {
+        return isFlexGroup (grp) ? 26 : upic::Knob::kCellHeight;
+    };
+
+    auto makeCells = [&] (const FlowGroup& grp) -> std::vector<CardCell>
+    {
+        std::vector<CardCell> cells;
+        for (auto& it : grp.items)
+        {
+            CardCell c { it, 0 };
+            if (it.flex) c.widthDp = it.minSlice;
+            else if (it.knob)
+                c.widthDp = juce::jmax (upic::Knob::kCellWidth, captionWidthDp (it.label));
+            else
+                c.widthDp = juce::jmax (it.w, it.labelW + 4);
+            cells.push_back (c);
+        }
+        return cells;
+    };
+
+    struct CardMetrics { int width = 0, height = 0; };
+
+    auto cardMetrics = [&] (const FlowGroup& grp, float sc, int maxW) -> CardMetrics
+    {
+        const int padX = juce::jmax (2, (int) std::lround ((float) cardPadX * sc));
+        const int padY = juce::jmax (1, (int) std::lround ((float) cardPadY * sc));
+        const int headerH = (int) std::lround ((float) cardHeaderH * sc);
+        const int cellH = (int) std::lround ((float) groupCellHeightDp (grp) * sc);
+        const int gap = juce::jmax (2, (int) std::lround ((float) cardCellGap * sc));
+        const int innerMax = juce::jmax (1, maxW - 2 * padX);
+
+        const auto cells = makeCells (grp);
+        int rows = 1, lineW = 0, widest = 0;
+        for (auto& c : cells)
+        {
+            const int cw = juce::jmax (8, (int) std::lround ((float) c.widthDp * sc));
+            if (lineW > 0 && lineW + gap + cw > innerMax)
+            {
+                widest = juce::jmax (widest, lineW);
+                ++rows;
+                lineW = 0;
+            }
+            lineW += (lineW > 0 ? gap : 0) + cw;
+        }
+        widest = juce::jmax (widest, lineW);
+
+        const int headerPx = (int) std::lround ((float) headerWidthDp (grp) * sc);
+        CardMetrics m;
+        m.width = juce::jmin (maxW, juce::jmax (widest, headerPx) + 2 * padX);
+        m.height = headerH + 2 * padY + rows * cellH + (rows - 1) * gap;
+        return m;
+    };
+
+    auto placeCardCells = [&] (const FlowGroup& grp, juce::Rectangle<int> card, float sc)
+    {
+        const int padX = juce::jmax (2, (int) std::lround ((float) cardPadX * sc));
+        const int padY = juce::jmax (1, (int) std::lround ((float) cardPadY * sc));
+        const int headerH = (int) std::lround ((float) cardHeaderH * sc);
+        const int cellH = (int) std::lround ((float) groupCellHeightDp (grp) * sc);
+        const int gap = juce::jmax (2, (int) std::lround ((float) cardCellGap * sc));
+        const int ctrlH = juce::jmax (14, (int) std::lround (26.0f * sc));
+
+        if (grp.header != nullptr)
+            grp.header->setBounds (card.getX() + padX, card.getY() + padY,
+                                   juce::jmax (8, card.getWidth() - 2 * padX),
+                                   juce::jmax (8, headerH));
+
+        auto body = card.withTrimmedTop (headerH).reduced (padX, 0);
+        body.removeFromTop (padY);
+        body.removeFromBottom (padY);
+
+        int x = body.getX(), y = body.getY();
+        for (auto& c : makeCells (grp))
+        {
+            const int cw = juce::jmax (8, (int) std::lround ((float) c.widthDp * sc));
+            if (x > body.getX() && x + cw > body.getRight())
+            {
+                x = body.getX();
+                y += cellH + gap;
+            }
+            const juce::Rectangle<int> cell (x, y, cw, cellH);
+
+            if (c.item.flex)
+            {
+                if (c.item.comp != nullptr)
+                    c.item.comp->setBounds (cell);
+            }
+            else if (c.item.knob)
+            {
+                juce::String caption;
+                if (auto* lab = dynamic_cast<juce::Label*> (c.item.label))
+                    caption = lab->getText();
+                if (auto* knob = dynamic_cast<upic::Knob*> (c.item.comp))
+                {
+                    knob->setDesignScale (sc);
+                    knob->setCellCaption (caption);
+                    knob->setFallback (upic::Knob::shouldFallBack (sc));
+                }
+                if (c.item.comp != nullptr)
+                    c.item.comp->setBounds (cell);
+                if (c.item.label != nullptr)
+                    c.item.label->setVisible (false);
+            }
+            else
+            {
+                if (c.item.label != nullptr)
+                    c.item.label->setBounds (cell.getX(), cell.getY(), cw,
+                                             juce::jmax (8, (int) std::lround (
+                                                 (float) upic::Knob::kCellCaptionH * sc)));
+                if (c.item.comp != nullptr)
+                    c.item.comp->setBounds (cell.getX(), cell.getBottom() - ctrlH, cw, ctrlH);
+            }
+            x += cw + gap;
+        }
+    };
+
+    auto layoutCards = [&] (const std::vector<FlowGroup>& list, juce::Rectangle<int> area,
+                            float sc, bool place, std::vector<ToolbarCard>* rects,
+                            int& groupColour, int* rowsOut = nullptr) -> int
+    {
+        const int gap = juce::jmax (2, (int) std::lround ((float) cardGap * sc));
+        int y = area.getY();
+        int rows = 0;
+
+        struct Card { const FlowGroup* grp; int w, h; };
+        std::vector<Card> cards;
+        cards.reserve (list.size());
+        for (auto& grp : list)
+        {
+            const auto m = cardMetrics (grp, sc, area.getWidth());
+            cards.push_back ({ &grp, m.width, m.height });
+        }
+
+        size_t i = 0;
+        while (i < cards.size())
+        {
+            if (isFlexGroup (*cards[i].grp))
+            {
+                // the status is a full-width card of its own
+                const int ch = cards[i].h;
+                const juce::Rectangle<int> card (area.getX(), y, area.getWidth(), ch);
+                if (rects != nullptr) rects->push_back ({ card, groupColour });
+                if (place) placeCardCells (*cards[i].grp, card, sc);
+                ++groupColour;
+                y += ch + gap;
+                ++rows;
+                ++i;
+                continue;
+            }
+
+            const size_t first = i;
+            int rowW = 0, rowH = 0;
+            size_t j = i;
+            while (j < cards.size() && ! isFlexGroup (*cards[j].grp))
+            {
+                if (j > first && rowW + gap + cards[j].w > area.getWidth())
+                    break;
+                rowW += (j > first ? gap : 0) + cards[j].w;
+                rowH = juce::jmax (rowH, cards[j].h);
+                ++j;
+            }
+            if (j == first)
+            {
+                // a card wider than the window gets the whole line
+                rowH = cards[j].h;
+                ++j;
+            }
+
+            int x = area.getX();
+            for (size_t k = first; k < j; ++k)
+            {
+                const juce::Rectangle<int> card (x, y, cards[k].w, rowH);
+                if (rects != nullptr) rects->push_back ({ card, groupColour });
+                if (place) placeCardCells (*cards[k].grp, card, sc);
+                ++groupColour;
+                x += cards[k].w + gap;
+            }
+            y += rowH + gap;
+            ++rows;
+            i = j;
+        }
+
+        if (rowsOut != nullptr) *rowsOut = rows;
+        return juce::jmax (0, y - gap - area.getY());
+    };
+
     // the hints sidebar: the long explanations that used to sit in the
     // toolbar's rows get their own column on the right - the spare space
     // on a large screen. The "Hints" toggle shows and hides it. A focus
-    // view has no room for it (F4).
-    const int sidebarW = (! anyFocus && showHints && getWidth() >= 820) ? 260 : 0;
+    // view has no room for it (F4), and neither has a short window: the
+    // cards need the width more than the hints do.
+    const int sidebarW = (! anyFocus && showHints && getWidth() >= 820
+                          && getHeight() >= 700) ? 260 : 0;
 
-    // fit-shrink: wrapping is scale-dependent, so settle by iteration
+    // fit-shrink: wrapping is scale-dependent, so settle by iteration.
+    // v1.34: the cards are taller than the old rows. When the minimum
+    // scale is still not enough, the cards that would not fit fold to
+    // their headers - from the end, so the important groups stay open.
+    // The user's own fold levels are never touched; the fold is recomputed
+    // on every layout, so a larger window brings the cards back.
     float s = 1.0f;
-    int topRowsTotal = 0, stripRows = 0;
-    for (int iter = 0; ; ++iter)
+    int stripRows = 0, topH = 0;
+    std::vector<char> autoCollapsed (shownGroups.size(), 0);
+
+    auto buildEffective = [&] (bool hide) -> std::vector<FlowGroup>
+    {
+        std::vector<FlowGroup> out;
+        out.reserve (shownGroups.size());
+        for (size_t i = 0; i < shownGroups.size(); ++i)
+        {
+            if (autoCollapsed[i] != 0 && shownGroups[i].name != "status")
+            {
+                if (hide)
+                    for (auto& it : shownGroups[i].items)
+                    {
+                        if (it.comp != nullptr)
+                        {
+                            it.comp->setVisible (false);
+                            foldHidden.push_back (it.comp);
+                        }
+                        if (it.label != nullptr)
+                        {
+                            it.label->setVisible (false);
+                            foldHidden.push_back (it.label);
+                        }
+                    }
+                out.push_back ({ shownGroups[i].name, {}, shownGroups[i].header });
+            }
+            else
+            {
+                out.push_back (shownGroups[i]);
+            }
+        }
+        return out;
+    };
+
+    auto toolbarHeightAt = [&] (float sc) -> int
     {
         auto area = b;
         if (sidebarW > 0) area.removeFromRight (sidebarW + 8);
         int colour = 0;
-        stripRows = flowGroups (stripGroups, area, s, false, nullptr, colour);
-        topRowsTotal = stripRows
-                     + flowGroups (shownGroups, area, s, false, nullptr, colour);
-        const int minH = topRowsTotal * (int) std::lround (rowH36 * s) + 6
+        const int sr = flowStrip (stripGroups, area, sc, false, nullptr, colour);
+        const auto eff = buildEffective (false);
+        const int cards = layoutCards (eff, area, sc, false, nullptr, colour);
+        return sr * (int) std::lround (rowH36 * sc) + (sr > 0 ? 4 : 0) + cards;
+    };
+
+    for (int iter = 0; ; ++iter)
+    {
+        topH = toolbarHeightAt (s);
+        const int minH = topH + 6
                        + (int) std::lround (minScoreH * s)
                        + (int) std::lround (26.0f * s) // Osc|Sample|Live tab strip
                        // F6: the view bar's row comes out of the editors'
@@ -1107,16 +1348,29 @@ void MainComponent::resized()
                        + (anyEditors ? (int) std::lround (minEdH * s) + 6
                                         + (int) std::lround (26.0f * s) : 0)
                        + (stripMode ? (int) std::lround (34.0f * s) : 0);
-        if (minH <= b.getHeight() || iter >= 8) break;
-        s *= 0.92f;
-        if (s < 0.55f) { s = 0.55f; }
+        if (minH <= b.getHeight() || iter >= 40) break;
+        if (s > 0.5501f)
+        {
+            s = juce::jmax (0.55f, s * 0.92f);
+            continue;
+        }
+        // at the minimum scale: fold a group from the end into its header
+        int target = -1;
+        for (int gi = (int) shownGroups.size() - 1; gi >= 0; --gi)
+            if (autoCollapsed[(size_t) gi] == 0 && shownGroups[(size_t) gi].name != "status")
+            {
+                target = gi;
+                break;
+            }
+        if (target < 0) break;
+        autoCollapsed[(size_t) target] = 1;
     }
     appLaf.uiScale = s;   // the fonts follow the layout's scale
 
-    // top toolbar block: the groups share the lines, the hints get the
-    // spare space on the right
+    // top toolbar block: the permanent strip and the cards; the hints get
+    // the spare space on the right
     {
-        auto top = b.removeFromTop (topRowsTotal * (int) std::lround (rowH36 * s) + 6);
+        auto top = b.removeFromTop (juce::jmin (b.getHeight(), topH + 6));
         toolbarBounds = top;
         toolbarGroups.clear();
         juce::Rectangle<int> sidebar;
@@ -1128,11 +1382,18 @@ void MainComponent::resized()
 
         // F5: the permanent strip is its own card row (or rows, when the
         // window is narrow), above the folding groups.
-        permanentStripBounds = area.removeFromTop (stripRows * (int) std::lround (rowH36 * s));
         int colour = 0;
-        flowGroups (stripGroups, permanentStripBounds, s, true, &toolbarGroups, colour);
-        flowGroups (shownGroups, area, s, true, &toolbarGroups, colour);
-        toolbarRows = topRowsTotal;
+        stripRows = flowStrip (stripGroups, area, s, false, nullptr, colour);
+        const int stripH = stripRows * (int) std::lround (rowH36 * s);
+        permanentStripBounds = area.removeFromTop (stripH);
+        colour = 0;
+        flowStrip (stripGroups, permanentStripBounds, s, true, &toolbarGroups, colour);
+        if (stripH > 0) area.removeFromTop (4);
+
+        // v1.34: one card per group, wrapped into rows
+        int cardRows = 0;
+        layoutCards (buildEffective (true), area, s, true, &toolbarGroups, colour, &cardRows);
+        toolbarRows = stripRows + cardRows;
 
         // the two explanation labels live in the sidebar now
         const bool sidebarOn = sidebarW > 0;

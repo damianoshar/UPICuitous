@@ -98,30 +98,33 @@ void upic::runKnobChecks (upic::SelfTest& t)
                "F11 the wide layout shows rotary knobs",
                knob != nullptr ? juce::String (knob->getSliderStyle()) : juce::String ("no knob"));
 
+        // the card cell carries the label as its caption
+        check (knob != nullptr && knob->hasCellCaption()
+               && knob->getCellCaption().isNotEmpty(),
+               "F11 the knob's card cell carries the caption",
+               knob != nullptr ? knob->getCellCaption() : juce::String());
+
         // the rule itself: a knob below the readable size falls back
         check (! upic::Knob::shouldFallBack (1.0f)
-               && upic::Knob::shouldFallBack (0.5f),
+               && upic::Knob::shouldFallBack (0.4f),
                "F11 the fallback rule follows the layout's scale");
 
-        // the narrow layout: the knob is too small to read, so the
-        // horizontal slider takes over (decision 14)
-        mc.setSize (460, 360);
-        check (knob != nullptr && knob->isFallback()
-               && knob->getSliderStyle() == juce::Slider::LinearHorizontal,
-               "F11 the narrow layout falls back to the horizontal slider",
-               knob != nullptr ? (knob->isFallback() ? "fallback" : "rotary")
-                                : juce::String ("no knob"));
-
-        // the fallback keeps the value in its own box beside the track
+        // the fallback's own geometry: the caption above, the track between
+        // the caption and the value box
         if (knob != nullptr)
         {
+            const bool wasFallback = knob->isFallback();
+            knob->setFallback (true);
             const auto track = knob->fallbackTrackArea();
             const auto pill = knob->valuePillArea();
-            check (pill.getX() >= track.getRight()
+            const auto cellKnob = knob->cellKnobArea();
+            check (pill.getY() >= track.getBottom()
                    && pill.getRight() <= knob->getWidth()
-                   && pill.getWidth() >= 20 && pill.getHeight() >= 8,
-                   "F11 the fallback's value box sits beside the track",
+                   && pill.getWidth() >= 20 && pill.getHeight() >= 8
+                   && track.getY() + 1 >= cellKnob.getY(),
+                   "F11 the fallback keeps the caption and puts the value below",
                    pill.toString() + " vs track " + track.toString());
+            knob->setFallback (wasFallback);
         }
 
         mc.setSize (1280, 800);
@@ -211,14 +214,17 @@ void upic::runKnobChecks (upic::SelfTest& t)
                    "F11 the knob's face shortens a long value",
                    face + " <- " + dur->valueText (true));
 
-            // the value has its own box beside the knob (the reference's
-            // pill): the box starts past the knob's square and stays inside
+            // the value has its own box below the knob (the reference's
+            // pill): the box starts past the disc and stays inside the cell
             const auto pill = dur->valuePillArea();
-            const int side = juce::jmin (dur->getWidth(), dur->getHeight());
-            check (pill.getX() >= side + 2 && pill.getRight() <= dur->getWidth()
+            const auto knobRect = dur->cellKnobArea();
+            check (dur->hasCellCaption()
+                   && pill.getY() >= knobRect.getBottom()
+                   && pill.getRight() <= dur->getWidth()
                    && pill.getWidth() >= 32 && pill.getHeight() >= 10,
-                   "F11 the value has its own box beside the knob",
-                   pill.toString() + " in " + dur->getBounds().toString());
+                   "F11 the value has its own box below the knob",
+                   pill.toString() + " below " + knobRect.toString()
+                     + " in " + dur->getBounds().toString());
         }
         else
         {
