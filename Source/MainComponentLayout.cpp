@@ -1015,7 +1015,7 @@ void MainComponent::resized()
                 if (rects != nullptr && x > segX)
                     rects->push_back ({ juce::Rectangle<int> (segX, segY,
                                                               juce::jmax (1, x - segX), rh2),
-                                        groupColour });
+                                        groupColour, grp.name });
             };
 
             for (auto& it : grp.items)
@@ -1063,8 +1063,15 @@ void MainComponent::resized()
     // wrap into rows - there is no scrolling - and a card that is wider
     // than the window wraps its own cells inside itself.
     const int cardPadX = 4, cardPadY = 3, cardGap = 6, cardHeaderH = 20;
-    const int cardCellGap = 4;
+    const int cardCellGap = 4, cardRowGap = 4;
+    const int cardControlH = 26;   // the row a button / dropdown occupies
 
+    // v1.34.1: a card is only as tall as its tallest cell. A knob's cell is
+    // 90dp (caption, disc, pill); a plain control is a caption row over one
+    // control row. Cards in one row keep their own height - the layout does
+    // not pad them to a common height. (The cell's pixel height is the sum
+    // of its parts, not the scaled sum: 40dp at 0.56 is 22px, but the 8px
+    // caption and the 15px control are 23px together.)
     struct CardCell { FlowItem item; int widthDp = 0; };
 
     auto captionWidthDp = [] (juce::Component* l) -> int
@@ -1089,11 +1096,6 @@ void MainComponent::resized()
             if (it.flex) return true;
         return false;
     };
-    auto groupCellHeightDp = [&] (const FlowGroup& grp) -> int
-    {
-        return isFlexGroup (grp) ? 26 : upic::Knob::kCellHeight;
-    };
-
     auto makeCells = [&] (const FlowGroup& grp) -> std::vector<CardCell>
     {
         std::vector<CardCell> cells;
@@ -1116,30 +1118,42 @@ void MainComponent::resized()
     {
         const int padX = juce::jmax (2, (int) std::lround ((float) cardPadX * sc));
         const int padY = juce::jmax (1, (int) std::lround ((float) cardPadY * sc));
-        const int headerH = (int) std::lround ((float) cardHeaderH * sc);
-        const int cellH = (int) std::lround ((float) groupCellHeightDp (grp) * sc);
+        const int headerH = juce::jmax (8, (int) std::lround ((float) cardHeaderH * sc));
         const int gap = juce::jmax (2, (int) std::lround ((float) cardCellGap * sc));
+        const int rowGap = juce::jmax (2, (int) std::lround ((float) cardRowGap * sc));
         const int innerMax = juce::jmax (1, maxW - 2 * padX);
+        const int captionH = juce::jmax (8, (int) std::lround ((float) upic::Knob::kCellCaptionH * sc));
+        const int ctrlH = juce::jmax (14, (int) std::lround ((float) cardControlH * sc));
+        auto cellH = [&] (const CardCell& c) -> int
+        {
+            if (c.item.flex) return ctrlH;
+            if (c.item.knob) return juce::jmax (8, (int) std::lround ((float) upic::Knob::kCellHeight * sc));
+            return (c.item.label != nullptr ? captionH : 0) + ctrlH;
+        };
 
         const auto cells = makeCells (grp);
-        int rows = 1, lineW = 0, widest = 0;
+        int lineW = 0, widest = 0, bodyH = 0, lineH = 0;
         for (auto& c : cells)
         {
             const int cw = juce::jmax (8, (int) std::lround ((float) c.widthDp * sc));
+            const int ch = cellH (c);
             if (lineW > 0 && lineW + gap + cw > innerMax)
             {
                 widest = juce::jmax (widest, lineW);
-                ++rows;
+                bodyH += lineH + rowGap;
                 lineW = 0;
+                lineH = 0;
             }
             lineW += (lineW > 0 ? gap : 0) + cw;
+            lineH = juce::jmax (lineH, ch);
         }
         widest = juce::jmax (widest, lineW);
+        bodyH += lineH;
 
         const int headerPx = (int) std::lround ((float) headerWidthDp (grp) * sc);
         CardMetrics m;
         m.width = juce::jmin (maxW, juce::jmax (widest, headerPx) + 2 * padX);
-        m.height = headerH + 2 * padY + rows * cellH + (rows - 1) * gap;
+        m.height = headerH + 2 * padY + bodyH;
         return m;
     };
 
@@ -1147,10 +1161,18 @@ void MainComponent::resized()
     {
         const int padX = juce::jmax (2, (int) std::lround ((float) cardPadX * sc));
         const int padY = juce::jmax (1, (int) std::lround ((float) cardPadY * sc));
-        const int headerH = (int) std::lround ((float) cardHeaderH * sc);
-        const int cellH = (int) std::lround ((float) groupCellHeightDp (grp) * sc);
+        const int headerH = juce::jmax (8, (int) std::lround ((float) cardHeaderH * sc));
         const int gap = juce::jmax (2, (int) std::lround ((float) cardCellGap * sc));
-        const int ctrlH = juce::jmax (14, (int) std::lround (26.0f * sc));
+        const int rowGap = juce::jmax (2, (int) std::lround ((float) cardRowGap * sc));
+        const int captionH = juce::jmax (8, (int) std::lround ((float) upic::Knob::kCellCaptionH * sc));
+        const int ctrlH = juce::jmax (14, (int) std::lround ((float) cardControlH * sc));
+        const int knobH = (int) std::lround ((float) upic::Knob::kCellHeight * sc);
+        auto cellH = [&] (const CardCell& c) -> int
+        {
+            if (c.item.flex) return ctrlH;
+            if (c.item.knob) return juce::jmax (8, knobH);
+            return (c.item.label != nullptr ? captionH : 0) + ctrlH;
+        };
 
         if (grp.header != nullptr)
             grp.header->setBounds (card.getX() + padX, card.getY() + padY,
@@ -1161,48 +1183,71 @@ void MainComponent::resized()
         body.removeFromTop (padY);
         body.removeFromBottom (padY);
 
-        int x = body.getX(), y = body.getY();
-        for (auto& c : makeCells (grp))
+        // first, pack the cells into lines and learn each line's height
+        const auto cells = makeCells (grp);
+        struct PlacedCell { const CardCell* cell; int x, y, w, lineH; };
+        std::vector<PlacedCell> placed;
+        size_t lineStart = 0;
+        int x = body.getX(), y = body.getY(), lineH = 0;
+        auto closeLine = [&]()
         {
-            const int cw = juce::jmax (8, (int) std::lround ((float) c.widthDp * sc));
+            for (size_t k = lineStart; k < placed.size(); ++k)
+                placed[k].lineH = lineH;
+            y += lineH + rowGap;
+            lineStart = placed.size();
+            lineH = 0;
+            x = body.getX();
+        };
+        for (auto& c : cells)
+        {
+            // v1.34.1: a narrowed card (the flex status) must not let its
+            // cell hang over the card's edge; the cell follows the body.
+            const int cw = juce::jmin (juce::jmax (8, (int) std::lround ((float) c.widthDp * sc)),
+                                       juce::jmax (8, body.getWidth()));
+            const int ch = cellH (c);
             if (x > body.getX() && x + cw > body.getRight())
-            {
-                x = body.getX();
-                y += cellH + gap;
-            }
-            const juce::Rectangle<int> cell (x, y, cw, cellH);
+                closeLine();
+            placed.push_back ({ &c, x, y, cw, ch });
+            x += cw + gap;
+            lineH = juce::jmax (lineH, ch);
+        }
+        closeLine();
 
-            if (c.item.flex)
+        // then place everything against its line's bottom, so the controls
+        // and value pills line up however tall the neighbour is
+        for (auto& p : placed)
+        {
+            const int bottom = p.y + p.lineH;
+            auto& item = p.cell->item;
+
+            if (item.flex)
             {
-                if (c.item.comp != nullptr)
-                    c.item.comp->setBounds (cell);
+                if (item.comp != nullptr)
+                    item.comp->setBounds (p.x, p.y, p.w, p.lineH);
             }
-            else if (c.item.knob)
+            else if (item.knob)
             {
                 juce::String caption;
-                if (auto* lab = dynamic_cast<juce::Label*> (c.item.label))
+                if (auto* lab = dynamic_cast<juce::Label*> (item.label))
                     caption = lab->getText();
-                if (auto* knob = dynamic_cast<upic::Knob*> (c.item.comp))
+                if (auto* knob = dynamic_cast<upic::Knob*> (item.comp))
                 {
                     knob->setDesignScale (sc);
                     knob->setCellCaption (caption);
                     knob->setFallback (upic::Knob::shouldFallBack (sc));
                 }
-                if (c.item.comp != nullptr)
-                    c.item.comp->setBounds (cell);
-                if (c.item.label != nullptr)
-                    c.item.label->setVisible (false);
+                if (item.comp != nullptr)
+                    item.comp->setBounds (p.x, bottom - knobH, p.w, knobH);
+                if (item.label != nullptr)
+                    item.label->setVisible (false);
             }
             else
             {
-                if (c.item.label != nullptr)
-                    c.item.label->setBounds (cell.getX(), cell.getY(), cw,
-                                             juce::jmax (8, (int) std::lround (
-                                                 (float) upic::Knob::kCellCaptionH * sc)));
-                if (c.item.comp != nullptr)
-                    c.item.comp->setBounds (cell.getX(), cell.getBottom() - ctrlH, cw, ctrlH);
+                if (item.label != nullptr)
+                    item.label->setBounds (p.x, bottom - ctrlH - captionH, p.w, captionH);
+                if (item.comp != nullptr)
+                    item.comp->setBounds (p.x, bottom - ctrlH, p.w, ctrlH);
             }
-            x += cw + gap;
         }
     };
 
@@ -1211,65 +1256,84 @@ void MainComponent::resized()
                             int& groupColour, int* rowsOut = nullptr) -> int
     {
         const int gap = juce::jmax (2, (int) std::lround ((float) cardGap * sc));
-        int y = area.getY();
         int rows = 0;
 
-        struct Card { const FlowGroup* grp; int w, h; };
+        struct Card { const FlowGroup* grp; int w, h; bool flex; };
         std::vector<Card> cards;
         cards.reserve (list.size());
         for (auto& grp : list)
         {
             const auto m = cardMetrics (grp, sc, area.getWidth());
-            cards.push_back ({ &grp, m.width, m.height });
+            cards.push_back ({ &grp, m.width, m.height, isFlexGroup (grp) });
         }
 
-        size_t i = 0;
-        while (i < cards.size())
+        // v1.34.1: the fixed cards are packed in order; a flex card (the
+        // status) then fills the first row from the end that still has room
+        // for it, instead of always taking a full row of its own. That is
+        // what removes the isolated last card and the dead space beside it.
+        std::vector<std::vector<size_t>> rowCards;
+        std::vector<int> rowW, rowH;
+        std::vector<size_t> flexCards;
+        for (size_t i = 0; i < cards.size(); ++i)
         {
-            if (isFlexGroup (*cards[i].grp))
+            if (cards[i].flex) { flexCards.push_back (i); continue; }
+            if (rowCards.empty() || rowW.back() + gap + cards[i].w > area.getWidth())
             {
-                // the status is a full-width card of its own
-                const int ch = cards[i].h;
-                const juce::Rectangle<int> card (area.getX(), y, area.getWidth(), ch);
-                if (rects != nullptr) rects->push_back ({ card, groupColour });
-                if (place) placeCardCells (*cards[i].grp, card, sc);
-                ++groupColour;
-                y += ch + gap;
-                ++rows;
-                ++i;
-                continue;
+                rowCards.push_back ({});
+                rowW.push_back (0);
+                rowH.push_back (0);
             }
+            rowCards.back().push_back (i);
+            rowW.back() += (rowCards.back().size() > 1 ? gap : 0) + cards[i].w;
+            rowH.back() = juce::jmax (rowH.back(), cards[i].h);
+        }
+        for (auto fi : flexCards)
+        {
+            bool done = false;
+            for (int r = (int) rowCards.size() - 1; r >= 0 && ! done; --r)
+            {
+                const int used = rowW[(size_t) r];
+                const int remaining = area.getWidth() - used - (used > 0 ? gap : 0);
+                // v1.34.1: the status is one label, so it can take a narrower
+                // slice of the row rather than forcing a full row of its own.
+                // Below a readable minimum it still gets its own row.
+                const int minFlex = juce::jmax (8, (int) std::lround (140.0f * sc));
+                if (remaining >= juce::jmin (cards[fi].w, minFlex))
+                {
+                    rowCards[(size_t) r].push_back (fi);
+                    rowW[(size_t) r] += (used > 0 ? gap : 0) + remaining;
+                    rowH[(size_t) r] = juce::jmax (rowH[(size_t) r], cards[fi].h);
+                    done = true;
+                }
+            }
+            if (! done)
+            {
+                rowCards.push_back ({ fi });
+                rowW.push_back (area.getWidth());
+                rowH.push_back (cards[fi].h);
+            }
+        }
 
-            const size_t first = i;
-            int rowW = 0, rowH = 0;
-            size_t j = i;
-            while (j < cards.size() && ! isFlexGroup (*cards[j].grp))
-            {
-                if (j > first && rowW + gap + cards[j].w > area.getWidth())
-                    break;
-                rowW += (j > first ? gap : 0) + cards[j].w;
-                rowH = juce::jmax (rowH, cards[j].h);
-                ++j;
-            }
-            if (j == first)
-            {
-                // a card wider than the window gets the whole line
-                rowH = cards[j].h;
-                ++j;
-            }
-
+        int y = area.getY();
+        for (size_t r = 0; r < rowCards.size(); ++r)
+        {
             int x = area.getX();
-            for (size_t k = first; k < j; ++k)
+            for (auto k : rowCards[r])
             {
-                const juce::Rectangle<int> card (x, y, cards[k].w, rowH);
-                if (rects != nullptr) rects->push_back ({ card, groupColour });
-                if (place) placeCardCells (*cards[k].grp, card, sc);
+                // the flex card takes the rest of its row; everything else
+                // keeps its own width and its own height
+                const int cw = cards[k].flex ? juce::jmax (1, area.getRight() - x)
+                                             : cards[k].w;
+                const juce::Rectangle<int> card (x, y, cw, cards[k].h);
+                if (rects != nullptr)
+                    rects->push_back ({ card, groupColour, cards[k].grp->name });
+                if (place)
+                    placeCardCells (*cards[k].grp, card, sc);
                 ++groupColour;
-                x += cards[k].w + gap;
+                x += cw + gap;
             }
-            y += rowH + gap;
+            y += rowH[r] + gap;
             ++rows;
-            i = j;
         }
 
         if (rowsOut != nullptr) *rowsOut = rows;
@@ -1278,11 +1342,14 @@ void MainComponent::resized()
 
     // the hints sidebar: the long explanations that used to sit in the
     // toolbar's rows get their own column on the right - the spare space
-    // on a large screen. The "Hints" toggle shows and hides it. A focus
-    // view has no room for it (F4), and neither has a short window: the
-    // cards need the width more than the hints do.
+    // on a large screen. The Hints toggle shows and hides it. A focus view
+    // has no room for it (F4), and neither has a short window: the cards
+    // need the width more than the hints do. v1.34.1: the width follows the
+    // window (20%, 190-260dp), so a narrower sidebar can buy a whole card.
     const int sidebarW = (! anyFocus && showHints && getWidth() >= 820
-                          && getHeight() >= 700) ? 260 : 0;
+                          && getHeight() >= 700)
+                           ? juce::jlimit (190, 260, (int) std::lround (getWidth() * 0.2))
+                           : 0;
 
     // fit-shrink: wrapping is scale-dependent, so settle by iteration.
     // v1.34: the cards are taller than the old rows. When the minimum
@@ -1401,7 +1468,7 @@ void MainComponent::resized()
         kbdHintLab.setVisible (sidebarOn);
         if (sidebarOn)
         {
-            toolbarGroups.push_back ({ sidebar, colour });
+            toolbarGroups.push_back ({ sidebar, colour, "hints" });
             auto sb = sidebar.reduced (6, 4);
             const int matLines = lineCount (matHintLab.getText());
             const int kbdLines = lineCount (kbdHintLab.getText());
@@ -1557,8 +1624,15 @@ void MainComponent::resized()
     const float wantEdHNow = (showWaveEd && showEnvEd) ? wantEdH : 240.0f;
     int edH = anyEditors ? (int) std::lround(wantEdHNow * s) : 0;
     const int budget = b.getHeight() - (int) std::lround(minScoreH * s) - 6 - stripH;
+    // v1.34.1: the score is the composition canvas, so the editors keep at
+    // most ~42% of the height below the toolbar even when they would like
+    // 300dp. The recovered toolbar height goes to the score, not to empty
+    // space at the bottom of a fixed-height editor.
+    const int edCap = juce::jmax ((int) std::lround (minEdH * s),
+                                  (int) std::lround ((float) juce::jmax (0, b.getHeight() - stripH) * 0.42f));
     if (anyEditors)
-        edH = juce::jmin(edH, juce::jmax((int) std::lround(minEdH * s), budget));
+        edH = juce::jmin(edH, juce::jmax((int) std::lround(minEdH * s),
+                                         juce::jmin (budget, edCap)));
     auto bottom = b.removeFromBottom(edH + stripH);
 
     // F6: the view bar sits between the canvas and the editors. When the

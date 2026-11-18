@@ -661,8 +661,9 @@ void upic::runWidgetChecks (upic::SelfTest& t)
             sc->setSelectedArcs({1});
             const auto now = juce::Time::getCurrentTime();
             const auto src = juce::Desktop::getInstance().getMainMouseSource();
-            const auto p = juce::Point<float>((float) we->getWidth() * 0.5f,
-                                              (float) we->getHeight() * 0.5f);
+            auto plot = we->getLocalBounds().toFloat().reduced (6);
+            plot.removeFromTop (18);
+            const auto p = plot.getCentre();
             juce::MouseEvent down(src, p, juce::ModifierKeys(), 1.0f,
                                   0.0f, 0.0f, 0.0f, 0.0f, we, we, now, p, now, 1, false);
             we->mouseDown(down);

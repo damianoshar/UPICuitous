@@ -488,6 +488,14 @@ public:
         return (i >= 0 && i < (int) toolbarGroups.size())
                  ? toolbarGroups[(size_t) i].area : juce::Rectangle<int>();
     }
+    // v1.34.1: a card by its group name, so the layout checks do not depend
+    // on where the packing put it.
+    juce::Rectangle<int> toolbarCardBoundsForGroupForTest (const juce::String& name) const
+    {
+        for (auto& c : toolbarGroups)
+            if (c.name == name) return c.area;
+        return {};
+    }
     juce::Rectangle<int> toolbarBoundsForTest() const { return toolbarBounds; }
 
     // --- F4 (2026-11-17): the focus views --------------------------------
@@ -815,6 +823,7 @@ private:
     {
         juce::Rectangle<int> area;
         int colour = 0;
+        juce::String name;   // v1.34.1: the group (or "permanent"/"hints")
     };
     std::vector<ToolbarCard> toolbarGroups;
     juce::Rectangle<int> toolbarBounds; // the whole toolbar block (cards + sidebar)

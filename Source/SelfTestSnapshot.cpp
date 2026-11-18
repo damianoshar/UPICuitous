@@ -105,7 +105,9 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
             };
             {
                 struct Sz { int w, h; };
-                const Sz sizes[] = { {1280,800}, {1024,600}, {800,480}, {640,400}, {480,700}, {360,640} };
+                const Sz sizes[] = { {1920,1080}, {1280,800}, {1024,768}, {1024,600},
+                                     {800,600}, {800,480}, {640,400}, {480,700},
+                                     {460,360}, {360,640} };
                 for (auto z : sizes)
                 {
                     juce::String detail;
@@ -141,16 +143,23 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                        "v1.33.3 the material hint sits above the shortcut list");
                 // F5: Play lives in the permanent strip above the groups;
                 // the groups still share their lines (the transport's loop
-                // and the pages sit side by side).
+                // and the pages sit side by side). v1.34.1: the cards keep
+                // their own heights, so they share the row - not a control
+                // baseline - and the controls stay inside their cards.
                 auto* loop = find ("loopBtn");
+                const auto transportCard = mc.toolbarCardBoundsForGroupForTest ("transport");
+                const auto pagesCard = mc.toolbarCardBoundsForGroupForTest ("pages");
                 check (play != nullptr && loop != nullptr && page != nullptr
-                       && play->getBounds().getBottom() <= loop->getBounds().getY()
-                       && loop->getBounds().getY() == page->getBounds().getY(),
-                       "F5 the permanent strip sits above two groups on one line",
+                       && play->getBounds().getBottom() <= transportCard.getY()
+                       && ! transportCard.isEmpty() && ! pagesCard.isEmpty()
+                       && transportCard.getY() == pagesCard.getY()
+                       && transportCard.contains (loop->getBounds())
+                       && pagesCard.contains (page->getBounds()),
+                       "F5 the permanent strip sits above two group cards on one line",
                        play != nullptr && loop != nullptr && page != nullptr
-                         ? play->getBounds().toString() + " / "
-                           + loop->getBounds().toString() + " vs "
-                           + page->getBounds().toString()
+                         ? play->getBounds().toString() + " / transport "
+                           + transportCard.toString() + " vs pages "
+                           + pagesCard.toString()
                          : juce::String());
 
                 // no button may be narrower than its own text
@@ -219,6 +228,34 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                     check (allOnCards && toolbarControls > 0,
                            "v1.33.3 every toolbar control sits on a card",
                            loose.trim());
+                }
+
+                // v1.34.1: a card is only as tall as its tallest cell, and
+                // the status fills the remaining width of a row instead of
+                // always taking a full row of its own. The large window has
+                // room for both effects.
+                {
+                    mc.setSize (1920, 1080);
+                    const auto transport = mc.toolbarCardBoundsForGroupForTest ("transport");
+                    const auto levels = mc.toolbarCardBoundsForGroupForTest ("levels");
+                    const auto status = mc.toolbarCardBoundsForGroupForTest ("status");
+                    check (transport.getHeight() > 0 && levels.getHeight() > 0
+                           && transport.getHeight() < levels.getHeight(),
+                           "v1.34.1 the compact cards are shorter than the knob cards",
+                           transport.toString() + " vs " + levels.toString());
+
+                    bool sharesRow = false;
+                    for (int i = 0; i < mc.toolbarCardCountForTest(); ++i)
+                    {
+                        const auto other = mc.toolbarCardBoundsForTest (i);
+                        if (other.getY() == status.getY() && other != status)
+                            sharesRow = true;
+                    }
+                    check (status.getHeight() > 0 && sharesRow
+                           && status.getWidth() > 0,
+                           "v1.34.1 the status fills the rest of a row",
+                           status.toString());
+                    mc.setSize (1280, 800);
                 }
             }
 
