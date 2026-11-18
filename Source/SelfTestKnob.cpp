@@ -112,6 +112,18 @@ void upic::runKnobChecks (upic::SelfTest& t)
                knob != nullptr ? (knob->isFallback() ? "fallback" : "rotary")
                                 : juce::String ("no knob"));
 
+        // the fallback keeps the value in its own box beside the track
+        if (knob != nullptr)
+        {
+            const auto track = knob->fallbackTrackArea();
+            const auto pill = knob->valuePillArea();
+            check (pill.getX() >= track.getRight()
+                   && pill.getRight() <= knob->getWidth()
+                   && pill.getWidth() >= 20 && pill.getHeight() >= 8,
+                   "F11 the fallback's value box sits beside the track",
+                   pill.toString() + " vs track " + track.toString());
+        }
+
         mc.setSize (1280, 800);
         check (knob != nullptr && ! knob->isFallback(),
                "F11 the wide layout comes back to the rotary knob");
@@ -198,6 +210,15 @@ void upic::runKnobChecks (upic::SelfTest& t)
                    && dur->getTooltip().contains ("12"),
                    "F11 the knob's face shortens a long value",
                    face + " <- " + dur->valueText (true));
+
+            // the value has its own box beside the knob (the reference's
+            // pill): the box starts past the knob's square and stays inside
+            const auto pill = dur->valuePillArea();
+            const int side = juce::jmin (dur->getWidth(), dur->getHeight());
+            check (pill.getX() >= side + 2 && pill.getRight() <= dur->getWidth()
+                   && pill.getWidth() >= 32 && pill.getHeight() >= 10,
+                   "F11 the value has its own box beside the knob",
+                   pill.toString() + " in " + dur->getBounds().toString());
         }
         else
         {

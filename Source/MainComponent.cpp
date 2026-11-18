@@ -221,7 +221,9 @@ void MainComponent::buildTransportControls()
         l->setJustificationType(juce::Justification::centredRight);
         l->setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
         l->setColour(juce::Label::textColourId, juce::Colours::white);
-        l->setColour(juce::Label::backgroundColourId, juce::Colour(0xff2a2a32));
+        // the label is plain text on the toolbar card (the reference's
+        // labels carry no plate of their own)
+        l->setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
         addAndMakeVisible(l);
     }
     scrubLenSlider.setTextValueSuffix(" ms");
@@ -253,7 +255,7 @@ void MainComponent::buildTransportControls()
     grainLab.setJustificationType(juce::Justification::centredRight);
     grainLab.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
     grainLab.setColour(juce::Label::textColourId, juce::Colours::white);
-    grainLab.setColour(juce::Label::backgroundColourId, juce::Colour(0xff2a2a32));
+    grainLab.setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     addAndMakeVisible(grainLab);
     grainSlider.setNumDecimalPlacesToDisplay(0);
     grainSlider.setName ("grainSlider");
@@ -276,7 +278,7 @@ void MainComponent::buildTransportControls()
     dragSmoothLab.setJustificationType(juce::Justification::centredRight);
     dragSmoothLab.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
     dragSmoothLab.setColour(juce::Label::textColourId, juce::Colours::white);
-    dragSmoothLab.setColour(juce::Label::backgroundColourId, juce::Colour(0xff2a2a32));
+    dragSmoothLab.setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     addAndMakeVisible(dragSmoothLab);
     dragSmoothSlider.setNumDecimalPlacesToDisplay(0);
     dragSmoothSlider.setName ("dragSmoothSlider");
@@ -517,7 +519,7 @@ void MainComponent::buildLiveControls()
     liveGrainLab.setJustificationType(juce::Justification::centredRight);
     liveGrainLab.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
     liveGrainLab.setColour(juce::Label::textColourId, juce::Colours::white);
-    liveGrainLab.setColour(juce::Label::backgroundColourId, juce::Colour(0xff2a2a32));
+    liveGrainLab.setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     liveGrainSlider.setName("liveGrainSlider");
     liveGrainSlider.setNumDecimalPlacesToDisplay(0);
     liveGrainSlider.setTextValueSuffix(" ms");

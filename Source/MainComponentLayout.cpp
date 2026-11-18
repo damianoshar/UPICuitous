@@ -641,19 +641,19 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillAll (upic::uiBackground());
     // one subtle card per toolbar row, so the transport / voice / material /
     // groove groups read as separate blocks (each with a faint tint)
-    static const juce::Colour fills[]   { juce::Colour (0xff1a1f2a), juce::Colour (0xff1a1a22),
-                                          juce::Colour (0xff1a241d), juce::Colour (0xff241a28) };
-    static const juce::Colour borders[] { juce::Colour (0xff39455c), juce::Colour (0xff3a3a4a),
-                                          juce::Colour (0xff3a5a44), juce::Colour (0xff5a3a5a) };
+    static const juce::Colour fills[]   { juce::Colour (0xff161a24), juce::Colour (0xff16161e),
+                                          juce::Colour (0xff161f19), juce::Colour (0xff1e1622) };
+    static const juce::Colour borders[] { juce::Colour (0xff2f3a4e), juce::Colour (0xff30303e),
+                                          juce::Colour (0xff30493a), juce::Colour (0xff483048) };
     for (auto& card : toolbarGroups)
     {
         auto r = card.area;
         if (r.isEmpty()) continue;
         auto rf = r.toFloat().reduced (1.0f, 2.0f);
         g.setColour (fills[(size_t) (card.colour & 3)]);
-        g.fillRoundedRectangle (rf, 5.0f);
+        g.fillRoundedRectangle (rf, 7.0f);
         g.setColour (borders[(size_t) (card.colour & 3)]);
-        g.drawRoundedRectangle (rf, 5.0f, 1.0f);
+        g.drawRoundedRectangle (rf, 7.0f, 1.0f);
     }
 }
 
@@ -735,11 +735,11 @@ void MainComponent::resized()
               { return fitItem (l, lw, c, w); };
     auto FX = [&] (juce::Component* c, int minSlice)
     { FlowItem it; it.comp = c; it.flex = true; it.minSlice = minSlice; return it; };
-    // F11: a knob is a square control, so it needs a square's width - not
-    // the long track the horizontal slider needed.
+    // F11: a knob needs the knob's square plus the room for its value box -
+    // not the long track the horizontal slider needed.
     auto FK = [&] (juce::Component* l, int lw, upic::Knob* c)
     {
-        auto it = fitItem (l, lw, c, upic::Knob::kDesignSize);
+        auto it = fitItem (l, lw, c, upic::Knob::preferredWidth());
         it.knob = true;
         return it;
     };

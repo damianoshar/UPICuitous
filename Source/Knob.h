@@ -12,10 +12,10 @@ namespace upic {
 // suffix, the callbacks and the undo behaviour are the slider's own - only
 // the shape and the drawing change.
 //
-// The look follows the reference archive (patches 02 and 05): the 5px cyan
-// filled track (#5ac8fa) over the dark unfilled track (#4a4a5c), the 11px
-// pale thumb (#e6f4ff) and the panel colour around it. The value is drawn
-// on the knob; the group's label stays beside it.
+// The look follows the EQ reference: a dark, slightly glossy disc, a thin
+// arc just outside it (the unfilled track, then the value's accent), a
+// coloured dot on the arc, and the value in its own dark pill beside the
+// knob. The group's label stays to the left.
 //
 // A narrow layout cannot read a knob, so the control falls back to the
 // horizontal slider (decision 14): the same drawing as the reference
@@ -28,10 +28,14 @@ namespace upic {
 class Knob : public juce::Slider
 {
 public:
-    // The knob's design width (in the layout's design units) and the width
-    // of the horizontal fallback.
+    // The knob's design width (in the layout's design units), the value
+    // box's width and the gap between them - the reference's knob + box.
     static constexpr int kDesignSize = 40;
-    static constexpr int kFallbackDesignWidth = 120;
+    static constexpr int kValueWidth = 48;
+    static constexpr int kValueGap = 4;
+    // The width a knob item needs: the knob, the gap and the value box.
+    static constexpr int preferredWidth() { return kDesignSize + kValueGap + kValueWidth; }
+    static constexpr int kFallbackDesignWidth = 124;
     // Below this many pixels the knob is too small to read, so the control
     // falls back to the horizontal slider.
     static constexpr float kMinRotaryPixels = 28.0f;
@@ -39,9 +43,9 @@ public:
     static constexpr int kTrackInset = 5;
 
     // The rotary sweep: 270 degrees, from the lower left round the top to
-    // the lower right.
-    static constexpr float startAngle = 2.35619f;    // 135 degrees
-    static constexpr float endAngle   = 7.06858f;    // 405 degrees
+    // the lower right (the reference's gap at the bottom).
+    static constexpr float startAngle = 3.92699f;    // 225 degrees
+    static constexpr float endAngle   = 8.63938f;    // 495 degrees
 
     Knob()
     {
@@ -93,6 +97,28 @@ public:
         const int textW = juce::jmin ((int) std::lround ((float) b.getWidth() * 0.42f),
                                       (int) std::lround (58.0f * uiScale()));
         return b.withTrimmedRight (juce::jmax (20, textW));
+    }
+
+    // The value's box - the reference's pill. In the rotary layout it sits
+    // to the right of the knob's square; in the fallback it sits beside the
+    // track. The layout gives the knob the room for both.
+    juce::Rectangle<int> valuePillArea() const
+    {
+        const auto b = getLocalBounds();
+        const int side = juce::jmin (b.getWidth(), b.getHeight());
+        const int gap = juce::jmax (2, (int) std::lround ((float) kValueGap * uiScale()));
+        const int pillH = juce::jmax (4, (int) std::lround ((float) side * 0.58f));
+
+        if (fallback)
+        {
+            const auto track = fallbackTrackArea();
+            return juce::Rectangle<int> (track.getRight() + gap, b.getCentreY() - pillH / 2,
+                                         juce::jmax (4, b.getRight() - track.getRight() - gap - 1),
+                                         pillH);
+        }
+
+        return juce::Rectangle<int> (b.getX() + side + gap, b.getCentreY() - pillH / 2,
+                                     juce::jmax (4, b.getWidth() - side - gap), pillH);
     }
 
     // The value as it is drawn (the number, with or without the suffix).
@@ -164,7 +190,15 @@ public:
             return {};
 
         const float base = juce::jlimit (7.0f, 13.0f, (float) height * 0.42f);
-        juce::Font font (juce::FontOptions (base, juce::Font::bold));
+        return shortenValue (juce::Font (juce::FontOptions (base, juce::Font::bold)), width);
+    }
+
+    // The ladder itself: the full text first, then without the suffix, then
+    // with fewer decimals, and at last not at all.
+    juce::String shortenValue (const juce::Font& font, int width) const
+    {
+        if (width < 4)
+            return {};
 
         const int decimals = getNumDecimalPlacesToDisplay();
         const juce::String full = valueText (true);
@@ -220,44 +254,62 @@ private:
     {
         const auto b = getLocalBounds().toFloat();
         const float side = juce::jmin (b.getWidth(), b.getHeight());
-        if (side < 6.0f)
+        if (side < 10.0f)
             return;
 
-        const float thickness = juce::jmax (3.0f, side * 0.16f);
-        const float radius = juce::jmax (2.0f, side * 0.5f - thickness * 0.5f - 1.0f);
-        const auto centre = b.getCentre();
+        const float sc = uiScale();
+        // the knob's own square; the value's pill takes the rest of the bounds
+        const auto knob = b.withWidth (side);
+        const auto centre = knob.getCentre();
+
+        const float arcThickness = juce::jmax (1.5f, 2.0f * sc);
+        const float discSide = juce::jmax (6.0f, side - 8.0f * sc);
+        const float radius = discSide * 0.5f + arcThickness * 0.5f + 0.5f;
         const float to = startAngle + (endAngle - startAngle)
                               * (float) valueToProportionOfLength (getValue());
 
+        // the body: the reference's dark, slightly glossy disc
+        const juce::Rectangle<float> disc (centre.x - discSide * 0.5f,
+                                           centre.y - discSide * 0.5f,
+                                           discSide, discSide);
+        juce::ColourGradient body (juce::Colour (0xff313146).withMultipliedAlpha (opacity),
+                                   centre.x, disc.getY(),
+                                   juce::Colour (0xff1a1a26).withMultipliedAlpha (opacity),
+                                   centre.x, disc.getBottom(), false);
+        g.setGradientFill (body);
+        g.fillEllipse (disc);
+        g.setColour (juce::Colour (0xff3e3e58).withMultipliedAlpha (opacity));
+        g.drawEllipse (disc, juce::jmax (1.0f, sc));
+
+        // the track: a thin arc just outside the disc
         juce::Path track;
         track.addCentredArc (centre.x, centre.y, radius, radius, 0.0f,
                              startAngle, endAngle, true);
-        g.setColour (findColour (juce::Slider::backgroundColourId)
-                          .withMultipliedAlpha (opacity));
-        g.strokePath (track, juce::PathStrokeType (thickness, juce::PathStrokeType::curved,
+        g.setColour (juce::Colour (0xff3a3a4c).withMultipliedAlpha (opacity));
+        g.strokePath (track, juce::PathStrokeType (arcThickness, juce::PathStrokeType::curved,
                                                    juce::PathStrokeType::rounded));
 
+        // the value's own arc, in the slider's accent
+        const auto accent = findColour (juce::Slider::trackColourId);
         if (to > startAngle + 0.01f)
         {
             juce::Path filled;
             filled.addCentredArc (centre.x, centre.y, radius, radius, 0.0f,
                                   startAngle, to, true);
-            g.setColour (findColour (juce::Slider::trackColourId)
-                              .withMultipliedAlpha (opacity));
-            g.strokePath (filled, juce::PathStrokeType (thickness, juce::PathStrokeType::curved,
+            g.setColour (accent.withMultipliedAlpha (opacity));
+            g.strokePath (filled, juce::PathStrokeType (arcThickness, juce::PathStrokeType::curved,
                                                         juce::PathStrokeType::rounded));
         }
 
-        // the thumb: the 11px pale dot of the reference archive
-        const float thumb = juce::jmax (6.0f, side * 0.34f);
+        // the thumb: the reference's coloured dot on the arc
+        const float dot = juce::jmax (3.0f, 4.5f * sc);
         const juce::Point<float> tip (centre.x + radius * std::cos (to - juce::MathConstants<float>::halfPi),
                                       centre.y + radius * std::sin (to - juce::MathConstants<float>::halfPi));
-        g.setColour (findColour (juce::Slider::thumbColourId)
-                          .withMultipliedAlpha (opacity));
-        g.fillEllipse (tip.x - thumb * 0.5f, tip.y - thumb * 0.5f, thumb, thumb);
+        g.setColour (accent.withMultipliedAlpha (opacity));
+        g.fillEllipse (tip.x - dot * 0.5f, tip.y - dot * 0.5f, dot, dot);
 
-        // the value, on the knob
-        drawValue (g, b.reduced (thickness + 2.0f).toNearestInt(), opacity, true);
+        // the value, in its own box beside the knob
+        paintValuePill (g, valuePillArea(), opacity);
     }
 
     void paintFallback (juce::Graphics& g, float opacity)
@@ -297,22 +349,27 @@ private:
         g.setColour (upic::uiBackground().withMultipliedAlpha (opacity));
         g.drawEllipse (pos - thumb * 0.5f, cy - thumb * 0.5f, thumb, thumb, 1.0f);
 
-        // the value, beside the track
-        drawValue (g, area.withPosition (area.getRight() + 2, area.getY())
-                          .withWidth (getWidth() - area.getWidth() - 2)
-                          .reduced (0, 2),
-                   opacity, false);
+        // the value, in its own box beside the track
+        paintValuePill (g, valuePillArea(), opacity);
     }
-    void drawValue (juce::Graphics& g, juce::Rectangle<int> area, float opacity,
-                    bool centred)
+
+    void paintValuePill (juce::Graphics& g, juce::Rectangle<int> area, float opacity)
     {
-        if (area.getWidth() < 4 || area.getHeight() < 4)
+        if (area.getWidth() < 6 || area.getHeight() < 6)
             return;
 
-        const float base = juce::jlimit (7.0f, 13.0f, (float) area.getHeight() * 0.42f);
-        juce::Font font (juce::FontOptions (base, juce::Font::bold));
+        const float sc = uiScale();
+        const float radius = juce::jmax (2.0f, 3.5f * sc);
+        const auto rf = area.toFloat();
+        g.setColour (juce::Colour (0xff15151f).withMultipliedAlpha (opacity));
+        g.fillRoundedRectangle (rf, radius);
+        g.setColour (juce::Colour (0xff33334a).withMultipliedAlpha (opacity));
+        g.drawRoundedRectangle (rf.reduced (0.5f), radius, 1.0f);
 
-        const juce::String text = faceText (area.getWidth() - 1, area.getHeight());
+        const float base = juce::jlimit (7.0f, 13.0f, (float) area.getHeight() * 0.46f);
+        juce::Font font (juce::FontOptions (base, juce::Font::bold));
+        const int inset = juce::jmax (2, (int) std::lround (3.0f * sc));
+        const juce::String text = shortenValue (font, area.getWidth() - inset * 2);
         if (text.isEmpty())
             return;
 
@@ -320,9 +377,7 @@ private:
                           .withMultipliedAlpha (opacity));
         g.setFont (font);
         // the text is never squashed: the ladder above made it fit
-        g.drawFittedText (text, area,
-                          centred ? juce::Justification::centred : juce::Justification::centredLeft,
-                          1, 1.0f);
+        g.drawFittedText (text, area, juce::Justification::centred, 1, 1.0f);
     }
 
     static bool fits (const juce::Font& font, const juce::String& text, int width)
@@ -333,18 +388,9 @@ private:
 
     juce::Rectangle<int> valueEditorArea() const
     {
-        const auto b = getLocalBounds();
-        if (fallback)
-        {
-            const auto area = fallbackTrackArea();
-            return juce::Rectangle<int> (area.getRight() + 2, b.getY() + 2,
-                                         juce::jmax (4, b.getRight() - area.getRight() - 3),
-                                         juce::jmax (4, b.getHeight() - 4));
-        }
-
-        const int side = juce::jmin (b.getWidth(), b.getHeight());
-        return juce::Rectangle<int> (b.getCentreX() - side / 2, b.getCentreY() - side / 2,
-                                     side, side).reduced ((int) (side * 0.22f));
+        // the editor opens over the value's own box, like the old sliders'
+        // value box did
+        return valuePillArea().reduced (1);
     }
 };
 
