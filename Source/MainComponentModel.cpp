@@ -2109,6 +2109,62 @@ void MainComponent::openGuerreroDialog (int arcId)
 bool MainComponent::applyGuerreroRecipe (int arcId, const upic::GuerreroRecipe& recipe,
                                          juce::String& error)
 {
+    // ---- existing arc: eligibility and equality BEFORE any generation -----
+    // Generation is stochastic, can be expensive, and can fail (for example
+    // when the envelope span no longer fits the page). None of that should
+    // happen for an Apply that changes nothing, so provenance, the fingerprint
+    // and exact recipe equality are settled first.
+    if (arcId != 0)
+    {
+        bool unchanged = false;
+        {
+            const juce::ScopedLock l (dataLock);
+            const upic::Arc* found = nullptr;
+            for (const auto& a : curPage().arcs)
+                if (a.id == arcId) { found = &a; break; }
+
+            if (found == nullptr)             { error = "no such arc"; return false; }
+            if (! found->hasGuerrero)         { error = "not a Guerrero arc"; return false; }
+            if (found->guerrero.malformed)    { error = "the provenance record is damaged"; return false; }
+            if (! found->guerrero.recipeValid){ error = "this arc predates the stored recipe"; return false; }
+            if (found->guerrero.geometryEdited)
+            {
+                error = "the geometry was edited, so the recipe is not applied";
+                return false;
+            }
+            if (! found->guerrero.hasFingerprint)
+            {
+                error = "this record has no geometry fingerprint";
+                return false;
+            }
+            if (upic::Arc::geometryFingerprint (found->points) != found->guerrero.geometryHash
+                || (int) found->points.size() != found->guerrero.pointCount)
+            {
+                error = "the geometry no longer matches its record";
+                return false;
+            }
+
+            if (sameRecipe (recipe, found->guerrero.recipe))
+                unchanged = true;
+            else if (found->guerrero.revision >= std::numeric_limits<int>::max())
+            {
+                // Only a real change consumes a revision, so an exhausted
+                // counter is not an obstacle to an Apply that changes nothing.
+                error = "the revision counter is exhausted for this arc";
+                return false;
+            }
+        }
+
+        if (unchanged)
+        {
+            // Nothing to do: no generation, no transaction, no revision bump.
+            // The separate "Regenerate" command is the explicit rebuild.
+            flash ("Guerrero: the recipe is unchanged");
+            return true;
+        }
+    }
+
+    // ---- generate: a new arc, or a recipe that really changed -------------
     guerrero::upicadapter::PlannedArc plan;
     bool lossy = false;
     uint32_t omitted = 0;
@@ -2168,53 +2224,6 @@ bool MainComponent::applyGuerreroRecipe (int arcId, const upic::GuerreroRecipe& 
             error = "the arc could not be inserted (page limits or host range)";
             return false;
         }
-        return true;
-    }
-
-    // ---- existing arc: replace geometry and recipe, keep identity ---------
-    bool unchanged = false;
-    {
-        const juce::ScopedLock l (dataLock);
-        const upic::Arc* found = nullptr;
-        for (const auto& a : curPage().arcs)
-            if (a.id == arcId) { found = &a; break; }
-
-        if (found == nullptr)             { error = "no such arc"; return false; }
-        if (! found->hasGuerrero)         { error = "not a Guerrero arc"; return false; }
-        if (found->guerrero.malformed)    { error = "the provenance record is damaged"; return false; }
-        if (! found->guerrero.recipeValid){ error = "this arc predates the stored recipe"; return false; }
-        if (found->guerrero.geometryEdited)
-        {
-            error = "the geometry was edited, so the recipe is not applied";
-            return false;
-        }
-        if (! found->guerrero.hasFingerprint)
-        {
-            error = "this record has no geometry fingerprint";
-            return false;
-        }
-        if (upic::Arc::geometryFingerprint (found->points) != found->guerrero.geometryHash
-            || (int) found->points.size() != found->guerrero.pointCount)
-        {
-            error = "the geometry no longer matches its record";
-            return false;
-        }
-        if (found->guerrero.revision >= std::numeric_limits<int>::max())
-        {
-            error = "the revision counter is exhausted for this arc";
-            return false;
-        }
-
-        // Nothing to do. Regenerating an identical recipe would bump the
-        // revision and leave an undo step for a change the user did not make;
-        // the separate "Regenerate" command is the explicit way to rebuild.
-        if (sameRecipe (recipe, found->guerrero.recipe))
-            unchanged = true;
-    }
-
-    if (unchanged)
-    {
-        flash ("Guerrero: the recipe is unchanged");
         return true;
     }
 
@@ -2676,3 +2685,16 @@ bool MainComponent::guerreroArcHasProvenanceForTest (int arcId) const
         if (a.id == arcId) return a.hasGuerrero;
     return false;
 }
+
+bool MainComponent::setGuerreroRecipeForTest (int arcId, const upic::GuerreroRecipe& recipe)
+{
+    const juce::ScopedLock l (dataLock);
+    for (auto& a : curPage().arcs)
+        if (a.id == arcId && a.hasGuerrero)
+        {
+            a.guerrero.recipe = recipe;
+            return true;
+        }
+    return false;
+}
+

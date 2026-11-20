@@ -1658,9 +1658,12 @@ void upic::runGuerreroChecks (SelfTest& t)
 // adding one more inside it overflowed the stack (0xC00000FD). Keeping these
 // checks at the same level as the caller gives them their own frame.
 //
-// The provenance lookup below also holds every juce::var in a named local:
-// `piece.getProperty(...).getArray()` takes a pointer into a temporary var that
-// dies at the end of the expression, so the array would be read after free.
+// The provenance lookup below keeps every juce::var in a named local. That is
+// for clarity of ownership rather than a proven lifetime defect: JUCE's variant
+// arrays are reference counted, and the crash that prompted this function was
+// established to be stack exhaustion (it disappeared when the checks moved out
+// of runGuerreroChecks()) - not a use-after-free. No sanitizer run has
+// confirmed a lifetime fault here.
 #if GUERRERO_INTEGRATION
 namespace {
 
@@ -1857,6 +1860,153 @@ void upic::runGuerreroDialogChecks (SelfTest& t)
                  "Guerrero: the model stores the edited seed");
         t.check (pE.hasFingerprint && pE.pointCount > 1,
                  "Guerrero: the edited arc has geometry and a fingerprint");
+    }
+
+    // --- a six-digit point limit is enterable ------------------------------
+    {
+        GuerreroParamOverlay dlg;
+        dlg.recipe = baseRecipe();
+        dlg.loadFromRecipe();
+        dlg.setTextForTest ("Max points per arc", "100000");
+
+        upic::GuerreroRecipe out;
+        juce::String err;
+        t.check (dlg.collect (out, err),
+                 "Guerrero dialog: a 100000 point limit is accepted", err);
+        t.check (out.maxPoints == 100000,
+                 "Guerrero dialog: the six-digit point limit survives");
+    }
+
+    // --- a non-default saved recipe applies end to end ---------------------
+    // 0.5 BPM at 0.2 beats is 24 s, inside the 30 s page, so this exercises
+    // generation, the transaction and undo rather than only collect().
+    {
+        MainComponent mcS;
+        mcS.setSize (1280, 800);
+
+        const upic::GuerreroRecipe ordinary = baseRecipe();
+        juce::String err;
+        t.check (mcS.applyGuerreroRecipe (0, ordinary, err),
+                 "Guerrero: an ordinary recipe creates the arc", err);
+
+        int id = -1;
+        upic::GuerreroProvenance before;
+        {
+            const juce::var piece = mcS.pieceToVar();
+            findGuerreroProvenance (piece, id, before);
+        }
+        const uint64_t hashBefore = before.geometryHash;
+        const int revBefore = before.revision;
+
+        upic::GuerreroRecipe slow = ordinary;
+        slow.bpm = 0.5;
+        slow.maxPoints = 2000;
+        slow.lower.depth = 20;
+        slow.upper.depth = 20;
+        slow.seed.depth = 20;
+        slow.lower.timeStart = 0.0;
+        slow.lower.timeEnd   = 0.2;
+        slow.upper.timeStart = 0.0;
+        slow.upper.timeEnd   = 0.2;
+        // 10000 seed knots against 2000 points needs the downsample policy;
+        // with Reject the planner correctly refuses rather than truncating.
+        slow.pointsPolicy = upic::GuerreroPointPolicy::Downsample;
+        slow.lowerSeed = 5000u;
+        slow.upperSeed = 5001u;
+        slow.seedSeed  = 5002u;
+
+        err.clear();
+        t.check (mcS.applyGuerreroRecipe (id, slow, err),
+                 "Guerrero: a 0.5 BPM / depth 20 recipe applies to an arc", err);
+
+        upic::GuerreroProvenance after;
+        {
+            const juce::var piece = mcS.pieceToVar();
+            findGuerreroProvenance (piece, id, after);
+        }
+        t.check (after.recipe.bpm == 0.5 && after.recipe.maxPoints == 2000
+                     && after.recipe.lower.depth == 20,
+                 "Guerrero: the non-default recipe is stored");
+        t.check (after.geometryHash != hashBefore,
+                 "Guerrero: the non-default recipe produced new geometry");
+        t.check (after.revision == revBefore + 1,
+                 "Guerrero: the non-default apply bumped the revision");
+
+        mcS.undo();
+        upic::GuerreroProvenance undone;
+        {
+            const juce::var piece = mcS.pieceToVar();
+            findGuerreroProvenance (piece, id, undone);
+        }
+        t.check (undone.recipe.bpm == ordinary.bpm && undone.geometryHash == hashBefore,
+                 "Guerrero: undo restores the ordinary recipe and geometry");
+
+        mcS.redo();
+        upic::GuerreroProvenance redone;
+        {
+            const juce::var piece = mcS.pieceToVar();
+            findGuerreroProvenance (piece, id, redone);
+        }
+        t.check (redone.recipe.bpm == 0.5,
+                 "Guerrero: redo restores the non-default recipe");
+    }
+
+    // --- an unchanged apply must return BEFORE any generation -------------
+    // The stored recipe is replaced (geometry and fingerprint untouched) by one
+    // whose 16 beats at 0.5 BPM span 1920 s and cannot fit the 30 s page.
+    // Applying that recipe unchanged has to succeed, because equality is
+    // decided before generation; changing it must fail, which proves that
+    // generation runs only for a real change.
+    {
+        MainComponent mcO;
+        mcO.setSize (1280, 800);
+
+        const upic::GuerreroRecipe ordinary = baseRecipe();
+        juce::String err;
+        t.check (mcO.applyGuerreroRecipe (0, ordinary, err),
+                 "Guerrero: the ordering test arc is created", err);
+
+        int id = -1;
+        upic::GuerreroProvenance p;
+        {
+            const juce::var piece = mcO.pieceToVar();
+            findGuerreroProvenance (piece, id, p);
+        }
+        const int revBefore = p.revision;
+
+        upic::GuerreroRecipe tooLong = ordinary;
+        tooLong.bpm = 0.5;
+        tooLong.lower.timeEnd = 16.0;
+        tooLong.upper.timeEnd = 16.0;
+        tooLong.pointsPolicy = upic::GuerreroPointPolicy::Downsample;
+
+        t.check (mcO.setGuerreroRecipeForTest (id, tooLong),
+                 "Guerrero: the stored recipe was overridden for the ordering test");
+
+        err.clear();
+        t.check (mcO.applyGuerreroRecipe (id, tooLong, err),
+                 "Guerrero: an unchanged recipe returns before generation", err);
+
+        upic::GuerreroProvenance p2;
+        {
+            const juce::var piece = mcO.pieceToVar();
+            findGuerreroProvenance (piece, id, p2);
+        }
+        t.check (p2.revision == revBefore,
+                 "Guerrero: the unchanged apply did not bump the revision");
+
+        // The same recipe with one seed changed is a REAL change, so generation
+        // runs and the page-fit check refuses it.
+        upic::GuerreroRecipe changed = tooLong;
+        changed.lowerSeed += 77u;
+        changed.upperSeed += 77u;
+        changed.seedSeed  += 77u;
+
+        err.clear();
+        t.check (! mcO.applyGuerreroRecipe (id, changed, err),
+                 "Guerrero: a changed recipe that cannot fit the page is refused");
+        t.check (err.containsIgnoreCase ("fit"),
+                 "Guerrero: the refusal says it does not fit the page", err);
     }
 #else
     juce::ignoreUnused (t);
