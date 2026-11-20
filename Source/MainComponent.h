@@ -2463,6 +2463,7 @@ public:
     // must be bound to the page the dialog was opened on - otherwise the same
     // id on another page would receive the edit.
     int    guerreroTargetPage = -1;
+    int    guerreroTargetEpoch = -1;
     int    guerreroTargetArcCount = -1;
     double guerreroTargetDuration = -1.0;
     bool guerreroTargetUnchanged() const;

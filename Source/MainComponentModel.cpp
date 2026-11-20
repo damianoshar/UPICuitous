@@ -2041,6 +2041,7 @@ void MainComponent::openGuerreroDialog (int arcId)
     {
         const juce::ScopedLock l (dataLock);
         guerreroTargetPage     = currentPage;
+        guerreroTargetEpoch    = pageEpoch.load (std::memory_order_relaxed);
         guerreroTargetArcCount = (int) curPage().arcs.size();
         guerreroTargetDuration = curPage().durationSec;
     }
@@ -2721,6 +2722,12 @@ bool MainComponent::guerreroTargetUnchanged() const
 {
     const juce::ScopedLock l (dataLock);
     if (currentPage != guerreroTargetPage) return false;
+
+    // The epoch survives a piece replacement: loadFromVar() swaps the pages and
+    // bumps it, so a different piece at the same index, with the same arc count
+    // and duration, is still recognised as a different edit context. Playback
+    // advancement does not bump it, which is why the index check stays.
+    if (pageEpoch.load (std::memory_order_relaxed) != guerreroTargetEpoch) return false;
 
     const auto& p = curPage();
     return (int) p.arcs.size() == guerreroTargetArcCount

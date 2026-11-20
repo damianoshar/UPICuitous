@@ -2056,6 +2056,80 @@ void upic::runGuerreroDialogChecks (SelfTest& t)
 
         mcG.closeGuerreroDialog();
     }
+
+    // --- a piece replacement at the same index must also be refused --------
+    // The page index, arc count and duration can all match a different piece,
+    // so the edit context also records the page epoch, which loadFromVar()
+    // bumps when it swaps the pages.
+    {
+        MainComponent mcR;
+        mcR.setSize (1280, 800);
+
+        const upic::GuerreroRecipe r = baseRecipe();
+        juce::String err;
+        t.check (mcR.applyGuerreroRecipe (0, r, err),
+                 "Guerrero: the replacement test arc is created", err);
+
+        int id = -1;
+        upic::GuerreroProvenance p;
+        {
+            const juce::var piece = mcR.pieceToVar();
+            findGuerreroProvenance (piece, id, p);
+        }
+
+        mcR.openGuerreroDialog (id);
+
+        // Same index, same arc count, same duration, same arc id - only the
+        // geometry differs, so nothing but the epoch can tell them apart.
+        // Same index, same arc count, same duration, same arc id - only the
+        // geometry differs, so nothing but the epoch can tell them apart.
+        // var copies share their array and object storage, so mutating the
+        // point through the pointer below is visible in `other`.
+        juce::var other = mcR.pieceToVar();
+        {
+            const juce::var pagesVar = other.getProperty ("pages", juce::var());
+            auto* pages = pagesVar.getArray();
+            if (pages != nullptr && ! pages->isEmpty())
+            {
+                const juce::var arcsVar = pages->getReference (0).getProperty ("arcs", juce::var());
+                auto* arcs = arcsVar.getArray();
+                if (arcs != nullptr && ! arcs->isEmpty())
+                {
+                    const juce::var ptsVar = arcs->getReference (0).getProperty ("points", juce::var());
+                    auto* pts = ptsVar.getArray();
+                    if (pts != nullptr && ! pts->isEmpty())
+                        if (auto* obj = pts->getReference (0).getDynamicObject())
+                            obj->setProperty ("f", 654.321);
+                }
+            }
+        }
+
+        t.check (mcR.loadFromVar (other),
+                 "Guerrero: a different piece with the same page shape loads");
+
+        const uint64_t hashAfterLoad = mcR.guerreroArcHashForTest (id);
+
+        auto* overlay = dynamic_cast<GuerreroParamOverlay*> (mcR.guerreroOverlay.get());
+        t.check (overlay != nullptr,
+                 "Guerrero: the dialog survives the piece replacement");
+
+        if (overlay != nullptr && overlay->onApply != nullptr)
+        {
+            upic::GuerreroRecipe changed = r;
+            changed.lowerSeed = 777u;
+
+            juce::String applyError;
+            const bool accepted = overlay->onApply (changed, applyError);
+
+            t.check (! accepted,
+                     "Guerrero: Apply is refused after the piece was replaced");
+            t.check (applyError.containsIgnoreCase ("page"),
+                     "Guerrero: the replacement refusal names the page", applyError);
+        }
+
+        t.check (mcR.guerreroArcHashForTest (id) == hashAfterLoad,
+                 "Guerrero: the replacement piece's arc was not modified");
+    }
 #else
     juce::ignoreUnused (t);
 #endif
