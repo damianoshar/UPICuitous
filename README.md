@@ -1,4 +1,4 @@
-﻿# UPICuitous - A JUCE-based UPIC clone: the classic oscillator graph becomes sound, and the same score can drive sample and live audio graphs with pitch change. Supports Windows standalone, VST3 plugin, and Android app.
+# UPICuitous - A JUCE-based UPIC clone: the classic oscillator graph becomes sound, and the same score can drive sample and live audio graphs with pitch change. Supports Windows standalone, VST3 plugin, and Android app.
 
 A homage to Iannis Xenakis' UPIC (1977): draw pitch curves on a
 time-vs-pitch page, give each arc a single-cycle wavetable and an
@@ -8,6 +8,13 @@ microphone input (pitch-shifted in realtime).
 
 Ships as a **desktop app**, an **Android tablet app**, and a **VST3
 plugin** with the same UI and engine.
+
+**Source snapshot: UPICuitous v0.29.0 (2026-11-21).** For implemented 0.29
+transport/library/UI work, Guerrero generator/dialog integration, test
+coverage and unverified behavior, see
+[`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
+The optional Guerrero source is maintained separately; it is not the GENDYN
+synthesizer, which remains an independent project.
 
 ## Button pictograms and captions
 
@@ -46,7 +53,7 @@ yellow edges to trim the material.*
 
 | Build | Where | State |
 |---|---|---|
-| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v0.28.1 |
+| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v0.29.0 |
 | Python + tkinter + numpy | `python-upic/` | Prototype, shares `.upic.json`. `python python-upic/upicuitous.py` |
 | Single-page WebAudio | `web-upic/` | Prototype, shares `.upic.json`. Open `web-upic/index.html` |
 
@@ -60,10 +67,10 @@ yellow edges to trim the material.*
 .\Builds\VisualStudio2026\x64\Debug\App\UPICuitous.exe
 
 # VST3 (built by the script; the install asks for admin rights)
-.\scripts\install_plugin.ps1 -Version 0.28.1
+.\scripts\install_plugin.ps1 -Version 0.29.0
 ```
 
-`scripts/build.ps1 -Version 0.28.1` bumps the version everywhere it is
+`scripts/build.ps1 -Version 0.29.0` bumps the version everywhere it is
 written - the app, the plugin, the root CMake project, the Android manifest
 and the generated exporters - from one number in `UPICuitous.jucer`. Every
 build checks that the others still agree with it. `-SkipApp` or `-SkipPlugin`
@@ -73,6 +80,43 @@ for the manual CMake commands, the Android project and troubleshooting.
 First run of the standalone: press **Audio** and pick the output device.
 The microphone is opened on demand (Sample tab -> **Mon** / **Capture**, or
 **Play** with live arcs on the page).
+
+## Optional Guerrero composition workflow (v0.29.0)
+
+When CMake finds the companion Guerrero `Source/guerrero` tree (or
+`-DGUERRERO_SOURCE_DIR=/path/to/guerrero/Source` points to it), the host
+builds with `GUERRERO_INTEGRATION=1`. The Guerrero generator dropdown opens a
+scrollable parameter overlay for a **new arc**. The context menu on an arc
+with Guerrero provenance offers **Edit Guerrero recipe** and **Regenerate**.
+The dialog carries three independent 64-bit seeds, preserves untouched
+high-precision parameters, and rejects malformed input.
+
+Existing-arc Apply is a no-op if the validated recipe is identical; otherwise
+it regenerates geometry and provenance in one undoable transaction while
+protecting manually edited geometry. It also refuses stale edits after page
+switching or piece replacement (page index and epoch safeguards). Generator
+frequency/time bounds of a confined seed derive from its envelopes, rather
+than independent editable controls. The stored Arc geometry is authoritative;
+**bit-identical regeneration across operating systems is not guaranteed**.
+
+The companion engine implements tested A1 Brownian envelopes and A2 bounded
+seeds, not the complete historical Guerrero thread/rhythmic/mass system.
+The GENDYN project is **not connected** as a Guerrero playback backend.
+These UI behaviors have strong headless test coverage, but the dialog has
+**not** yet been checked visually for focus, scrolling or small screens.
+See the [implementation status](docs/IMPLEMENTATION_STATUS.md) for exact
+verification levels and outstanding issues.
+
+## v0.29 transport, libraries and score views
+
+Version 0.29 adds transport-state/fade behaviors, wavetable/envelope library
+reference replacement (including per-page rewrites and undo), toolbar/score
+view restyling and knob interaction. The headless suite exercises these
+model-level behaviors and a two-page tone/silence playback fixture in four
+Sequential/Loop combinations. The Sequential+Loop fixture **still needs an
+intermediate silent-page assertion** to prove that it visited page two before
+wrapping. UI `currentPage` notifications and real-time allocation safety at
+page transitions remain unverified.
 
 ## What it does
 
@@ -536,7 +580,7 @@ repository.
 
 - Windows with **Visual Studio 2026** (Desktop development with C++),
   MSBuild and CMake 3.22+.
-- **JUCE 8.0.6** in `JUCE/` (the app CMakeLists also fetches it if
+- **JUCE 8.0.16-security** in `JUCE/` (the app CMakeLists also fetches it if
   missing; `python Tools/fetch_juce.py` downloads it without git).
 - MinGW is not supported by JUCE 8 - use MSVC.
 - Android: JDK 17, SDK 35, NDK 28.1.13356709, CMake 3.22.1 (see
@@ -544,7 +588,11 @@ repository.
 
 ## Tests
 
-`UPICuitous.exe --selftest` runs 730 headless checks (DSP, pitch math,
+`UPICuitous.exe --selftest` has **1,202 total headless checks**
+reported passing in the latest Windows v0.29 run (including 187 Guerrero
+checks when that integration is enabled). That result is **developer-reported**,
+not independently rerun on this Linux reviewer environment. The suite covers
+DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample
 reverse read, the live reverse, the live grain size, the forced live
