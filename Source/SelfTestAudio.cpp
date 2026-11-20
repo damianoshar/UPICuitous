@@ -2476,6 +2476,9 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
                 return nullptr;
             };
 
+        check (findByName (mc, "seqBtn") != nullptr && findByName (mc, "loopBtn") != nullptr,
+               "F1: the transport mode toggles are present");
+
         // Sequential mode also travels in the piece; the toggles are set after
         // the load so the fixture owns the state rather than the piece or a
         // previous block.
