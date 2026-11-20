@@ -2510,6 +2510,75 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
         for (int b = 0; b < 4; ++b) render();
     }
 
+    // --- playback crosses into the next page's material --------------------
+    // The Guerrero recipe dialog binds an edit to the page it was opened on, and
+    // its guard assumes playback can move the active page. Only the pure
+    // upic::seqNextPage() decision was tested; this covers the audio side of the
+    // path: at the page end the engine continues on the NEXT page rather than
+    // stopping or repeating the first.
+    //
+    // Page 1 is silent, so "the transport keeps running but nothing is heard" is
+    // direct evidence that the audio thread changed page. Forward playback
+    // advances through all three enabled modes (sequential, loop-wrapped, plain
+    // next-page), so this asserts the shared outcome rather than one mode.
+    //
+    // The asynchronous message-thread notification that updates currentPage is
+    // NOT covered here: it goes through MessageManager::callAsync, and the
+    // headless self-test has no running dispatch loop to deliver it.
+    {
+        const juce::String toneThenSilence =
+            "{\"master\":1,\"pages\":["
+            "{\"duration\":0.1,\"nextArcId\":2,\"arcs\":["
+            "{\"id\":1,\"mode\":0,\"waveformId\":2,\"envelopeId\":0,\"intensity\":1,"
+            "\"points\":[{\"t\":0,\"f\":1},{\"t\":0.1,\"f\":1}]}]},"
+            "{\"duration\":2.0,\"nextArcId\":1,\"arcs\":[]}]}";
+
+        check (mc.loadFromVar (juce::JSON::parse (toneThenSilence)),
+               "F1: the tone-then-silence piece loads");
+        check (mc.pageCountForTest() == 2,
+               "F1: both pages are present",
+               juce::String (mc.pageCountForTest()));
+        check (std::abs (mc.pageDurationForTest() - 0.1) < 1e-9,
+               "F1: playback starts on the 0.1 s page",
+               juce::String (mc.pageDurationForTest(), 3));
+
+        render();   // absorb the load's model-change block
+
+        mc.clickPlayForTest();
+
+        // The first blocks are inside the 0.1 s tone page.
+        float tonePeak = 0.0f;
+        for (int b = 0; b < 3; ++b)
+            tonePeak = juce::jmax (tonePeak, render());
+
+        check (tonePeak > 0.001f,
+               "F1: the first page is audible",
+               juce::String (tonePeak, 4));
+
+        // 0.1 s at 44.1 kHz in 512-frame blocks is ~9 blocks; run past it and
+        // past the start fade of the next page.
+        for (int b = 0; b < 30; ++b)
+            render();
+
+        check (mc.isPlayingForTest(),
+               "F1: playback keeps running past the page end");
+
+        float silentPeak = 0.0f;
+        for (int b = 0; b < 4; ++b)
+            silentPeak = juce::jmax (silentPeak, render());
+
+        check (silentPeak < 0.001f,
+               "F1: the second page's silence is what is playing",
+               juce::String (silentPeak, 6));
+
+        mc.stopPlaybackForTest();
+        for (int b = 0; b < 4; ++b)
+            render();
+    }
+
+
+
+
     // --- double-click Stop rewinds, but only a real double click ---------
     {
         check (mc.loadFromVar (juce::JSON::parse (squarePiece)),
