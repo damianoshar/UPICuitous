@@ -1649,3 +1649,216 @@ void upic::runGuerreroChecks (SelfTest& t)
     juce::ignoreUnused (t);
 #endif
 }
+
+//==============================================================================
+// The Guerrero parameter dialog: recipe round trip and its transactions.
+//
+// Deliberately a SEPARATE function from runGuerreroChecks(). That function is
+// already near the stack limit after constructing a dozen MainComponents, and
+// adding one more inside it overflowed the stack (0xC00000FD). Keeping these
+// checks at the same level as the caller gives them their own frame.
+//
+// The provenance lookup below also holds every juce::var in a named local:
+// `piece.getProperty(...).getArray()` takes a pointer into a temporary var that
+// dies at the end of the expression, so the array would be read after free.
+#if GUERRERO_INTEGRATION
+namespace {
+
+bool findGuerreroProvenance (const juce::var& piece, int& idOut,
+                             upic::GuerreroProvenance& out)
+{
+    const juce::var pagesVar = piece.getProperty ("pages", juce::var());
+    auto* pages = pagesVar.getArray();
+    if (pages == nullptr || pages->isEmpty()) return false;
+
+    const juce::var arcsVar = pages->getReference (0).getProperty ("arcs", juce::var());
+    auto* arcs = arcsVar.getArray();
+    if (arcs == nullptr) return false;
+
+    for (int i = 0; i < arcs->size(); ++i)
+    {
+        const juce::var a = arcs->getReference (i);
+        const juce::var g = a.getProperty ("guerrero", juce::var());
+        if (! g.isObject()) continue;
+        out = upic::guerreroio::fromVar (g);
+        idOut = (int) a.getProperty ("id", -1);
+        return true;
+    }
+    return false;
+}
+
+} // anonymous namespace
+#endif
+
+void upic::runGuerreroDialogChecks (SelfTest& t)
+{
+#if GUERRERO_INTEGRATION
+    auto baseRecipe = []
+    {
+        upic::GuerreroRecipe r;
+        r.lower.roughness = 0.35;
+        r.lower.depth     = 7;
+        r.lower.freqLo    = 110.0;
+        r.lower.freqHi    = 880.0;
+        r.lower.timeStart = 0.0;
+        r.lower.timeEnd   = 16.0;
+        r.upper = r.lower;
+        r.upper.freqLo = 880.0;
+        r.upper.freqHi = 1760.0;
+        r.seed.roughness = 0.55;
+        r.seed.depth     = 7;
+        r.lowerSeed = 1000u;
+        r.upperSeed = 1001u;
+        r.seedSeed  = 1002u;
+        r.bpm = 120.0;
+        r.maxPoints = 1000;
+        return r;
+    };
+
+    // --- a saved recipe outside the dialog's preferred defaults ------------
+    // 0.5 BPM, depth 20 and maxPoints 2000 are all valid in the persisted
+    // format, so opening and pressing Apply must not reject them.
+    {
+        upic::GuerreroRecipe slow = baseRecipe();
+        slow.bpm = 0.5;
+        slow.maxPoints = 2000;
+        slow.lower.depth = 20;
+        slow.upper.depth = 20;
+        slow.seed.depth = 20;
+
+        GuerreroParamOverlay dlg;
+        dlg.recipe = slow;
+        dlg.loadFromRecipe();
+
+        upic::GuerreroRecipe out;
+        juce::String err;
+        t.check (dlg.collect (out, err),
+                 "Guerrero dialog: a saved 0.5 BPM / 2000 point recipe stays editable", err);
+        t.check (out.bpm == 0.5 && out.maxPoints == 2000 && out.lower.depth == 20,
+                 "Guerrero dialog: those saved values survive the round trip");
+    }
+
+    // --- underflow is rejected, not turned into zero ----------------------
+    {
+        GuerreroParamOverlay dlg;
+        dlg.recipe = baseRecipe();
+        dlg.loadFromRecipe();
+        dlg.setTextForTest ("Lower roughness (0-8)", "1e-999");
+
+        upic::GuerreroRecipe out;
+        juce::String err;
+        t.check (! dlg.collect (out, err),
+                 "Guerrero dialog: an underflowing number is rejected");
+        t.check (out.lower.roughness == 0.35,
+                 "Guerrero dialog: the rejected underflow leaves the value intact");
+    }
+
+    // --- an identical recipe is a no-op, not a new revision ---------------
+    {
+        upic::GuerreroRecipe r = baseRecipe();
+        r.lowerSeed = 2000u;
+        r.upperSeed = 2001u;
+        r.seedSeed  = 2002u;
+
+        MainComponent mcN;
+        mcN.setSize (1280, 800);
+
+        juce::String err;
+        t.check (mcN.applyGuerreroRecipe (0, r, err),
+                 "Guerrero: the base recipe creates an arc", err);
+
+        int id = -1;
+        upic::GuerreroProvenance p1;
+        {
+            const juce::var piece = mcN.pieceToVar();
+            t.check (findGuerreroProvenance (piece, id, p1),
+                     "Guerrero: the created arc carries provenance");
+        }
+
+        err.clear();
+        t.check (mcN.applyGuerreroRecipe (id, r, err),
+                 "Guerrero: applying an identical recipe reports success", err);
+
+        upic::GuerreroProvenance p2;
+        {
+            const juce::var piece = mcN.pieceToVar();
+            findGuerreroProvenance (piece, id, p2);
+        }
+
+        t.check (p2.revision == p1.revision,
+                 "Guerrero: an identical recipe does not bump the revision",
+                 juce::String (p1.revision) + " -> " + juce::String (p2.revision));
+        t.check (p2.geometryHash == p1.geometryHash,
+                 "Guerrero: an identical recipe leaves the geometry untouched");
+    }
+
+    // --- a stale deferred close must not destroy a newer dialog -----------
+    {
+        MainComponent mcT;
+        mcT.setSize (1280, 800);
+
+        mcT.openGuerreroDialog (0);
+        const int firstGeneration = mcT.guerreroOverlayGenerationForTest();
+        t.check (firstGeneration > 0, "Guerrero: the first dialog has an identity");
+
+        mcT.openGuerreroDialog (0);
+        const int secondGeneration = mcT.guerreroOverlayGenerationForTest();
+        t.check (secondGeneration != firstGeneration,
+                 "Guerrero: a second dialog gets a different identity");
+
+        mcT.closeGuerreroDialog (firstGeneration);   // the stale request
+        t.check (mcT.guerreroOverlay != nullptr,
+                 "Guerrero: a stale close leaves the newer dialog open");
+
+        mcT.closeGuerreroDialog (secondGeneration);
+        t.check (mcT.guerreroOverlay == nullptr,
+                 "Guerrero: the matching close removes the dialog");
+    }
+
+    // --- an EDITED value travels from the editor into the model -----------
+    {
+        upic::GuerreroRecipe r = baseRecipe();
+        r.lowerSeed = 3000u;
+        r.upperSeed = 3001u;
+        r.seedSeed  = 3002u;
+
+        GuerreroParamOverlay dlg;
+        dlg.recipe = r;
+        dlg.loadFromRecipe();
+        dlg.setTextForTest ("Lower roughness (0-8)", "0.42");
+        dlg.setTextForTest ("Upper envelope seed", "12345");
+
+        upic::GuerreroRecipe edited;
+        juce::String err;
+        t.check (dlg.collect (edited, err),
+                 "Guerrero dialog: edited values are accepted", err);
+        t.check (edited.lower.roughness == 0.42,
+                 "Guerrero dialog: the edited roughness reaches the recipe");
+        t.check (edited.upperSeed == 12345u,
+                 "Guerrero dialog: the edited seed reaches the recipe");
+        t.check (edited.lowerSeed == 3000u && edited.seedSeed == 3002u,
+                 "Guerrero dialog: the other seeds are untouched by the edit");
+
+        MainComponent mcE;
+        mcE.setSize (1280, 800);
+        t.check (mcE.applyGuerreroRecipe (0, edited, err),
+                 "Guerrero: the edited recipe applies to the model", err);
+
+        upic::GuerreroProvenance pE;
+        int idE = -1;
+        {
+            const juce::var piece = mcE.pieceToVar();
+            findGuerreroProvenance (piece, idE, pE);
+        }
+
+        t.check (std::abs (pE.recipe.lower.roughness - 0.42) < 1e-12,
+                 "Guerrero: the model stores the edited roughness");
+        t.check (pE.recipe.upperSeed == 12345u,
+                 "Guerrero: the model stores the edited seed");
+        t.check (pE.hasFingerprint && pE.pointCount > 1,
+                 "Guerrero: the edited arc has geometry and a fingerprint");
+    }
+#else
+    juce::ignoreUnused (t);
+#endif
+}

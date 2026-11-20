@@ -94,15 +94,15 @@ struct GuerreroParamOverlay : juce::Component
         ptsPol.addItem ("Downsample to the point limit", 2);
 
         addRow ("Lower roughness (0-8)",  lowerRough);
-        addRow ("Lower depth (0-16)",     lowerDepth);
+        addRow ("Lower depth (0-30)",     lowerDepth);
         addRow ("Lower freq low (Hz)",    lowerLo);
         addRow ("Lower freq high (Hz)",   lowerHi);
         addRow ("Upper roughness (0-8)",  upperRough);
-        addRow ("Upper depth (0-16)",     upperDepth);
+        addRow ("Upper depth (0-30)",     upperDepth);
         addRow ("Upper freq low (Hz)",    upperLo);
         addRow ("Upper freq high (Hz)",   upperHi);
         addRow ("Seed roughness (0-8)",   seedRough);
-        addRow ("Seed depth (0-16)",      seedDepth);
+        addRow ("Seed depth (0-30)",      seedDepth);
         addRow ("Tempo (BPM)",            bpmEd);
         addRow ("Max points per arc",     maxPtsEd);
         addRow ("Lower envelope seed",    lowerSeedEd);
@@ -307,15 +307,15 @@ struct GuerreroParamOverlay : juce::Component
         if (! inRange (out.upper.roughness, 0.0, 8.0)) { error = "Upper roughness must be within [0, 8]"; return false; }
         if (! inRange (out.seed.roughness,  0.0, 8.0)) { error = "Seed roughness must be within [0, 8]";  return false; }
 
-        if (out.lower.depth < 0 || out.lower.depth > 16) { error = "Lower depth must be within [0, 16]"; return false; }
-        if (out.upper.depth < 0 || out.upper.depth > 16) { error = "Upper depth must be within [0, 16]"; return false; }
-        if (out.seed.depth  < 0 || out.seed.depth  > 16) { error = "Seed depth must be within [0, 16]";  return false; }
+        if (out.lower.depth < 0 || out.lower.depth > 30) { error = "Lower depth must be within [0, 30]"; return false; }
+        if (out.upper.depth < 0 || out.upper.depth > 30) { error = "Upper depth must be within [0, 30]"; return false; }
+        if (out.seed.depth  < 0 || out.seed.depth  > 30) { error = "Seed depth must be within [0, 30]";  return false; }
 
-        if (! inRange (out.bpm, 1.0, 1000.0)) { error = "Tempo must be within [1, 1000] BPM"; return false; }
+        if (! (std::isfinite (out.bpm) && out.bpm > 0.0 && out.bpm <= 1000.0)) { error = "Tempo must be greater than 0 and at most 1000 BPM"; return false; }
 
-        if (out.maxPoints < 2 || out.maxPoints > 1000)
+        if (out.maxPoints < 2 || out.maxPoints > 100000)
         {
-            error = "Max points must be within [2, 1000]";
+            error = "Max points must be within [2, 100000]";
             return false;
         }
 
@@ -482,6 +482,10 @@ private:
         const double v = std::strtod (s, &end);
         if (end == s || end == nullptr || *end != '\0') return false;   // trailing junk
         if (! std::isfinite (v)) return false;
+        // Overflow returns inf (caught above), but UNDERFLOW such as 1e-999
+        // returns a finite 0 with ERANGE. Accepting that would silently turn a
+        // number the user typed into a different, valid-looking one.
+        if (errno == ERANGE) return false;
         out = v;
         return true;
     }

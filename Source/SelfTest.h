@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <JuceHeader.h>
 
 //==============================================================================
@@ -71,6 +71,7 @@ namespace upic
     void runTransportStateChecks (SelfTest& t);
     void runChooserChecks (SelfTest& t);
     void runGuerreroChecks (SelfTest& t);   // Guerrero engine -> UPIC arc
+    void runGuerreroDialogChecks (SelfTest& t);   // the parameter dialog and its transactions
 
     // Runs every check and returns the number of failures (0 = all passed).
     // The log of the run is written to <temp>/upic_selftest.txt.

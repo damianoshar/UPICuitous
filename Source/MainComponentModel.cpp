@@ -1982,6 +1982,34 @@ upic::GuerreroRecipe defaultGuerreroRecipe()
     return r;
 }
 
+// Exact comparison, field by field. `==` on the doubles is deliberate: a recipe
+// the dialog did not change carries the original binary values, so equality here
+// means "the user really did not change anything".
+bool sameEnvelopeRecipe (const upic::GuerreroEnvelopeRecipe& a,
+                         const upic::GuerreroEnvelopeRecipe& b)
+{
+    return a.roughness == b.roughness && a.depth == b.depth
+        && a.freqLo == b.freqLo && a.freqHi == b.freqHi
+        && a.timeStart == b.timeStart && a.timeEnd == b.timeEnd
+        && a.allowDegenerateRangeExpansion == b.allowDegenerateRangeExpansion;
+}
+
+bool sameRecipe (const upic::GuerreroRecipe& a, const upic::GuerreroRecipe& b)
+{
+    return a.generatorVersion == b.generatorVersion
+        && a.generator == b.generator
+        && sameEnvelopeRecipe (a.lower, b.lower)
+        && sameEnvelopeRecipe (a.upper, b.upper)
+        && a.seed.roughness == b.seed.roughness && a.seed.depth == b.seed.depth
+        && a.lowerSeed == b.lowerSeed
+        && a.upperSeed == b.upperSeed
+        && a.seedSeed == b.seedSeed
+        && a.bpm == b.bpm
+        && a.frequencyPolicy == b.frequencyPolicy
+        && a.pointsPolicy == b.pointsPolicy
+        && a.maxPoints == b.maxPoints;
+}
+
 } // anonymous namespace
 
 void MainComponent::runGuerreroGenerator()
@@ -1991,8 +2019,13 @@ void MainComponent::runGuerreroGenerator()
         flash ("Guerrero: " + error);
 }
 
-void MainComponent::closeGuerreroDialog()
+void MainComponent::closeGuerreroDialog (int generation)
 {
+    // A deferred close carries the generation of the dialog that scheduled it.
+    // If a newer dialog has opened since, the stale request must not destroy it.
+    if (generation != 0 && generation != guerreroOverlayGeneration)
+        return;
+
     // Component's destructor detaches from its parent, so resetting the
     // unique_ptr is all that is needed.
     guerreroOverlay.reset();
@@ -2001,6 +2034,10 @@ void MainComponent::closeGuerreroDialog()
 void MainComponent::openGuerreroDialog (int arcId)
 {
     closeGuerreroDialog();
+
+    // Identity for this dialog, so a delayed close belonging to it can never
+    // take down a dialog opened later.
+    const int generation = ++guerreroOverlayGeneration;
 
     auto overlay = std::make_unique<GuerreroParamOverlay>();
     overlay->editing = (arcId != 0);
@@ -2037,11 +2074,11 @@ void MainComponent::openGuerreroDialog (int arcId)
     // when these fire, so destroying it inline would use an object after its
     // own method frame had been entered.
     juce::Component::SafePointer<MainComponent> safe (this);
-    auto scheduleClose = [safe]
+    auto scheduleClose = [safe, generation]
     {
-        juce::MessageManager::callAsync ([safe]
+        juce::MessageManager::callAsync ([safe, generation]
         {
-            if (safe != nullptr) safe->closeGuerreroDialog();
+            if (safe != nullptr) safe->closeGuerreroDialog (generation);
         });
     };
 
@@ -2135,6 +2172,7 @@ bool MainComponent::applyGuerreroRecipe (int arcId, const upic::GuerreroRecipe& 
     }
 
     // ---- existing arc: replace geometry and recipe, keep identity ---------
+    bool unchanged = false;
     {
         const juce::ScopedLock l (dataLock);
         const upic::Arc* found = nullptr;
@@ -2166,6 +2204,18 @@ bool MainComponent::applyGuerreroRecipe (int arcId, const upic::GuerreroRecipe& 
             error = "the revision counter is exhausted for this arc";
             return false;
         }
+
+        // Nothing to do. Regenerating an identical recipe would bump the
+        // revision and leave an undo step for a change the user did not make;
+        // the separate "Regenerate" command is the explicit way to rebuild.
+        if (sameRecipe (recipe, found->guerrero.recipe))
+            unchanged = true;
+    }
+
+    if (unchanged)
+    {
+        flash ("Guerrero: the recipe is unchanged");
+        return true;
     }
 
     beginEdit ("Edit Guerrero recipe");
