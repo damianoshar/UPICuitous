@@ -113,10 +113,11 @@ Version 0.29 adds transport-state/fade behaviors, wavetable/envelope library
 reference replacement (including per-page rewrites and undo), toolbar/score
 view restyling and knob interaction. The headless suite exercises these
 model-level behaviors and a two-page tone/silence playback fixture in four
-Sequential/Loop combinations. The Sequential+Loop fixture **still needs an
-intermediate silent-page assertion** to prove that it visited page two before
-wrapping. UI `currentPage` notifications and real-time allocation safety at
-page transitions remain unverified.
+Sequential/Loop combinations. The Sequential+Loop fixture samples the
+**intermediate silent page** (tone -> silence -> tone), so it proves page two was
+visited before wrapping, and it asserts both named toggles were found; forcing
+`snap.seqPages` to false fails that middle sample. UI `currentPage` notifications
+and real-time allocation safety at page transitions remain unverified.
 
 ## What it does
 
