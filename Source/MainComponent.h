@@ -2489,6 +2489,11 @@ public:
     void transformPageForTest (int op) { transformPage (op); }
     bool guerreroArcGeometryEditedForTest (int arcId) const;
     uint64_t guerreroArcHashForTest (int arcId) const;
+
+    // Hash computed from the CURRENT points, unlike guerreroArcHashForTest() which
+    // returns the stored provenance hash. Needed to prove whether an apply really
+    // rewrote the geometry.
+    uint64_t guerreroArcLiveHashForTest (int arcId) const;
     bool guerreroArcHasProvenanceForTest (int arcId) const;
 
     // Test hook: replace an arc's stored recipe WITHOUT touching its geometry or

@@ -2698,6 +2698,14 @@ uint64_t MainComponent::guerreroArcHashForTest (int arcId) const
     return 0;
 }
 
+uint64_t MainComponent::guerreroArcLiveHashForTest (int arcId) const
+{
+    const juce::ScopedLock l (dataLock);
+    for (const auto& a : curPage().arcs)
+        if (a.id == arcId) return upic::Arc::geometryFingerprint (a.points);
+    return 0;
+}
+
 bool MainComponent::guerreroArcHasProvenanceForTest (int arcId) const
 {
     const juce::ScopedLock l (dataLock);
