@@ -1,4 +1,4 @@
-#include "MainComponent.h"
+﻿#include "MainComponent.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -419,6 +419,12 @@ void MainComponent::buildScoreArea()
     score.onEditStart = [this](const juce::String& what){ beginEdit (what); };
     score.onEditEnd   = [this]{ endEdit(); };
     score.onUndo = [this]{ undo(); };
+    // Guerrero: the arc menu's regenerate command is a host operation, because
+    // it needs the provenance checks and the undo transaction.
+#if GUERRERO_INTEGRATION
+    score.onRegenerateGuerrero = [this](int arcId){ regenerateGuerreroArc (arcId); };
+    score.onEditGuerreroRecipe = [this](int arcId){ openGuerreroDialog (arcId); };
+#endif
     score.onRedo = [this]{ redo(); };
 }
 
@@ -687,7 +693,7 @@ void MainComponent::resized()
     // whole component tree is placed in dp space (Main.cpp sets the JUCE
     // global scale factor to the display density), so controls keep a
     // constant physical size. Narrow windows wrap toolbar rows; if the
-    // height budget still doesn't fit, the grid shrinks (down to 55%) β€”
+    // height budget still doesn't fit, the grid shrinks (down to 55%) Ξ²β‚¬β€
     // tablets stay at 1x, small screens degrade gracefully.
     struct FlowItem
     {
@@ -2104,4 +2110,11 @@ void MainComponent::layoutOverlays (float s)
         btnRow.removeFromRight(8);
         clearConfirmBtn.setBounds(btnRow.removeFromRight(130).reduced(2));
     }
+
+#if GUERRERO_INTEGRATION
+    // The Guerrero parameter dialog tracks the window like the other overlays,
+    // so resizing while it is open cannot leave it at its previous bounds.
+    if (guerreroOverlay != nullptr)
+        guerreroOverlay->setBounds (getLocalBounds());
+#endif
 }

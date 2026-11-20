@@ -1,4 +1,4 @@
-#include <JuceHeader.h>
+﻿#include <JuceHeader.h>
 #include "MainComponent.h"
 #include "SelfTest.h"
 #include "AllocCounter.h"
@@ -105,6 +105,9 @@ upic::runLibraryModelChecks (t);
     upic::runTransportChecks (t);
     upic::runTransportStateChecks (t);
     upic::runChooserChecks (t);
+#if GUERRERO_INTEGRATION
+    upic::runGuerreroChecks (t);   // Guerrero engine -> UPIC arc
+#endif
 
     t.log << "\n" << (t.failures == 0 ? "ALL CHECKS PASSED" : juce::String(t.failures) + " CHECK(S) FAILED") << "\n";
     juce::File::getSpecialLocation(juce::File::tempDirectory)

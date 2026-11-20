@@ -1,4 +1,5 @@
 build/
+build-*/
 JUCE/
 out/
 *.user
@@ -46,7 +47,6 @@ Builds/VisualStudio2022/
 Builds/VisualStudio2026/
 Builds/LinuxMakefile/
 Builds/MacOSX/
-"
 
 # Release artifacts (build outputs)
 release-artifacts/
@@ -76,3 +76,6 @@ web-upic/
 
 # stray simulation dumps from a Verilog testbench (Icarus)
 *.vcd
+
+# Local build logs
+*.log

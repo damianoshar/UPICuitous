@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "GuerreroImport.h"
 #include <atomic>
 #include <functional>
 #include <map>
@@ -1394,6 +1395,9 @@ private:
     void pushAmbitus();               // v1.33: the page's ambitus
     void pushWarp();                 // v1.33: the page's acceleration
     void runGenerator(int kind);      // procedural arc generation (nUPIC-style)
+
+    // --- Guerrero integration -------------------------------------------
+    // Guerrero import is declared in the public section below.
     void exportStems();               // one WAV per voice into a folder
     void flash(const juce::String& m); // transient status message (4s)
     void startPlayback(), stopPlayback(bool fromAudio = false);
@@ -1414,6 +1418,75 @@ private:
     juce::String takeName();
 
 public:
+    // --- Guerrero integration -------------------------------------------
+    // Insert arcs produced by the Guerrero composition engine inside ONE undo
+    // transaction, following the runGenerator() mutation contract.
+    //
+    // upic::GuerreroImportArc is the single import contract (GuerreroImport.h),
+    // so this header depends on neither the Guerrero headers nor a second
+    // conversion representation.
+    //
+    // Everything the host owns is decided here: ids come from Page::nextArcId,
+    // material selection comes from the current draw voice, and the page arc cap
+    // and per-arc point cap are enforced before mutation. Arcs that cannot be
+    // inserted are skipped and counted; if nothing is inserted the piece is not
+    // marked dirty and no undo entry is created.
+    //
+    // Returns the number of arcs actually inserted.
+    // Each GuerreroImportArc carries its own optional provenance, so one
+    // generator run can describe several arcs independently.
+    int insertGuerreroArcs(const std::vector<upic::GuerreroImportArc>& arcs,
+                           const juce::String& label,
+                           std::vector<int>* insertedIds = nullptr);
+
+#if GUERRERO_INTEGRATION
+    // Generate a Guerrero envelope and a confined seed curve, convert the seed
+    // into an arc and insert it: the complete engine -> host pipeline behind
+    // one call. Uses the default recipe; the dialog path is openGuerreroDialog.
+    void runGuerreroGenerator();
+
+    // Open the Guerrero parameter dialog. `arcId == 0` creates a new arc from
+    // the default recipe; any other value loads that arc's stored recipe for
+    // editing. Refuses arcs that cannot be regenerated (legacy, malformed,
+    // unsupported version, or geometry edited by the user) and explains why.
+    void openGuerreroDialog (int arcId);
+
+    // Remove and destroy the parameter dialog if one is open. Safe to call
+    // when nothing is open.
+    void closeGuerreroDialog();
+
+    // Apply a recipe to the model.
+    //
+    // `arcId == 0` inserts a new arc. Otherwise the arc keeps its host id and
+    // all sound-material overrides; only its geometry and stored recipe are
+    // replaced, in a single undoable transaction. On failure `error` explains
+    // why and the model is untouched.
+    bool applyGuerreroRecipe (int arcId, const upic::GuerreroRecipe& recipe,
+                              juce::String& error);
+
+    // Mark any Guerrero arc whose geometry no longer matches the fingerprint
+    // recorded at generation time. Called from endEdit(), so every edit path
+    // is covered by one place rather than by instrumenting each tool.
+    void markEditedGuerreroGeometry();
+
+    // The active parameter dialog, when one is open. Typed as juce::Component
+    // so this header does not depend on the dialog's widget layout.
+    std::unique_ptr<juce::Component> guerreroOverlay;
+#endif
+
+    // Regenerate one Guerrero arc from its stored recipe, in place: the host id
+    // and all sound-material overrides are preserved, only the geometry is
+    // replaced. Refuses legacy records, malformed records, unsupported recipe
+    // versions and arcs whose geometry the user has edited.
+    //
+    // Returns false with a flash message explaining which check refused it.
+    bool regenerateGuerreroArc (int arcId);
+
+    // --- test hooks for the Guerrero self-test -------------------------
+    void transformPageForTest (int op) { transformPage (op); }
+    bool guerreroArcGeometryEditedForTest (int arcId) const;
+    uint64_t guerreroArcHashForTest (int arcId) const;
+    bool guerreroArcHasProvenanceForTest (int arcId) const;
     // v1.33.4 (L15): the save with a file chooser, for the window's
     // unsaved-changes prompt: the app closes only when the piece really was
     // written (a cancelled chooser leaves the window open).
@@ -1437,7 +1510,7 @@ public:
     void updateMidiScrubForTest() { updateMidiScrub(); }
     bool midiScrubRunning() const { return scrubActive; }
     double playRateForTest() const { return playRate.load (std::memory_order_relaxed); }
-    // Piece (de)serialization — public so the selftest can round-trip them.
+    // Piece (de)serialization β€” public so the selftest can round-trip them.
     juce::var pieceToVar() const;
     // v1.33.4 (M28): the piece as a self-contained model, captured under the
     // lock - the worker thread builds the JSON (and the base64 of the
