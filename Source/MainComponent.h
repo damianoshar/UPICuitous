@@ -1500,6 +1500,12 @@ public:
     bool guerreroArcGeometryEditedForTest (int arcId) const;
     uint64_t guerreroArcHashForTest (int arcId) const;
     bool guerreroArcHasProvenanceForTest (int arcId) const;
+
+    // Test hook: replace an arc's stored recipe WITHOUT touching its geometry or
+    // fingerprint. Lets a test present a recipe whose regeneration would be
+    // impossible on the current page, which is how the apply ordering is
+    // verified (an unchanged recipe must return before any generation).
+    bool setGuerreroRecipeForTest (int arcId, const upic::GuerreroRecipe& recipe);
     // v1.33.4 (L15): the save with a file chooser, for the window's
     // unsaved-changes prompt: the app closes only when the piece really was
     // written (a cancelled chooser leaves the window open).

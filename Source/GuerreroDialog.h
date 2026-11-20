@@ -82,7 +82,7 @@ struct GuerreroParamOverlay : juce::Component
         seedRough.setInputRestrictions (20, numChars);
         seedDepth.setInputRestrictions (3,  "0123456789");
         bpmEd.setInputRestrictions (16, numChars);
-        maxPtsEd.setInputRestrictions (5, "0123456789");
+        maxPtsEd.setInputRestrictions (6, "0123456789");
 
         lowerSeedEd.setInputRestrictions (20, "0123456789");
         upperSeedEd.setInputRestrictions (20, "0123456789");
