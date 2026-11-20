@@ -2458,6 +2458,15 @@ public:
     // so this header does not depend on the dialog's widget layout.
     std::unique_ptr<juce::Component> guerreroOverlay;
 
+    // Page context captured when the dialog opened. Arc ids are page-local and
+    // the transport can advance the active page during playback, so an Apply
+    // must be bound to the page the dialog was opened on - otherwise the same
+    // id on another page would receive the edit.
+    int    guerreroTargetPage = -1;
+    int    guerreroTargetArcCount = -1;
+    double guerreroTargetDuration = -1.0;
+    bool guerreroTargetUnchanged() const;
+
     // Identity of the dialog currently open (0 when none has ever been shown).
     // Deferred closes compare against it so a late callback cannot destroy a
     // dialog that replaced the one which scheduled it.
@@ -2486,6 +2495,11 @@ public:
     // impossible on the current page, which is how the apply ordering is
     // verified (an unchanged recipe must return before any generation).
     bool setGuerreroRecipeForTest (int arcId, const upic::GuerreroRecipe& recipe);
+
+    // Test hooks for page identity: add a copy of the current page (so arc ids
+    // overlap) and switch to it without going through the transport.
+    int  addPageCopyForTest();
+    void setCurrentPageForTest (int page);
     // v1.33.4 (L15): the save with a file chooser, for the window's
     // unsaved-changes prompt: the app closes only when the piece really was
     // written (a cancelled chooser leaves the window open).
