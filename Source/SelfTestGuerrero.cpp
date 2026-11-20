@@ -2079,35 +2079,50 @@ void upic::runGuerreroDialogChecks (SelfTest& t)
 
         mcR.openGuerreroDialog (id);
 
-        // Same index, same arc count, same duration, same arc id - only the
-        // geometry differs, so nothing but the epoch can tell them apart.
-        // Same index, same arc count, same duration, same arc id - only the
-        // geometry differs, so nothing but the epoch can tell them apart.
-        // var copies share their array and object storage, so mutating the
-        // point through the pointer below is visible in `other`.
-        juce::var other = mcR.pieceToVar();
+        // A SELF-CONSISTENT replacement: a second component generates its own
+        // arc, so its geometry, fingerprint, pointCount and provenance all
+        // agree. It matches the page shape (index 0, one arc, same duration,
+        // same page-local arc id) and differs only in the material, so the
+        // epoch is the only thing that can distinguish the contexts.
+        juce::var other;
         {
-            const juce::var pagesVar = other.getProperty ("pages", juce::var());
-            auto* pages = pagesVar.getArray();
-            if (pages != nullptr && ! pages->isEmpty())
-            {
-                const juce::var arcsVar = pages->getReference (0).getProperty ("arcs", juce::var());
-                auto* arcs = arcsVar.getArray();
-                if (arcs != nullptr && ! arcs->isEmpty())
-                {
-                    const juce::var ptsVar = arcs->getReference (0).getProperty ("points", juce::var());
-                    auto* pts = ptsVar.getArray();
-                    if (pts != nullptr && ! pts->isEmpty())
-                        if (auto* obj = pts->getReference (0).getDynamicObject())
-                            obj->setProperty ("f", 654.321);
-                }
-            }
+            MainComponent pieceSource;
+            pieceSource.setSize (1280, 800);
+
+            upic::GuerreroRecipe otherRecipe = baseRecipe();
+            otherRecipe.lowerSeed = 4242u;
+            otherRecipe.upperSeed = 4243u;
+            otherRecipe.seedSeed  = 4244u;
+
+            juce::String srcErr;
+            t.check (pieceSource.applyGuerreroRecipe (0, otherRecipe, srcErr),
+                     "Guerrero: the replacement piece is generated", srcErr);
+
+            other = pieceSource.pieceToVar();
         }
 
-        t.check (mcR.loadFromVar (other),
-                 "Guerrero: a different piece with the same page shape loads");
+        int otherId = -1;
+        upic::GuerreroProvenance otherProv;
+        t.check (findGuerreroProvenance (other, otherId, otherProv),
+                 "Guerrero: the replacement piece carries Guerrero provenance");
+        t.check (otherId == id,
+                 "Guerrero: the replacement uses the same page-local arc id",
+                 juce::String (otherId) + " vs " + juce::String (id));
 
-        const uint64_t hashAfterLoad = mcR.guerreroArcHashForTest (id);
+        const uint64_t liveHashBefore = mcR.guerreroArcLiveHashForTest (id);
+
+        t.check (mcR.loadFromVar (other),
+                 "Guerrero: the replacement piece loads");
+
+        const uint64_t liveHashAfterLoad = mcR.guerreroArcLiveHashForTest (id);
+        t.check (liveHashAfterLoad != liveHashBefore,
+                 "Guerrero: the loaded piece really has different geometry");
+
+        // Isolation evidence: the pre-existing fingerprint guard must NOT be
+        // what refuses the apply, or this test would prove nothing about the
+        // epoch.
+        t.check (! mcR.guerreroArcGeometryEditedForTest (id),
+                 "Guerrero: the replacement arc is not flagged edited");
 
         auto* overlay = dynamic_cast<GuerreroParamOverlay*> (mcR.guerreroOverlay.get());
         t.check (overlay != nullptr,
@@ -2127,8 +2142,8 @@ void upic::runGuerreroDialogChecks (SelfTest& t)
                      "Guerrero: the replacement refusal names the page", applyError);
         }
 
-        t.check (mcR.guerreroArcHashForTest (id) == hashAfterLoad,
-                 "Guerrero: the replacement piece's arc was not modified");
+        t.check (mcR.guerreroArcLiveHashForTest (id) == liveHashAfterLoad,
+                 "Guerrero: the replacement piece's points were not modified");
     }
 #else
     juce::ignoreUnused (t);
