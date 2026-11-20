@@ -2008,6 +2008,54 @@ void upic::runGuerreroDialogChecks (SelfTest& t)
         t.check (err.containsIgnoreCase ("fit"),
                  "Guerrero: the refusal says it does not fit the page", err);
     }
+
+    // --- an Apply must not follow a page change ---------------------------
+    // Arc ids are page-local, and playback can advance the active page while the
+    // dialog is open. A copy of the page carries the SAME ids, so without the
+    // page identity guard an edit would land on the wrong page's arc.
+    {
+        MainComponent mcG;
+        mcG.setSize (1280, 800);
+
+        const upic::GuerreroRecipe r = baseRecipe();
+        juce::String err;
+        t.check (mcG.applyGuerreroRecipe (0, r, err),
+                 "Guerrero: the page-identity arc is created", err);
+
+        int id = -1;
+        upic::GuerreroProvenance p;
+        {
+            const juce::var piece = mcG.pieceToVar();
+            findGuerreroProvenance (piece, id, p);
+        }
+        const uint64_t hashOnFirstPage = p.geometryHash;
+
+        mcG.openGuerreroDialog (id);
+        mcG.addPageCopyForTest();   // same arc ids, different page
+
+        auto* overlay = dynamic_cast<GuerreroParamOverlay*> (mcG.guerreroOverlay.get());
+        t.check (overlay != nullptr,
+                 "Guerrero: the dialog is open for the page-identity test");
+
+        if (overlay != nullptr && overlay->onApply != nullptr)
+        {
+            upic::GuerreroRecipe changed = r;
+            changed.lowerSeed = 9999u;
+
+            juce::String applyError;
+            const bool accepted = overlay->onApply (changed, applyError);
+
+            t.check (! accepted,
+                     "Guerrero: Apply is refused after the active page changed");
+            t.check (applyError.containsIgnoreCase ("page"),
+                     "Guerrero: the refusal names the page", applyError);
+        }
+
+        t.check (mcG.guerreroArcHashForTest (id) == hashOnFirstPage,
+                 "Guerrero: the other page's arc was not modified");
+
+        mcG.closeGuerreroDialog();
+    }
 #else
     juce::ignoreUnused (t);
 #endif

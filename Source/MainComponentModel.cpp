@@ -1283,6 +1283,16 @@ void MainComponent::openGuerreroDialog (int arcId)
 {
     closeGuerreroDialog();
 
+    // Bind the dialog to the page it was opened on. Arc ids are page-local, and
+    // sequential playback can advance the active page while the dialog is open,
+    // so an Apply must not follow that change onto a different page.
+    {
+        const juce::ScopedLock l (dataLock);
+        guerreroTargetPage     = currentPage;
+        guerreroTargetArcCount = (int) curPage().arcs.size();
+        guerreroTargetDuration = curPage().durationSec;
+    }
+
     // Identity for this dialog, so a delayed close belonging to it can never
     // take down a dialog opened later.
     const int generation = ++guerreroOverlayGeneration;
@@ -1339,6 +1349,15 @@ void MainComponent::openGuerreroDialog (int arcId)
     overlay->onApply = [this, arcId, scheduleClose] (const upic::GuerreroRecipe& r,
                                                      juce::String& error) -> bool
     {
+        // The page must be the one the dialog was opened on. Without this, an
+        // automatic page advance during playback could redirect the edit onto a
+        // different page's arc that happens to share the id.
+        if (! guerreroTargetUnchanged())
+        {
+            error = "the active page changed while the dialog was open - reopen it";
+            return false;
+        }
+
         if (! applyGuerreroRecipe (arcId, r, error))
             return false;   // the dialog stays open and shows the reason
 
@@ -1908,5 +1927,29 @@ bool MainComponent::setGuerreroRecipeForTest (int arcId, const upic::GuerreroRec
             return true;
         }
     return false;
+}
+
+bool MainComponent::guerreroTargetUnchanged() const
+{
+    const juce::ScopedLock l (dataLock);
+    if (currentPage != guerreroTargetPage) return false;
+
+    const auto& p = curPage();
+    return (int) p.arcs.size() == guerreroTargetArcCount
+        && p.durationSec == guerreroTargetDuration;
+}
+
+int MainComponent::addPageCopyForTest()
+{
+    const juce::ScopedLock l (dataLock);
+    pages.insert (pages.begin() + currentPage + 1, curPage());
+    currentPage++;
+    return currentPage;
+}
+
+void MainComponent::setCurrentPageForTest (int page)
+{
+    const juce::ScopedLock l (dataLock);
+    currentPage = juce::jlimit (0, (int) pages.size() - 1, page);
 }
 
