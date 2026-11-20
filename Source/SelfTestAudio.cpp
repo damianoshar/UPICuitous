@@ -2614,21 +2614,72 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
         };
 
         // Plain next-page branch: no sequencing, no loop.
+        // Plain next-page branch: no sequencing, no loop.
         runCase (false, false, 2.0, 30, true,  "seq off, loop off");
 
         // Sequential branch, no wrap: the same destination, different path.
         runCase (true,  false, 2.0, 30, true,  "seq on, loop off");
 
-        // Sequential with wrap: page 2 is short, so the sequence returns to the
-        // tone page and the output must be audible again.
-        runCase (true,  true,  0.1, 30, false, "seq on, loop on");
-
         // Looping without sequencing: the first page simply repeats.
         runCase (false, true,  2.0, 30, false, "seq off, loop on");
+
+        // --- sequential+loop must actually VISIT the silent page ------------
+        // The case above only proves the tone comes back; a broken seqPages that
+        // is always false would loop page 1 and pass it. With two 0.1 s pages
+        // the sequence must be tone -> SILENCE -> tone, while loop-alone is
+        // tone -> tone -> tone and never visits page 2.
+        //
+        // 512 frames at 44.1 kHz is ~11.6 ms per block, so page 1 is blocks 0-7,
+        // page 2 is blocks 9-16 and the wrapped page 1 is blocks 18-25. Blocks
+        // 4, 12 and 21 sit safely inside those windows, away from the seams.
+        auto runMidPageProbe = [&] (bool seq, float& atTone1, float& atMiddle, float& atTone2)
+        {
+            check (mc.loadFromVar (juce::JSON::parse (makePiece (0.1))),
+                   "F1: mid-page probe - the 0.1/0.1 piece loads");
+
+            setMode (seq, true);
+            mc.timerCallback();
+            render();
+
+            mc.clickPlayForTest();
+
+            for (int b = 0; b < 4; ++b)  render();
+            atTone1  = render();          // block 4  ~46-58 ms   page 1
+            for (int b = 5; b < 12; ++b) render();
+            atMiddle = render();          // block 12 ~139-151 ms page 2
+            for (int b = 13; b < 21; ++b) render();
+            atTone2  = render();          // block 21 ~244-255 ms page 1 again
+
+            mc.stopPlaybackForTest();
+            for (int b = 0; b < 4; ++b) render();
+        };
+
+        float seqTone1 = 0.0f, seqMiddle = 0.0f, seqTone2 = 0.0f;
+        runMidPageProbe (true, seqTone1, seqMiddle, seqTone2);
+
+        check (seqTone1 > 0.001f,
+               "F1: seq on, loop on - page 1 is audible first",
+               juce::String (seqTone1, 4));
+        check (seqMiddle < 0.001f,
+               "F1: seq on, loop on - page 2's silence is audible between repeats",
+               juce::String (seqMiddle, 6));
+        check (seqTone2 > 0.001f,
+               "F1: seq on, loop on - the wrap returns to page 1",
+               juce::String (seqTone2, 4));
+
+        float loopTone1 = 0.0f, loopMiddle = 0.0f, loopTone2 = 0.0f;
+        runMidPageProbe (false, loopTone1, loopMiddle, loopTone2);
+
+        check (loopTone1 > 0.001f,
+               "F1: seq off, loop on - page 1 is audible first",
+               juce::String (loopTone1, 4));
+        check (loopMiddle > 0.001f,
+               "F1: seq off, loop on - page 1 repeats and never goes silent",
+               juce::String (loopMiddle, 6));
+        check (loopTone2 > 0.001f,
+               "F1: seq off, loop on - page 1 is still playing later",
+               juce::String (loopTone2, 4));
     }
-
-
-
 
     // --- double-click Stop rewinds, but only a real double click ---------
     {
