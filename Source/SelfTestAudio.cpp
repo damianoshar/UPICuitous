@@ -2510,70 +2510,121 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
         for (int b = 0; b < 4; ++b) render();
     }
 
-    // --- playback crosses into the next page's material --------------------
+    // --- page-end behaviour under each transport mode ----------------------
     // The Guerrero recipe dialog binds an edit to the page it was opened on, and
     // its guard assumes playback can move the active page. Only the pure
-    // upic::seqNextPage() decision was tested; this covers the audio side of the
-    // path: at the page end the engine continues on the NEXT page rather than
-    // stopping or repeating the first.
+    // upic::seqNextPage() decision was tested; these cover the audio side of the
+    // whole path, and they configure the mode explicitly instead of inheriting
+    // whatever an earlier check left behind.
     //
-    // Page 1 is silent, so "the transport keeps running but nothing is heard" is
-    // direct evidence that the audio thread changed page. Forward playback
-    // advances through all three enabled modes (sequential, loop-wrapped, plain
-    // next-page), so this asserts the shared outcome rather than one mode.
+    // The first page is a tone and the second is silent, so the output tells us
+    // which page is playing: silence means page 2, audio means page 1 (either
+    // repeated by the loop or wrapped back to by the sequence).
     //
-    // The asynchronous message-thread notification that updates currentPage is
-    // NOT covered here: it goes through MessageManager::callAsync, and the
-    // headless self-test has no running dispatch loop to deliver it.
+    // Not covered here: the asynchronous message-thread notification that
+    // updates currentPage, which needs a running dispatch loop.
     {
-        const juce::String toneThenSilence =
-            "{\"master\":1,\"pages\":["
-            "{\"duration\":0.1,\"nextArcId\":2,\"arcs\":["
-            "{\"id\":1,\"mode\":0,\"waveformId\":2,\"envelopeId\":0,\"intensity\":1,"
-            "\"points\":[{\"t\":0,\"f\":1},{\"t\":0.1,\"f\":1}]}]},"
-            "{\"duration\":2.0,\"nextArcId\":1,\"arcs\":[]}]}";
+        std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+            [&findByName] (juce::Component& c, const juce::String& n) -> juce::Component*
+            {
+                if (c.getName() == n) return &c;
+                for (int i = 0; i < c.getNumChildComponents(); ++i)
+                    if (auto* r = findByName (*c.getChildComponent (i), n)) return r;
+                return nullptr;
+            };
 
-        check (mc.loadFromVar (juce::JSON::parse (toneThenSilence)),
-               "F1: the tone-then-silence piece loads");
-        check (mc.pageCountForTest() == 2,
-               "F1: both pages are present",
-               juce::String (mc.pageCountForTest()));
-        check (std::abs (mc.pageDurationForTest() - 0.1) < 1e-9,
-               "F1: playback starts on the 0.1 s page",
-               juce::String (mc.pageDurationForTest(), 3));
+        // Sequential mode also travels in the piece; the toggles are set after
+        // the load so the fixture owns the state rather than the piece or a
+        // previous block.
+        auto setMode = [&] (bool seq, bool loop)
+        {
+            if (auto* s = dynamic_cast<juce::ToggleButton*> (findByName (mc, "seqBtn")))
+            {
+                s->setToggleState (seq, juce::dontSendNotification);
+                if (s->onClick) s->onClick();
+            }
+            if (auto* l = dynamic_cast<juce::ToggleButton*> (findByName (mc, "loopBtn")))
+            {
+                l->setToggleState (loop, juce::dontSendNotification);
+                if (l->onClick) l->onClick();
+            }
+        };
 
-        render();   // absorb the load's model-change block
+        auto makePiece = [] (double page2Sec)
+        {
+            return juce::String ("{\"master\":1,\"pages\":["
+                                 "{\"duration\":0.1,\"nextArcId\":2,\"arcs\":["
+                                 "{\"id\":1,\"mode\":0,\"waveformId\":2,\"envelopeId\":0,\"intensity\":1,"
+                                 "\"points\":[{\"t\":0,\"f\":1},{\"t\":0.1,\"f\":1}]}]},"
+                                 "{\"duration\":")
+                 + juce::String (page2Sec, 3)
+                 + ",\"nextArcId\":1,\"arcs\":[]}]}";
+        };
 
-        mc.clickPlayForTest();
+        auto runCase = [&] (bool seq, bool loop, double page2Sec, int blocks,
+                            bool expectSilent, const juce::String& name)
+        {
+            check (mc.loadFromVar (juce::JSON::parse (makePiece (page2Sec))),
+                   "F1: " + name + " - the piece loads");
 
-        // The first blocks are inside the 0.1 s tone page.
-        float tonePeak = 0.0f;
-        for (int b = 0; b < 3; ++b)
-            tonePeak = juce::jmax (tonePeak, render());
+            setMode (seq, loop);
+            mc.timerCallback();   // publish seqPages and loopPage to the snapshot
+            render();             // absorb the load's model-change block
 
-        check (tonePeak > 0.001f,
-               "F1: the first page is audible",
-               juce::String (tonePeak, 4));
+            check (mc.pageCountForTest() == 2,
+                   "F1: " + name + " - both pages are present",
+                   juce::String (mc.pageCountForTest()));
+            check (std::abs (mc.pageDurationForTest() - 0.1) < 1e-9,
+                   "F1: " + name + " - starts on the 0.1 s tone page",
+                   juce::String (mc.pageDurationForTest(), 3));
 
-        // 0.1 s at 44.1 kHz in 512-frame blocks is ~9 blocks; run past it and
-        // past the start fade of the next page.
-        for (int b = 0; b < 30; ++b)
-            render();
+            mc.clickPlayForTest();
 
-        check (mc.isPlayingForTest(),
-               "F1: playback keeps running past the page end");
+            float early = 0.0f;
+            for (int b = 0; b < 3; ++b)
+                early = juce::jmax (early, render());
+            check (early > 0.001f,
+                   "F1: " + name + " - the tone page is audible",
+                   juce::String (early, 4));
 
-        float silentPeak = 0.0f;
-        for (int b = 0; b < 4; ++b)
-            silentPeak = juce::jmax (silentPeak, render());
+            // 0.1 s at 44.1 kHz in 512-frame blocks is ~9 blocks; run well past
+            // it and past any start fade on the destination page.
+            for (int b = 0; b < blocks; ++b)
+                render();
 
-        check (silentPeak < 0.001f,
-               "F1: the second page's silence is what is playing",
-               juce::String (silentPeak, 6));
+            check (mc.isPlayingForTest(),
+                   "F1: " + name + " - the transport keeps running");
 
-        mc.stopPlaybackForTest();
-        for (int b = 0; b < 4; ++b)
-            render();
+            float late = 0.0f;
+            for (int b = 0; b < 4; ++b)
+                late = juce::jmax (late, render());
+
+            if (expectSilent)
+                check (late < 0.001f,
+                       "F1: " + name + " - the silent second page is playing",
+                       juce::String (late, 6));
+            else
+                check (late > 0.001f,
+                       "F1: " + name + " - the tone page is playing again",
+                       juce::String (late, 6));
+
+            mc.stopPlaybackForTest();
+            for (int b = 0; b < 4; ++b)
+                render();
+        };
+
+        // Plain next-page branch: no sequencing, no loop.
+        runCase (false, false, 2.0, 30, true,  "seq off, loop off");
+
+        // Sequential branch, no wrap: the same destination, different path.
+        runCase (true,  false, 2.0, 30, true,  "seq on, loop off");
+
+        // Sequential with wrap: page 2 is short, so the sequence returns to the
+        // tone page and the output must be audible again.
+        runCase (true,  true,  0.1, 30, false, "seq on, loop on");
+
+        // Looping without sequencing: the first page simply repeats.
+        runCase (false, true,  2.0, 30, false, "seq off, loop on");
     }
 
 
