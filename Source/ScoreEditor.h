@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <JuceHeader.h>
 #include "UpicModel.h"
 #include <optional>
@@ -339,6 +339,10 @@ public:
     // changed. A pointer drag is one transaction, so a drag is one undo step
     // (the review: "coalesce pointer drags into one undo action").
     std::function<void (const juce::String& what)> onEditStart;
+    // Guerrero: regenerate this arc's geometry from its stored recipe.
+    std::function<void (int arcId)> onRegenerateGuerrero;
+    // Guerrero: open the recipe editor for this arc and regenerate on accept.
+    std::function<void (int arcId)> onEditGuerreroRecipe;
     std::function<void()> onEditEnd;
     // v1.33.4 (L15, part 2): the undo and redo keys (Ctrl+Z / Ctrl+Shift+Z).
     // The editor has the keyboard focus while the user draws, so it hands

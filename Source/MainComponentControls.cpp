@@ -197,8 +197,21 @@ void MainComponent::buildSieveControls()
     genBox.addItem("Convergent arborescence", 2);
     genBox.addItem("Echelon (Bourbaki)", 3);
     genBox.addItem("Ordinal spine + branches", 4);
+#if GUERRERO_INTEGRATION
+    genBox.addItem("Guerrero: envelope + seed", 5);
+#endif
     genBox.onChange = [this]{
-        const int kind = genBox.getSelectedId() - 1;
+        const int id = genBox.getSelectedId();
+#if GUERRERO_INTEGRATION
+        if (id == 5)
+        {
+            // Open the parameter dialog rather than generating with defaults.
+            openGuerreroDialog(0);
+            genBox.setSelectedId(0, juce::dontSendNotification);
+            return;
+        }
+#endif
+        const int kind = id - 1;
         if (kind >= 0) runGenerator(kind);
         genBox.setSelectedId(0);
     };
@@ -234,7 +247,7 @@ void MainComponent::buildSieveControls()
 // function. The frequency space could be the continuum (a diagonal line is
 // a glissando) or discrete, with equal temperaments of 1..99 divisions per
 // octave: "the same diagonal arc would then sound like discrete steps in a
-// defined temperament" (Robindoré, in "From Xenakis's UPIC to Graphic
+// defined temperament" (RobindorΓ©, in "From Xenakis's UPIC to Graphic
 // Notation Today", Hatje Cantz 2024).
 //
 // The sieve (the row below) snaps the DRAWN points; this steps the SOUND:
@@ -296,7 +309,7 @@ void MainComponent::applyStepToSelection()
 // simultaneous tables or grids that could be superimposed on each page.
 // These grids were invisible to the eye, however, and accessed by
 // assigning one of four tables to whatever arc was being drawn, the same
-// way as one would assign the waveform or envelope to it." (Robindoré)
+// way as one would assign the waveform or envelope to it." (RobindorΓ©)
 //
 // So: the PAGE owns the four spaces, and an arc names the one it is
 // played in. A space is a range of the frequency axis - the position on

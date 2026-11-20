@@ -1,6 +1,13 @@
 #include "MainComponent.h"
 #include "UserLibrary.h"
 #include <algorithm>
+#if GUERRERO_INTEGRATION
+#include "GuerreroUpicAdapter.h"
+#include "GuerreroDialog.h"
+#include "guerrero/core/Curves.h"
+#include "guerrero/upic/GuerreroUpicPlan.h"
+#endif
+
 #include <cmath>
 #include <fstream>
 #include <sstream>
@@ -1726,8 +1733,653 @@ void MainComponent::runGenerator(int kind)
 }
 
 //==============================================================================
+// Guerrero integration: insert externally generated arcs.
+//
+// This follows runGenerator() exactly, because that is the established contract
+// for mutating Page::arcs from the message thread:
+//
+//   1. beginEdit() opens the undo transaction BEFORE the model changes.
+//   2. The model mutation happens under dataLock.
+//   3. Ids come from Page::nextArcId so nothing collides.
+//   4. markModelChanged() + publishModelSnapshot() hand the change to the audio
+//      thread.
+//   5. endEdit() closes the transaction AFTER the change is published.
+//
+// Every host limit that Arc::fromVar() enforces on load is enforced here first,
+// so an inserted arc cannot be silently truncated when the piece is reopened.
+// If nothing is inserted, no model change is published and no undo entry is
+// left behind.
+int MainComponent::insertGuerreroArcs(const std::vector<upic::GuerreroImportArc>& arcs,
+                                      const juce::String& label,
+                                      std::vector<int>* insertedIds)
+{
+    if (insertedIds != nullptr)
+        insertedIds->clear();
+
+    if (arcs.empty())
+    {
+        flash("Guerrero produced no arcs");
+        return 0;
+    }
+
+    std::vector<int> created;
+    int added = 0, skipped = 0;
+    juce::String lastReason;
+
+    beginEdit(label.isNotEmpty() ? label : juce::String("Insert Guerrero arcs"));
+    {
+        juce::ScopedLock l(dataLock);
+        auto& pg = curPage();
+
+        for (const auto& in : arcs)
+        {
+            // Loader-relevant caps first: the page arc count and the per-arc
+            // point count. Arc::fromVar() stops at kMaxPointsPerArc, so
+            // accepting more here would lose points on reload.
+            if ((int) pg.arcs.size() >= upic::limits::kMaxArcsPerPage)
+            {
+                ++skipped;
+                lastReason = "page arc limit reached";
+                continue;
+            }
+            if (in.points.size() < 2)
+            {
+                ++skipped;
+                lastReason = "arc has fewer than two points";
+                continue;
+            }
+            if (in.points.size() > (size_t) upic::limits::kMaxPointsPerArc)
+            {
+                ++skipped;
+                lastReason = "arc exceeds the per-arc point limit";
+                continue;
+            }
+            if (! std::isfinite (in.intensity) || in.intensity < 0.0f || in.intensity > 1.0f)
+            {
+                ++skipped;
+                lastReason = "arc intensity outside [0, 1]";
+                continue;
+            }
+
+            upic::Arc a;
+            a.waveformId = selWave;
+            a.envelopeId = selEnv;
+            a.intensity = in.intensity;
+            a.mode = drawMatMode;
+            a.sampleId = drawSampleId;
+            a.refFreq = drawRef;
+
+            // PM mode needs the current synthesis settings, exactly as
+            // runGenerator() copies them; without this an imported PM arc would
+            // fall back to Arc's defaults and sound different from a generated
+            // one in the same mode.
+            if (a.mode == 3)
+            {
+                a.pmRatio = pmRatioSlider.getValue();
+                a.pmIndex = pmIndexSlider.getValue();
+                const int pmIdx = pmIndexEnvBox.getSelectedId();
+                a.pmIndexEnv = (pmIdx >= 2 && pmIdx - 2 < (int) envelopes.size())
+                                   ? envelopes[(size_t)(pmIdx - 2)].id : 0;
+                a.pmFeedback = pmFeedbackSlider.getValue();
+                a.pmOps = pmOpsBox.getSelectedId() == 2 ? 4 : 2;
+            }
+
+            a.points.reserve(in.points.size());
+            bool bad = false;
+            for (const auto& p : in.points)
+            {
+                // Host contract, mirrored from Arc::fromVar(): finite score time
+                // inside the page, finite pitch inside the supported range,
+                // pressure in 0..1, and points in non-decreasing time order.
+                if (! std::isfinite (p.t) || p.t < 0.0 || p.t > pg.durationSec)
+                {
+                    bad = true;
+                    lastReason = "point outside the page duration";
+                    break;
+                }
+                if (! std::isfinite (p.freq) ||
+                    p.freq < upic::kMinFreq || p.freq > upic::kMaxFreq)
+                {
+                    bad = true;
+                    lastReason = "point frequency outside the host range";
+                    break;
+                }
+                if (! std::isfinite (p.i) || p.i < 0.0f || p.i > 1.0f)
+                {
+                    bad = true;
+                    lastReason = "point pressure outside [0, 1]";
+                    break;
+                }
+                if (! a.points.empty() && p.t < a.points.back().t)
+                {
+                    bad = true;
+                    lastReason = "points are not in time order";
+                    break;
+                }
+
+                upic::ArcPoint pt;
+                pt.t = p.t;
+                pt.freq = p.freq;
+                pt.i = p.i;
+                a.points.push_back(pt);
+            }
+
+            if (bad)
+            {
+                ++skipped;
+                continue;
+            }
+
+            a.id = pg.nextArcId++;
+            // Provenance travels with the arc: it is serialized by Arc::toVar
+            // and therefore also survives undo/redo and reload.
+            if (in.hasProvenance)
+            {
+                a.guerrero = in.provenance;
+                a.hasGuerrero = true;
+                // Fingerprint what was inserted, so endEdit() can tell later
+                // whether this arc has been edited.
+                a.guerrero.pointCount   = (int) a.points.size();
+                a.guerrero.geometryEdited = false;
+                a.guerrero.geometryHash = upic::Arc::geometryFingerprint(a.points);
+                a.guerrero.hasFingerprint = true;
+            }
+            created.push_back(a.id);
+            pg.arcs.push_back(std::move(a));
+            ++added;
+        }
+
+        if (added > 0)
+            score.setSelectedArcs(created);
+    }
+
+    if (added == 0)
+    {
+        // Nothing changed: close the transaction without publishing a model
+        // change, so the piece is not marked dirty and no empty undo step is
+        // left in the history.
+        endEdit();
+        juce::String msg = "Guerrero: no arcs inserted";
+        if (skipped > 0)
+            msg += " (" + juce::String(skipped) + " skipped"
+                   + (lastReason.isNotEmpty() ? ": " + lastReason : juce::String()) + ")";
+        flash(msg);
+        return 0;
+    }
+
+    refreshBoxes();
+    updateStatus();
+    score.repaint();
+
+    markModelChanged();
+    publishModelSnapshot();
+    endEdit();
+
+    if (insertedIds != nullptr)
+        *insertedIds = created;
+
+    juce::String msg = "Inserted " + juce::String(added) + " Guerrero arc"
+                       + (added == 1 ? "" : "s");
+    if (skipped > 0)
+        msg += " (" + juce::String(skipped) + " skipped"
+               + (lastReason.isNotEmpty() ? ": " + lastReason : juce::String()) + ")";
+    flash(msg);
+
+    return added;
+}
+
+//==============================================================================
 // v1.21 (wave 19): the arc list - one row per arc, grouped by material,
 // with the arc's page, pitch range and time span.
+#if GUERRERO_INTEGRATION
+//==============================================================================
+// The complete Guerrero -> UPICuitous pipeline, behind one call.
+//
+//   envelope (A1 Brownian) + upper boundary
+//     -> seed (A2 confinement between them)
+//     -> planArcFromCurve  (beats -> score seconds, log2Hz -> Hz, host limits)
+//     -> guerrero_bridge::toImportArc
+//     -> insertGuerreroArcs (one undo transaction)
+//
+// The engine owns the musical data; the host owns ids, material selection,
+// limits and the transaction. Nothing here writes into the page directly.
+namespace {
+
+// The default recipe: the settings the generator has always shipped with, now
+// expressed in the persisted recipe type so the menu item and the dialog share
+// one code path instead of duplicating the parameter list.
+upic::GuerreroRecipe defaultGuerreroRecipe()
+{
+    upic::GuerreroRecipe r;
+    r.generatorVersion = 1;
+    r.generator = 0;                 // envelope + confined seed
+
+    r.lower.roughness = 0.35;
+    r.lower.depth     = 7;
+    r.lower.freqLo    = 110.0;
+    r.lower.freqHi    = 880.0;
+    r.lower.timeStart = 0.0;
+    r.lower.timeEnd   = 16.0;
+
+    // The upper boundary is the lower one an octave higher.
+    r.upper = r.lower;
+    r.upper.freqLo = 880.0;
+    r.upper.freqHi = 1760.0;
+
+    // Only roughness and depth: the seed takes its time and frequency bounds
+    // from the envelopes, which is why the dialog does not offer them.
+    r.seed.roughness = 0.55;
+    r.seed.depth     = 7;
+
+    r.lowerSeed = 20261118u;
+    r.upperSeed = r.lowerSeed + 1u;
+    r.seedSeed  = r.lowerSeed + 2u;
+
+    r.bpm = 120.0;
+    r.frequencyPolicy = upic::GuerreroOutOfRange::Compress;
+    r.pointsPolicy    = upic::GuerreroPointPolicy::Downsample;
+    r.maxPoints = (int) upic::limits::kMaxPointsPerArc;
+    return r;
+}
+
+} // anonymous namespace
+
+void MainComponent::runGuerreroGenerator()
+{
+    juce::String error;
+    if (! applyGuerreroRecipe (0, defaultGuerreroRecipe(), error))
+        flash ("Guerrero: " + error);
+}
+
+void MainComponent::closeGuerreroDialog()
+{
+    // Component's destructor detaches from its parent, so resetting the
+    // unique_ptr is all that is needed.
+    guerreroOverlay.reset();
+}
+
+void MainComponent::openGuerreroDialog (int arcId)
+{
+    closeGuerreroDialog();
+
+    auto overlay = std::make_unique<GuerreroParamOverlay>();
+    overlay->editing = (arcId != 0);
+    overlay->title   = overlay->editing ? juce::String ("Edit Guerrero recipe")
+                                        : juce::String ("New Guerrero arc");
+    overlay->recipe  = defaultGuerreroRecipe();
+
+    if (arcId != 0)
+    {
+        bool found = false;
+        const juce::ScopedLock l (dataLock);
+        for (const auto& a : curPage().arcs)
+        {
+            if (a.id != arcId) continue;
+
+            // The same preconditions as regeneration. Editing the recipe of an
+            // arc whose geometry the user has already changed would overwrite
+            // that work, so it is refused with an explanation.
+            if (! a.hasGuerrero)              { flash ("Edit recipe: not a Guerrero arc"); return; }
+            if (a.guerrero.malformed)         { flash ("Edit recipe: the provenance record is damaged"); return; }
+            if (! a.guerrero.recipeValid)     { flash ("Edit recipe: this arc predates the stored recipe"); return; }
+            if (a.guerrero.geometryEdited)    { flash ("Edit recipe: the geometry was edited, so it is kept as it is"); return; }
+
+            overlay->recipe = a.guerrero.recipe;
+            found = true;
+            break;
+        }
+        if (! found) { flash ("Edit recipe: no such arc"); return; }
+    }
+
+    overlay->loadFromRecipe();
+
+    // Closing is deferred: the dialog's button and key handlers are running
+    // when these fire, so destroying it inline would use an object after its
+    // own method frame had been entered.
+    juce::Component::SafePointer<MainComponent> safe (this);
+    auto scheduleClose = [safe]
+    {
+        juce::MessageManager::callAsync ([safe]
+        {
+            if (safe != nullptr) safe->closeGuerreroDialog();
+        });
+    };
+
+    overlay->onCancel = [this, scheduleClose]
+    {
+        if (guerreroOverlay != nullptr) guerreroOverlay->setVisible (false);
+        scheduleClose();
+    };
+
+    overlay->onApply = [this, arcId, scheduleClose] (const upic::GuerreroRecipe& r,
+                                                     juce::String& error) -> bool
+    {
+        if (! applyGuerreroRecipe (arcId, r, error))
+            return false;   // the dialog stays open and shows the reason
+
+        if (guerreroOverlay != nullptr) guerreroOverlay->setVisible (false);
+        scheduleClose();
+        return true;
+    };
+
+    guerreroOverlay = std::move (overlay);
+    addAndMakeVisible (*guerreroOverlay);
+    guerreroOverlay->setBounds (getLocalBounds());
+    guerreroOverlay->toFront (true);
+    guerreroOverlay->grabKeyboardFocus();
+}
+
+bool MainComponent::applyGuerreroRecipe (int arcId, const upic::GuerreroRecipe& recipe,
+                                         juce::String& error)
+{
+    guerrero::upicadapter::PlannedArc plan;
+    bool lossy = false;
+    uint32_t omitted = 0;
+
+    if (! upic::guerrero_bridge::regenerateFromRecipe (recipe, plan, &lossy, &omitted))
+    {
+        error = "this recipe could not be generated";
+        return false;
+    }
+
+    if (plan.points.size() < 2)
+    {
+        error = "the recipe produced too little material";
+        return false;
+    }
+
+    // Validate against the page before touching the model, exactly as
+    // regeneration does. This is also what catches a recipe whose envelope
+    // time span no longer fits the current page.
+    const double pageSeconds = curPage().durationSec;
+    for (const auto& p : plan.points)
+    {
+        if (! std::isfinite (p.t) || p.t < 0.0 || p.t > pageSeconds
+            || ! std::isfinite (p.freq) || p.freq < upic::kMinFreq || p.freq > upic::kMaxFreq)
+        {
+            error = "the generated arc does not fit this page";
+            return false;
+        }
+    }
+
+    // ---- new arc ---------------------------------------------------------
+    if (arcId == 0)
+    {
+        upic::GuerreroImportArc arc = upic::guerrero_bridge::toImportArc (plan);
+
+        upic::GuerreroProvenance prov;
+        prov.version         = 1;
+        prov.compositionSeed = recipe.lowerSeed;
+        prov.randomSeed      = recipe.seedSeed;
+        prov.recipe          = recipe;
+        prov.lossy           = lossy;
+        prov.omittedPoints   = omitted;
+        prov.revision        = 1;
+        prov.recipeValid     = true;
+        prov.geometryEdited  = false;
+
+        arc.hasProvenance = true;
+        arc.provenance    = prov;
+
+        juce::String label = "Guerrero: envelope + seed";
+        if (lossy)
+            label += " (" + juce::String ((int) omitted) + " points dropped)";
+
+        std::vector<int> ids;
+        if (insertGuerreroArcs ({ arc }, label, &ids) == 0)
+        {
+            error = "the arc could not be inserted (page limits or host range)";
+            return false;
+        }
+        return true;
+    }
+
+    // ---- existing arc: replace geometry and recipe, keep identity ---------
+    {
+        const juce::ScopedLock l (dataLock);
+        const upic::Arc* found = nullptr;
+        for (const auto& a : curPage().arcs)
+            if (a.id == arcId) { found = &a; break; }
+
+        if (found == nullptr)             { error = "no such arc"; return false; }
+        if (! found->hasGuerrero)         { error = "not a Guerrero arc"; return false; }
+        if (found->guerrero.malformed)    { error = "the provenance record is damaged"; return false; }
+        if (! found->guerrero.recipeValid){ error = "this arc predates the stored recipe"; return false; }
+        if (found->guerrero.geometryEdited)
+        {
+            error = "the geometry was edited, so the recipe is not applied";
+            return false;
+        }
+        if (! found->guerrero.hasFingerprint)
+        {
+            error = "this record has no geometry fingerprint";
+            return false;
+        }
+        if (upic::Arc::geometryFingerprint (found->points) != found->guerrero.geometryHash
+            || (int) found->points.size() != found->guerrero.pointCount)
+        {
+            error = "the geometry no longer matches its record";
+            return false;
+        }
+        if (found->guerrero.revision >= std::numeric_limits<int>::max())
+        {
+            error = "the revision counter is exhausted for this arc";
+            return false;
+        }
+    }
+
+    beginEdit ("Edit Guerrero recipe");
+    {
+        const juce::ScopedLock l (dataLock);
+        for (auto& a : curPage().arcs)
+        {
+            if (a.id != arcId) continue;
+
+            a.points.clear();
+            a.points.reserve (plan.points.size());
+            for (const auto& p : plan.points)
+            {
+                upic::ArcPoint pt;
+                pt.t = p.t; pt.freq = p.freq; pt.i = p.i;
+                a.points.push_back (pt);
+            }
+
+            // The recipe is replaced; the fingerprint describes the geometry
+            // that was just written, so endEdit() still detects a later edit.
+            a.guerrero.recipe           = recipe;
+            a.guerrero.lossy            = lossy;
+            a.guerrero.omittedPoints    = omitted;
+
+            // Provenance identity must move with the recipe, or the record
+            // would claim a composition seed and RNG seed that no longer
+            // describe the geometry it holds. The engine curve ids referred to
+            // the original generation and cannot be re-derived here, so they
+            // are cleared rather than left pointing at stale curves.
+            a.guerrero.compositionSeed  = recipe.lowerSeed;
+            a.guerrero.randomSeed       = recipe.seedSeed;
+            a.guerrero.sourceSeedId     = 0;
+            a.guerrero.sourceCurveId    = 0;
+
+            a.guerrero.geometryHash     = upic::Arc::geometryFingerprint (a.points);
+            a.guerrero.pointCount       = (int) a.points.size();
+            a.guerrero.hasFingerprint   = true;
+            a.guerrero.fingerprintAlgorithm = upic::Arc::kFingerprintQuantised;
+            a.guerrero.geometryEdited   = false;
+            ++a.guerrero.revision;
+            break;
+        }
+        markModelChanged();
+        publishModelSnapshot();
+    }
+
+    refreshBoxes();
+    updateStatus();
+    score.repaint();
+    endEdit();
+
+    flash ("Applied the Guerrero recipe");
+    return true;
+}
+#endif // GUERRERO_INTEGRATION
+
+#if GUERRERO_INTEGRATION
+// Called from endEdit() after the model revision check, so it only runs when
+// something really changed. Comparing each Guerrero arc against the fingerprint
+// taken at insertion detects an edit on ANY path (drag, transpose, invert,
+// reverse, point insert/remove) without instrumenting each tool.
+//
+// The undo snapshot was captured in beginEdit(), when the arc was still
+// unbaked, so undoing the edit also restores the unbaked state.
+//==============================================================================
+// Regenerate one Guerrero arc from its stored recipe.
+//
+// The recipe is the authority for the GEOMETRY only. The arc keeps its host id
+// and every sound-material setting (waveform, envelope, intensity, mode, PM
+// parameters), because those are host overrides rather than generated material.
+//
+// Refused when: the record is not Guerrero, has no usable recipe (legacy or
+// malformed), declares an unsupported recipe version, or the geometry has been
+// edited by the user - regenerating over an edit would destroy work.
+bool MainComponent::regenerateGuerreroArc (int arcId)
+{
+#if GUERRERO_INTEGRATION
+    upic::GuerreroProvenance prov;
+    {
+        const juce::ScopedLock l (dataLock);
+        const upic::Arc* found = nullptr;
+        for (const auto& a : curPage().arcs)
+            if (a.id == arcId) { found = &a; break; }
+
+        if (found == nullptr)            { flash ("Regenerate: no such arc"); return false; }
+        if (! found->hasGuerrero)        { flash ("Regenerate: not a Guerrero arc"); return false; }
+        if (found->guerrero.malformed)   { flash ("Regenerate: the provenance record is damaged"); return false; }
+        if (! found->guerrero.recipeValid)
+        {
+            flash ("Regenerate: this arc predates the stored recipe, so it cannot be rebuilt");
+            return false;
+        }
+        if (found->guerrero.geometryEdited)
+        {
+            flash ("Regenerate: the geometry was edited, so it is kept as it is");
+            return false;
+        }
+
+        // Do not trust the flag alone: verify the points against the fingerprint.
+        // A record without a fingerprint cannot be integrity-checked. "No
+        // fingerprint" must NOT mean "skip the check and proceed": a file whose
+        // geometryHash was deleted would otherwise be regenerable over changed
+        // geometry. Such a record is refused.
+        if (! found->guerrero.hasFingerprint)
+        {
+            flash ("Regenerate: this record has no geometry fingerprint, so it cannot be verified");
+            return false;
+        }
+
+        // Verify the points against the fingerprint. This catches geometry
+        // changed outside any tracked transaction, such as a hand-edited
+        // .upic.json whose provenance was otherwise left untouched.
+        if (upic::Arc::geometryFingerprint (found->points) != found->guerrero.geometryHash
+            || (int) found->points.size() != found->guerrero.pointCount)
+        {
+            flash ("Regenerate: the geometry no longer matches its record, so it is kept");
+            return false;
+        }
+        // A revision read from user-supplied JSON could be INT_MAX; incrementing
+        // it during regeneration would overflow. Refuse instead of wrapping.
+        if (found->guerrero.revision >= std::numeric_limits<int>::max())
+        {
+            flash ("Regenerate: the revision counter is exhausted for this arc");
+            return false;
+        }
+
+        prov = found->guerrero;
+    }
+
+    guerrero::upicadapter::PlannedArc rebuilt;
+    if (! upic::guerrero_bridge::regenerateFromRecipe (prov.recipe, rebuilt))
+    {
+        flash ("Regenerate: this recipe version is not supported");
+        return false;
+    }
+
+    // Validate the rebuilt material against the page before touching the model.
+    const double pageSeconds = curPage().durationSec;
+    if (rebuilt.points.size() < 2)
+    {
+        flash ("Regenerate: the recipe produced too little material");
+        return false;
+    }
+    for (const auto& p : rebuilt.points)
+    {
+        if (! std::isfinite (p.t) || p.t < 0.0 || p.t > pageSeconds
+            || ! std::isfinite (p.freq) || p.freq < upic::kMinFreq || p.freq > upic::kMaxFreq)
+        {
+            flash ("Regenerate: the rebuilt arc does not fit this page");
+            return false;
+        }
+    }
+
+    beginEdit ("Regenerate Guerrero arc");
+    {
+        const juce::ScopedLock l (dataLock);
+        for (auto& a : curPage().arcs)
+        {
+            if (a.id != arcId) continue;
+
+            a.points.clear();
+            a.points.reserve (rebuilt.points.size());
+            for (const auto& p : rebuilt.points)
+            {
+                upic::ArcPoint pt;
+                pt.t = p.t; pt.freq = p.freq; pt.i = p.i;
+                a.points.push_back (pt);
+            }
+
+            // New fingerprint for the new geometry, and a new revision.
+            a.guerrero.geometryHash   = upic::Arc::geometryFingerprint (a.points);
+            a.guerrero.pointCount     = (int) a.points.size();
+            a.guerrero.hasFingerprint = true;
+            a.guerrero.fingerprintAlgorithm = upic::Arc::kFingerprintQuantised;
+            a.guerrero.geometryEdited = false;
+            ++a.guerrero.revision;
+            break;
+        }
+        markModelChanged();
+        publishModelSnapshot();
+    }
+
+    refreshBoxes();
+    updateStatus();
+    score.repaint();
+    endEdit();
+
+    flash ("Regenerated Guerrero arc from its recipe");
+    return true;
+#else
+    juce::ignoreUnused (arcId);
+    return false;
+#endif
+}
+
+void MainComponent::markEditedGuerreroGeometry()
+{
+    for (auto& pg : pages)
+        for (auto& a : pg.arcs)
+        {
+            if (! a.hasGuerrero || a.guerrero.geometryEdited) continue;
+
+            // A legacy record has no fingerprint. Comparing it against zero
+            // would mark it edited on the next unrelated transaction, so it is
+            // skipped until something actually re-records it.
+            if (a.guerrero.geometryHash == 0 || a.guerrero.pointCount <= 0) continue;
+
+            if (upic::Arc::geometryFingerprint (a.points) != a.guerrero.geometryHash
+                || (int) a.points.size() != a.guerrero.pointCount)
+                a.guerrero.geometryEdited = true;
+        }
+}
+#endif
+
 void MainComponent::rebuildArcList()
 {
     arcListDirty = false;
@@ -1947,3 +2599,30 @@ void MainComponent::clearCurrentPage()
 // otherwise every arc of the current page.
 //
 // The menu ids come from the "Transform the page..." submenu.
+
+//==============================================================================
+// Guerrero test hooks. These only read Arc fields, so they exist whether or
+// not the engine was compiled in.
+bool MainComponent::guerreroArcGeometryEditedForTest (int arcId) const
+{
+    const juce::ScopedLock l (dataLock);
+    for (const auto& a : curPage().arcs)
+        if (a.id == arcId) return a.hasGuerrero && a.guerrero.geometryEdited;
+    return false;
+}
+
+uint64_t MainComponent::guerreroArcHashForTest (int arcId) const
+{
+    const juce::ScopedLock l (dataLock);
+    for (const auto& a : curPage().arcs)
+        if (a.id == arcId) return a.guerrero.geometryHash;
+    return 0;
+}
+
+bool MainComponent::guerreroArcHasProvenanceForTest (int arcId) const
+{
+    const juce::ScopedLock l (dataLock);
+    for (const auto& a : curPage().arcs)
+        if (a.id == arcId) return a.hasGuerrero;
+    return false;
+}

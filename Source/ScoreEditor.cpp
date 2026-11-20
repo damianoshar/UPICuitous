@@ -1,4 +1,4 @@
-#include "ScoreEditor.h"
+﻿#include "ScoreEditor.h"
 
 //==============================================================================
 // The ScoreEditor implementation. It used to live inside the class in the
@@ -1935,6 +1935,17 @@ void ScoreEditor::showArcMenu(int id)
             m.addItem(2, muted ? "Unmute" : "Mute");
         }
         m.addItem(3, "Remagnetize (re-apply sieve)");
+#if GUERRERO_INTEGRATION
+        // Only arcs that actually carry Guerrero provenance get the Guerrero
+        // commands. Showing them on a hand-drawn arc - or in a build without the
+        // engine - would offer actions that cannot run.
+        if (const upic::Arc* menuArc = findArc(id))
+            if (menuArc->hasGuerrero)
+            {
+                m.addItem(6, "Regenerate Guerrero arc (from recipe)");
+                m.addItem(7, "Edit Guerrero recipe...");
+            }
+#endif
         m.addSeparator();
         m.addItem(4, "Delete");
         m.addItem(5, "Select all");
@@ -1948,6 +1959,8 @@ void ScoreEditor::showArcMenu(int id)
                 case 1: sp->duplicateSelected(); break;
                 case 2: sp->toggleMuteSelected(); break;
                 case 3: sp->remagnetizeSelected(); break;
+                case 6: if (sp->onRegenerateGuerrero) sp->onRegenerateGuerrero (id); break;
+                case 7: if (sp->onEditGuerreroRecipe) sp->onEditGuerreroRecipe (id); break;
                 case 4: sp->setSelectedArc(id); sp->deleteSelected(); break;
                 case 5: sp->selectAll(); if (sp->onSelect) sp->onSelect(sp->getSelectedArc()); break;
                 default: break;
