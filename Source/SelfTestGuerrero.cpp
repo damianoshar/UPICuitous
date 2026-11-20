@@ -2109,6 +2109,37 @@ void upic::runGuerreroDialogChecks (SelfTest& t)
                  "Guerrero: the replacement uses the same page-local arc id",
                  juce::String (otherId) + " vs " + juce::String (id));
 
+        // Fixture assumptions, asserted rather than assumed. The regression only
+        // means something if the replacement matches the page shape, so future
+        // changes to default page construction cannot silently weaken it.
+        auto pageShape = [] (const juce::var& piece, int& arcCount, double& duration) -> bool
+        {
+            const juce::var pagesVar = piece.getProperty ("pages", juce::var());
+            auto* pages = pagesVar.getArray();
+            if (pages == nullptr || pages->isEmpty()) return false;
+
+            const juce::var pageVar = pages->getReference (0);
+            duration = (double) pageVar.getProperty ("duration", 0.0);
+
+            const juce::var arcsVar = pageVar.getProperty ("arcs", juce::var());
+            auto* arcs = arcsVar.getArray();
+            arcCount = (arcs != nullptr) ? arcs->size() : 0;
+            return true;
+        };
+
+        int    originalArcs = -1, replacementArcs = -1;
+        double originalDur = -1.0, replacementDur = -1.0;
+        {
+            const juce::var originalPiece = mcR.pieceToVar();
+            t.check (pageShape (originalPiece, originalArcs, originalDur)
+                         && pageShape (other, replacementArcs, replacementDur),
+                     "Guerrero: both pieces expose their first page");
+        }
+        t.check (originalArcs == replacementArcs && originalDur == replacementDur,
+                 "Guerrero: the replacement matches the page arc count and duration",
+                 juce::String (originalArcs) + "/" + juce::String (originalDur, 3)
+                     + " vs " + juce::String (replacementArcs) + "/" + juce::String (replacementDur, 3));
+
         const uint64_t liveHashBefore = mcR.guerreroArcLiveHashForTest (id);
 
         t.check (mcR.loadFromVar (other),
@@ -2117,6 +2148,8 @@ void upic::runGuerreroDialogChecks (SelfTest& t)
         const uint64_t liveHashAfterLoad = mcR.guerreroArcLiveHashForTest (id);
         t.check (liveHashAfterLoad != liveHashBefore,
                  "Guerrero: the loaded piece really has different geometry");
+        t.check (liveHashAfterLoad == otherProv.geometryHash,
+                 "Guerrero: the loaded geometry matches the replacement fingerprint");
 
         // Isolation evidence: the pre-existing fingerprint guard must NOT be
         // what refuses the apply, or this test would prove nothing about the
