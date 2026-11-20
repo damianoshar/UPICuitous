@@ -1453,7 +1453,12 @@ public:
 
     // Remove and destroy the parameter dialog if one is open. Safe to call
     // when nothing is open.
-    void closeGuerreroDialog();
+    //
+    // `generation` is the identity of the dialog requesting the close. A
+    // deferred close passes the generation it was created with, so a stale
+    // request cannot close a dialog that opened afterwards. Zero means "close
+    // whatever is current".
+    void closeGuerreroDialog (int generation = 0);
 
     // Apply a recipe to the model.
     //
@@ -1472,6 +1477,14 @@ public:
     // The active parameter dialog, when one is open. Typed as juce::Component
     // so this header does not depend on the dialog's widget layout.
     std::unique_ptr<juce::Component> guerreroOverlay;
+
+    // Identity of the dialog currently open (0 when none has ever been shown).
+    // Deferred closes compare against it so a late callback cannot destroy a
+    // dialog that replaced the one which scheduled it.
+    int guerreroOverlayGeneration = 0;
+
+    // Test hooks for the dialog lifecycle.
+    int guerreroOverlayGenerationForTest() const { return guerreroOverlayGeneration; }
 #endif
 
     // Regenerate one Guerrero arc from its stored recipe, in place: the host id
