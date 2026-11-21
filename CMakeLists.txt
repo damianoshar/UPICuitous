@@ -120,7 +120,12 @@ if (GUERRERO_AVAILABLE)
     )
 endif()
 
+# JUCE_MODAL_LOOPS_PERMITTED gates MessageManager::runDispatchLoopUntil, which
+# the headless self-test uses to deliver queued message-thread work (the
+# asynchronous active-page notification after a page transition). Enabling it
+# only compiles that support in; nothing in the app calls a modal loop.
 target_compile_definitions(UPICuitous PRIVATE
+    JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0

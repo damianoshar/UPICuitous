@@ -116,8 +116,10 @@ model-level behaviors and a two-page tone/silence playback fixture in four
 Sequential/Loop combinations. The Sequential+Loop fixture samples the
 **intermediate silent page** (tone -> silence -> tone), so it proves page two was
 visited before wrapping, and it asserts both named toggles were found; forcing
-`snap.seqPages` to false fails that middle sample. UI `currentPage` notifications
-and real-time allocation safety at page transitions remain unverified.
+`snap.seqPages` to false fails that middle sample. The queued UI page update is
+also covered: the test pumps the message queue (`JUCE_MODAL_LOOPS_PERMITTED`)
+and asserts the visible page follows the audio page. Real-time allocation safety
+of `callAsync()` on the audio path remains unverified.
 
 ## What it does
 
@@ -589,7 +591,7 @@ repository.
 
 ## Tests
 
-`UPICuitous.exe --selftest` has **1,202 total headless checks**
+`UPICuitous.exe --selftest` has **1,205 total headless checks**
 reported passing in the latest Windows v0.29 run (including 187 Guerrero
 checks when that integration is enabled). That result is **developer-reported**,
 not independently rerun on this Linux reviewer environment. The suite covers
