@@ -2464,8 +2464,9 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
     // which page is playing: silence means page 2, audio means page 1 (either
     // repeated by the loop or wrapped back to by the sequence).
     //
-    // Not covered here: the asynchronous message-thread notification that
-    // updates currentPage, which needs a running dispatch loop.
+    // The asynchronous message-thread notification that updates currentPage is
+    // covered by the sub-test at the end of this block, which pumps the message
+    // queue; the checks here describe the audio side only.
     {
         std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
             [&findByName] (juce::Component& c, const juce::String& n) -> juce::Component*
