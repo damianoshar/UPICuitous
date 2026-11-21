@@ -2625,6 +2625,40 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
         check (loopTone2 > 0.001f,
                "F1: seq off, loop on - page 1 is still playing later",
                juce::String (loopTone2, 4));
+
+        // --- the visible page follows the audio page -----------------------
+        // The audio thread posts the page change with MessageManager::callAsync,
+        // so nothing updates currentPage until the message queue is serviced.
+        // The probe above only proves the AUDIO moved; this pumps the queue and
+        // proves the visible page caught up - the half the audio probe cannot
+        // see. The second page's duration is distinct (0.25 s) so the UI value
+        // identifies which page is active.
+        {
+            check (mc.loadFromVar (juce::JSON::parse (makePiece (0.25))),
+                   "F1: async notification - the piece loads");
+
+            setMode (false, false);
+            mc.timerCallback();
+            render();
+
+            mc.clickPlayForTest();
+
+            for (int b = 0; b < 30; ++b)
+                render();
+
+            check (mc.isPlayingForTest(),
+                   "F1: async notification - the transport crossed the page");
+
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (200);
+
+            check (std::abs (mc.pageDurationForTest() - 0.25) < 1e-9,
+                   "F1: async notification - the visible page follows the audio",
+                   juce::String (mc.pageDurationForTest(), 3));
+
+            mc.stopPlaybackForTest();
+            for (int b = 0; b < 4; ++b)
+                render();
+        }
     }
 
     // --- double-click Stop rewinds, but only a real double click ---------
