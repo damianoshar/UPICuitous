@@ -505,15 +505,19 @@ double MainComponent::displayPlayhead() const
 // Called from the audio thread. Stores only: no allocation, no lock.
 void MainComponent::requestStopFromAudio() noexcept
 {
-    const auto run = (uint64_t) (uint32_t) transportSession.load (std::memory_order_relaxed);
+    // Tag with the run this callback is rendering, not with the live session:
+    // a restart may already have advanced the session (the P1 interleaving).
+    const auto run = (uint64_t) audioSession;
     pendingStopRequest.store ((run << 32) | 1u, std::memory_order_release);
+}
+
+void MainComponent::postStopForRunForTest (uint32_t run)
+{
+    pendingStopRequest.store (((uint64_t) run << 32) | 1u, std::memory_order_release);
 }
 
 void MainComponent::startPlayback()
 {
-    // A new run: any deferred stop raised for the previous run is now stale.
-    transportSession.fetch_add (1, std::memory_order_acq_rel);
-
     const auto state = transport();
 
     // F1: Play while the transport is starting or playing is a no-op. The
@@ -544,7 +548,10 @@ void MainComponent::startPlayback()
         return;
     }
 
-    // Stopped: a fresh start.
+    // Stopped: a fresh start. Only an ACCEPTED start advances the run counter - a
+    // rejected (no-op) Play must not invalidate pending requests for nothing.
+    transportSession.fetch_add (1, std::memory_order_acq_rel);
+
     // a Stop click after Play is a fresh single click, not a double-click
     lastStopClickMs = -1.0e9;
     bool hasLive = false;
@@ -781,6 +788,15 @@ void MainComponent::applyAudioPreparation (std::uint64_t generation,
 
 void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 {
+    // Adopt the run this callback renders. A run is adopted when the transport is
+    // starting; the message thread advances the counter only on an accepted
+    // start, so this identifies the run that owns any stop raised below.
+    if (transportState.load (std::memory_order_relaxed) == (int) TransportState::starting)
+    {
+        const auto run = transportSession.load (std::memory_order_relaxed);
+        if (run != audioSession) audioSession = run;
+    }
+
     // Preparation may run on a host setup thread while this callback is
     // active. The callback never waits for it: if preparation owns the
     // engine gate, this block is silent and the next one continues from the

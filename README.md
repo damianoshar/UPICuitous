@@ -593,7 +593,7 @@ repository.
 
 ## Tests
 
-`UPICuitous.exe --selftest` has **1,209 total headless checks**
+`UPICuitous.exe --selftest` has **1,213 total headless checks**
 reported passing in the latest Windows v0.29 run (including 187 Guerrero
 checks when that integration is enabled). That result is **developer-reported**,
 not independently rerun on this Linux reviewer environment. The suite covers

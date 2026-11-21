@@ -2685,12 +2685,12 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
                juce::String (loopTone2, 4));
 
         // --- the visible page follows the audio page -----------------------
-        // The audio thread posts the page change with MessageManager::callAsync,
-        // so nothing updates currentPage until the message queue is serviced.
-        // The probe above only proves the AUDIO moved; this pumps the queue and
-        // proves the visible page caught up - the half the audio probe cannot
-        // see. The second page's duration is distinct (0.25 s) so the UI value
-        // identifies which page is active.
+        // The audio thread only stores a packed page request; the 30 Hz timer
+        // applies it, so nothing updates currentPage until a timer tick runs.
+        // The probe above only proves the AUDIO moved; this pumps the message
+        // queue (which fires the timer) and proves the visible page caught up -
+        // the half the audio probe cannot see. The second page's duration is
+        // distinct (0.25 s) so the UI value identifies which page is active.
         {
             check (mc.loadFromVar (juce::JSON::parse (makePiece (0.25))),
                    "F1: async notification - the piece loads");
@@ -2751,6 +2751,45 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
 
             check (mc.transportStateForTest() == TS::starting && mc.isPlayingForTest(),
                    "F1: deferred stop - the old request does not stop the new run",
+                   stateName (mc.transportStateForTest()));
+
+            mc.stopPlaybackForTest();
+            for (int b = 0; b < 4; ++b)
+                render();
+        }
+
+        // --- a stop from an OLDER run cannot stop the current one ----------
+        // The real race - a request posted while the session changes - cannot be
+        // produced deterministically in one thread, so the ordering is injected:
+        // the same request that a previous run would have raised must be ignored,
+        // and one carrying the current run's id must be applied.
+        {
+            check (mc.loadFromVar (juce::JSON::parse (makePiece (0.1))),
+                   "F1: run binding - the piece loads");
+
+            setMode (false, false);
+            mc.timerCallback();
+            render();
+
+            mc.clickPlayForTest();   // an accepted run
+            render();                // the audio callback adopts it
+
+            const auto currentRun = mc.transportSessionForTest();
+            check (currentRun > 0,
+                   "F1: run binding - the run has an identity",
+                   juce::String (currentRun));
+
+            const auto olderRun = currentRun > 0 ? currentRun - 1u : 0u;
+            mc.postStopForRunForTest (olderRun);
+            mc.timerCallback();
+            check (mc.isPlayingForTest() && ! mc.stopPendingForTest(),
+                   "F1: run binding - a stop from an older run is ignored",
+                   stateName (mc.transportStateForTest()));
+
+            mc.postStopForRunForTest (currentRun);
+            mc.timerCallback();
+            check (mc.stopPendingForTest() || ! mc.isPlayingForTest(),
+                   "F1: run binding - a stop from the current run applies",
                    stateName (mc.transportStateForTest()));
 
             mc.stopPlaybackForTest();

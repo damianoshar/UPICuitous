@@ -1817,6 +1817,11 @@ private:
     void requestStopFromAudio() noexcept;
     int seenPageEpoch = -1;                         // audio
     int audioPage = 0;                              // audio thread's page
+
+    // audio thread only: the transport run this callback is rendering. A stop
+    // request is tagged with it, so a restart cannot have its stop attributed to
+    // the new run even if the message thread advanced transportSession meanwhile.
+    uint32_t audioSession = 0;
     double audioPlayhead = 0.0;                     // audio thread's playhead
     std::atomic<double> seekTo { 0.0 };             // message -> audio
     std::atomic<int> seekSerial { 0 };
@@ -2522,6 +2527,12 @@ public:
     // returns the stored provenance hash. Needed to prove whether an apply really
     // rewrote the geometry.
     uint64_t guerreroArcLiveHashForTest (int arcId) const;
+    // Transport-run identity, and a way to inject a stop request for a chosen
+    // run. The second simulates the ordering a real race cannot be made to
+    // produce deterministically: a request from an OLDER run arriving after the
+    // session has already advanced.
+    uint32_t transportSessionForTest() const { return transportSession.load (std::memory_order_relaxed); }
+    void postStopForRunForTest (uint32_t run);
     bool guerreroArcHasProvenanceForTest (int arcId) const;
 
     // Test hook: replace an arc's stored recipe WITHOUT touching its geometry or
