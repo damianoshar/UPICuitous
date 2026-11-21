@@ -97,6 +97,10 @@ void MainComponent::refreshBoxes()
             (int) upic::freqSpacePresets().size() - 1,
             curPage().spaces[(size_t) i]) + 1, juce::dontSendNotification);
     refreshSpaceBox();
+    refreshAmpTableBox();   // WP2
+    refreshGroupPanel();    // WP3
+    refreshSequencePanel();  // WP4
+    refreshModBox();         // WP5
 
     // v1.33: the ambitus - the combo shows the preset that matches, or
     // "Custom" when the page carries an interval of its own
@@ -763,7 +767,7 @@ void MainComponent::syncControlsToArc(int arcId)
             refSlider.setValue(drawRef, juce::dontSendNotification);
             // M5: on the Sample tab the Ref is the slot's (the material's
             // base pitch), so the slider shows it.
-            syncRefToSlot();
+    syncRefToSlot();
             updateSampleView();
             pushVoice();
             break;

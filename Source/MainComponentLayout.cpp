@@ -946,7 +946,21 @@ void MainComponent::resized()
                                   FI(&spaceDefLab[0], 46, &spaceDefBox[0], 120),
                                   FI(&spaceDefLab[1], 46, &spaceDefBox[1], 120),
                                   FI(&spaceDefLab[2], 46, &spaceDefBox[2], 120),
-                                  FI(&spaceDefLab[3], 46, &spaceDefBox[3], 120) } });
+                                  FI(&spaceDefLab[3], 46, &spaceDefBox[3], 120),
+                                  F(&spaceTableBtn, 66) } });
+
+    // WP2/WP3/WP5: the amplitude table, the groups and the modulator.
+    groups.push_back ({ "amp", { FI(&ampTableLab, 34, &ampTableBox, 150),
+                                  F(&ampTableBtn, 76),
+                                  F(&groupBtn, 86) } });
+    groups.push_back ({ "mod", { FI(&arcModLab, 30, &arcModBox, 100),
+                                  FI(&arcModTgtLab, 26, &arcModTgtBox, 66),
+                                  FI(&arcModDepthLab, 36, &arcModSlider, 110) } });
+
+    // WP4: the performance sequences.
+    groups.push_back ({ "seq", { FI(&seqLab, 30, &seqBox, 110),
+                                  F(&seqRecBtn, 52), F(&seqPlayBtn, 54),
+                                  F(&seqLoopBtn, 52), F(&seqEditBtn, 54) } });
 
     // v1.34.3: the tools card is the Generator; its caption is the title,
     // so the "Gen" label above the dropdown is gone.
@@ -2017,6 +2031,11 @@ void MainComponent::resized()
 
 void MainComponent::layoutOverlays (float s)
 {
+    freqTableEd.setBounds (getLocalBounds());
+    ampTableEd.setBounds (getLocalBounds());
+    groupPanel.setBounds (getLocalBounds());
+    seqPanel.setBounds (getLocalBounds());
+
     // v1.7 audio settings overlay: full-window backdrop + centred card
     audioOverlay.setBounds(getLocalBounds());
     if (audioSelector != nullptr && audioOverlay.isVisible())

@@ -2,6 +2,7 @@
 #include "UpicModel.h"
 #include <atomic>
 #include <cstddef>
+#include <memory>
 #include <type_traits>
 #include <vector>
 
@@ -162,6 +163,9 @@ struct ModelSnapshot : SnapshotBase
 {
     std::vector<upic::Waveform>   waveforms;
     std::vector<upic::Envelope>   envelopes;
+    std::vector<upic::AmplitudeTable> amplitudeTables;  // WP2: the conversion bank
+    std::vector<upic::PerformanceSequence> sequences;   // WP4
+    std::vector<upic::Channel> channels;                 // WP6 (model only)
     std::vector<upic::Page>       pages;
     std::vector<upic::SampleSlot> slots;
     int  currentPage = 0;   // the message thread's view of the page
@@ -171,4 +175,28 @@ struct ModelSnapshot : SnapshotBase
     // v1.33.4 (M22): the model revision this snapshot was built from - the
     // status timer publishes only when the revision moved.
     uint64_t revision = 0;
+
+    // WP1: the drawn frequency tables compiled to render-time LUTs. Only the
+    // spaces that have a curve get one (the presets stay analytic), so the
+    // cost is paid by the pieces that use the feature. The LUTs are owned by
+    // shared_ptrs so their addresses stay stable while the snapshot lives;
+    // the audio thread only ever reads the raw pointers.
+    std::vector<upic::PageLutSet> pageLuts;
+    std::vector<std::shared_ptr<const upic::FreqLut>> ownedLuts;
+
+    // WP3: the groups resolved to one override per arc per page (solo is
+    // already applied). Parallel to `pages[i].arcs`.
+    std::vector<std::vector<upic::ArcRenderOverride>> arcOverrides;
+
+    const upic::PageLutSet* lutsFor (int page) const
+    {
+        if (page < 0 || page >= (int) pageLuts.size()) return nullptr;
+        return &pageLuts[(size_t) page];
+    }
+
+    const std::vector<upic::ArcRenderOverride>* overridesFor (int page) const
+    {
+        if (page < 0 || page >= (int) arcOverrides.size()) return nullptr;
+        return &arcOverrides[(size_t) page];
+    }
 };

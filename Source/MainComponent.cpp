@@ -37,6 +37,7 @@ MainComponent::MainComponent(bool pluginMode)
 {
     waveforms = upic::defaultWaveforms();
     envelopes = upic::defaultEnvelopes();
+    ampTables = upic::defaultAmplitudeTables();   // WP2: the identity table
     pages.push_back(upic::demoPage());
     for (int i = 0; i < upic::kMaxSampleSlots; ++i)
     {
@@ -99,9 +100,10 @@ MainComponent::MainComponent(bool pluginMode)
         &scrubTailSlider, &scrubGrainSlider, &grainSlider,
         &dragSmoothSlider, &liveGrainSlider, &oscPortSlider,
         &oscMcPortSlider, &modRateSlider, &modDepthSlider,
-        &stepDivSlider, &warpSlider, &levelSlider };
+        &stepDivSlider, &warpSlider, &levelSlider, &arcModSlider };
     for (auto* slider : themedSliders)
         applyMasterVolumeSliderTheme (*slider);
+    groupPanel.themeSliders();   // WP3
     // Icon-only controls remain discoverable with mouse/pen hover. Preserve
     // any more specific tooltips that the individual controls already set.
     pageAddBtn.setTooltip ("Add a page");
@@ -293,7 +295,7 @@ void MainComponent::buildTransportControls()
 
 void MainComponent::buildViewToggles()
 {
-    // v1.7: view toggles β€” hide the waveform/envelope editors at the bottom
+    // v1.7: view toggles ΞΒ²Ξ²β€Β¬Ξ²β‚¬Β hide the waveform/envelope editors at the bottom
     // and the instruction hints, so the canvas gains the space. View state
     // only: nothing here changes the piece.
     for (auto* t : { &waveTog, &envTog, &hintsTog })
@@ -489,7 +491,7 @@ void MainComponent::buildLiveControls()
                 for (auto& a : pg.arcs)
                     if (a.mode == 2) a.reversed = on;
             markModelChanged();
-            publishModelSnapshot();
+    publishModelSnapshot();
             arcListDirty = true;
         }
         if (on)
@@ -667,7 +669,7 @@ void MainComponent::buildCombos()
         currentPage++;
         seekPlayhead(0.0);
         bumpPageEpoch();
-        publishModelSnapshot(); // the new page must be audible right away
+    publishModelSnapshot();
         refreshBoxes(); refreshScoreBinding();
     };
     pageDupBtn.onClick = [this]{
@@ -683,7 +685,7 @@ void MainComponent::buildCombos()
         currentPage++;
         seekPlayhead(0.0);
         bumpPageEpoch();
-        publishModelSnapshot();
+    publishModelSnapshot();
         refreshBoxes(); refreshScoreBinding();
     };
     pageDelBtn.onClick = [this]{
@@ -693,7 +695,7 @@ void MainComponent::buildCombos()
         currentPage = juce::jlimit(0, (int)pages.size() - 1, currentPage);
         seekPlayhead(0.0);
         bumpPageEpoch();
-        publishModelSnapshot();
+    publishModelSnapshot();
         refreshBoxes(); refreshScoreBinding();
     };
     pageBox.onChange = [this]{
@@ -706,7 +708,7 @@ void MainComponent::buildCombos()
             seekPlayhead(0.0);
             bumpPageEpoch();
             markModelChanged(); // v1.15: a page change replaces the sound -> fade across it
-            publishModelSnapshot(); // the new page must be audible right away
+    publishModelSnapshot();
             refreshScoreBinding();
         }
     };
@@ -729,7 +731,7 @@ void MainComponent::buildToolbarControls()
                 if (std::find(ids.begin(), ids.end(), a.id) != ids.end())
                     a.waveformId = wid;
         }
-        publishModelSnapshot();
+    publishModelSnapshot();
         score.repaint();
         refreshLibraryBoxes(); // F2: the use counts moved
     };
@@ -745,7 +747,7 @@ void MainComponent::buildToolbarControls()
                 if (std::find(ids.begin(), ids.end(), a.id) != ids.end())
                     a.envelopeId = eid;
         }
-        publishModelSnapshot();
+    publishModelSnapshot();
         score.repaint();
         refreshLibraryBoxes(); // F3: the use counts moved
     };
@@ -762,7 +764,7 @@ void MainComponent::buildToolbarControls()
             for (auto& a : curPage().arcs)
                 if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
                     a.pmIndexEnv = envId;
-            publishModelSnapshot();
+    publishModelSnapshot();
         }
         pushVoice();
         refreshLibraryBoxes(); // F3: a PM-index reference is a use too
@@ -820,7 +822,7 @@ void MainComponent::buildToolbarControls()
                 if (std::find(ids.begin(), ids.end(), a.id) != ids.end())
                     a.intensity = drawIntensity;
         }
-        publishModelSnapshot();
+    publishModelSnapshot();
         score.repaint();
     };
     // F11 (2026-11-18): the levels are knobs now. The knob draws its own
@@ -886,6 +888,7 @@ int MainComponent::liveLatencySamples() const
 void MainComponent::timerCallback()
 {
     ++timerTicks;
+    if (seqRecording) sequenceRecordTick();   // WP4
     // Refresh the cached input count (device/add-remove happens here on the
     // message thread; the audio tap only reads the atomic). In plugin mode the
     // processor keeps it fresh from the host's input bus instead.
@@ -938,7 +941,7 @@ void MainComponent::timerCallback()
         const bool changed = (rev != lastPublishedRevision);
         const bool safetyNet = (nowMs - lastModelPublishMs) >= 2000;
         if (changed || safetyNet)
-            publishModelSnapshot();
+    publishModelSnapshot();
     }
     const double dur = curPage().durationSec;
     const bool revNow = playRate.load(std::memory_order_relaxed) < 0.0;
@@ -1134,7 +1137,7 @@ void MainComponent::transformPage (int op)
         if (touched > 0)
         {
             markModelChanged(); // the voices re-anchor -> fade across it
-            publishModelSnapshot();
+    publishModelSnapshot();
             arcListDirty = true;
         }
     }

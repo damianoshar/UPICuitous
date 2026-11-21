@@ -233,7 +233,7 @@ void MainComponent::buildSieveControls()
 // function. The frequency space could be the continuum (a diagonal line is
 // a glissando) or discrete, with equal temperaments of 1..99 divisions per
 // octave: "the same diagonal arc would then sound like discrete steps in a
-// defined temperament" (Robindoré, in "From Xenakis's UPIC to Graphic
+// defined temperament" (RobindorΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β©, in "From Xenakis's UPIC to Graphic
 // Notation Today", Hatje Cantz 2024).
 //
 // The sieve (the row below) snaps the DRAWN points; this steps the SOUND:
@@ -295,7 +295,7 @@ void MainComponent::applyStepToSelection()
 // simultaneous tables or grids that could be superimposed on each page.
 // These grids were invisible to the eye, however, and accessed by
 // assigning one of four tables to whatever arc was being drawn, the same
-// way as one would assign the waveform or envelope to it." (Robindoré)
+// way as one would assign the waveform or envelope to it." (RobindorΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β©)
 //
 // So: the PAGE owns the four spaces, and an arc names the one it is
 // played in. A space is a range of the frequency axis - the position on
@@ -360,6 +360,160 @@ void MainComponent::buildFrequencyControls()
         flash ("Space " + juce::String (s + 1) + ": "
                + upic::freqSpacePresets()[(size_t) curPage().spaces[(size_t) s]].name);
     };
+
+    // WP1: draw the conversion table of the space on show. The button edits
+    // the space the arc's combo points at, so "pick space 2, press Table"
+    // is the whole gesture.
+    addAndMakeVisible (spaceTableBtn);
+    spaceTableBtn.setName ("spaceTableBtn");
+    spaceTableBtn.setTooltip ("Draw the frequency table of the space\n"
+                              "selected in the Space menu (WP1)");
+    spaceTableBtn.onClick = [this]{
+        showFreqTableEditor (juce::jlimit (0, 3, spaceBox.getSelectedId() - 1));
+    };
+
+    freqTableEd.setName ("freqTableEd");
+    addChildComponent (freqTableEd);
+    freqTableEd.onClose = [this]{ closeFreqTableEditor(); };
+
+    // WP2: the amplitude conversion tables.
+    addAndMakeVisible (ampTableLab);
+    addAndMakeVisible (ampTableBox);
+    addAndMakeVisible (ampTableBtn);
+    ampTableLab.setName ("ampTableLab");
+    ampTableBox.setName ("ampTableBox");
+    ampTableBtn.setName ("ampTableBtn");
+    ampTableLab.setJustificationType (juce::Justification::centredRight);
+    ampTableLab.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
+    ampTableBox.setTooltip ("The amplitude conversion table this arc plays through.\n"
+                            "Envelopes set the shape; the table maps it to gain.");
+    ampTableBtn.setTooltip ("The amplitude table bank: draw, duplicate, rename,\n"
+                            "delete and assign tables");
+    ampTableBox.onChange = [this]{
+        const int item = ampTableBox.getSelectedId();
+        if (item <= 1) { selAmpTableId = -1; applyAmpTableToSelection (-1); return; }
+        const int idx = juce::jlimit (0, (int) ampTables.size() - 1, item - 2);
+        if (idx < 0 || idx >= (int) ampTables.size()) return;
+        selAmpTableId = ampTables[(size_t) idx].id;
+        applyAmpTableToSelection (selAmpTableId);
+    };
+    ampTableBtn.onClick = [this]{ showAmpTableEditor(); };
+    refreshAmpTableBox();
+    addChildComponent (ampTableEd);
+    ampTableEd.onClose = [this]{ closeAmpTableEditor(); };
+
+    // WP3: the arc-group panel.
+    addAndMakeVisible (groupBtn);
+    groupBtn.setName ("groupBtn");
+    groupBtn.setTooltip ("Groups: named sets of arcs with shared mute, solo,\n"
+                        "gain, transpose and timbre overrides");
+    groupBtn.onClick = [this]{ showGroupPanel(); };
+    addChildComponent (groupPanel);
+    groupPanel.onClose = [this]{ closeGroupPanel(); };
+
+    // WP4: the performance sequences.
+    addAndMakeVisible (seqLab);
+    addAndMakeVisible (seqBox);
+    for (auto* b : { &seqRecBtn, &seqPlayBtn, &seqLoopBtn, &seqEditBtn })
+        addAndMakeVisible (b);
+    seqLab.setName ("seqLab");
+    seqLab.setJustificationType (juce::Justification::centredRight);
+    seqLab.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
+    seqBox.setName ("seqBox");
+    seqRecBtn.setName ("seqRecBtn");   seqPlayBtn.setName ("seqPlayBtn");
+    seqLoopBtn.setName ("seqLoopBtn"); seqEditBtn.setName ("seqEditBtn");
+    seqLoopBtn.setClickingTogglesState (true);
+    seqBox.setTooltip ("The performance sequence");
+    seqRecBtn.setTooltip ("Record the movement through the score (page + playhead)");
+    seqPlayBtn.setTooltip ("Replay the recorded performance");
+    seqLoopBtn.setTooltip ("Loop the performance");
+    seqEditBtn.setTooltip ("Open the sequence panel");
+    seqBox.onChange = [this]
+    {
+        const int i = seqBox.getSelectedId() - 1;
+        if (i >= 0 && i < (int) sequences.size()) selSeqId = sequences[(size_t) i].id;
+        refreshSequencePanel();
+    };
+    seqRecBtn.onClick = [this]
+    {
+        if (seqRecording) stopSequenceRecording(); else startSequenceRecording();
+    };
+    seqPlayBtn.onClick = [this]
+    {
+        if (seqPlayActive.load()) stopSequencePlayback(); else startSequencePlayback();
+    };
+    seqLoopBtn.onClick = [this]{ toggleSequenceLoop(); };
+    seqEditBtn.onClick = [this]{ showSequencePanel(); };
+    addChildComponent (seqPanel);
+    seqPanel.onClose = [this]{ closeSequencePanel(); };
+    refreshSequencePanel();
+
+
+    // WP5: the independent modulating arc.
+    addAndMakeVisible (arcModLab);
+    addAndMakeVisible (arcModBox);
+    addAndMakeVisible (arcModTgtLab);
+    addAndMakeVisible (arcModTgtBox);
+    addAndMakeVisible (arcModDepthLab);
+    addAndMakeVisible (arcModSlider);
+    arcModLab.setName ("arcModLab");   arcModTgtLab.setName ("arcModTgtLab");
+    arcModDepthLab.setName ("arcModDepthLab");
+    arcModBox.setName ("arcModBox");   arcModTgtBox.setName ("arcModTgtBox");
+    arcModSlider.setName ("arcModSlider");
+    for (auto* l : { &arcModLab, &arcModTgtLab, &arcModDepthLab })
+    {
+        l->setJustificationType (juce::Justification::centredRight);
+        l->setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+    }
+    arcModBox.setTooltip ("The arc that modulates the selection (its contour bends the pitch or its level)");
+    arcModTgtBox.setTooltip ("What the modulator drives: pitch or amplitude");
+    arcModSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    arcModSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 20);
+    arcModSlider.setRange (0.0, 1.0, 0.001);
+    arcModSlider.setTooltip ("The modulation depth (1 = +/- one octave at the contour extremes)");
+    arcModTgtBox.addItem ("Pitch", 1);
+    arcModTgtBox.addItem ("Amp", 2);
+    arcModBox.onChange = [this]
+    {
+        const int i = arcModBox.getSelectedId();
+        setModOnSelection (i <= 1 ? -1 : i - 1,
+                           arcModTgtBox.getSelectedId() == 2 ? 1 : 0,
+                           arcModSlider.getValue());
+    };
+    arcModTgtBox.onChange = [this]
+    {
+        const int i = arcModBox.getSelectedId();
+        setModOnSelection (i <= 1 ? -1 : i - 1,
+                           arcModTgtBox.getSelectedId() == 2 ? 1 : 0,
+                           arcModSlider.getValue());
+    };
+    arcModSlider.onDragStart = [this]
+    {
+        if (! modLevelsEditing) { beginEdit ("Modulation depth"); modLevelsEditing = true; }
+    };
+    arcModSlider.onValueChange = [this]
+    {
+        const int i = arcModBox.getSelectedId();
+        if (i <= 1) return;
+        const bool standalone = ! modLevelsEditing;
+        if (standalone) beginEdit ("Modulation depth");
+        { const juce::ScopedLock l (dataLock);
+          for (auto& a : curPage().arcs)
+              if (std::find (score.getSelectedArcs().begin(), score.getSelectedArcs().end(), a.id)
+                  != score.getSelectedArcs().end())
+                  a.modArcDepth = arcModSlider.getValue(); }
+        markModelChanged();
+        if (standalone) endEdit();
+        publishModelSnapshot();
+    };
+    arcModSlider.onDragEnd = [this]
+    {
+        if (modLevelsEditing) { modLevelsEditing = false; endEdit(); }
+    };
+    refreshModBox();
+
+    refreshModBox();
+
 }
 
 // The page's four spaces -> the model.
@@ -393,6 +547,914 @@ void MainComponent::pushSpaceDefs()
     }
 }
 
+// WP1: the drawn frequency-table editor. It edits one page space; every
+// commit is one undo transaction and republishes the snapshot so the change
+// is audible immediately.
+void MainComponent::showFreqTableEditor (int space)
+{
+    freqTableSpace = juce::jlimit (0, 3, space);
+    upic::FreqSpaceDef def;
+    double lo = upic::kDefaultPitchLo, hi = upic::kDefaultPitchHi;
+    {
+        const juce::ScopedLock l (dataLock);
+        def = curPage().spaceDefs[(size_t) freqTableSpace];
+        lo = curPage().pitchLo;
+        hi = curPage().pitchHi;
+    }
+
+    freqTableEd.onCommitCurve = [this] (const std::vector<upic::TablePoint>& pts)
+    {
+        beginEdit ("Draw the frequency table");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto& d = curPage().spaceDefs[(size_t) freqTableSpace];
+            d.points = pts;
+            d.editable = pts.size() >= 2;
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshSpaceBox();
+        score.repaint();
+        flash ("Space " + juce::String (freqTableSpace + 1) + ": the table is drawn");
+    };
+
+    freqTableEd.onCommitFlags = [this] (bool inverted, bool stepped, int divisions)
+    {
+        beginEdit ("Edit the frequency table");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto& d = curPage().spaceDefs[(size_t) freqTableSpace];
+            d.inverted = inverted;
+            d.stepped = stepped;
+            d.stepDivisions = divisions;
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        score.repaint();
+    };
+
+    freqTableEd.onReset = [this]
+    {
+        beginEdit ("Reset the frequency table");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto& d = curPage().spaceDefs[(size_t) freqTableSpace];
+            d = upic::FreqSpaceDef {};
+            d.preset = curPage().spaces[(size_t) freqTableSpace];
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshSpaceBox();
+        score.repaint();
+        flash ("Space " + juce::String (freqTableSpace + 1) + ": back to the preset");
+    };
+
+    freqTableEd.open (def, lo, hi, "Frequency table - space "
+                                  + juce::String (freqTableSpace + 1));
+    freqTableEd.setBounds (getLocalBounds());
+    freqTableEd.toFront (true);
+}
+
+void MainComponent::closeFreqTableEditor()
+{
+    freqTableEd.setVisible (false);
+    grabKeyboardFocus();
+}
+
+//---------------- WP2: the amplitude conversion tables ----------------
+
+int MainComponent::ampTableIndexOfId (int id) const
+{
+    for (int i = 0; i < (int) ampTables.size(); ++i)
+        if (ampTables[(size_t) i].id == id) return i;
+    return -1;
+}
+
+int MainComponent::ampTableUseCount (int id) const
+{
+    if (id < 0) return 0;
+    int n = 0;
+    for (auto& pg : pages)
+        for (auto& a : pg.arcs)
+            if (a.amplitudeTableId == id) ++n;
+    return n;
+}
+
+void MainComponent::refreshAmpTableBox()
+{
+    ampTableBox.clear (juce::dontSendNotification);
+    ampTableBox.addItem ("None", 1);
+    for (int i = 0; i < (int) ampTables.size(); ++i)
+        ampTableBox.addItem (ampTables[(size_t) i].name, i + 2);
+
+    int cur = -1;
+    const auto ids = score.getSelectedArcs();
+    {
+        const juce::ScopedLock l (dataLock);
+        for (auto& a : curPage().arcs)
+            if (! ids.empty() && std::find (ids.begin(), ids.end(), a.id) != ids.end())
+            { cur = a.amplitudeTableId; break; }
+    }
+    if (cur < 0) cur = selAmpTableId;
+    const int idx = ampTableIndexOfId (cur);
+    ampTableBox.setSelectedId (idx < 0 ? 1 : idx + 2, juce::dontSendNotification);
+    selAmpTableId = cur;
+}
+
+void MainComponent::applyAmpTableToSelection (int id)
+{
+    // WP2: an id the bank does not hold is refused (a piece loaded from a
+    // file without its tables, or a stale selection) - never indexed.
+    const int tableIndex = ampTableIndexOfId (id);
+    if (id >= 0 && tableIndex < 0)
+    {
+        flash ("That amplitude table is not in the bank");
+        return;
+    }
+
+    const auto ids = score.getSelectedArcs();
+    selAmpTableId = id;
+    const juce::String tableName = tableIndex >= 0 ? ampTables[(size_t) tableIndex].name
+                                                   : juce::String ("none");
+    if (ids.empty())
+    {
+        flash (id < 0 ? juce::String ("Amplitude table: none")
+                      : "Amplitude table: " + tableName + " (select arcs to assign it)");
+        return;
+    }
+
+    beginEdit ("Assign the amplitude table");
+    {
+        const juce::ScopedLock l (dataLock);
+        for (auto& a : curPage().arcs)
+            if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
+                a.amplitudeTableId = id;
+    }
+    markModelChanged();
+    endEdit();
+    publishModelSnapshot();
+    refreshAmpTableBox();
+    score.repaint();
+    flash (id < 0 ? juce::String ("Amplitude table: none")
+                  : "Amplitude table: " + tableName);
+}
+
+void MainComponent::refreshAmpTableEditor()
+{
+    std::vector<int> uses;
+    for (auto& t : ampTables) uses.push_back (ampTableUseCount (t.id));
+    ampTableEd.setBank (ampTables, uses, juce::jmax (0, ampTableIndexOfId (selAmpTableId)));
+}
+
+void MainComponent::showAmpTableEditor()
+{
+    std::vector<int> uses;
+    for (auto& t : ampTables) uses.push_back (ampTableUseCount (t.id));
+    int idx = ampTableIndexOfId (selAmpTableId);
+    if (idx < 0 && ! ampTables.empty()) { idx = 0; selAmpTableId = ampTables.front().id; }
+
+    ampTableEd.onSelectIndex = [this] (int i)
+    {
+        if (i < 0 || i >= (int) ampTables.size()) return;
+        selAmpTableId = ampTables[(size_t) i].id;
+        refreshAmpTableBox();
+    };
+    ampTableEd.onCurve = [this] (int i, const std::vector<upic::EnvPoint>& pts)
+    {
+        if (i < 0 || i >= (int) ampTables.size()) return;
+        beginEdit ("Draw the amplitude table");
+        {
+            const juce::ScopedLock l (dataLock);
+            ampTables[(size_t) i].points = pts;
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshAmpTableEditor();
+        refreshAmpTableBox();
+        score.repaint();
+        flash ("Amplitude table: " + ampTables[(size_t) i].name + " redrawn");
+    };
+    ampTableEd.onRename = [this] (int i, const juce::String& name)
+    {
+        if (i < 0 || i >= (int) ampTables.size() || name.isEmpty()) return;
+        beginEdit ("Rename the amplitude table");
+        {
+            const juce::ScopedLock l (dataLock);
+            ampTables[(size_t) i].name = name;
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshAmpTableEditor();
+        refreshAmpTableBox();
+        flash ("Amplitude table: " + name);
+    };
+    ampTableEd.onNew = [this]
+    {
+        if ((int) ampTables.size() >= upic::limits::kMaxAmplitudeTables)
+        { flash ("The amplitude table bank is full"); return; }
+        int nextId = 1;
+        for (auto& t : ampTables) nextId = juce::jmax (nextId, t.id + 1);
+        beginEdit ("New amplitude table");
+        {
+            const juce::ScopedLock l (dataLock);
+            ampTables.push_back (upic::makeAmplitudeTable (nextId,
+                                                           "Table " + juce::String (nextId),
+                                                           juce::Colour (0xff5aa0c8),
+                                                           upic::ampLinear));
+        }
+        selAmpTableId = nextId;
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshAmpTableEditor();
+        refreshAmpTableBox();
+        flash ("Amplitude table: new table " + juce::String (nextId));
+    };
+    ampTableEd.onDuplicate = [this]
+    {
+        const int i = ampTableIndexOfId (selAmpTableId);
+        if (i < 0 || (int) ampTables.size() >= upic::limits::kMaxAmplitudeTables)
+        { flash ("The amplitude table bank is full"); return; }
+        int nextId = 1;
+        for (auto& t : ampTables) nextId = juce::jmax (nextId, t.id + 1);
+        beginEdit ("Duplicate the amplitude table");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto copy = ampTables[(size_t) i];
+            copy.id = nextId;
+            copy.name = copy.name + " copy";
+            ampTables.push_back (std::move (copy));
+        }
+        selAmpTableId = nextId;
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshAmpTableEditor();
+        refreshAmpTableBox();
+        flash ("Amplitude table duplicated");
+    };
+    ampTableEd.onDelete = [this]
+    {
+        const int i = ampTableIndexOfId (selAmpTableId);
+        if (i < 0) return;
+        if (ampTableUseCount (selAmpTableId) > 0)
+        { flash ("That table is in use - assign another one first"); return; }
+        beginEdit ("Delete the amplitude table");
+        {
+            const juce::ScopedLock l (dataLock);
+            ampTables.erase (ampTables.begin() + i);
+        }
+        selAmpTableId = ampTables.empty() ? -1 : ampTables.front().id;
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshAmpTableEditor();
+        refreshAmpTableBox();
+        flash ("Amplitude table deleted");
+    };
+    ampTableEd.onAssign = [this] (int i)
+    {
+        if (i < 0 || i >= (int) ampTables.size()) return;
+        applyAmpTableToSelection (ampTables[(size_t) i].id);
+        refreshAmpTableEditor();
+    };
+
+    ampTableEd.open (ampTables, uses, juce::jmax (0, idx));
+    ampTableEd.setBounds (getLocalBounds());
+    ampTableEd.toFront (true);
+}
+
+void MainComponent::closeAmpTableEditor()
+{
+    ampTableEd.setVisible (false);
+    grabKeyboardFocus();
+}
+
+//---------------- WP3: the groups ----------------
+
+int MainComponent::groupIndexOfId (int id) const
+{
+    for (int i = 0; i < (int) curPage().groups.size(); ++i)
+        if (curPage().groups[(size_t) i].id == id) return i;
+    return -1;
+}
+
+void MainComponent::refreshGroupPanel()
+{
+    const auto& page = curPage();
+    std::vector<int> counts;
+    for (auto& g : page.groups) counts.push_back ((int) g.arcIds.size());
+    std::vector<GroupPanel::BankItem> waves, envs, tabs;
+    for (auto& w : waveforms) waves.push_back ({ w.id, w.name });
+    for (auto& e : envelopes) envs.push_back ({ e.id, e.name });
+    for (auto& t : ampTables) tabs.push_back ({ t.id, t.name });
+    groupPanel.setBank (page.groups, counts, waves, envs, tabs,
+                        juce::jmax (0, groupIndexOfId (selGroupId)));
+}
+
+void MainComponent::showGroupPanel()
+{
+    // A group's colour follows its id, so the list and the future canvas
+    // tint agree without another editable field.
+    auto colourFor = [] (int id)
+    {
+        static const juce::uint32 palette[] = { 0xff5ac8fa, 0xff9a7ad0, 0xff6ac08a,
+                                                0xffd0a050, 0xffd07272, 0xff50b8b8 };
+        return juce::Colour (palette[(size_t) (juce::jmax (0, id - 1) % 6)]);
+    };
+
+    groupPanel.onSelectIndex = [this] (int i)
+    {
+        if (i >= 0 && i < (int) curPage().groups.size())
+            selGroupId = curPage().groups[(size_t) i].id;
+        refreshGroupPanel();
+    };
+    groupPanel.onNew = [this, colourFor]
+    {
+        if ((int) curPage().groups.size() >= upic::limits::kMaxGroupsPerPage)
+        { flash ("The page is full of groups"); return; }
+        int newId = 1;
+        beginEdit ("New group");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto& page = curPage();
+            newId = juce::jlimit (1, upic::limits::kMaxItemId, page.nextGroupId);
+            page.nextGroupId = juce::jmin (upic::limits::kMaxItemId, newId + 1);
+            upic::ArcGroup g;
+            g.id = newId;
+            g.name = "Group " + juce::String (newId);
+            g.colour = colourFor (newId);
+            page.groups.push_back (g);
+        }
+        selGroupId = newId;
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshGroupPanel();
+        flash ("Group " + juce::String (newId) + " added");
+    };
+    groupPanel.onDelete = [this]
+    {
+        const int idx = groupIndexOfId (selGroupId);
+        if (idx < 0) return;
+        beginEdit ("Delete group");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto& gr = curPage().groups;
+            gr.erase (gr.begin() + idx);
+        }
+        selGroupId = curPage().groups.empty() ? -1 : curPage().groups.front().id;
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshGroupPanel();
+        score.repaint();
+        flash ("Group deleted - its arcs keep their own data");
+    };
+    groupPanel.onRename = [this] (int i, const juce::String& name)
+    {
+        if (i < 0 || i >= (int) curPage().groups.size() || name.isEmpty()) return;
+        beginEdit ("Rename group");
+        {
+            const juce::ScopedLock l (dataLock);
+            curPage().groups[(size_t) i].name = name.substring (0, 64);
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshGroupPanel();
+        flash ("Group renamed");
+    };
+    groupPanel.onMuteSolo = [this] (int i, bool muted, bool solo)
+    {
+        if (i < 0 || i >= (int) curPage().groups.size()) return;
+        beginEdit ("Group mute/solo");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto& g = curPage().groups[(size_t) i];
+            g.muted = muted;
+            g.solo = solo;
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshGroupPanel();
+        score.repaint();
+        flash (muted ? "Group muted" : (solo ? "Group soloed" : "Group unsilenced"));
+    };
+    groupPanel.onLevelsBegin = [this] (int)
+    {
+        if (! groupLevelsEditing) { beginEdit ("Group levels"); groupLevelsEditing = true; }
+    };
+    groupPanel.onLevels = [this] (int i, float gain, double transpose)
+    {
+        if (i < 0 || i >= (int) curPage().groups.size()) return;
+        const bool standalone = ! groupLevelsEditing;
+        if (standalone) beginEdit ("Group levels");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto& g = curPage().groups[(size_t) i];
+            g.gain = juce::jlimit (0.0f, 2.0f, gain);
+            g.transposeSemitones = juce::jlimit (-48.0, 48.0, transpose);
+        }
+        markModelChanged();
+        if (standalone) endEdit();
+        publishModelSnapshot();
+        score.repaint();
+    };
+    groupPanel.onLevelsEnd = [this] (int)
+    {
+        if (groupLevelsEditing)
+        {
+            groupLevelsEditing = false;
+            endEdit();
+            refreshGroupPanel();
+        }
+    };
+    groupPanel.onOverride = [this] (int i, int kind, int id)
+    {
+        if (i < 0 || i >= (int) curPage().groups.size()) return;
+        // only ids the banks actually hold (a combo can outlive a deletion)
+        if (kind == 0 && id >= 0 && ! upic::hasId (waveforms, id)) return;
+        if (kind == 1 && id >= 0 && ! upic::hasId (envelopes, id)) return;
+        if (kind == 2 && id >= 0 && ! upic::hasId (ampTables, id)) return;
+        beginEdit ("Group override");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto& g = curPage().groups[(size_t) i];
+            if (kind == 0) g.waveformId = id;
+            else if (kind == 1) g.envelopeId = id;
+            else g.amplitudeTableId = id;
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshGroupPanel();
+        score.repaint();
+        flash (id < 0 ? "Group override cleared" : "Group override set");
+    };
+    groupPanel.onAddSelection = [this]
+    {
+        const int idx = groupIndexOfId (selGroupId);
+        const auto ids = score.getSelectedArcs();
+        if (idx < 0 || ids.empty()) { flash ("Select arcs first"); return; }
+        beginEdit ("Add arcs to the group");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto& page = curPage();
+            // one group per arc: the selected arcs leave any other group
+            for (auto& g : page.groups)
+                g.arcIds.erase (std::remove_if (g.arcIds.begin(), g.arcIds.end(),
+                                                [&] (int aid)
+                                                {
+                                                    return std::find (ids.begin(), ids.end(), aid)
+                                                           != ids.end();
+                                                }),
+                                g.arcIds.end());
+            auto& g = page.groups[(size_t) idx];
+            for (int aid : ids)
+                if (std::find (g.arcIds.begin(), g.arcIds.end(), aid) == g.arcIds.end())
+                    g.arcIds.push_back (aid);
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshGroupPanel();
+        score.repaint();
+        flash (juce::String ((int) ids.size()) + " arc(s) added to the group");
+    };
+    groupPanel.onRemoveSelection = [this]
+    {
+        const int idx = groupIndexOfId (selGroupId);
+        const auto ids = score.getSelectedArcs();
+        if (idx < 0 || ids.empty()) { flash ("Select arcs first"); return; }
+        beginEdit ("Remove arcs from the group");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto& g = curPage().groups[(size_t) idx];
+            g.arcIds.erase (std::remove_if (g.arcIds.begin(), g.arcIds.end(),
+                                            [&] (int aid)
+                                            {
+                                                return std::find (ids.begin(), ids.end(), aid)
+                                                       != ids.end();
+                                            }),
+                            g.arcIds.end());
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshGroupPanel();
+        score.repaint();
+        flash ("Arc(s) removed from the group");
+    };
+    groupPanel.onSelectMembers = [this]
+    {
+        const int idx = groupIndexOfId (selGroupId);
+        if (idx < 0) return;
+        score.setSelectedArcs (curPage().groups[(size_t) idx].arcIds);
+        refreshBoxes();
+        score.repaint();
+        flash ("The group's arcs are selected");
+    };
+
+    refreshGroupPanel();
+    groupPanel.setVisible (true);
+    groupPanel.toFront (true);
+    groupPanel.grabKeyboardFocus();
+    groupPanel.setBounds (getLocalBounds());
+}
+
+void MainComponent::closeGroupPanel()
+{
+    groupPanel.setVisible (false);
+    grabKeyboardFocus();
+}
+
+//---------------- WP4: the performance sequences ----------------
+
+int MainComponent::sequenceIndexOfId (int id) const
+{
+    for (int i = 0; i < (int) sequences.size(); ++i)
+        if (sequences[(size_t) i].id == id) return i;
+    return -1;
+}
+
+void MainComponent::refreshSequencePanel()
+{
+    int idx = sequenceIndexOfId (selSeqId);
+    if (idx < 0 && ! sequences.empty())
+    {
+        idx = 0;
+        selSeqId = sequences.front().id;
+    }
+    if (sequences.empty()) selSeqId = -1;
+
+    seqBox.clear (juce::dontSendNotification);
+    for (int i = 0; i < (int) sequences.size(); ++i)
+        seqBox.addItem (sequences[(size_t) i].name, i + 1);
+    seqBox.setSelectedId (idx < 0 ? 0 : idx + 1, juce::dontSendNotification);
+
+    seqLoopBtn.setToggleState (idx >= 0 && sequences[(size_t) idx].loop,
+                               juce::dontSendNotification);
+    seqRecBtn.setButtonText (seqRecording ? "Stop" : "Rec");
+    seqPlayBtn.setButtonText (seqPlayActive.load() ? "Stop" : "Play");
+
+    std::vector<double> durations;
+    for (auto& p : pages) durations.push_back (p.durationSec);
+    seqPanel.setSequences (sequences, durations, juce::jmax (0, idx),
+                           seqRecording, seqPlayActive.load());
+}
+
+void MainComponent::showSequencePanel()
+{
+    seqPanel.onRecordToggle = [this]
+    {
+        if (seqRecording) stopSequenceRecording(); else startSequenceRecording();
+    };
+    seqPanel.onPlayToggle = [this]
+    {
+        if (seqPlayActive.load()) stopSequencePlayback(); else startSequencePlayback();
+    };
+    seqPanel.onClear = [this]
+    {
+        const int i = sequenceIndexOfId (selSeqId);
+        if (i < 0 || seqRecording) return;
+        beginEdit ("Clear the performance sequence");
+        {
+            const juce::ScopedLock l (dataLock);
+            sequences[(size_t) i].points.clear();
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshSequencePanel();
+        flash ("Sequence cleared");
+    };
+    seqPanel.onLoopToggle = [this]{ toggleSequenceLoop(); };
+    seqPanel.onPointsEdited = [this] (const std::vector<upic::PerformancePoint>& pts)
+    {
+        const int i = sequenceIndexOfId (selSeqId);
+        if (i < 0 || seqRecording) return;
+        beginEdit ("Move a performance point");
+        {
+            const juce::ScopedLock l (dataLock);
+            sequences[(size_t) i].points = pts;
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshSequencePanel();
+        flash ("Performance point moved");
+    };
+    seqPanel.onTrim = [this]
+    {
+        const int i = sequenceIndexOfId (selSeqId);
+        const int j = seqPanel.selectedPointForTest();
+        if (i < 0 || j < 0 || j >= (int) sequences[(size_t) i].points.size() || seqRecording)
+            return;
+        const double cut = sequences[(size_t) i].points[(size_t) j].t;
+        beginEdit ("Trim the performance sequence");
+        {
+            const juce::ScopedLock l (dataLock);
+            auto& pts = sequences[(size_t) i].points;
+            pts.erase (std::remove_if (pts.begin(), pts.end(),
+                                       [cut] (const upic::PerformancePoint& p)
+                                       { return p.t > cut; }),
+                       pts.end());
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshSequencePanel();
+        flash ("The sequence is trimmed after the selected point");
+    };
+    seqPanel.onReplace = [this]
+    {
+        const int i = sequenceIndexOfId (selSeqId);
+        const int j = seqPanel.selectedPointForTest();
+        if (i < 0 || j < 0 || j >= (int) sequences[(size_t) i].points.size() || seqRecording)
+            return;
+        seqReplaceFromT = sequences[(size_t) i].points[(size_t) j].t;
+        startSequenceRecording();
+    };
+
+    refreshSequencePanel();
+    seqPanel.setVisible (true);
+    seqPanel.toFront (true);
+    seqPanel.grabKeyboardFocus();
+    seqPanel.setBounds (getLocalBounds());
+}
+
+void MainComponent::closeSequencePanel()
+{
+    seqPanel.setVisible (false);
+    grabKeyboardFocus();
+}
+
+void MainComponent::startSequenceRecording()
+{
+    int idx = -1;
+    bool needsConfirm = false;
+    {
+        const juce::ScopedLock l (dataLock);
+        idx = sequenceIndexOfId (selSeqId);
+        if (idx < 0)
+        {
+            if ((int) sequences.size() >= upic::limits::kMaxSequences)
+            {
+                flash ("The sequence bank is full - delete one first");
+                return;
+            }
+            upic::PerformanceSequence s;
+            s.id = 1;
+            for (auto& other : sequences)
+                s.id = juce::jmax (s.id, other.id + 1);
+            s.name = "Sequence " + juce::String (s.id);
+            sequences.push_back (s);
+            idx = (int) sequences.size() - 1;
+            selSeqId = sequences[(size_t) idx].id;
+        }
+        needsConfirm = seqReplaceFromT < 0.0 && ! sequences[(size_t) idx].points.empty();
+    }
+
+    // WP4 fix: a recording that replaces existing material asks twice; the
+    // flash is the confirmation, not a silent overwrite.
+    if (needsConfirm)
+    {
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        if (seqOverwriteArmedMs < 0.0 || now - seqOverwriteArmedMs > 5000.0)
+        {
+            seqOverwriteArmedMs = now;
+            flash ("Press Record again within 5 s to overwrite the performance");
+            return;
+        }
+    }
+    seqOverwriteArmedMs = -1.0;
+
+    // WP4 fix: one undo transaction spans the whole take.
+    if (! seqEditOpen)
+    {
+        beginEdit ("Record the performance");
+        seqEditOpen = true;
+    }
+    {
+        const juce::ScopedLock l (dataLock);
+        auto& s = sequences[(size_t) idx];
+        if (seqReplaceFromT >= 0.0)
+        {
+            const double cut = seqReplaceFromT;
+            s.points.erase (std::remove_if (s.points.begin(), s.points.end(),
+                                            [cut] (const upic::PerformancePoint& p)
+                                            { return p.t >= cut; }),
+                            s.points.end());
+            seqRecordTimeOffset = cut;
+            // the anchor at the cut: the head ends where the new take
+            // begins, so the replaced span is not bridged by a glide
+            s.points.push_back ({ cut, currentPage, displayPlayhead() });
+        }
+        else
+        {
+            s.points.clear();
+            seqRecordTimeOffset = 0.0;
+            s.points.push_back ({ 0.0, currentPage, displayPlayhead() });
+        }
+    }
+    seqReplaceFromT = -1.0;
+    seqRecording = true;
+    seqDecimated = false;
+    seqRecordStartMs = juce::Time::getMillisecondCounterHiRes();
+    seqPlayActive.store (false, std::memory_order_relaxed);
+    markModelChanged();
+    publishModelSnapshot();
+    refreshSequencePanel();
+    flash ("Recording - play or scrub, then press Stop");
+}
+
+void MainComponent::sequenceAppendRecorderPoint (double t, int page, double pos)
+{
+    const int idx = sequenceIndexOfId (selSeqId);
+    if (idx < 0) return;
+    auto& s = sequences[(size_t) idx];
+    // WP4 fix: at the point cap, thin the take instead of silently refusing
+    // the rest of the performance (every other point, keeping the last).
+    if ((int) s.points.size() >= upic::limits::kMaxSequencePoints)
+    {
+        if (s.points.size() < 2) return;
+        std::vector<upic::PerformancePoint> kept;
+        kept.reserve (s.points.size() / 2 + 1);
+        for (size_t i = 0; i < s.points.size(); i += 2) kept.push_back (s.points[i]);
+        if (kept.back().t < s.points.back().t) kept.push_back (s.points.back());
+        s.points = std::move (kept);
+        seqDecimated = true;
+    }
+    if (! s.points.empty())
+    {
+        const auto& last = s.points.back();
+        if (page == last.page && std::abs (pos - last.pos) < 0.002
+            && t - last.t < 0.05)
+            return;
+    }
+    s.points.push_back ({ juce::jmax (0.0, t), page, pos });
+}
+
+void MainComponent::sequenceRecordTick()
+{
+    if (! seqRecording) return;
+    const double elapsed = (juce::Time::getMillisecondCounterHiRes() - seqRecordStartMs) * 0.001;
+    const double t = seqRecordTimeOffset + juce::jmax (0.0, elapsed);
+    if (t > (double) upic::limits::kMaxSequenceSeconds)
+    {
+        stopSequenceRecording();
+        flash ("The sequence reached its length limit");
+        return;
+    }
+    sequenceAppendRecorderPoint (t, currentPage, displayPlayhead());
+}
+
+void MainComponent::stopSequenceRecording()
+{
+    if (! seqRecording) return;
+    seqRecording = false;
+    const int idx = sequenceIndexOfId (selSeqId);
+    if (idx >= 0)
+    {
+        const juce::ScopedLock l (dataLock);
+        auto& s = sequences[(size_t) idx];
+        std::sort (s.points.begin(), s.points.end(),
+                   [] (const upic::PerformancePoint& a, const upic::PerformancePoint& b)
+                   { return a.t < b.t; });
+    }
+    markModelChanged();
+    if (seqEditOpen)
+    {
+        endEdit();
+        seqEditOpen = false;
+    }
+    seqRecordTimeOffset = 0.0;
+    publishModelSnapshot();
+    refreshSequencePanel();
+    const juce::String note = seqDecimated ? " (thinned to fit the point cap)" : juce::String();
+    seqDecimated = false;
+    flash (idx >= 0 ? "Performance recorded: "
+                        + juce::String ((int) sequences[(size_t) idx].points.size())
+                        + " points" + note
+                    : juce::String ("Recording stopped"));
+}
+
+void MainComponent::startSequencePlayback()
+{
+    const int idx = sequenceIndexOfId (selSeqId);
+    if (idx < 0 || sequences[(size_t) idx].points.size() < 2)
+    {
+        flash ("Record a performance first");
+        return;
+    }
+    if (seqRecording) stopSequenceRecording();
+
+    seqActiveId.store (sequences[(size_t) idx].id, std::memory_order_relaxed);
+    seqClock.store (0.0, std::memory_order_relaxed);
+    seqPlayActive.store (true, std::memory_order_relaxed);
+    publishModelSnapshot();
+    startPlayback();
+    refreshSequencePanel();
+    flash ("Playing the performance");
+}
+
+void MainComponent::stopSequencePlayback()
+{
+    seqPlayActive.store (false, std::memory_order_relaxed);
+    seqClock.store (0.0, std::memory_order_relaxed);
+    stopPlayback();
+    refreshSequencePanel();
+}
+
+void MainComponent::toggleSequenceLoop()
+{
+    const int idx = sequenceIndexOfId (selSeqId);
+    if (idx < 0) return;
+    beginEdit ("Sequence loop");
+    {
+        const juce::ScopedLock l (dataLock);
+        sequences[(size_t) idx].loop = ! sequences[(size_t) idx].loop;
+    }
+    markModelChanged();
+    endEdit();
+    publishModelSnapshot();
+    refreshSequencePanel();
+    flash (sequences[(size_t) idx].loop ? "Sequence loops" : "Sequence plays once");
+}
+//---------------- WP5: the independent modulating arcs ----------------
+
+bool MainComponent::modWouldCycle (int carrierId, int modId) const
+{
+    int cur = modId;
+    for (int guard = 0; guard < 64 && cur >= 0; ++guard)
+    {
+        if (cur == carrierId) return true;
+        const upic::Arc* a = nullptr;
+        for (auto& x : curPage().arcs) if (x.id == cur) { a = &x; break; }
+        if (a == nullptr) return false;
+        cur = a->modulatorArcId;
+    }
+    return false;
+}
+
+void MainComponent::refreshModBox()
+{
+    arcModBox.clear (juce::dontSendNotification);
+    arcModBox.addItem ("None", 1);
+    for (auto& a : curPage().arcs)
+        arcModBox.addItem ("Arc " + juce::String (a.id), a.id + 1);
+
+    int cur = -1, target = 0;
+    double depth = 0.5;
+    const auto ids = score.getSelectedArcs();
+    if (! ids.empty())
+        for (auto& a : curPage().arcs)
+            if (a.id == ids.front())
+            {
+                cur = a.modulatorArcId;
+                target = a.modTarget;
+                depth = a.modArcDepth;
+                break;
+            }
+    arcModBox.setSelectedId (cur < 0 ? 1 : cur + 1, juce::dontSendNotification);
+    arcModTgtBox.setSelectedId (target == 1 ? 2 : 1, juce::dontSendNotification);
+    arcModSlider.setValue (depth, juce::dontSendNotification);
+}
+
+void MainComponent::setModOnSelection (int modId, int target, double depth)
+{
+    const auto ids = score.getSelectedArcs();
+    if (ids.empty()) { flash ("Select an arc first"); return; }
+    int applied = 0, refused = 0;
+    beginEdit ("Modulating arc");
+    {
+        const juce::ScopedLock l (dataLock);
+        for (auto& a : curPage().arcs)
+            if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
+            {
+                if (modId >= 0 && (modId == a.id || modWouldCycle (a.id, modId)))
+                { ++refused; continue; }
+                a.modulatorArcId = modId;
+                a.modTarget = juce::jlimit (0, 1, target);
+                a.modArcDepth = juce::jlimit (0.0, 1.0, depth);
+                ++applied;
+            }
+    }
+    markModelChanged();
+    endEdit();
+    publishModelSnapshot();
+    refreshModBox();
+    score.repaint();
+    if (refused > 0) flash ("A modulator cannot loop back to the arc it drives");
+    else if (applied > 0) flash (modId < 0 ? "Modulator cleared" : "Modulator assigned");
+}
 // The arc's space: the assignment, the way a wave or an envelope is
 // assigned.
 void MainComponent::applySpaceToSelection()
@@ -433,7 +1495,9 @@ void MainComponent::refreshSpaceBox()
     {
         const int p = juce::jlimit (0, (int) presets.size() - 1,
                                     curPage().spaces[(size_t) i]);
-        spaceBox.addItem (juce::String (i + 1) + ": " + juce::String (presets[(size_t) p].name),
+        const bool drawn = curPage().spaceDefs[(size_t) i].editable;
+        spaceBox.addItem (juce::String (i + 1) + ": " + juce::String (presets[(size_t) p].name)
+                            + (drawn ? " (drawn)" : juce::String()),
                           i + 1);
     }
     spaceBox.setSelectedId (cur + 1, juce::dontSendNotification);

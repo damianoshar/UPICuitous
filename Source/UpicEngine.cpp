@@ -8,6 +8,17 @@
 // visible where it is used.
 //==============================================================================
 
+// WP2: the amplitude conversion table an arc names. -1 means "none", and a
+// missing id is treated as none rather than falling back to another table:
+// an amplitude table changes the level, so the wrong one would be audible.
+static const upic::Envelope* findAmpTable (const std::vector<upic::Envelope>* tables, int id)
+{
+    if (tables == nullptr || id < 0) return nullptr;
+    for (const auto& t : *tables)
+        if (t.id == id) return &t;
+    return nullptr;
+}
+
 void UpicEngine::prepare(double sampleRate_, int blockSize)
 {
         sampleRate = sampleRate_ > 0 ? sampleRate_ : 44100.0;
@@ -111,19 +122,34 @@ double UpicEngine::scrubMaterialPos(const upic::Arc& arc, double t, double ref, 
         return pitchScaledPos(arc, t, ref, matDur, map);
     }
 
-double UpicEngine::arcPitch(const upic::Arc& arc, double t, upic::Page::SpaceMap map)
+double UpicEngine::arcPitch(const upic::Arc& arc, double t, upic::Page::SpaceMap map, double modFactor)
 {
-        double f = map.apply (arc.freqAt (t));
+        double f = map.apply (arc.freqAt (t) * modFactor);
+        // WP1: a stepped space quantises after its curve; an arc's own
+        // temperament then divides whichever space it landed in.
+        if (map.stepDivisions > 0)
+            f = upic::applyTemperament (f, map.stepDivisions, upic::kDefaultRefFreq);
         if (arc.stepDivisions > 0)
             f = upic::applyTemperament (f, arc.stepDivisions, upic::kDefaultRefFreq);
+        // WP3: the group transpose is the LAST pitch operation (space ->
+        // temperament -> transpose), so a tempered or drawn space is
+        // transposed as a whole rather than before its quantisation.
+        if (map.transposeSemis != 0.0)
+            f = juce::jlimit (upic::kMinFreq, upic::kMaxFreq,
+                              f * std::exp2 (map.transposeSemis / 12.0));
         return f;
     }
 
-double UpicEngine::arcPitch(const upic::Arc& arc, double t, upic::Page::SpaceMap map, upic::Arc::PitchCursor& cursor)
+double UpicEngine::arcPitch(const upic::Arc& arc, double t, upic::Page::SpaceMap map, upic::Arc::PitchCursor& cursor, double modFactor)
 {
-        double f = map.apply (arc.freqAt (t, cursor));
+        double f = map.apply (arc.freqAt (t, cursor) * modFactor);
+        if (map.stepDivisions > 0)
+            f = upic::applyTemperament (f, map.stepDivisions, upic::kDefaultRefFreq);
         if (arc.stepDivisions > 0)
             f = upic::applyTemperament (f, arc.stepDivisions, upic::kDefaultRefFreq);
+        if (map.transposeSemis != 0.0)
+            f = juce::jlimit (upic::kMinFreq, upic::kMaxFreq,
+                              f * std::exp2 (map.transposeSemis / 12.0));
         return f;
     }
 
@@ -179,12 +205,32 @@ int UpicEngine::effectiveMode(const upic::Arc& arc, int globalMode) const
         return arc.pitchMode >= 0 ? arc.pitchMode : globalMode;
     }
 
-void UpicEngine::render(const upic::Page& page, double playhead, const std::vector<upic::Waveform>& waves, const std::vector<upic::Envelope>& envs, const std::vector<upic::SampleSlot>& slots, float* left, float* right, int numSamples, float masterGain, double rate, bool freeze)
+void UpicEngine::addToMix (int n, float v)
+{
+    if (chanRoutingActive && mixChannel >= 0 && mixChannel < 16)
+        chanBuf[(size_t) mixChannel * (size_t) chanStride + (size_t) n] += v;
+    else
+        scratch[(size_t) n] += v;
+}
+
+void UpicEngine::render(const upic::Page& page, double playhead, const std::vector<upic::Waveform>& waves, const std::vector<upic::Envelope>& envs, const std::vector<upic::SampleSlot>& slots, float* left, float* right, int numSamples, float masterGain, double rate, bool freeze, const upic::PageLutSet* luts, const std::vector<upic::Envelope>* ampTables, const std::vector<upic::ArcRenderOverride>* overrides, const std::vector<upic::Channel>* channels)
 {
         if (numSamples <= 0) return;
         if (! freeze && std::abs(rate) < 1e-6) return; // stopped transport: silence
         if (scratch.size() < (size_t) numSamples) scratch.resize((size_t) numSamples);
         std::fill(scratch.begin(), scratch.begin() + numSamples, 0.0f);
+
+        // WP6.3: channel routing only when the piece has channels.
+        chanRoutingActive = (channels != nullptr && ! channels->empty());
+        chanStride = numSamples;
+        mixChannel = 0;
+        if (chanRoutingActive)
+        {
+            const size_t need = (size_t) 16 * (size_t) numSamples;
+            if (chanBuf.size() < need) chanBuf.resize (need);
+            std::fill (chanBuf.begin(), chanBuf.begin() + (std::ptrdiff_t) need, 0.0f);
+        }
+
 
         // a shifter-mode change drops the live voices so each re-anchors
         const int pitchMode = livePitchMode.load(std::memory_order_relaxed);
@@ -223,18 +269,30 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
         {
             guardLevels.clear();
             const double blockEndTime = playhead + (double) numSamples * std::abs (step);
-            for (auto& arc : page.arcs)
+            for (size_t gai = 0; gai < page.arcs.size(); ++gai)
             {
+                const upic::Arc& arc = page.arcs[gai];
+                const upic::ArcRenderOverride* gov = (overrides != nullptr
+                                                      && gai < overrides->size())
+                                                         ? &(*overrides)[gai] : nullptr;
                 float level = 0.0f;
-                if (! arc.muted && arc.points.size() >= 2
+                if (! arc.muted && ! (gov != nullptr && gov->muted) && arc.points.size() >= 2
                     && arc.endTime() > arc.startTime()
                     && arc.endTime() > playhead && arc.startTime() < blockEndTime)
                 {
-                    const upic::Envelope* e = findEnv (envs, arc.envelopeId);
+                    const int geid = (gov != nullptr && gov->envelopeId >= 0)
+                                         ? gov->envelopeId : arc.envelopeId;
+                    const int gaid = (gov != nullptr && gov->amplitudeTableId >= 0)
+                                         ? gov->amplitudeTableId : arc.amplitudeTableId;
+                    const upic::Envelope* e = findEnv (envs, geid);
+                    const upic::Envelope* gt = findAmpTable (ampTables, gaid);
                     const double t = juce::jlimit (arc.startTime(), arc.endTime(), playhead);
-                    level = arc.intensity
-                            * (e != nullptr ? e->valueAt (arc.lifeAt (t)) : 1.0f)
-                            * arc.intensityAt (t);
+                    float ev = e != nullptr ? e->valueAt (arc.lifeAt (t)) : 1.0f;
+                    // WP2: the guard ranks arcs by what they contribute, so
+                    // the amplitude table counts here too.
+                    if (gt != nullptr) ev = gt->valueAt (juce::jlimit (0.0f, 1.0f, ev));
+                    level = arc.intensity * (gov != nullptr ? gov->gain : 1.0f)
+                            * ev * arc.intensityAt (t);
                 }
                 guardLevels.push_back (level);
             }
@@ -252,7 +310,12 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
         for (size_t ai = 0; ai < page.arcs.size(); ++ai)
         {
             const upic::Arc& arc = page.arcs[ai];
-            if (arc.muted || arc.points.size() < 2) continue;
+            // WP3: the group's resolved attributes (null when the arc has no
+            // group). The audio thread only indexes a table built on the
+            // message thread.
+            const upic::ArcRenderOverride* ov = (overrides != nullptr && ai < overrides->size())
+                                                    ? &(*overrides)[ai] : nullptr;
+            if (arc.muted || (ov != nullptr && ov->muted) || arc.points.size() < 2) continue;
 
             const double arcStart = arc.startTime(), arcEnd = arc.endTime();
             if (arcEnd <= arcStart) continue;
@@ -275,13 +338,50 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
                 if (i0 > i1) continue;
             }
 
-            const upic::Envelope* e = findEnv(envs, arc.envelopeId);
-            const float intensity = arc.intensity;
+            // the effective material: the group's override wins when it has
+            // one, otherwise the arc's own
+            const int waveformId = (ov != nullptr && ov->waveformId >= 0)
+                                       ? ov->waveformId : arc.waveformId;
+            const int envelopeId = (ov != nullptr && ov->envelopeId >= 0)
+                                       ? ov->envelopeId : arc.envelopeId;
+            const int ampTableId = (ov != nullptr && ov->amplitudeTableId >= 0)
+                                       ? ov->amplitudeTableId : arc.amplitudeTableId;
+            const upic::Envelope* e = findEnv(envs, envelopeId);
+            const upic::Envelope* ampT = findAmpTable (ampTables, ampTableId);
+            const float intensity = arc.intensity * (ov != nullptr ? ov->gain : 1.0f);
 
             // v1.33: the frequency space this arc is played in (the UPIC's
             // four tables). The mapping is computed once per arc, not per
             // sample.
-            const upic::Page::SpaceMap map = page.spaceMap (arc.space);
+            const upic::FreqLut* lut = (luts != nullptr)
+                ? luts->lut[(size_t) juce::jlimit (0, 3, arc.space)] : nullptr;
+            upic::Page::SpaceMap map = page.spaceMap (arc.space, lut);
+            if (ov != nullptr) map.transposeSemis = ov->transposeSemitones;
+
+            // WP5: the resolved modulator (null when the arc has none).
+            ModContext mod;
+            if (ov != nullptr && ov->modIndex >= 0 && ov->modIndex < (int) page.arcs.size())
+            {
+                mod.arc = &page.arcs[(size_t) ov->modIndex];
+                const upic::FreqLut* mlut = (luts != nullptr)
+                    ? luts->lut[(size_t) juce::jlimit (0, 3, mod.arc->space)] : nullptr;
+                mod.map = page.spaceMap (mod.arc->space, mlut);
+                mod.target = ov->modTarget;
+                mod.depth = ov->modDepth;
+                mod.lo = ov->modLoLog2;
+                mod.hi = ov->modHiLog2;
+                mod.align = ov->modAlign;
+            }
+
+            // WP6.3: the arc's channel (group override, then its own id).
+            const int effCh = (ov != nullptr && ov->channelId >= 1) ? ov->channelId
+                                                                    : arc.channelId;
+            mixChannel = 0;
+            if (chanRoutingActive && effCh > 0)
+                for (int ci = 0; ci < (int) channels->size(); ++ci)
+                    if ((*channels)[(size_t) ci].id == effCh) { mixChannel = ci + 1; break; }
+            if (channelFilter >= 0 && chanRoutingActive && mixChannel != channelFilter)
+                continue;
 
             if (freeze && arc.mode == 2) continue; // live input cannot be frozen
 
@@ -307,17 +407,12 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
                 {
                     const int arcSamples = i1 - i0 + 1;
                     const int fadeSamples = juce::jlimit (1, arcSamples,
-                                                          (int) (sampleRate * 0.005));
-                    const float span = (float) fadeSamples;
-                    const float gain = (target > start)
-                        ? juce::jmin (target, start + (float) arcSamples / span)
-                        : juce::jmax (target, start - (float) arcSamples / span);
-                    guardSetGain (arc.id, gain);
+                                                         (int) (sampleRate * 0.005));
                     g0 = start;
-                    gStep = (gain - start) / span;
-                    if (start >= 1.0f && gain < 1.0f) ++guardFading;
-                    else if (start < 1.0f && gain >= 1.0f)
-                        guardFading = juce::jmax (0, guardFading - 1);
+                    gStep = (target - start) / (float) juce::jmax (1, fadeSamples);
+                    guardSetGain (arc.id, target);
+                    if (target < 0.5f) ++guardFading;
+                    else guardFading = juce::jmax (0, guardFading - 1);
                 }
             }
             ++rendered;
@@ -327,7 +422,7 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
             {
                 const upic::SampleSlot* smp = findSlot(slots, arc.sampleId);
                 if (smp == nullptr) continue;
-                renderSampleArc(arc, *smp, playhead, i0, i1, invSr, e, map, rate, freeze,
+                renderSampleArc(arc, *smp, playhead, i0, i1, invSr, e, ampT, mod, map, rate, freeze,
                                 g0, gStep);
                 continue;
             }
@@ -335,7 +430,7 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
             // ---- mode 2: live input, pitch follows the arc in realtime ----
             if (arc.mode == 2)
             {
-                renderLiveArc(arc, playhead, i0, i1, invSr, e, map, rate, g0, gStep);
+                renderLiveArc(arc, playhead, i0, i1, invSr, e, ampT, mod, map, rate, g0, gStep);
                 continue;
             }
             // ---- mode 3: phase modulation (PM). pmOps operators (2 or 4),
@@ -362,20 +457,33 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
                                       juce::jlimit (0.0,20.0,arc.pmIndex),
                                       juce::jlimit (0.0,20.0,arc.pmI2),
                                       juce::jlimit (0.0,20.0,arc.pmI3), } ;
-                const upic::Waveform* carW = findWave (waves, arc.waveformId);
+                const upic::Waveform* carW = findWave (waves, waveformId);
 
                 // v1.33.4 (U6-C): the cursors. The loop walks the samples in
                 // order, so the arc's segment and the two envelopes' segments
                 // can be followed instead of searched for every sample.
-                upic::Arc::PitchCursor pc;
-                upic::SegmentCursor ec, iec;
+                upic::Arc::PitchCursor pc, mpc;
+                upic::SegmentCursor ec, iec, atc;
 
                 for (int n = i0; n <= i1; ++n)
                 {
                     const double t = playhead + (double) n * step;
                     const float g = guardGainAt (g0, gStep, n - i0);
-                    const double cFreq = juce::jlimit (upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
-                    const float env = e != nullptr ? e->valueAt (arc.lifeAt (t), ec) : 1.0f;
+                    double modF = 1.0;
+                    float trem = 1.0f;
+                    if (mod.arc != nullptr)
+                    {
+                        const double mt = (mod.align == 1)
+                            ? t - arcStart + mod.arc->startTime() : t;
+                        double n01 = 1.0;
+                        modF = upic::modulationFactor (arcPitch (*mod.arc, mt, mod.map, mpc),
+                                                       mod.lo, mod.hi, mod.depth, &n01);
+                        if (mod.target == 1) trem = (float) (1.0 - mod.depth * (1.0 - n01));
+                    }
+                    const double cFreq = juce::jlimit (upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc, modF));
+                    float env = e != nullptr ? e->valueAt (arc.lifeAt (t), ec) : 1.0f;
+                    if (ampT != nullptr) env = ampT->valueAt (juce::jlimit (0.0f, 1.0f, env), atc);
+                    env *= trem;
                     const float idxE = (idxEnv != nullptr ? idxEnv->valueAt (arc.lifeAt (t), iec) : 1.0f);
                     const float edge = edgeFade (t, arcStart, arcEnd);
 
@@ -406,31 +514,45 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
                     // 2-op legacy single-mod path unused when ops==2? keep for compat:
 
 
-                    scratch[(size_t) n] += osc * env * edge * (float) arc.intensity * arc.intensityAt (t, pc) * g;
+                    addToMix (n, osc * env * edge * (float) arc.intensity * arc.intensityAt (t, pc) * g);
                 }
                 continue;
             }
 
             // ---- mode 0: wavetable oscillator ----
-            const upic::Waveform* w = findWave(waves, arc.waveformId);
+            const upic::Waveform* w = findWave(waves, waveformId);
             if (w == nullptr) continue;
 
             double& ph = phaseFor (arc.id); // 0..1, kept across blocks for continuity
 
             // v1.33.4 (U6-C): the cursors - the arc's segment and the
             // envelope's segment are followed, not searched.
-            upic::Arc::PitchCursor pc;
-            upic::SegmentCursor ec;
+            upic::Arc::PitchCursor pc, mpc;
+            upic::SegmentCursor ec, atc;
 
             for (int n = i0; n <= i1; ++n)
             {
                 const double t = playhead + (double) n * step;
                 const float g = guardGainAt (g0, gStep, n - i0);
 
+                double modF = 1.0;
+                float trem = 1.0f;
+                if (mod.arc != nullptr)
+                {
+                    const double mt = (mod.align == 1) ? t - arcStart + mod.arc->startTime() : t;
+                    double n01 = 1.0;
+                    modF = upic::modulationFactor (arcPitch (*mod.arc, mt, mod.map, mpc),
+                                                   mod.lo, mod.hi, mod.depth, &n01);
+                    if (mod.target == 1) trem = (float) (1.0 - mod.depth * (1.0 - n01));
+                }
+
                 float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
+                if (ampT != nullptr) env = ampT->valueAt (juce::jlimit (0.0f, 1.0f, env), atc);
+                env *= trem;
                 const float edge = edgeFade(t, arcStart, arcEnd);
 
-                float freq = (float) juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
+                float freq = (float) juce::jlimit(upic::kMinFreq, upic::kMaxFreq,
+                                                  arcPitch (arc, t, map, pc, modF));
 
                 // v1.31 (U1): the polyagogy - the arc's own wave can also
                 // be a control signal. The curve is read at its own rate
@@ -458,16 +580,47 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
                 ph += freq * invSr;
                 if (ph >= 1.0) ph -= std::floor(ph);
 
-                scratch[(size_t) n] += osc * env * edge * intensity * arc.intensityAt(t, pc) * g;
+                addToMix (n, osc * env * edge * intensity * arc.intensityAt(t, pc) * g);
             }
         }
 
         // soft clip + master gain, accumulate into output (buffer was zeroed by caller)
-        for (int n = 0; n < numSamples; ++n)
+        if (! chanRoutingActive)
         {
-            const float out = (float) std::tanh(scratch[(size_t) n] * 0.6) * masterGain * 0.9f;
-            left[n] += out;
-            if (right != nullptr) right[n] += out;
+            for (int n = 0; n < numSamples; ++n)
+            {
+                const float out = (float) std::tanh(scratch[(size_t) n] * 0.6) * masterGain * 0.9f;
+                left[n] += out;
+                if (right != nullptr) right[n] += out;
+            }
+        }
+        else
+        {
+            // WP6.3: bucket 0 is Main (unity, no curve); bank channel i is
+            // bucket i+1. Mute and solo resolve here; the gain curve is
+            // sampled at the page position, per sample.
+            bool anySolo = false;
+            for (auto& c : *channels) if (c.solo && ! c.muted) { anySolo = true; break; }
+            upic::SegmentCursor chCur[16];
+            const double dur = juce::jmax (1.0e-6, page.durationSec);
+            for (int n = 0; n < numSamples; ++n)
+            {
+                float acc = anySolo ? 0.0f : chanBuf[(size_t) n];
+                const float chX = (float) juce::jlimit (0.0, 1.0,
+                                      (playhead + (double) n * step) / dur);
+                for (int ci = 0; ci < (int) channels->size() && ci < 15; ++ci)
+                {
+                    const upic::Channel& c = (*channels)[(size_t) ci];
+                    float g = c.gain;
+                    if (c.muted || (anySolo && ! c.solo)) g = 0.0f;
+                    if (g > 0.0f)
+                        g *= c.envelopeAt (chX, chCur[ci]);
+                    acc += chanBuf[(size_t) (ci + 1) * (size_t) chanStride + (size_t) n] * g;
+                }
+                const float out = (float) std::tanh(acc * 0.6) * masterGain * 0.9f;
+                left[n] += out;
+                if (right != nullptr) right[n] += out;
+            }
         }
 
         // v1.33.4 (U6-B): the load and the adaptive limit. Over 90% of the
@@ -522,7 +675,7 @@ void UpicEngine::renderPageOffline(const upic::Page& page, const std::vector<upi
 
         const int total = dest.getNumSamples();
         int pos = 0;
-        renderPageBlocks (page, waves, envs, slots,
+        renderPageBlocks (page, waves, envs, slots, nullptr, nullptr,
                           destSampleRate > 0 ? destSampleRate : 44100.0, masterGain, total,
                           [&] (const juce::AudioBuffer<float>& block, int n)
                           {
@@ -859,7 +1012,7 @@ float UpicEngine::readMaterial(const upic::SampleSlot& smp, double pos, bool mir
         return v;
     }
 
-void UpicEngine::renderSampleArc(const upic::Arc& arc, const upic::SampleSlot& smp, double playhead, int i0, int i1, double invSr, const upic::Envelope* e, const upic::Page::SpaceMap& map, double rate, bool freeze, float g0, float gStep)
+void UpicEngine::renderSampleArc(const upic::Arc& arc, const upic::SampleSlot& smp, double playhead, int i0, int i1, double invSr, const upic::Envelope* e, const upic::Envelope* ampTable, const ModContext& mod, const upic::Page::SpaceMap& map, double rate, bool freeze, float g0, float gStep)
 {
         const int nFrames = smp.data != nullptr ? smp.data->getNumSamples() : 0;
         const double matDur = smp.durationSec();
@@ -977,18 +1130,32 @@ void UpicEngine::renderSampleArc(const upic::Arc& arc, const upic::SampleSlot& s
 
         // v1.33.4 (U6-C): the cursors - the arc's segment and the envelope's
         // segment are followed, not searched.
-        upic::Arc::PitchCursor pc;
-        upic::SegmentCursor ec;
+        upic::Arc::PitchCursor pc, mpc;
+        upic::SegmentCursor ec, atc;
 
         for (int n = i0; n <= i1; ++n)
         {
             const double t = playhead + (double) n * step;
             const float g = guardGainAt (g0, gStep, n - i0);
 
-            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
+            double modF = 1.0;
+            float trem = 1.0f;
+            if (mod.arc != nullptr)
+            {
+                const double mt = (mod.align == 1) ? t - arcStart + mod.arc->startTime() : t;
+                double n01 = 1.0;
+                modF = upic::modulationFactor (arcPitch (*mod.arc, mt, mod.map, mpc),
+                                               mod.lo, mod.hi, mod.depth, &n01);
+                if (mod.target == 1) trem = (float) (1.0 - mod.depth * (1.0 - n01));
+            }
+
+            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq,
+                                             arcPitch (arc, t, map, pc, modF));
             const double ratio = juce::jlimit(1.0 / 16.0, 16.0, freq / ref);
 
-            const float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
+            float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
+            if (ampTable != nullptr) env = ampTable->valueAt (juce::jlimit (0.0f, 1.0f, env), atc);
+            env *= trem;
             const float edge = edgeFade(t, arcStart, arcEnd);
 
             float s;
@@ -1034,11 +1201,11 @@ void UpicEngine::renderSampleArc(const upic::Arc& arc, const upic::SampleSlot& s
                 if (v.pos < 0.0) v.pos += matDur;
             }
 
-            scratch[(size_t) n] += s * env * edge * arc.intensity * arc.intensityAt(t, pc) * g * slotGain;
+            addToMix (n, s * env * edge * arc.intensity * arc.intensityAt(t, pc) * g * slotGain);
         }
     }
 
-void UpicEngine::renderLiveArc(const upic::Arc& arc, double playhead, int i0, int i1, double invSr, const upic::Envelope* e, const upic::Page::SpaceMap& map, double rate, float g0, float gStep)
+void UpicEngine::renderLiveArc(const upic::Arc& arc, double playhead, int i0, int i1, double invSr, const upic::Envelope* e, const upic::Envelope* ampTable, const ModContext& mod, const upic::Page::SpaceMap& map, double rate, float g0, float gStep)
 {
         // the arc's own mode, or the tab's setting
         // v1.33.4 (M24): the same rule the latency reporting uses
@@ -1085,19 +1252,33 @@ void UpicEngine::renderLiveArc(const upic::Arc& arc, double playhead, int i0, in
 
         // v1.33.4 (U6-C): the cursors - the arc's segment and the envelope's
         // segment are followed, not searched.
-        upic::Arc::PitchCursor pc;
-        upic::SegmentCursor ec;
+        upic::Arc::PitchCursor pc, mpc;
+        upic::SegmentCursor ec, atc;
 
         for (int n = i0; n <= i1; ++n)
         {
             const double t = playhead + (double) n * (rate * invSr);
             const float g = guardGainAt (g0, gStep, n - i0);
 
-            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, arcPitch (arc, t, map, pc));
+            double modF = 1.0;
+            float trem = 1.0f;
+            if (mod.arc != nullptr)
+            {
+                const double mt = (mod.align == 1) ? t - arcStart + mod.arc->startTime() : t;
+                double n01 = 1.0;
+                modF = upic::modulationFactor (arcPitch (*mod.arc, mt, mod.map, mpc),
+                                               mod.lo, mod.hi, mod.depth, &n01);
+                if (mod.target == 1) trem = (float) (1.0 - mod.depth * (1.0 - n01));
+            }
+
+            const double freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq,
+                                             arcPitch (arc, t, map, pc, modF));
             const double ratio = juce::jlimit(upic::kLiveMinRatio,
                                               upic::kLiveMaxRatio, freq / ref);
 
-            const float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
+            float env = e != nullptr ? e->valueAt(arc.lifeAt(t), ec) : 1.0f;
+            if (ampTable != nullptr) env = ampTable->valueAt (juce::jlimit (0.0f, 1.0f, env), atc);
+            env *= trem;
             const float edge = edgeFade(t, arcStart, arcEnd);
 
             // v1.14: the live ring is filled per block, so the write head
@@ -1109,7 +1290,7 @@ void UpicEngine::renderLiveArc(const upic::Arc& arc, double playhead, int i0, in
 
             const float v = ls.next(ringA, ringB, ringSize, frameNow, ratio);
 
-            scratch[(size_t) n] += v * env * edge * arc.intensity * arc.intensityAt(t) * g;
+            addToMix (n, v * env * edge * arc.intensity * arc.intensityAt(t) * g);
         }
     }
 
@@ -1159,7 +1340,7 @@ bool writeWavFile(const juce::File& target, const juce::AudioBuffer<float>& buf,
     return temp.overwriteTargetFileWithTemporary();
 }
 
-bool writePageToWavFile(const juce::File& target, const upic::Page& page, const std::vector<upic::Waveform>& waves, const std::vector<upic::Envelope>& envs, const std::vector<upic::SampleSlot>& slots, double sr, float masterGain, int samplePitchMode, int sampleGrainMs, int liveGrainMs, const std::function<bool (int percent)>& progress)
+bool writePageToWavFile(const juce::File& target, const upic::Page& page, const std::vector<upic::Waveform>& waves, const std::vector<upic::Envelope>& envs, const std::vector<upic::SampleSlot>& slots, double sr, float masterGain, int samplePitchMode, int sampleGrainMs, int liveGrainMs, const std::vector<upic::Envelope>* ampTables, const std::vector<upic::Channel>* channels, int onlyChannel, const std::function<bool (int percent)>& progress)
 {
     if (target == juce::File() || sr <= 0.0 || page.durationSec <= 0.0) return false;
 
@@ -1183,7 +1364,8 @@ bool writePageToWavFile(const juce::File& target, const upic::Page& page, const 
     // audio than it has score
     const int frames = (int) std::ceil (page.audioDurationSec() * sr);
     int done = 0;
-    const bool ok = eng.renderPageBlocks (page, waves, envs, slots, sr, masterGain, frames,
+    eng.setChannelFilter (onlyChannel);
+    const bool ok = eng.renderPageBlocks (page, waves, envs, slots, ampTables, channels, sr, masterGain, frames,
         [&] (const juce::AudioBuffer<float>& block, int n)
         {
             if (! w->writeFromAudioSampleBuffer (block, 0, n)) return false;
@@ -1202,9 +1384,10 @@ bool writePageToWavFile(const juce::File& target, const upic::Page& page, const 
     return temp.overwriteTargetFileWithTemporary();
 }
 
-StemExport renderStems(const upic::Page& page, const std::vector<upic::Waveform>& waves, const std::vector<upic::Envelope>& envs, const std::vector<upic::SampleSlot>& slots, const juce::File& outDir, const juce::String& prefix, double sr, float masterGain, int samplePitchMode, int sampleGrainMs, int liveGrainMs, const std::function<bool (int percent)>& progress)
+StemExport renderStems(const upic::Page& page, const std::vector<upic::Waveform>& waves, const std::vector<upic::Envelope>& envs, const std::vector<upic::SampleSlot>& slots, const juce::File& outDir, const juce::String& prefix, double sr, float masterGain, int samplePitchMode, int sampleGrainMs, int liveGrainMs, const std::vector<upic::Envelope>* ampTables, const std::vector<upic::Channel>* channels, int onlyChannel, const std::function<bool (int percent)>& progress)
 {
     StemExport result;
+    juce::ignoreUnused (onlyChannel);
     if (page.arcs.empty() || sr <= 0.0 || prefix.isEmpty()) return result;
 
     // mirror of engine slot lookup: is there any material for this slot id?
@@ -1267,7 +1450,7 @@ StemExport renderStems(const upic::Page& page, const std::vector<upic::Waveform>
         if (liveArcs > 0)
             result.note = "the page holds only live material ("
                           + juce::String (liveArcs) + " live arc(s)) - there is nothing to export";
-        return result;
+    return result;
     }
     if (liveArcs > 0)
         result.note = juce::String (liveArcs) + " live arc(s) were not exported (they need the microphone)";
@@ -1276,18 +1459,20 @@ StemExport renderStems(const upic::Page& page, const std::vector<upic::Waveform>
 
     // v1.33.4 (M28): the progress runs over the voices, and the cancel stops
     // the render (the files that were already written stay).
-    const int totalVoices = (int) (wIds.size() + sIds.size() + pmVoices.size());
+    int totalVoices = (int) (wIds.size() + sIds.size() + pmVoices.size());
+    if (channels != nullptr)
+        for (auto& c : *channels) if (! c.muted) ++totalVoices;
     int voicesDone = 0;
     bool cancelled = false;
 
-    auto renderOne = [&](const upic::Page& one, const juce::File& f) {
+    auto renderOne = [&](const upic::Page& one, const juce::File& f, int onlyChannel = -1) {
         if (cancelled) return;
         ++result.attempted;
         // v1.33.4 (H8): the stem is rendered straight into the file, block
         // by block, and it is as long as the page's own time needs (a warped
         // page used to be cut off at the end)
         const bool ok = writePageToWavFile (f, one, waves, envs, slots, sr, masterGain,
-                                samplePitchMode, sampleGrainMs, liveGrainMs,
+                                samplePitchMode, sampleGrainMs, liveGrainMs, ampTables, channels, onlyChannel,
                                 [&] (int percent)
                                 {
                                     if (! progress) return true;
@@ -1334,5 +1519,16 @@ StemExport renderStems(const upic::Page& page, const std::vector<upic::Waveform>
                 one.arcs.push_back(a);
         renderOne(one, outDir.getChildFile(prefix + "_pm" + juce::String ((int) vi + 1) + ".wav"));
     }
+    // WP6.4: one stem per mixer channel (Main is part of the mix, not a
+    // channel stem). The channel gain, curve, mute and solo apply through
+    // the same mixer the session uses.
+    if (channels != nullptr && ! channels->empty())
+        for (int ci = 0; ci < (int) channels->size(); ++ci)
+        {
+            const auto& c = (*channels)[(size_t) ci];
+            if (c.muted) continue;
+            renderOne (page, outDir.getChildFile (prefix + "_ch" + juce::String (c.id) + ".wav"),
+                      ci + 1);
+        }
     return result;
 }

@@ -34,6 +34,10 @@ upic::PieceModel MainComponent::capturePieceModel() const
         const juce::ScopedLock l (dataLock);
         m.waveforms = waveforms;
         m.envelopes = envelopes;
+        m.amplitudeTables = ampTables;
+        m.sequences = sequences;
+        m.channels = channels;
+        m.nextChannelId = nextChannelId;
         m.sampleSlots = sampleSlots;
         m.pages = pages;
         m.currentPage = currentPage;
@@ -80,6 +84,9 @@ bool MainComponent::loadFromVar(const juce::var& v)
     //     touched yet, so a parse that fails leaves the piece alone) ---
     std::vector<upic::Waveform> newWaves;
     std::vector<upic::Envelope> newEnvelopes;
+    std::vector<upic::AmplitudeTable> newAmpTables;
+    std::vector<upic::PerformanceSequence> newSequences;
+    std::vector<upic::Channel> newChannels;
     std::vector<upic::Page> newPages;
     std::vector<upic::SampleSlot> newSlots;
     for (int i = 0; i < upic::kMaxSampleSlots; ++i)
@@ -163,6 +170,44 @@ bool MainComponent::loadFromVar(const juce::var& v)
                 noteDrop ("envelope point", "envelope points",
                           (int) ptsArr->size() - (int) newEnvelopes[(size_t) ei].points.size());
     }
+    // WP2: the amplitude conversion tables. Absent in older pieces, and an
+    // arc that names one must get its reference checked like any other.
+    if (auto* arr = v.getProperty("ampTables", juce::var()).getArray())
+    {
+        int i = 0;
+        for (auto& tv : *arr)
+        {
+            if ((int) newAmpTables.size() >= upic::limits::kMaxAmplitudeTables) break;
+            newAmpTables.push_back (upic::AmplitudeTable::fromVar (tv, i++));
+        }
+        noteDrop ("amplitude table", "amplitude tables",
+                  (int) arr->size() - (int) newAmpTables.size());
+    }
+    // WP4: the performance sequences (absent in older pieces).
+    if (auto* sarr = v.getProperty("sequences", juce::var()).getArray())
+    {
+        int si = 0;
+        for (auto& sv : *sarr)
+        {
+            if ((int) newSequences.size() >= upic::limits::kMaxSequences) break;
+            newSequences.push_back (upic::PerformanceSequence::fromVar (sv, si++));
+        }
+        noteDrop ("performance sequence", "performance sequences",
+                  (int) sarr->size() - (int) newSequences.size());
+    }
+    // WP6: the mixer channels (absent in older pieces -> the legacy path).
+    const int fileNextChannelId = (int) v.getProperty ("nextChannelId", 1);
+    if (auto* carr = v.getProperty ("channels", juce::var()).getArray())
+    {
+        int ci = 0;
+        for (auto& cv : *carr)
+        {
+            if ((int) newChannels.size() >= upic::limits::kMaxChannels) break;
+            newChannels.push_back (upic::Channel::fromVar (cv, ci++));
+        }
+        noteDrop ("channel", "channels", (int) carr->size() - (int) newChannels.size());
+    }
+    renamed += upic::uniquifyIds (newChannels);
     if (auto* arr = v.getProperty("pages", juce::var()).getArray())
     {
         for (auto& pv : *arr)
@@ -244,6 +289,8 @@ bool MainComponent::loadFromVar(const juce::var& v)
     // pointing at the same thing), a duplicate gets a free id.
     renamed += upic::uniquifyIds (newWaves);
     renamed += upic::uniquifyIds (newEnvelopes);
+    renamed += upic::uniquifyIds (newAmpTables);
+    renamed += upic::uniquifyIds (newSequences);
 
     // and the arcs' references to the material are checked: a piece can
     // point at a wavetable or an envelope that is not there (the arc then
@@ -256,10 +303,90 @@ bool MainComponent::loadFromVar(const juce::var& v)
             { a.waveformId = newWaves.front().id; ++fixedRefs; }
             if (! newEnvelopes.empty() && ! upic::hasId (newEnvelopes, a.envelopeId))
             { a.envelopeId = newEnvelopes.front().id; ++fixedRefs; }
+            // a table is optional: a missing one falls back to none
+            if (a.amplitudeTableId >= 0 && ! upic::hasId (newAmpTables, a.amplitudeTableId))
+            { a.amplitudeTableId = -1; ++fixedRefs; }
             // 0 is the "no envelope of its own" marker for the PM index
             if (a.pmIndexEnv != 0 && ! upic::hasId (newEnvelopes, a.pmIndexEnv))
             { a.pmIndexEnv = 0; ++fixedRefs; }
         }
+    // WP4: the sequences' pages and positions are checked against the
+    // pages that actually loaded.
+    for (auto& sq : newSequences)
+    {
+        std::vector<upic::PerformancePoint> kept;
+        double lastT = -1.0;
+        for (auto p : sq.points)
+        {
+            if (newPages.empty()) break;
+            p.page = juce::jlimit (0, (int) newPages.size() - 1, p.page);
+            p.pos = upic::limits::clampFinite (p.pos, 0.0,
+                                               newPages[(size_t) p.page].durationSec);
+            if (p.t <= lastT) continue;
+            lastT = p.t;
+            kept.push_back (p);
+        }
+        sq.points = std::move (kept);
+    }
+
+    // WP3: the groups' overrides point into the same banks; a missing one
+    // falls back to "the arc's own" rather than switching the timbre to
+    // unrelated material.
+    for (auto& pg : newPages)
+        for (auto& g : pg.groups)
+        {
+            if (g.waveformId >= 0 && ! upic::hasId (newWaves, g.waveformId))
+            { g.waveformId = -1; ++fixedRefs; }
+            if (g.envelopeId >= 0 && ! upic::hasId (newEnvelopes, g.envelopeId))
+            { g.envelopeId = -1; ++fixedRefs; }
+            if (g.amplitudeTableId >= 0 && ! upic::hasId (newAmpTables, g.amplitudeTableId))
+            { g.amplitudeTableId = -1; ++fixedRefs; }
+        }
+    // WP5: a modulator must exist on its own page and the chain must not
+    // loop back to the carrier.
+    for (auto& pg : newPages)
+    {
+        auto findArc = [&pg] (int id) -> const upic::Arc*
+        {
+            for (auto& a : pg.arcs) if (a.id == id) return &a;
+            return nullptr;
+        };
+        for (auto& a : pg.arcs)
+        {
+            if (a.modulatorArcId < 0) continue;
+            if (a.modulatorArcId == a.id || findArc (a.modulatorArcId) == nullptr)
+            { a.modulatorArcId = -1; ++fixedRefs; continue; }
+            bool cycle = false;
+            std::vector<int> chain;
+            int cur = a.modulatorArcId;
+            for (int guard = 0; guard < 64 && cur >= 0; ++guard)
+            {
+                if (cur == a.id) { cycle = true; break; }
+                chain.push_back (cur);
+                const upic::Arc* m = findArc (cur);
+                cur = (m != nullptr) ? m->modulatorArcId : -1;
+            }
+            if (cycle)
+            {
+                // break every edge of the loop, not just this arc's
+                a.modulatorArcId = -1;
+                for (int id : chain)
+                    for (auto& other : pg.arcs)
+                        if (other.id == id) other.modulatorArcId = -1;
+                ++fixedRefs;
+            }
+        }
+    }
+    // WP6: a channel reference must exist in the bank (0 = main).
+    for (auto& pg : newPages)
+    {
+        for (auto& a : pg.arcs)
+            if (a.channelId > 0 && ! upic::hasId (newChannels, a.channelId))
+            { a.channelId = 0; ++fixedRefs; }
+        for (auto& g : pg.groups)
+            if (g.channelId > 0 && ! upic::hasId (newChannels, g.channelId))
+            { g.channelId = -1; ++fixedRefs; }
+    }
     if (renamed > 0)
         droppedMsg += (droppedMsg.isEmpty() ? "" : ", ") + juce::String(renamed)
                     + (renamed == 1 ? " item had a duplicate id and has been renumbered"
@@ -278,6 +405,15 @@ bool MainComponent::loadFromVar(const juce::var& v)
         transportState.store ((int) TransportState::stopped, std::memory_order_relaxed);
         waveforms = std::move (newWaves);
         envelopes = std::move (newEnvelopes);
+        ampTables = std::move (newAmpTables);
+        sequences = std::move (newSequences);
+        channels = std::move (newChannels);
+        nextChannelId = 1;
+        for (auto& c : channels) nextChannelId = juce::jmax (nextChannelId, c.id + 1);
+        if (fileNextChannelId > nextChannelId && fileNextChannelId <= upic::limits::kMaxItemId)
+            nextChannelId = fileNextChannelId;
+        selChannelId = channels.empty() ? -1 : channels.front().id;
+        selSeqId = sequences.empty() ? -1 : sequences.front().id;
         pages = std::move (newPages);
         sampleSlots = std::move (newSlots);
     }

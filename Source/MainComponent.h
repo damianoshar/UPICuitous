@@ -16,6 +16,10 @@
 #include "EnvelopeEditor.h"
 #include "LibraryManager.h"
 #include "OverlayPanels.h"
+#include "FreqTableEditor.h"
+#include "AmpTableEditor.h"
+#include "GroupPanel.h"
+#include "SequencePanel.h"
 #include "OscScrubReceiver.h"
 #include "JobRunner.h"
 #include "UpicButtonIcons.h"
@@ -264,7 +268,9 @@ public:
         upic::Page page;
         std::vector<upic::Waveform> waves;
         std::vector<upic::Envelope> envs;
-        std::vector<upic::SampleSlot> slots;
+        std::vector<upic::Envelope> ampTables;  // WP2
+        std::vector<upic::Channel> channels;    // WP6
+            std::vector<upic::SampleSlot> slots;
         double sr = 44100.0;
         float masterGain = 0.8f;
         int samplePitchMode = 0, sampleGrainMs = 0, liveGrainMs = 0;
@@ -311,6 +317,134 @@ public:
     // v1.33: the page's four spaces and an arc's space, so the selftest can
     // check that the controls really reach the model.
     int pageSpaceForTest (int i) const { return curPage().spaces[(size_t) juce::jlimit (0, 3, i)]; }
+    // WP1: the drawn tables, through the same paths the Table... button and
+    // the editor use.
+    bool spaceDefEditableForTest (int i) const
+    { return curPage().spaceDefs[(size_t) juce::jlimit (0, 3, i)].editable; }
+    int spaceDefPointCountForTest (int i) const
+    { return (int) curPage().spaceDefs[(size_t) juce::jlimit (0, 3, i)].points.size(); }
+    bool freqTableOpenForTest() const { return freqTableEd.isVisible(); }
+    void openFreqTableForTest (int s) { showFreqTableEditor (s); }
+    void commitFreqTableCurveForTest (const std::vector<upic::TablePoint>& pts)
+    { freqTableEd.commitCurveForTest (pts); }
+    void commitFreqTableFlagsForTest() { freqTableEd.commitFlagsForTest(); }
+    // WP2: the amplitude table bank, through the paths the UI uses.
+    int ampTableCountForTest() const { return (int) ampTables.size(); }
+    int ampTableIdAtForTest (int i) const
+    { return (i >= 0 && i < (int) ampTables.size()) ? ampTables[(size_t) i].id : -1; }
+    float ampTableValueForTest (int i, float x) const
+    { return (i >= 0 && i < (int) ampTables.size()) ? ampTables[(size_t) i].valueAt (x) : x; }
+    int arcAmpTableIdForTest (int arcId) const
+    {
+        for (auto& a : curPage().arcs) if (a.id == arcId) return a.amplitudeTableId;
+        return -2;
+    }
+    bool ampTableEditorOpenForTest() const { return ampTableEd.isVisible(); }
+    void openAmpTableEditorForTest() { showAmpTableEditor(); }
+    void ampTableDrawForTest (const std::vector<upic::EnvPoint>& pts)
+    { ampTableEd.drawCurveForTest (pts); }
+    void ampTableSelectForTest (int index) { ampTableEd.selectRowForTest (index); }
+    void ampTableAssignForTest (int id) { applyAmpTableToSelection (id); }
+    void ampTableNewForTest() { ampTableEd.newForTest(); }
+    void ampTableDeleteForTest() { ampTableEd.deleteForTest(); }
+    void ampTableDuplicateForTest() { ampTableEd.duplicateForTest(); }
+    void ampTableRenameForTest (const juce::String& n) { ampTableEd.renameForTest (n); }
+    // WP3: the groups, through the panel's commands.
+    int groupCountForTest() const { return (int) curPage().groups.size(); }
+    int channelCountForTest() const { return (int) channels.size(); }
+    int channelIdAtForTest (int i) const { return (i >= 0 && i < (int) channels.size()) ? channels[(size_t) i].id : -1; }
+    float channelGainAtForTest (int i) const { return (i >= 0 && i < (int) channels.size()) ? channels[(size_t) i].gain : -1.0f; }
+    int channelEnvelopePointsAtForTest (int i) const { return (i >= 0 && i < (int) channels.size()) ? (int) channels[(size_t) i].envelope.size() : -1; }
+    int arcChannelForTest (int arcId) const
+    {
+        for (auto& a : curPage().arcs) if (a.id == arcId) return a.channelId;
+        return -2;
+    }
+    int groupIdAtForTest (int i) const
+    { return (i >= 0 && i < (int) curPage().groups.size()) ? curPage().groups[(size_t) i].id : -1; }
+    int groupMemberCountAtForTest (int i) const
+    { return (i >= 0 && i < (int) curPage().groups.size()) ? (int) curPage().groups[(size_t) i].arcIds.size() : -1; }
+    int arcGroupIdForTest (int arcId) const
+    {
+        for (auto& g : curPage().groups)
+            for (int aid : g.arcIds) if (aid == arcId) return g.id;
+        return -1;
+    }
+    bool groupPanelOpenForTest() const { return groupPanel.isVisible(); }
+    void openGroupPanelForTest() { showGroupPanel(); }
+    void groupNewForTest() { groupPanel.newForTest(); }
+    void groupDeleteForTest() { groupPanel.deleteForTest(); }
+    void groupAddSelForTest() { groupPanel.addSelForTest(); }
+    void groupRemoveSelForTest() { groupPanel.removeSelForTest(); }
+    void groupSelectMembersForTest() { groupPanel.selectMembersForTest(); }
+    void groupMuteForTest (bool on) { groupPanel.setMuteForTest (on); }
+    void groupSoloForTest (bool on) { groupPanel.setSoloForTest (on); }
+    void groupGainForTest (float v) { groupPanel.setGainForTest (v); }
+    void groupTransposeForTest (double v) { groupPanel.setTransposeForTest (v); }
+    void groupOverrideForTest (int kind, int id) { groupPanel.setOverrideForTest (kind, id); }
+    void groupRenameForTest (const juce::String& n) { groupPanel.renameForTest (n); }
+    int selectedGroupIdForTest() const { return selGroupId; }
+    // WP4: the sequences.
+    int seqCountForTest() const { return (int) sequences.size(); }
+    int seqIdAtForTest (int i) const
+    { return (i >= 0 && i < (int) sequences.size()) ? sequences[(size_t) i].id : -1; }
+    int seqPointCountAtForTest (int i) const
+    { return (i >= 0 && i < (int) sequences.size()) ? (int) sequences[(size_t) i].points.size() : -1; }
+    bool seqLoopAtForTest (int i) const
+    { return i >= 0 && i < (int) sequences.size() && sequences[(size_t) i].loop; }
+    int selectedSeqIdForTest() const { return selSeqId; }
+    bool seqRecordingForTest() const { return seqRecording; }
+    bool seqPlayActiveForTest() const { return seqPlayActive.load(); }
+    bool seqPanelOpenForTest() const { return seqPanel.isVisible(); }
+    void openSeqPanelForTest() { showSequencePanel(); }
+    void seqRecordToggleForTest() { seqPanel.recordForTest(); }
+    void seqPlayToggleForTest() { seqPanel.playForTest(); }
+    void seqClearForTest() { seqPanel.clearForTest(); }
+    void seqLoopToggleForTest() { seqPanel.loopForTest(); }
+    void seqSelectPointForTest (int i) { seqPanel.selectPointForTest (i); }
+    void seqTrimForTest() { seqPanel.trimForTest(); }
+    void seqReplaceForTest() { seqPanel.replaceForTest(); }
+    void seqDragPointForTest (int i, double t, int page, double pos)
+    { seqPanel.dragPointForTest (i, t, page, pos); }
+    void seqAppendForTest (double t, int page, double pos)
+    { sequenceAppendRecorderPoint (t, page, pos); }
+    double seqPointTAtForTest (int i, int j) const
+    { return (i >= 0 && i < (int) sequences.size() && j >= 0 && j < (int) sequences[(size_t) i].points.size()) ? sequences[(size_t) i].points[(size_t) j].t : -1.0; }
+    int seqPointPageAtForTest (int i, int j) const
+    { return (i >= 0 && i < (int) sequences.size() && j >= 0 && j < (int) sequences[(size_t) i].points.size()) ? sequences[(size_t) i].points[(size_t) j].page : -1; }
+    double seqPointPosAtForTest (int i, int j) const
+    { return (i >= 0 && i < (int) sequences.size() && j >= 0 && j < (int) sequences[(size_t) i].points.size()) ? sequences[(size_t) i].points[(size_t) j].pos : -1.0; }
+    bool groupMutedAtForTest (int i) const
+    { return i >= 0 && i < (int) curPage().groups.size() && curPage().groups[(size_t) i].muted; }
+    bool groupSoloAtForTest (int i) const
+    { return i >= 0 && i < (int) curPage().groups.size() && curPage().groups[(size_t) i].solo; }
+    float groupGainAtForTest (int i) const
+    { return i >= 0 && i < (int) curPage().groups.size() ? curPage().groups[(size_t) i].gain : -1.0f; }
+    double groupTransposeAtForTest (int i) const
+    { return i >= 0 && i < (int) curPage().groups.size() ? curPage().groups[(size_t) i].transposeSemitones : 0.0; }
+    int arcModulatorForTest (int arcId) const
+    {
+        for (auto& a : curPage().arcs) if (a.id == arcId) return a.modulatorArcId;
+        return -2;
+    }
+    int arcModTargetForTest (int arcId) const
+    {
+        for (auto& a : curPage().arcs) if (a.id == arcId) return a.modTarget;
+        return -1;
+    }
+    double arcModDepthForTest (int arcId) const
+    {
+        for (auto& a : curPage().arcs) if (a.id == arcId) return a.modArcDepth;
+        return -1.0;
+    }
+    void modApplyForTest (int modId, int target, double depth)
+    { setModOnSelection (modId, target, depth); }
+    int groupOverrideAtForTest (int i, int kind) const
+    {
+        if (i < 0 || i >= (int) curPage().groups.size()) return -2;
+        const auto& g = curPage().groups[(size_t) i];
+        return kind == 0 ? g.waveformId : (kind == 1 ? g.envelopeId : g.amplitudeTableId);
+    }
     int arcSpaceForTest (int arcId) const
     {
         for (auto& a : curPage().arcs) if (a.id == arcId) return a.space;
@@ -820,6 +954,29 @@ private:
     // --- data ---
     std::vector<upic::Waveform> waveforms;
     std::vector<upic::Envelope> envelopes;
+    // WP2: the amplitude conversion tables (their own bank).
+    std::vector<upic::AmplitudeTable> ampTables;
+
+    // WP4: the performance sequences (piece-level, recorded and replayed by
+    // the audio thread's own clock).
+    std::vector<upic::PerformanceSequence> sequences;
+    // WP6: the mixer channels (model only; engine/UI in later milestones).
+    std::vector<upic::Channel> channels;
+    int nextChannelId = 1;
+    int selChannelId = -1;
+
+    int selSeqId = -1;
+    bool seqRecording = false;
+    double seqRecordStartMs = 0.0;
+    double seqRecordTimeOffset = 0.0;   // replace-tail recordings start at this t
+    double seqReplaceFromT = -1.0;      // armed replace-tail point
+    double seqOverwriteArmedMs = -1.0;  // two-step overwrite confirmation
+    bool seqDecimated = false;          // the recorder thinned the points to fit
+    bool seqEditOpen = false;           // the record session owns one undo step
+    std::atomic<bool> seqPlayActive { false };
+    std::atomic<int> seqActiveId { -1 };
+    std::atomic<double> seqClock { 0.0 };
+
     std::vector<upic::SampleSlot> sampleSlots; // fixed 8 slots, ids 1..8
     std::vector<upic::Page> pages;
     int currentPage = 0;
@@ -1202,6 +1359,42 @@ private:
     juce::ComboBox spaceDefBox[4];    // the page's four spaces
     juce::Label spaceDefLab[4];
     juce::Label spaceLab{ {}, "Space" };
+    // WP1: draw the table of the space selected above.
+    juce::TextButton spaceTableBtn{ "Table..." };
+
+    // WP2: the amplitude conversion tables (the bank the arc combo names).
+    juce::ComboBox ampTableBox;
+    juce::Label ampTableLab{ {}, "Amp" };
+    juce::TextButton ampTableBtn{ "Tables..." };
+    AmpTableEditor ampTableEd;
+    int selAmpTableId = -1;
+
+    // WP3: the arc groups (non-destructive, per page).
+    juce::TextButton groupBtn{ "Groups..." };
+
+    // WP5: the independent modulating arc.
+    juce::Label arcModLab{ {}, "Mod" }, arcModTgtLab{ {}, "Tgt" }, arcModDepthLab{ {}, "Depth" };
+    juce::ComboBox arcModBox, arcModTgtBox;
+    juce::Slider arcModSlider;
+    bool modLevelsEditing = false;
+
+    // WP4: the performance sequences.
+    juce::Label seqLab{ {}, "Seq" };
+
+
+    juce::ComboBox seqBox;
+
+    juce::TextButton seqRecBtn{ "Rec" }, seqPlayBtn{ "Play" },
+                     seqLoopBtn{ "Loop" }, seqEditBtn{ "View" };
+    SequencePanel seqPanel;
+    GroupPanel groupPanel;
+    int selGroupId = -1;
+    bool groupLevelsEditing = false;
+
+    // WP1: the in-app frequency-table editor (an overlay: Android has no
+    // closable dialog windows).
+    FreqTableEditor freqTableEd;
+    int freqTableSpace = 0;
 
     // v1.33: the page's ambitus - the interval its vertical axis covers
     // ("the vertical axis could correspond to any interval", Mache).
@@ -1391,6 +1584,34 @@ private:
     void applySpaceToSelection();     // v1.33: the arc's frequency space
     void pushSpaceDefs();             // v1.33: the page's four spaces
     void refreshSpaceBox();           // v1.33: the arc's space combo
+    void showFreqTableEditor (int space);   // WP1: the drawn conversion table
+    void closeFreqTableEditor();
+    void showAmpTableEditor();              // WP2: the amplitude table bank
+    void closeAmpTableEditor();
+    void refreshAmpTableBox();
+    void applyAmpTableToSelection (int id);
+    int  ampTableUseCount (int id) const;
+    int  ampTableIndexOfId (int id) const;
+    void refreshAmpTableEditor();
+    void showGroupPanel();                  // WP3: the arc-group panel
+    void showSequencePanel();               // WP4: the performance sequences
+    void closeSequencePanel();
+    void refreshSequencePanel();
+
+    int  sequenceIndexOfId (int id) const;
+    void startSequenceRecording();
+    void stopSequenceRecording();
+    void startSequencePlayback();
+    void stopSequencePlayback();
+    void sequenceRecordTick();
+    void toggleSequenceLoop();
+    void sequenceAppendRecorderPoint (double t, int page, double pos);
+    void closeGroupPanel();
+    void refreshGroupPanel();
+    void refreshModBox();                    // WP5
+    void setModOnSelection (int modId, int target, double depth);
+    bool modWouldCycle (int carrierId, int modId) const;
+    int  groupIndexOfId (int id) const;
     void pushAmbitus();               // v1.33: the page's ambitus
     void pushWarp();                 // v1.33: the page's acceleration
     void runGenerator(int kind);      // procedural arc generation (nUPIC-style)
@@ -1437,7 +1658,7 @@ public:
     void updateMidiScrubForTest() { updateMidiScrub(); }
     bool midiScrubRunning() const { return scrubActive; }
     double playRateForTest() const { return playRate.load (std::memory_order_relaxed); }
-    // Piece (de)serialization — public so the selftest can round-trip them.
+    // Piece (de)serialization ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β public so the selftest can round-trip them.
     juce::var pieceToVar() const;
     // v1.33.4 (M28): the piece as a self-contained model, captured under the
     // lock - the worker thread builds the JSON (and the base64 of the

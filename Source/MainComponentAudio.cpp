@@ -52,12 +52,38 @@ void MainComponent::publishModelSnapshot()
     auto* snap = new ModelSnapshot();
     snap->waveforms = waveforms;
     snap->envelopes = envelopes;
+    snap->amplitudeTables = ampTables;
+    snap->sequences = sequences;
+    snap->channels = channels;
     snap->pages = pages;
     snap->slots = sampleSlots; // shared buffers: only the pointers are copied
     snap->currentPage = currentPage;
     snap->pageEpoch = pageEpoch.load(std::memory_order_relaxed);
     snap->seqPages = seqPages;
     snap->loopPage = loopPage;
+    // WP1: compile the drawn frequency tables for the pages that have one.
+    // Only the spaces with a curve get a LUT, so a preset-only piece pays
+    // nothing for the feature.
+    snap->pageLuts.resize (snap->pages.size());
+    for (size_t pi = 0; pi < snap->pages.size(); ++pi)
+    {
+        const upic::Page& page = snap->pages[pi];
+        for (int s = 0; s < 4; ++s)
+        {
+            const upic::FreqSpaceDef& def = page.spaceDefs[(size_t) s];
+            if (! (def.editable || def.inverted)) continue;
+            auto lut = std::make_shared<upic::FreqLut> (
+                upic::buildFreqLut (def, page.pitchLo, page.pitchHi));
+            snap->pageLuts[pi].lut[s] = lut.get();
+            snap->ownedLuts.push_back (std::move (lut));
+        }
+    }
+    // WP3: resolve the groups once per publication. The audio thread reads
+    // one override per arc; solo is already decided here.
+    snap->arcOverrides.reserve (snap->pages.size());
+    for (auto& page : snap->pages)
+        snap->arcOverrides.push_back (page.resolveArcOverrides());
+
     // v1.33.4 (M22): the revision this snapshot was built from
     snap->revision = modelRevision.load(std::memory_order_relaxed);
     snapshots.publish(snap); // frees the snapshots the reader retired
@@ -151,6 +177,9 @@ void MainComponent::startPlayback()
 
 void MainComponent::stopPlayback(bool fromAudio)
 {
+    // WP4 fix: the ordinary Stop returns the transport to the internal
+    // source; the sequence is re-armed only by its own Play.
+    seqPlayActive.store (false, std::memory_order_relaxed);
     {
         juce::ScopedLock l(dataLock);
         const auto state = transport();
@@ -563,7 +592,8 @@ void MainComponent::renderScrubPreview (const ModelSnapshot& snap, AudioBlock& b
 
     scrubEngine.render (pg, ph, snap.waveforms, snap.envelopes, snap.slots,
                         b.scoreL, (b.scoreR != nullptr ? b.scoreR : b.scoreL),
-                        chunk, 1.0f, rate);
+                        chunk, 1.0f, rate, false, snap.lutsFor (p), &snap.amplitudeTables,
+                        snap.overridesFor (p));
 
     const int fade = juce::jmin (chunk / 4, (int) (b.sr * 0.005));
     for (int i = 0; i < chunk; ++i)
@@ -616,7 +646,8 @@ void MainComponent::renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& b,
 
     engine.render (pg, audioPlayhead, snap.waveforms, snap.envelopes, snap.slots,
                    b.freezeL, (b.freezeR != nullptr ? b.freezeR : b.freezeL),
-                   b.numSamples, 1.0f, 0.0, true);
+                   b.numSamples, 1.0f, 0.0, true, snap.lutsFor (p), &snap.amplitudeTables,
+                   snap.overridesFor (p));
 
     float gain = 1.0f;
     if (stopAt > 0.0)
@@ -788,6 +819,90 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
             audioPage = juce::jlimit(0, (int) snap.pages.size() - 1, audioPage);
         const auto& pg = snap.pages[(size_t) audioPage];
 
+        // WP4: sequence playback. The clock and the page/position resolution
+        // live on the audio thread; the points come from the snapshot. The
+        // page's own time map still applies inside the chunk, because the
+        // engine is called exactly as the internal transport calls it.
+        {
+            const bool seqOn = seqPlayActive.load (std::memory_order_relaxed);
+            const upic::PerformanceSequence* seq = nullptr;
+            if (seqOn)
+            {
+                const int sid = seqActiveId.load (std::memory_order_relaxed);
+                for (auto& s : snap.sequences)
+                    if (s.id == sid) { seq = &s; break; }
+            }
+            if (seqOn && (seq == nullptr || seq->points.size() < 2))
+            {
+                seqPlayActive.store (false, std::memory_order_relaxed);
+            }
+            else if (seqOn)
+            {
+                const double len = seq->lengthSec();
+                double t0 = seqClock.load (std::memory_order_relaxed);
+                if (seq->loop && len > 1.0e-6)
+                    t0 = upic::sequenceLoopTime (t0, len);
+                else if (len > 0.0 && t0 >= len)
+                {
+                    // WP4 fix: do not cut the buffer off in the middle - hand
+                    // the last recorded position to the internal path, which
+                    // then runs the ordinary end-of-page fade.
+                    seqPlayActive.store (false, std::memory_order_relaxed);
+                    const auto& last = seq->points.back();
+                    audioPage = juce::jlimit (0, (int) snap.pages.size() - 1, last.page);
+                    audioPlayhead = juce::jlimit (0.0, snap.pages[(size_t) audioPage].durationSec,
+                                                  last.pos);
+                    seqClock.store (0.0, std::memory_order_relaxed);
+                    continue;
+                }
+
+                int chunk = juce::jlimit (1, 256, n - offset);
+                // WP4 fix: split the chunk at the next recorded point (and at
+                // the loop seam), so a page switch or a wrap lands on the
+                // sample it was recorded at instead of up to 5 ms late.
+                {
+                    const auto nextIt = std::upper_bound (seq->points.begin(), seq->points.end(), t0,
+                        [] (double v, const upic::PerformancePoint& p) { return v < p.t; });
+                    if (nextIt != seq->points.end() && nextIt->t > t0)
+                        chunk = juce::jmin (chunk, juce::jmax (1, (int) std::ceil ((nextIt->t - t0) * sr)));
+                    if (seq->loop && len > 1.0e-6 && len > t0)
+                        chunk = juce::jmin (chunk, juce::jmax (1, (int) std::ceil ((len - t0) * sr)));
+                }
+                upic::SequencePosition p0, p1;
+                upic::sequencePositionAt (seq->points, t0, p0);
+                upic::sequencePositionAt (seq->points, t0 + (double) chunk / sr, p1);
+
+                const int target = juce::jlimit (0, (int) snap.pages.size() - 1, p0.page);
+                if (target != audioPage)
+                {
+                    audioPage = target;
+                    engine.reset();
+                    notifyPage (audioPage);
+                }
+                const auto& spg = snap.pages[(size_t) audioPage];
+                audioPlayhead = juce::jlimit (0.0, spg.durationSec, p0.pos);
+
+                double seqRate = 1.0;
+                if (p0.page == p1.page && p1.page == target)
+                {
+                    seqRate = (p1.pos - p0.pos) * (double) sr / (double) chunk;
+                    seqRate = juce::jlimit (-4.0, 4.0, seqRate);
+                    if (std::abs (seqRate) < 1.0e-4) seqRate = 1.0e-4; // a hold
+                }
+                engine.render (spg, audioPlayhead, snap.waveforms, snap.envelopes,
+                               snap.slots, SL + offset,
+                               SR != nullptr ? SR + offset : nullptr, chunk, 1.0f,
+                               seqRate, false, snap.lutsFor (audioPage),
+                               &snap.amplitudeTables, snap.overridesFor (audioPage));
+                offset += chunk;
+                const double nextT = t0 + (double) chunk / sr;
+                seqClock.store (seq->loop && len > 1.0e-6
+                                    ? upic::sequenceLoopTime (nextT, len) : nextT,
+                                std::memory_order_relaxed);
+                continue;
+            }
+        }
+
         if (pg.durationSec < 0.001)
         {
             transportState.store ((int) TransportState::stopped,
@@ -917,7 +1032,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
 
         engine.render(pg, audioPlayhead, snap.waveforms, snap.envelopes, snap.slots,
                       SL + offset, (SR != nullptr ? SR + offset : nullptr), chunk, 1.0f,
-                      blockRate);
+                      blockRate, false, snap.lutsFor (audioPage), &snap.amplitudeTables,
+                      snap.overridesFor (audioPage));
 
         if (! snap.loopPage && ((reverse && audioPage == 0) || (! reverse && audioPage + 1 >= (int) snap.pages.size())))
         {

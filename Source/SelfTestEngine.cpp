@@ -1,6 +1,8 @@
 #include <JuceHeader.h>
 #include "MainComponent.h"
 #include "SelfTest.h"
+#include <cstdint>
+#include <cstring>
 #include "AllocCounter.h"
 
 //==============================================================================
@@ -891,4 +893,244 @@ void upic::runArcOverrideChecks (upic::SelfTest& t)
         }
     }
 
+}
+
+//==============================================================================
+// The golden render (audit 2026-11-19): one fixed piece rendered offline at
+// 48 kHz, hashed sample by sample. It locks the engine's output against
+// accidental change from 0.33 on; the v0.29 binary is not part of this
+// archive, so the reference is the 0.32 engine (documented in the wave note).
+void upic::runGoldenRenderChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    upic::Page pg;
+    pg.durationSec = 2.0;
+    pg.warp = 0.3;
+    pg.spaces[1] = 2;
+
+    upic::Arc a;
+    a.id = 1; a.waveformId = 0; a.envelopeId = 1; a.intensity = 0.7f;
+    a.points = { { 0.0, 220.0 }, { 2.0, 440.0 } };
+    pg.arcs.push_back (a);
+
+    upic::Arc b;
+    b.id = 2; b.waveformId = 3; b.envelopeId = 2; b.intensity = 0.4f;
+    b.space = 1;
+    b.amplitudeTableId = 1;
+    b.stepDivisions = 12;
+    b.points = { { 0.0, 440.0 }, { 2.0, 110.0 } };
+    pg.arcs.push_back (b);
+
+    upic::Arc c;
+    c.id = 3; c.mode = 3; c.waveformId = 1; c.envelopeId = 0; c.intensity = 0.3f;
+    c.pmRatio = 1.5; c.pmIndex = 0.4; c.pmFeedback = 0.1;
+    c.points = { { 0.0, 330.0 }, { 2.0, 330.0 } };
+    pg.arcs.push_back (c);
+
+    upic::ArcGroup g;
+    g.id = 1; g.arcIds = { 1 }; g.gain = 0.8f; g.transposeSemitones = 3.0;
+    pg.groups = { g };
+
+    std::vector<upic::Envelope> tables;
+    tables.push_back (upic::makeAmplitudeTable (1, "Square", juce::Colours::white,
+                                                upic::ampSquare));
+    const auto waves = upic::defaultWaveforms();
+    const auto envs = upic::defaultEnvelopes();
+    const std::vector<upic::SampleSlot> slots;
+
+    std::uint64_t hash = 1469598103934665603ull;   // FNV-1a
+    auto mix = [&hash] (float v)
+    {
+        std::uint32_t bits = 0;
+        std::memcpy (&bits, &v, sizeof (bits));
+        hash ^= bits;
+        hash *= 1099511628211ull;
+    };
+
+    const int frames = 48000 * 2;
+    const int blockSize = 512;
+    UpicEngine eng;
+    eng.prepare (48000.0, blockSize);
+    const auto ov = pg.resolveArcOverrides();
+    std::vector<float> l (blockSize, 0.0f), r (blockSize, 0.0f);
+    bool ok = true;
+    for (int offset = 0; offset < frames && ok; offset += blockSize)
+    {
+        const int n = juce::jmin (blockSize, frames - offset);
+        const double audioT = (double) offset / 48000.0;
+        const double scorePos = pg.scoreAtAudioTime (audioT);
+        const double rate = pg.averageRate (scorePos, (double) n / 48000.0);
+        eng.render (pg, scorePos, waves, envs, slots, l.data(), r.data(), n, 0.8f,
+                    rate, false, nullptr, &tables, &ov);
+        for (int i = 0; i < n; ++i) { mix (l[(size_t) i]); mix (r[(size_t) i]); }
+    }
+
+    const juce::String hex = "0x" + juce::String::toHexString ((juce::int64) hash);
+    check (ok, "golden: the piece renders");
+    check (hash == 0x6d7571bdd80e3cd9ull, "golden: the render matches the reference", hex);
+}
+
+//==============================================================================
+// WP6.3: the channel MIXER in the engine. The buckets, the gain curve, mute,
+// solo and Main. Legacy pieces (no channels) take the old path unchanged.
+void upic::runChannelRoutingChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    auto makePage = [] (int channelId)
+    {
+        upic::Page pg;
+        pg.durationSec = 1.0;
+        upic::Arc a;
+        a.id = 1;
+        a.waveformId = 0;
+        a.envelopeId = 0;
+        a.intensity = 0.05f;       // linear region of the output clip
+        a.channelId = channelId;
+        a.points = { { 0.0, 440.0 }, { 1.0, 440.0 } };
+        pg.arcs.push_back (a);
+        return pg;
+    };
+
+    const auto waves = upic::defaultWaveforms();
+    const auto envs = upic::defaultEnvelopes();
+    const std::vector<upic::SampleSlot> slots;
+
+    auto render = [&] (const upic::Page& pg, const std::vector<upic::Channel>* ch,
+                       std::vector<float>* out = nullptr)
+    {
+        auto ov = pg.resolveArcOverrides();
+        UpicEngine e;
+        e.prepare (48000.0, 512);
+        std::vector<float> l (1024, 0.0f), r (1024, 0.0f);
+        e.render (pg, 0.0, waves, envs, slots, l.data(), r.data(), 1024, 0.8f,
+                  1.0, false, nullptr, nullptr, &ov, ch);
+        if (out != nullptr) *out = l;
+        double sum = 0.0;
+        for (float v : l) sum += (double) v * v;
+        return std::sqrt (sum / 1024.0);
+    };
+
+    // a bank with nothing routed is bit-identical to no bank
+    {
+        const auto pg = makePage (0);
+        std::vector<upic::Channel> bank;
+        upic::Channel c;
+        c.id = 1;
+        c.name = "A";
+        bank.push_back (c);
+        std::vector<float> a, b;
+        const double ra = render (pg, nullptr, &a);
+        const double rb = render (pg, &bank, &b);
+        check (ra == rb && a == b,
+               "channels: a bank with no routing is bit-identical to legacy",
+               juce::String (ra, 6) + " vs " + juce::String (rb, 6));
+    }
+
+    // gain scales the channel's contribution
+    {
+        const auto pg = makePage (1);
+        std::vector<upic::Channel> bank;
+        upic::Channel c;
+        c.id = 1;
+        c.name = "A";
+        c.gain = 0.5f;
+        bank.push_back (c);
+        const double base = render (makePage (1), nullptr);
+        const double half = render (pg, &bank);
+        check (std::abs (half / base - 0.5) < 0.01,
+               "channels: the channel gain scales its arcs",
+               juce::String (half / base, 4));
+    }
+
+    // the page-long gain curve is applied once, per sample
+    {
+        const auto pg = makePage (1);
+        std::vector<upic::Channel> bank;
+        upic::Channel c;
+        c.id = 1;
+        c.name = "A";
+        c.envelope = { { 0.0f, 0.5f }, { 1.0f, 0.5f } };
+        bank.push_back (c);
+        const double base = render (makePage (1), nullptr);
+        const double curved = render (pg, &bank);
+        check (std::abs (curved / base - 0.5) < 0.01,
+               "channels: the channel curve scales its arcs",
+               juce::String (curved / base, 4));
+    }
+
+    // mute silences the channel, Main included via solo
+    {
+        const auto pg = makePage (1);
+        std::vector<upic::Channel> bank;
+        upic::Channel c;
+        c.id = 1;
+        c.name = "A";
+        c.muted = true;
+        bank.push_back (c);
+        check (render (pg, &bank) == 0.0, "channels: a muted channel is silent");
+
+        bank[0].muted = false;
+        bank[0].solo = true;
+        std::vector<float> soloBuf, mutedBuf;
+        const double solo = render (makePage (1), &bank, &soloBuf);
+        auto mutedPage = makePage (0);
+        std::vector<upic::Channel> soloBank = bank;
+        const double mainOnly = render (mutedPage, &soloBank, &mutedBuf);
+        check (solo > 0.0 && mainOnly == 0.0,
+               "channels: a solo silences Main",
+               juce::String (mainOnly, 6));
+    }
+
+    // WP6.4: a stem per mixer channel
+    {
+        upic::Page pg = makePage (1);
+        pg.durationSec = 0.2;
+        std::vector<upic::Channel> bank;
+        upic::Channel c;
+        c.id = 7;
+        c.name = "Stem";
+        bank.push_back (c);
+        auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                       .getChildFile ("upic_channel_stems");
+        dir.deleteRecursively();
+        const auto res = renderStems (pg, waves, envs, slots, dir, "t", 48000.0, 0.8f,
+                                      0, 0, 0, nullptr, &bank);
+        bool found = false;
+        for (auto& f : res.written) if (f.getFileName().contains ("_ch7")) found = true;
+        check (found, "channels: a mixer channel gets its own stem");
+        dir.deleteRecursively();
+    }
+    // the render allocates nothing on the audio path
+    {
+        const auto pg = makePage (1);
+        std::vector<upic::Channel> bank;
+        upic::Channel c;
+        c.id = 1;
+        c.name = "A";
+        c.envelope = { { 0.0f, 0.0f }, { 1.0f, 1.0f } };
+        bank.push_back (c);
+
+        auto ov = pg.resolveArcOverrides();
+        UpicEngine e;
+        e.prepare (48000.0, 512);
+        std::vector<float> l (512, 0.0f), r (512, 0.0f);
+        e.render (pg, 0.0, waves, envs, slots, l.data(), r.data(), 512, 0.8f,
+                  1.0, false, nullptr, nullptr, &ov, &bank); // warm the buffers
+
+        upic::allocCount = 0;
+        upic::allocCounting = true;
+        e.render (pg, 0.25, waves, envs, slots, l.data(), r.data(), 512, 0.8f,
+                  1.0, false, nullptr, nullptr, &ov, &bank);
+        upic::allocCounting = false;
+        check (upic::allocCount == 0, "channels: the mixer does not allocate per block",
+               juce::String (upic::allocCount));
+    }
 }

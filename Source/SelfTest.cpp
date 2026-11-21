@@ -60,6 +60,7 @@ void upic::SelfTest::check (bool ok, const juce::String& name, const juce::Strin
 // in the order they are listed here - the same order as before the split.
 //
 // Returns the number of failed checks (0 = everything passed).
+
 int upic::runSelfTest()
 {
     upic::SelfTest t;
@@ -68,6 +69,7 @@ int upic::runSelfTest()
     // snapshot into the user's own data folder (the app would offer it
     // at the next start)
     MainComponent::setRecoveryAllowed (false);
+
 
     upic::runDspChecks (t);
     upic::runAudioThreadChecks (t);
@@ -80,6 +82,15 @@ int upic::runSelfTest()
     upic::runCursorPathChecks (t);
     upic::runLivePathChecks (t);
     upic::runTransformChecks (t);
+    upic::runFreqTableChecks (t);
+    upic::runAmpTableChecks (t);
+    upic::runGroupChecks (t);
+    upic::runSequenceChecks (t);
+    upic::runGoldenRenderChecks (t);
+    upic::runModulationChecks (t);
+    upic::runModulationSemanticsChecks (t);
+    upic::runChannelModelChecks (t);
+    upic::runChannelRoutingChecks (t);
     upic::runUntrustedPieceChecks (t);
     upic::runModelMathChecks (t);
 upic::runLibraryModelChecks (t);

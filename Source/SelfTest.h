@@ -10,6 +10,7 @@
 // point is small enough to read at a glance.
 namespace upic
 {
+
     // The shared state of a run: the log and the number of failures so far.
     struct SelfTest
     {
@@ -33,6 +34,15 @@ namespace upic
     void runCursorPathChecks (SelfTest& t);
     void runLivePathChecks (SelfTest& t);
     void runTransformChecks (SelfTest& t);
+    void runFreqTableChecks (SelfTest& t); // WP1: the drawn conversion tables
+    void runAmpTableChecks (SelfTest& t);  // WP2: the amplitude conversion tables
+    void runGroupChecks (SelfTest& t);     // WP3: the arc groups
+    void runSequenceChecks (SelfTest& t);  // WP4: the performance sequences
+    void runGoldenRenderChecks (SelfTest& t); // the fixed offline render
+    void runModulationChecks (SelfTest& t);  // WP5: the modulating arcs
+    void runModulationSemanticsChecks (SelfTest& t); // WP5 verification targets
+    void runChannelModelChecks (SelfTest& t); // WP6.1: the channel model
+    void runChannelRoutingChecks (SelfTest& t); // WP6.3: the mixer
     void runUntrustedPieceChecks (SelfTest& t);
     void runModelMathChecks (SelfTest& t);
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
