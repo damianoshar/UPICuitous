@@ -517,6 +517,11 @@ public:
     // Applies a page transition requested by the audio thread. Called from the
     // 30 Hz timer, so the audio callback only ever does an atomic store.
     void applyPendingAudioRequests();
+    // The handoff relies on 64-bit atomics being lock-free; every JUCE 8 target
+    // (Windows, macOS, arm64 Android) provides that. If a target ever does not,
+    // fail the build rather than silently taking a lock on the audio thread.
+    static_assert (std::atomic<uint64_t>::is_always_lock_free,
+                   "the audio handoff requires lock-free 64-bit atomics");
 
 private:
     // --- construction ---
@@ -949,9 +954,19 @@ private:
     // instead of through MessageManager::callAsync().
     std::atomic<uint64_t> pendingPageRequest { 0 };
 
-    // audio -> message: the piece ended and the transport must stop. Setting a
-    // flag replaces the previous MessageManager::callAsync() from the audio path.
-    std::atomic<bool> pendingStopAtEnd { false };
+    // audio -> message: the piece ended and the transport must stop. Packed as
+    // (session + 1) << 32 | 1, where session identifies the transport run that
+    // asked. A deferred stop is applied only when the session still matches, so
+    // a request raised just before the user pressed Play cannot stop the new run.
+    std::atomic<uint64_t> pendingStopRequest { 0 };
+
+    // Incremented by every startPlayback(), so a deferred stop belongs to a run
+    // and never to "whatever is playing now".
+    std::atomic<uint32_t> transportSession { 0 };
+
+    // Raised by the audio thread at the end of a page chain or when a stop fade
+    // finishes. No allocation, no lock: the audio path only stores.
+    void requestStopFromAudio() noexcept;
     int seenPageEpoch = -1;                         // audio
     int audioPage = 0;                              // audio thread's page
     double audioPlayhead = 0.0;                     // audio thread's playhead
