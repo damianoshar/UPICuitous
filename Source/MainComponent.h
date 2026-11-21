@@ -514,6 +514,10 @@ public:
     void resized() override;
     void timerCallback() override;
 
+    // Applies a page transition requested by the audio thread. Called from the
+    // 30 Hz timer, so the audio callback only ever does an atomic store.
+    void applyPendingAudioRequests();
+
 private:
     // --- construction ---
     // v1.30 (5.3 refactor): the constructor used to be 1400 lines long. It
@@ -939,6 +943,15 @@ private:
     // The job that is running and the thread itself (one job at a time).
     upic::JobRunner jobs;
     std::atomic<int> pageEpoch { 0 };               // message -> audio
+
+    // audio -> message: packed (epoch << 32) | (page + 1); 0 = nothing pending.
+    // The audio thread must not allocate or lock, so the page change travels here
+    // instead of through MessageManager::callAsync().
+    std::atomic<uint64_t> pendingPageRequest { 0 };
+
+    // audio -> message: the piece ended and the transport must stop. Setting a
+    // flag replaces the previous MessageManager::callAsync() from the audio path.
+    std::atomic<bool> pendingStopAtEnd { false };
     int seenPageEpoch = -1;                         // audio
     int audioPage = 0;                              // audio thread's page
     double audioPlayhead = 0.0;                     // audio thread's playhead
