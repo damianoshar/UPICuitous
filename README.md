@@ -118,8 +118,10 @@ Sequential/Loop combinations. The Sequential+Loop fixture samples the
 visited before wrapping, and it asserts both named toggles were found; forcing
 `snap.seqPages` to false fails that middle sample. The queued UI page update is
 also covered: the test pumps the message queue (`JUCE_MODAL_LOOPS_PERMITTED`)
-and asserts the visible page follows the audio page. Real-time allocation safety
-of `callAsync()` on the audio path remains unverified.
+and asserts the visible page follows the audio page. The audio callback itself
+no longer calls `callAsync()` - page transitions and end-of-piece stops are
+published as atomics and applied by the 30 Hz timer - so it allocates nothing and
+takes no lock on that path.
 
 ## What it does
 

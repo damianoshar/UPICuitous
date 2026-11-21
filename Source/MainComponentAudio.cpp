@@ -1498,13 +1498,8 @@ void MainComponent::applyTransportGain (float* SL, float* SR, int n, double sr,
                                                     std::memory_order_relaxed))
         {
             engine.reset();
-            // UI must not be touched from the audio thread. The shared
-            // callback gate makes the queued stop safe even if a host
-            // destroys the component on another thread.
-            postToMessageThread ([] (MainComponent& component)
-            {
-                component.stopPlayback (true);
-            });
+            // UI must not be touched from the audio thread -> SafePointer.
+            pendingStopAtEnd.store (true, std::memory_order_release);
         }
     }
 }
@@ -1544,22 +1539,16 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
     const auto publishPlayhead = [this]
     { playheadPublished.store(audioPlayhead, std::memory_order_relaxed); };
 
-    // UI must not be touched from the audio thread. The shared callback gate
-    // keeps the queued notification safe if the host destroys the component
-    // on another thread. The epoch guard drops a late notification if the
-    // user picked another page meanwhile.
+    // The audio thread must not allocate or lock, so it cannot use
+    // MessageManager::callAsync - that does `new MessageBase` and takes the
+    // message-queue lock. It publishes a packed (epoch, page) request instead,
+    // and the 30 Hz timer applies it on the message thread. The epoch guard
+    // drops a late request if the user changed the page structure meanwhile.
     const auto notifyPage = [this](int next)
     {
-        const int epoch = pageEpoch.load(std::memory_order_relaxed);
-        postToMessageThread ([next, epoch] (MainComponent& component)
-        {
-            if (component.pageEpoch.load(std::memory_order_relaxed) != epoch)
-                return;
-            component.currentPage = juce::jlimit (
-                0, (int) component.pages.size() - 1, next);
-            component.refreshBoxes();
-            component.refreshScoreBinding();
-        });
+        const auto epoch = (uint64_t) (uint32_t) pageEpoch.load(std::memory_order_relaxed);
+        const auto page  = (uint64_t) (uint32_t) (next + 1);   // +1: 0 means "none"
+        pendingPageRequest.store ((epoch << 32) | page, std::memory_order_release);
     };
 
     // Render in sub-chunks split at the page boundary so looping never
@@ -1690,10 +1679,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                               std::memory_order_relaxed);
                         playheadAtEnd.store(false, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
-                        postToMessageThread ([] (MainComponent& component)
-                        {
-                            component.stopPlayback (true);
-                        });
+            pendingStopAtEnd.store (true, std::memory_order_release);
                         return;
                     }
                 }
@@ -1723,10 +1709,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                           std::memory_order_relaxed);
                     playheadAtEnd.store(false, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
-                    postToMessageThread ([] (MainComponent& component)
-                    {
-                        component.stopPlayback (true);
-                    });
+            pendingStopAtEnd.store (true, std::memory_order_release);
                     return;
                 }
             }
@@ -1746,10 +1729,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                               std::memory_order_relaxed);
                         playheadAtEnd.store(true, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
-                        postToMessageThread ([] (MainComponent& component)
-                        {
-                            component.stopPlayback (true);
-                        });
+            pendingStopAtEnd.store (true, std::memory_order_release);
                         return;
                     }
                 }
@@ -1768,10 +1748,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                           std::memory_order_relaxed);
                     playheadAtEnd.store(true, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
-                    postToMessageThread ([] (MainComponent& component)
-                    {
-                        component.stopPlayback (true);
-                    });
+            pendingStopAtEnd.store (true, std::memory_order_release);
                     return;
                 }
             }

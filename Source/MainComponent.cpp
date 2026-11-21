@@ -920,8 +920,40 @@ int MainComponent::liveLatencySamples() const
     return maxDelayed;
 }
 
+// Applies a page change the audio thread requested. The audio callback only
+// stores a packed (epoch, page) value, so it allocates nothing and takes no
+// lock; the work happens here on the message thread.
+void MainComponent::applyPendingAudioRequests()
+{
+    // A stop at the end of the piece: the audio thread cannot call stopPlayback
+    // (it touches the model), so it raises a flag instead.
+    if (pendingStopAtEnd.exchange (false, std::memory_order_acq_rel))
+        stopPlayback (true);
+
+    const auto req = pendingPageRequest.load (std::memory_order_acquire);
+    if (req == 0) return;
+
+    // Clear before applying: a newer request that arrives meanwhile is handled
+    // on the next tick rather than being lost or applied out of order.
+    auto expected = req;
+    pendingPageRequest.compare_exchange_strong (expected, 0,
+                                                std::memory_order_acq_rel,
+                                                std::memory_order_relaxed);
+
+    const int epoch = (int) (uint32_t) (req >> 32);
+    const int next  = (int) (uint32_t) (req & 0xffffffffu) - 1;
+
+    // Drop it if the page structure changed since the audio thread decided.
+    if (pageEpoch.load (std::memory_order_relaxed) != epoch) return;
+
+    currentPage = juce::jlimit (0, (int) pages.size() - 1, next);
+    refreshBoxes();
+    refreshScoreBinding();
+}
+
 void MainComponent::timerCallback()
 {
+    applyPendingAudioRequests();   // page transition / stop requested by the audio thread
     ++timerTicks;
     if (seqRecording) sequenceRecordTick();   // WP4
     // Refresh the cached input count (device/add-remove happens here on the
