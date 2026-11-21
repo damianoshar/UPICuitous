@@ -926,19 +926,33 @@ int MainComponent::liveLatencySamples() const
 void MainComponent::applyPendingAudioRequests()
 {
     // A stop at the end of the piece: the audio thread cannot call stopPlayback
-    // (it touches the model), so it raises a flag instead.
-    if (pendingStopAtEnd.exchange (false, std::memory_order_acq_rel))
-        stopPlayback (true);
+    // (it touches the model), so it leaves a request tagged with the transport
+    // run that raised it. If the user started a new run since, the request
+    // belongs to the old one and must not touch the new transport.
+    if (const auto stopReq = pendingStopRequest.load (std::memory_order_acquire))
+    {
+        auto expectedStop = stopReq;
+        if (pendingStopRequest.compare_exchange_strong (expectedStop, 0,
+                                                        std::memory_order_acq_rel,
+                                                        std::memory_order_relaxed))
+        {
+            const auto run = (uint32_t) (stopReq >> 32);
+            if (run == transportSession.load (std::memory_order_relaxed))
+                stopPlayback (true);
+        }
+    }
 
     const auto req = pendingPageRequest.load (std::memory_order_acquire);
     if (req == 0) return;
 
-    // Clear before applying: a newer request that arrives meanwhile is handled
-    // on the next tick rather than being lost or applied out of order.
+    // Clear before applying. If a newer request replaced this one meanwhile, the
+    // clear fails and this stale page must not be applied: the newer request is
+    // applied on the next tick.
     auto expected = req;
-    pendingPageRequest.compare_exchange_strong (expected, 0,
-                                                std::memory_order_acq_rel,
-                                                std::memory_order_relaxed);
+    if (! pendingPageRequest.compare_exchange_strong (expected, 0,
+                                                     std::memory_order_acq_rel,
+                                                     std::memory_order_relaxed))
+        return;
 
     const int epoch = (int) (uint32_t) (req >> 32);
     const int next  = (int) (uint32_t) (req & 0xffffffffu) - 1;

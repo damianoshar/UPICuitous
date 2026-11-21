@@ -2717,6 +2717,46 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
             for (int b = 0; b < 4; ++b)
                 render();
         }
+
+        // --- a deferred stop must not cancel a new run ----------------------
+        // The audio thread raises a stop request at the end of the piece. If the
+        // user presses Play before the timer drains it, that request belongs to
+        // the previous run and must be dropped rather than stopping the new one.
+        {
+            check (mc.loadFromVar (juce::JSON::parse (makePiece (0.1))),
+                   "F1: deferred stop - the piece loads");
+
+            setMode (false, false);
+            mc.timerCallback();
+            render();
+
+            mc.clickPlayForTest();
+
+            int blocks = 0;
+            while (mc.transportStateForTest() != TS::stopped && blocks < 40)
+            {
+                render();
+                ++blocks;
+            }
+            check (mc.transportStateForTest() == TS::stopped,
+                   "F1: deferred stop - the piece reached its end");
+
+            // Play again BEFORE the timer has drained the pending stop.
+            mc.clickPlayForTest();
+            check (mc.transportStateForTest() == TS::starting,
+                   "F1: deferred stop - the new run starts",
+                   stateName (mc.transportStateForTest()));
+
+            mc.timerCallback();   // the previous run's stop request is drained here
+
+            check (mc.transportStateForTest() == TS::starting && mc.isPlayingForTest(),
+                   "F1: deferred stop - the old request does not stop the new run",
+                   stateName (mc.transportStateForTest()));
+
+            mc.stopPlaybackForTest();
+            for (int b = 0; b < 4; ++b)
+                render();
+        }
     }
 
     // --- double-click Stop rewinds, but only a real double click ---------

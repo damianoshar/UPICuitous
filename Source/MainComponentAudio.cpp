@@ -502,8 +502,18 @@ double MainComponent::displayPlayhead() const
                : playheadSec;
 }
 
+// Called from the audio thread. Stores only: no allocation, no lock.
+void MainComponent::requestStopFromAudio() noexcept
+{
+    const auto run = (uint64_t) (uint32_t) transportSession.load (std::memory_order_relaxed);
+    pendingStopRequest.store ((run << 32) | 1u, std::memory_order_release);
+}
+
 void MainComponent::startPlayback()
 {
+    // A new run: any deferred stop raised for the previous run is now stale.
+    transportSession.fetch_add (1, std::memory_order_acq_rel);
+
     const auto state = transport();
 
     // F1: Play while the transport is starting or playing is a no-op. The
@@ -1498,8 +1508,8 @@ void MainComponent::applyTransportGain (float* SL, float* SR, int n, double sr,
                                                     std::memory_order_relaxed))
         {
             engine.reset();
-            // UI must not be touched from the audio thread -> SafePointer.
-            pendingStopAtEnd.store (true, std::memory_order_release);
+            // the transport cannot be stopped from here: raise the request.
+            requestStopFromAudio();
         }
     }
 }
@@ -1544,9 +1554,12 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
     // message-queue lock. It publishes a packed (epoch, page) request instead,
     // and the 30 Hz timer applies it on the message thread. The epoch guard
     // drops a late request if the user changed the page structure meanwhile.
-    const auto notifyPage = [this](int next)
+    const auto notifyPage = [this, &snap](int next)
     {
-        const auto epoch = (uint64_t) (uint32_t) pageEpoch.load(std::memory_order_relaxed);
+        // The epoch of the snapshot this decision came from, not the live one:
+        // a piece replaced meanwhile must not lend its epoch to an older page
+        // choice.
+        const auto epoch = (uint64_t) (uint32_t) snap.pageEpoch;
         const auto page  = (uint64_t) (uint32_t) (next + 1);   // +1: 0 means "none"
         pendingPageRequest.store ((epoch << 32) | page, std::memory_order_release);
     };
@@ -1679,7 +1692,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                               std::memory_order_relaxed);
                         playheadAtEnd.store(false, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
-            pendingStopAtEnd.store (true, std::memory_order_release);
+                        requestStopFromAudio();
                         return;
                     }
                 }
@@ -1709,7 +1722,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                           std::memory_order_relaxed);
                     playheadAtEnd.store(false, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
-            pendingStopAtEnd.store (true, std::memory_order_release);
+                    requestStopFromAudio();
                     return;
                 }
             }
@@ -1729,7 +1742,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                               std::memory_order_relaxed);
                         playheadAtEnd.store(true, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
-            pendingStopAtEnd.store (true, std::memory_order_release);
+                        requestStopFromAudio();
                         return;
                     }
                 }
@@ -1748,7 +1761,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                           std::memory_order_relaxed);
                     playheadAtEnd.store(true, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
-            pendingStopAtEnd.store (true, std::memory_order_release);
+                    requestStopFromAudio();
                     return;
                 }
             }
