@@ -433,6 +433,33 @@ void MainComponent::buildFrequencyControls()
         const int i = seqBox.getSelectedId() - 1;
         if (i >= 0 && i < (int) sequences.size()) selSeqId = sequences[(size_t) i].id;
         refreshSequencePanel();
+    // --- WP6.4: the mixer UI ---
+    // NOTE FOR WP7: this block only adds the Ch combo / Mix button. WP7's
+    // library and extraction controls belong in their own marked block so a
+    // parallel merge keeps both toolbars intact.
+    addAndMakeVisible (channelLab);
+    addAndMakeVisible (channelBox);
+    addAndMakeVisible (channelBtn);
+    channelLab.setName ("channelLab");
+    channelBox.setName ("channelBox");
+    channelBtn.setName ("channelBtn");
+    channelLab.setJustificationType (juce::Justification::centredRight);
+    channelLab.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+    channelBox.setTooltip ("The mixer channel the selected arcs play on");
+    channelBtn.setTooltip ("The mixer: channel levels, mute/solo and routing");
+    channelBtn.onClick = [this]{ showChannelPanel(); };
+    refreshChannelBox();
+    channelBox.onChange = [this]
+    {
+        if (! channelBoxReady || channelBoxRefreshing || refreshingControls) return;
+        const int item = channelBox.getSelectedId();
+        if (item <= 1) { setChannelOnSelection (0); return; }
+        const int idx2 = juce::jlimit (0, (int) channels.size() - 1, item - 2);
+        if (idx2 >= 0 && idx2 < (int) channels.size())
+            setChannelOnSelection (channels[(size_t) idx2].id);
+    };
+    channelBoxReady = true;
+    // --- end WP6.4 ---
     };
     seqRecBtn.onClick = [this]
     {
@@ -1388,6 +1415,159 @@ void MainComponent::toggleSequenceLoop()
     refreshSequencePanel();
     flash (sequences[(size_t) idx].loop ? "Sequence loops" : "Sequence plays once");
 }
+// --- WP6.4: the mixer commands ---
+// NOTE FOR WP7: keep the library/extraction host commands in their own
+// marked section; these functions only touch the channel bank.
+
+int MainComponent::channelIndexOfId (int id) const
+{
+    for (int i = 0; i < (int) channels.size(); ++i)
+        if (channels[(size_t) i].id == id) return i;
+    return -1;
+}
+
+void MainComponent::refreshChannelBox()
+{
+    channelBoxRefreshing = true;
+    channelBox.clear (juce::dontSendNotification);
+    channelBox.addItem ("Main", 1);
+    for (int i = 0; i < (int) channels.size(); ++i)
+        channelBox.addItem (channels[(size_t) i].name, i + 2);
+    int cur = 0;
+    const auto ids = score.getSelectedArcs();
+    if (! ids.empty())
+        for (auto& a : curPage().arcs)
+            if (a.id == ids.front()) { cur = a.channelId; break; }
+    const int idx = channelIndexOfId (cur);
+    channelBox.setSelectedId (idx < 0 ? 1 : idx + 2, juce::dontSendNotification);
+    channelBoxRefreshing = false;
+}
+
+void MainComponent::setChannelOnSelection (int channelId)
+{
+    if (channelId > 0 && channelIndexOfId (channelId) < 0)
+    { flash ("That channel is not in the mixer"); return; }
+    const auto ids = score.getSelectedArcs();
+    if (ids.empty()) { flash ("Select arcs first"); return; }
+    beginEdit ("Routing the arcs");
+    {
+        const juce::ScopedLock l (dataLock);
+        for (auto& a : curPage().arcs)
+            if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
+                a.channelId = channelId;
+    }
+    markModelChanged();
+    endEdit();
+    publishModelSnapshot();
+    refreshChannelBox();
+    score.repaint();
+    flash (channelId == 0 ? "Arcs on Main"
+                          : "Arcs on " + channels[(size_t) juce::jmax (0, channelIndexOfId (channelId))].name);
+}
+
+void MainComponent::refreshChannelPanel()
+{
+    if (channelPanel != nullptr)
+        channelPanel->setChannels (channels, juce::jmax (0, channelIndexOfId (selChannelId)));
+}
+
+void MainComponent::showChannelPanel()
+{
+    auto colourFor = [] (int id)
+    {
+        static const juce::uint32 palette[] = { 0xff5ac8fa, 0xff9a7ad0, 0xff6ac08a,
+                                                0xffd0a050, 0xffd07272, 0xff50b8b8 };
+        return juce::Colour (palette[(size_t) (juce::jmax (0, id - 1) % 6)]);
+    };
+
+    // WP6.4 safety: construct lazily, on the message thread, once.
+    if (channelPanel == nullptr)
+    {
+        channelPanel = std::make_unique<ChannelPanel>();
+        addChildComponent (*channelPanel);
+        channelPanel->onClose = [this]{ closeChannelPanel(); };
+        channelPanel->themeSliders();
+    }
+    channelPanel->onSelectIndex = [this] (int i)
+    {
+        if (i >= 0 && i < (int) channels.size()) selChannelId = channels[(size_t) i].id;
+        refreshChannelBox();
+    };
+    channelPanel->onRename = [this] (int i, const juce::String& name)
+    {
+        if (i < 0 || i >= (int) channels.size() || name.isEmpty()) return;
+        beginEdit ("Rename the channel");
+        { const juce::ScopedLock l (dataLock); channels[(size_t) i].name = name.substring (0, 64); }
+        markModelChanged(); endEdit(); publishModelSnapshot();
+        refreshChannelPanel(); refreshChannelBox();
+    };
+    channelPanel->onMuteSolo = [this] (int i, bool muted, bool solo)
+    {
+        if (i < 0 || i >= (int) channels.size()) return;
+        beginEdit ("Channel mute/solo");
+        { const juce::ScopedLock l (dataLock); channels[(size_t) i].muted = muted; channels[(size_t) i].solo = solo; }
+        markModelChanged(); endEdit(); publishModelSnapshot(); refreshChannelPanel(); score.repaint();
+    };
+    channelPanel->onGain = [this] (int i, float gain)
+    {
+        if (i < 0 || i >= (int) channels.size()) return;
+        beginEdit ("Channel gain");
+        { const juce::ScopedLock l (dataLock); channels[(size_t) i].gain = juce::jlimit (0.0f, 2.0f, gain); }
+        markModelChanged(); endEdit(); publishModelSnapshot(); score.repaint();
+    };
+    channelPanel->onNew = [this, colourFor]
+    {
+        if ((int) channels.size() >= upic::limits::kMaxChannels) { flash ("The mixer is full"); return; }
+        beginEdit ("New channel");
+        int newId = 1;
+        {
+            const juce::ScopedLock l (dataLock);
+            newId = juce::jlimit (1, upic::limits::kMaxItemId, nextChannelId);
+            nextChannelId = juce::jmin (upic::limits::kMaxItemId, newId + 1);
+            upic::Channel c;
+            c.id = newId;
+            c.name = "Channel " + juce::String (newId);
+            c.colour = colourFor (newId);
+            channels.push_back (c);
+        }
+        selChannelId = newId;
+        markModelChanged(); endEdit(); publishModelSnapshot();
+        refreshChannelPanel(); refreshChannelBox();
+        flash ("Channel " + juce::String (newId) + " added");
+    };
+    channelPanel->onDelete = [this]
+    {
+        const int i = channelIndexOfId (selChannelId);
+        if (i < 0) return;
+        const int removedId = channels[(size_t) i].id;
+        beginEdit ("Delete the channel");
+        {
+            const juce::ScopedLock l (dataLock);
+            channels.erase (channels.begin() + i);
+            for (auto& pg : pages)
+            {
+                for (auto& a : pg.arcs) if (a.channelId == removedId) a.channelId = 0;
+                for (auto& g : pg.groups) if (g.channelId == removedId) g.channelId = -1;
+            }
+        }
+        selChannelId = channels.empty() ? -1 : channels.front().id;
+        markModelChanged(); endEdit(); publishModelSnapshot();
+        refreshChannelPanel(); refreshChannelBox(); score.repaint();
+        flash ("Channel deleted - its arcs return to Main");
+    };
+
+    refreshChannelPanel();
+    channelPanel->setVisible (true);
+    channelPanel->toFront (true);
+    channelPanel->setBounds (getLocalBounds());
+}
+
+void MainComponent::closeChannelPanel()
+{
+    if (channelPanel != nullptr) channelPanel->setVisible (false);
+    grabKeyboardFocus();
+}
+// --- end WP6.4 ---
 //---------------- WP5: the independent modulating arcs ----------------
 
 bool MainComponent::modWouldCycle (int carrierId, int modId) const

@@ -101,6 +101,7 @@ void MainComponent::refreshBoxes()
     refreshGroupPanel();    // WP3
     refreshSequencePanel();  // WP4
     refreshModBox();         // WP5
+    refreshChannelBox();     // WP6.4
 
     // v1.33: the ambitus - the combo shows the preset that matches, or
     // "Custom" when the page carries an interval of its own

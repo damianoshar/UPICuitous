@@ -417,7 +417,11 @@ void MainComponent::buildScoreArea()
     // change starts and when it is over; the app keeps the state from
     // before it (one snapshot per gesture - a drag is one undo step).
     score.onEditStart = [this](const juce::String& what){ beginEdit (what); };
-    score.onEditEnd   = [this]{ endEdit(); };
+    score.onEditEnd   = [this]{
+        endEdit();
+        // v1.36: publish after the commit, not before it.
+        publishModelSnapshot();
+    };
     score.onUndo = [this]{ undo(); };
     score.onRedo = [this]{ redo(); };
 }
@@ -956,6 +960,10 @@ void MainComponent::resized()
     groups.push_back ({ "mod", { FI(&arcModLab, 30, &arcModBox, 100),
                                   FI(&arcModTgtLab, 26, &arcModTgtBox, 66),
                                   FI(&arcModDepthLab, 36, &arcModSlider, 110) } });
+    // --- WP6.4: the mixer (WP7 adds its own card in its marked block) ---
+    groups.push_back ({ "ch", { FI(&channelLab, 26, &channelBox, 100),
+                                F(&channelBtn, 62) } });
+    // --- end WP6.4 ---
 
     // WP4: the performance sequences.
     groups.push_back ({ "seq", { FI(&seqLab, 30, &seqBox, 110),
@@ -2035,6 +2043,7 @@ void MainComponent::layoutOverlays (float s)
     ampTableEd.setBounds (getLocalBounds());
     groupPanel.setBounds (getLocalBounds());
     seqPanel.setBounds (getLocalBounds());
+    if (channelPanel != nullptr) channelPanel->setBounds (getLocalBounds()); // WP6.4
 
     // v1.7 audio settings overlay: full-window backdrop + centred card
     audioOverlay.setBounds(getLocalBounds());

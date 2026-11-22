@@ -20,6 +20,7 @@
 #include "AmpTableEditor.h"
 #include "GroupPanel.h"
 #include "SequencePanel.h"
+#include "ChannelPanel.h"
 #include "OscScrubReceiver.h"
 #include "JobRunner.h"
 #include "UpicButtonIcons.h"
@@ -364,6 +365,21 @@ public:
     { return (i >= 0 && i < (int) curPage().groups.size()) ? curPage().groups[(size_t) i].id : -1; }
     int groupMemberCountAtForTest (int i) const
     { return (i >= 0 && i < (int) curPage().groups.size()) ? (int) curPage().groups[(size_t) i].arcIds.size() : -1; }
+    // --- WP6.4 test accessors ---
+    bool channelMutedAtForTest (int i) const { return i >= 0 && i < (int) channels.size() && channels[(size_t) i].muted; }
+    bool channelSoloAtForTest (int i) const { return i >= 0 && i < (int) channels.size() && channels[(size_t) i].solo; }
+    bool channelPanelOpenForTest() const { return channelPanel != nullptr && channelPanel->isVisible(); }
+    void openChannelPanelForTest() { showChannelPanel(); }
+    void closeChannelPanelForTest() { closeChannelPanel(); }
+    void channelNewForTest() { if (channelPanel != nullptr) channelPanel->newForTest(); }
+    void channelDeleteForTest() { if (channelPanel != nullptr) channelPanel->deleteForTest(); }
+    void channelSelectForTest (int i) { if (channelPanel != nullptr) channelPanel->selectForTest (i); }
+    void channelMuteForTest (bool on) { if (channelPanel != nullptr) channelPanel->muteForTest (on); }
+    void channelSoloForTest (bool on) { if (channelPanel != nullptr) channelPanel->soloForTest (on); }
+    void channelGainForTest (float v) { if (channelPanel != nullptr) channelPanel->gainForTest (v); }
+    void channelRenameForTest (const juce::String& n) { if (channelPanel != nullptr) channelPanel->renameForTest (n); }
+    void channelAssignForTest (int id) { setChannelOnSelection (id); }
+    // --- end WP6.4 ---
     int arcGroupIdForTest (int arcId) const
     {
         for (auto& g : curPage().groups)
@@ -1384,6 +1400,21 @@ private:
 
     // WP4: the performance sequences.
     juce::Label seqLab{ {}, "Seq" };
+    // --- WP6.4: the mixer UI (the channel model is WP6.1) ---
+    // NOTE: WP7 adds its library/extraction controls in its own marked
+    // block below; keep edits inside these markers.
+    juce::Label channelLab{ {}, "Ch" };
+    juce::ComboBox channelBox;
+    juce::TextButton channelBtn{ "Mix..." };
+    std::unique_ptr<ChannelPanel> channelPanel;
+    bool channelBoxReady = false;
+    bool channelBoxRefreshing = false;
+    // v1.36: true while refreshBoxes() repopulates the controls. A combo
+    // change caused by that refresh must not edit the model or begin an
+    // undo transaction - a stroke-end refresh would otherwise apply the
+    // previous toolbar selection to the arc that was just drawn.
+    bool refreshingControls = false;
+    // --- end WP6.4 ---
 
 
     juce::ComboBox seqBox;
@@ -1601,6 +1632,14 @@ private:
     void showSequencePanel();               // WP4: the performance sequences
     void closeSequencePanel();
     void refreshSequencePanel();
+    // --- WP6.4: the mixer ---
+    void refreshChannelBox();
+    void refreshChannelPanel();
+    void showChannelPanel();
+    void closeChannelPanel();
+    void setChannelOnSelection (int channelId);
+    int  channelIndexOfId (int id) const;
+    // --- end WP6.4 ---
 
     int  sequenceIndexOfId (int id) const;
     void startSequenceRecording();
@@ -1662,7 +1701,7 @@ public:
     void updateMidiScrubForTest() { updateMidiScrub(); }
     bool midiScrubRunning() const { return scrubActive; }
     double playRateForTest() const { return playRate.load (std::memory_order_relaxed); }
-    // Piece (de)serialization ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β public so the selftest can round-trip them.
+    // Piece (de)serialization ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β public so the selftest can round-trip them.
     juce::var pieceToVar() const;
     // v1.33.4 (M28): the piece as a self-contained model, captured under the
     // lock - the worker thread builds the JSON (and the base64 of the
