@@ -1055,6 +1055,10 @@ private:
     bool   scrubActive = false;
     bool   scrubAudition = true;            // v1.28: short audio preview while scrubbing
     std::atomic<bool> arcEditing { false }; // an arc is being dragged/drawn
+    double lastScoreRepaintPlayhead = -1.0;    // v1.36: idle paint gate
+    juce::String lastStatusText, lastTimeText; // v1.36: label repaint gates
+    uint64_t lastStatusLayoutMs = 0;          // v1.36: relayout cooldown
+    int timerHzNow = 30;                      // v1.36: idle rate
     std::atomic<bool> muteWhileDragging { true };        // skip model publishes while editing
     std::atomic<int> dragSmoothMs { 20 };              // fade time on release
     std::atomic<bool> scrubPreviewActive { false };

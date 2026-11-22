@@ -295,7 +295,7 @@ void MainComponent::buildTransportControls()
 
 void MainComponent::buildViewToggles()
 {
-    // v1.7: view toggles ΞΒ²Ξ²β€Β¬Ξ²β‚¬Β hide the waveform/envelope editors at the bottom
+    // v1.7: view toggles ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β€Β¬Ξ’Β hide the waveform/envelope editors at the bottom
     // and the instruction hints, so the canvas gains the space. View state
     // only: nothing here changes the piece.
     for (auto* t : { &waveTog, &envTog, &hintsTog })
@@ -945,8 +945,12 @@ void MainComponent::timerCallback()
     }
     const double dur = curPage().durationSec;
     const bool revNow = playRate.load(std::memory_order_relaxed) < 0.0;
-    timeLab.setText((revNow ? juce::String("REV ") : juce::String()) + juce::String(displayPlayhead(), 1) + " / " + juce::String(dur, 1) + " s",
-                    juce::dontSendNotification);
+    const juce::String timeText = (revNow ? juce::String("REV ") : juce::String()) + juce::String(displayPlayhead(), 1) + " / " + juce::String(dur, 1) + " s";
+    if (timeText != lastTimeText)
+    {
+        lastTimeText = timeText;
+        timeLab.setText (timeText, juce::dontSendNotification);
+    }
 
     // v1.16: the latency the host has to compensate for this page (0 = the
     // score is sample-accurate). Shown in the status line so the delay is
@@ -1028,13 +1032,19 @@ void MainComponent::timerCallback()
         }
         else s += "draw curves; assign voice per arc.";
     }
-    statusLab.setText(s, juce::dontSendNotification);
+    if (s != lastStatusText)
+    {
+        lastStatusText = s;
+        statusLab.setText (s, juce::dontSendNotification);
+    }
     // v1.34.5: the status card is measured to its text. Re-flow the cards
     // when the string needs materially more or less room (a selection, a
     // job, an indicator); the band keeps the per-tick drag updates - which
     // only move a digit - from re-laying out. The re-flow is async: the
     // timer holds the model lock, and layout reads the UI only.
-    if (! statusLayoutPending && statusLab.getWidth() > 0)
+    const uint64_t __nowMs = (uint64_t) juce::Time::getMillisecondCounter();
+    if (! statusLayoutPending && statusLab.getWidth() > 0
+        && __nowMs - lastStatusLayoutMs >= 750)
     {
         const float sc = appLaf.uiScale;
         const int textW = juce::GlyphArrangement::getStringWidthInt (
@@ -1047,6 +1057,7 @@ void MainComponent::timerCallback()
             || need < have - juce::jmax (16, have / 4))
         {
             statusLayoutPending = true;
+            lastStatusLayoutMs = __nowMs;
             juce::MessageManager::callAsync (
                 [safe = juce::Component::SafePointer<MainComponent> (this)]
                 {
@@ -1058,7 +1069,15 @@ void MainComponent::timerCallback()
                 });
         }
     }
-    score.repaint();
+    {
+        const double ph = displayPlayhead();
+        if (transportActive() || scrubActive
+            || std::abs (ph - lastScoreRepaintPlayhead) > 1.0e-4)
+        {
+            lastScoreRepaintPlayhead = ph;
+            score.repaint();
+        }
+    }
 
     // v1.16: publish the latency the host has to compensate. The host can
     // only take one number, and it must not change per block - so it is
@@ -1073,6 +1092,14 @@ void MainComponent::timerCallback()
 
     // v1.33.4 (H3): the host's transport drives the app when the mode is on
     applyHostTransport();
+
+    // v1.36: idle at 10 Hz; 30 Hz only while a gesture is running.
+    const int wantHz = (transportActive() || scrubActive || seqRecording) ? 30 : 10;
+    if (wantHz != timerHzNow)
+    {
+        timerHzNow = wantHz;
+        startTimerHz (wantHz);
+    }
 }
 
 void MainComponent::publishLatency()
