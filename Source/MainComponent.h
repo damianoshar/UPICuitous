@@ -377,6 +377,7 @@ public:
     void channelMuteForTest (bool on) { if (channelPanel != nullptr) channelPanel->muteForTest (on); }
     void channelSoloForTest (bool on) { if (channelPanel != nullptr) channelPanel->soloForTest (on); }
     void channelGainForTest (float v) { if (channelPanel != nullptr) channelPanel->gainForTest (v); }
+    void channelCurveForTest (const std::vector<upic::EnvPoint>& pts) { if (channelPanel != nullptr) channelPanel->curveForTest (pts); }
     void channelRenameForTest (const juce::String& n) { if (channelPanel != nullptr) channelPanel->renameForTest (n); }
     void channelAssignForTest (int id) { setChannelOnSelection (id); }
     // --- end WP6.4 ---

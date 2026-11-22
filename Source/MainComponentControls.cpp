@@ -1515,6 +1515,21 @@ void MainComponent::showChannelPanel()
         { const juce::ScopedLock l (dataLock); channels[(size_t) i].gain = juce::jlimit (0.0f, 2.0f, gain); }
         markModelChanged(); endEdit(); publishModelSnapshot(); score.repaint();
     };
+    channelPanel->onCurve = [this] (int i, const std::vector<upic::EnvPoint>& pts)
+    {
+        if (i < 0 || i >= (int) channels.size()) return;
+        beginEdit ("Channel gain curve");
+        {
+            const juce::ScopedLock l (dataLock);
+            channels[(size_t) i].envelope = pts;
+        }
+        markModelChanged();
+        endEdit();
+        publishModelSnapshot();
+        refreshChannelPanel();
+        score.repaint();
+        flash ("Channel gain curve updated");
+    };
     channelPanel->onNew = [this, colourFor]
     {
         if ((int) channels.size() >= upic::limits::kMaxChannels) { flash ("The mixer is full"); return; }

@@ -2828,3 +2828,51 @@ void upic::runChannelModelChecks (upic::SelfTest& t)
                juce::String (mc2.channelCountForTest()) + " channels");
     }
 }
+
+//==============================================================================
+// WP6.4: the mixer panel's commands (open, channels, routing, curve, undo).
+void upic::runChannelUiChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    MainComponent mc (true);
+    const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":440},{"t":2,"f":440}]},{"id":2,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":330},{"t":2,"f":330}]}]}]})";
+    check (mc.loadFromVar (juce::JSON::parse (json)), "mixer ui: the piece loads");
+    check (! mc.channelPanelOpenForTest(), "mixer ui: the panel starts closed");
+    mc.openChannelPanelForTest();
+    check (mc.channelPanelOpenForTest(), "mixer ui: the panel opens");
+
+    mc.channelNewForTest();
+    check (mc.channelCountForTest() == 1, "mixer ui: New adds a channel");
+    const int id = mc.channelIdAtForTest (0);
+
+    mc.channelRenameForTest ("Wood");
+    mc.channelGainForTest (0.6f);
+    mc.channelMuteForTest (true);
+    check (std::abs (mc.channelGainAtForTest (0) - 0.6f) < 1e-6f
+           && mc.channelMutedAtForTest (0),
+           "mixer ui: gain and mute reach the model");
+    mc.channelMuteForTest (false);
+
+    mc.channelCurveForTest ({ { 0.0f, 0.25f }, { 1.0f, 0.75f } });
+    check (mc.channelEnvelopePointsAtForTest (0) == 2,
+           "mixer ui: a drawn curve reaches the bank");
+
+    mc.selectArcsForTest ({ 1, 2 });
+    mc.channelAssignForTest (id);
+    check (mc.arcChannelForTest (1) == id && mc.arcChannelForTest (2) == id,
+           "mixer ui: the panel routes the selection");
+
+    mc.channelDeleteForTest();
+    check (mc.channelCountForTest() == 0 && mc.arcChannelForTest (1) == 0,
+           "mixer ui: deleting the channel returns its arcs to Main");
+    mc.undo();
+    check (mc.channelCountForTest() == 1 && mc.arcChannelForTest (1) == id,
+           "mixer ui: the delete is one undo step");
+
+    mc.closeChannelPanelForTest();
+    check (! mc.channelPanelOpenForTest(), "mixer ui: the panel closes");
+}
