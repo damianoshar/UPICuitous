@@ -302,7 +302,7 @@ void MainComponent::buildTransportControls()
 
 void MainComponent::buildViewToggles()
 {
-    // v1.7: view toggles ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β€Β¬Ξ’Β hide the waveform/envelope editors at the bottom
+    // v1.7: view toggles — hide the waveform/envelope editors at the bottom
     // and the instruction hints, so the canvas gains the space. View state
     // only: nothing here changes the piece.
     for (auto* t : { &waveTog, &envTog, &hintsTog })

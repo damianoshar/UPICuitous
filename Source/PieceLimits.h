@@ -10,7 +10,7 @@
 // minutes on every block.
 //
 // Every parser clamps against these numbers, so a malformed piece is
-// truncated rather than rejected β€” the app still opens it, it just cannot
+// truncated rather than rejected — the app still opens it, it just cannot
 // be used as a denial-of-service vector.
 //
 // v1.30 (UPIC): added with the security hardening (S-03).
@@ -58,8 +58,8 @@ namespace upic
 
         // --- the arrays in a piece ---
         constexpr int kMaxPages = 100;
-        // The real UPIC's page carried 2024 arcs (MΓΆche) or 4000
-        // (RobindorΓ©); the clone follows the smaller number. This is a
+        // The real UPIC's page carried 2024 arcs (Mâche) or 4000
+        // (Robindoré); the clone follows the smaller number. This is a
         // memory and parse guard, not a realtime one - the engine's
         // overload guard (U6 option B) bounds what the audio thread is
         // asked to do, and the cursor render path (option C) made the

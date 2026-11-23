@@ -526,7 +526,7 @@ private:
     bool pitchMagnet(int& m, std::vector<int>& R, double t, double f) const;
 
     // Next magnetically allowed pitch strictly above (dir>0) or below (dir<0)
-    // the current one β€” so arrow steps always land ON the sieve.
+    // the current one — so arrow steps always land ON the sieve.
     // v1.33: the steps stay inside the page's ambitus, like the drawing.
     double nextAllowedPitch(double f, int dir, double t) const;
 

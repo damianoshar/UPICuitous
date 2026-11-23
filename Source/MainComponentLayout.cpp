@@ -719,7 +719,7 @@ void MainComponent::resized()
     // whole component tree is placed in dp space (Main.cpp sets the JUCE
     // global scale factor to the display density), so controls keep a
     // constant physical size. Narrow windows wrap toolbar rows; if the
-    // height budget still doesn't fit, the grid shrinks (down to 55%) β€”
+    // height budget still doesn't fit, the grid shrinks (down to 55%) —
     // tablets stay at 1x, small screens degrade gracefully.
     struct FlowItem
     {

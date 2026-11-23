@@ -57,7 +57,7 @@ namespace upic
 
         //---------------- the page's acceleration (v1.33) ----------------
         // The UPIC's page could be expanded and contracted in time "with the
-        // additional option of acceleration and deceleration" (RobindorΓ©):
+        // additional option of acceleration and deceleration" (Robindoré):
         // the page's own time ran at a varying rate. The warp is a tempo
         // sweep across the page: 0 is a straight line (the rate is 1 all
         // the way), a positive value starts slow and speeds up, a negative

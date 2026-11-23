@@ -73,7 +73,7 @@ namespace upic
         // continuum, where a diagonal line is a glissando - or "discrete",
         // with equal temperaments of 1..99 divisions per octave: "the same
         // diagonal arc would then sound like discrete steps in a defined
-        // temperament" (Brigitte RobindorΓ©, in "From Xenakis's UPIC to
+        // temperament" (Brigitte Robindoré, in "From Xenakis's UPIC to
         // Graphic Notation Today", Hatje Cantz 2024).
         //
         // The sieve (above) snaps the DRAWN points; this steps the SOUND.
