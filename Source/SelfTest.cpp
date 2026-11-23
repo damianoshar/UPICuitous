@@ -90,6 +90,7 @@ int upic::runSelfTest()
     upic::runModulationChecks (t);
     upic::runModulationSemanticsChecks (t);
     upic::runChannelModelChecks (t);
+    upic::runChannelUiChecks (t);
     upic::runChannelRoutingChecks (t);
     upic::runUntrustedPieceChecks (t);
     upic::runModelMathChecks (t);

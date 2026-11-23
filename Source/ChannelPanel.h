@@ -21,6 +21,7 @@ public:
     std::function<void (int index, const juce::String&)> onRename;
     std::function<void (int index, bool muted, bool solo)> onMuteSolo;
     std::function<void (int index, float gain)> onGain;
+    std::function<void (int index, const std::vector<upic::EnvPoint>&)> onCurve;
     std::function<void()> onNew, onDelete, onClose;
 
     ChannelPanel()
@@ -76,6 +77,19 @@ public:
         gainLab.setText ("Gain", juce::dontSendNotification);
         addAndMakeVisible (gainLab);
 
+        for (auto* b : { &flatBtn, &riseBtn, &fallBtn })
+        {
+            b->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff34343f));
+            addAndMakeVisible (b);
+        }
+        flatBtn.setName ("chFlatBtn"); riseBtn.setName ("chRiseBtn"); fallBtn.setName ("chFallBtn");
+        flatBtn.setTooltip ("A flat channel curve");
+        riseBtn.setTooltip ("A curve rising across the page");
+        fallBtn.setTooltip ("A curve falling across the page");
+        flatBtn.onClick = [this]{ commitPreset (0); };
+        riseBtn.onClick = [this]{ commitPreset (1); };
+        fallBtn.onClick = [this]{ commitPreset (2); };
+
         setVisible (false);
     }
 
@@ -95,7 +109,7 @@ public:
         shown = bank;
         sel = shown.empty() ? -1 : juce::jlimit (0, (int) shown.size() - 1, index);
         const bool on = sel >= 0;
-        for (auto* b : { &delBtn, &renameBtn }) b->setEnabled (on);
+        for (auto* b : { &delBtn, &renameBtn, &flatBtn, &riseBtn, &fallBtn }) b->setEnabled (on);
         nameEd.setEnabled (on);
         muteBtn.setEnabled (on);
         soloBtn.setEnabled (on);
@@ -121,8 +135,8 @@ public:
     juce::Rectangle<int> cardRect() const
     {
         auto r = getLocalBounds().reduced (10);
-        return juce::Rectangle<int> (juce::jmin (640, r.getWidth()),
-                                     juce::jmin (420, r.getHeight())).withCentre (r.getCentre());
+        return juce::Rectangle<int> (juce::jmin (760, r.getWidth()),
+                                     juce::jmin (500, r.getHeight())).withCentre (r.getCentre());
     }
     juce::Rectangle<int> listRect() const
     {
@@ -130,6 +144,16 @@ public:
         inner.removeFromTop (titleH);
         inner.removeFromBottom (bottomH);
         return inner.removeFromLeft (listW);
+    }
+
+    juce::Rectangle<float> plotRect() const
+    {
+        auto inner = cardRect().reduced (18, 12);
+        inner.removeFromTop (titleH);
+        inner.removeFromBottom (bottomH + presetH);
+        inner.removeFromLeft (listW + 16);
+        inner.removeFromTop (56); // gain + mute/solo rows
+        return inner.toFloat();
     }
 
     void paint (juce::Graphics& g) override
@@ -174,6 +198,40 @@ public:
             g.drawFittedText ("No channels. Arcs play on Main.\nPress New to add one.",
                               list.reduced (10), juce::Justification::centred, 3);
         }
+
+        const auto plot = plotRect();
+        g.setColour (juce::Colour (0xff14141a));
+        g.fillRect (plot);
+        g.setColour (juce::Colour (0xff3a4a6a));
+        g.drawRect (plot, 1.0f);
+        g.setColour (juce::Colour (0xff2a2a36));
+        for (int q = 1; q < 4; ++q)
+            g.drawHorizontalLine ((int) (plot.getY() + plot.getHeight() * (float) q / 4.0f),
+                                  plot.getX(), plot.getRight());
+        const std::vector<upic::EnvPoint>* pts = nullptr;
+        if (dragging) pts = &dragPts;
+        else if (sel >= 0 && sel < (int) shown.size() && ! shown[(size_t) sel].envelope.empty())
+            pts = &shown[(size_t) sel].envelope;
+        if (pts != nullptr)
+        {
+            juce::Path path;
+            path.startNewSubPath (xFor ((*pts)[0].x), yFor ((*pts)[0].y));
+            for (size_t i = 1; i < pts->size(); ++i)
+                path.lineTo (xFor ((*pts)[i].x), yFor ((*pts)[i].y));
+            g.setColour (juce::Colour (0xff5ac8fa));
+            g.strokePath (path, juce::PathStrokeType (2.0f));
+        }
+        else
+        {
+            g.setColour (juce::Colour (0x605ac8fa));
+            g.drawHorizontalLine ((int) yFor (1.0f), plot.getX(), plot.getRight());
+        }
+        g.setColour (juce::Colour (0xff7a7a88));
+        g.setFont (juce::Font (juce::FontOptions (10.0f)));
+        g.drawText ("channel gain curve (draw, or use a preset)",
+                    juce::Rectangle<float> (plot.getX(), plot.getBottom() + 2.0f,
+                                            plot.getWidth(), 12.0f),
+                    juce::Justification::centredLeft);
     }
 
     void resized() override
@@ -201,20 +259,58 @@ public:
         muteBtn.setBounds (ms.removeFromLeft (60));
         ms.removeFromLeft (6);
         soloBtn.setBounds (ms.removeFromLeft (60));
+        auto presets = inner.removeFromBottom (presetH).reduced (0, 4);
+        flatBtn.setBounds (presets.removeFromLeft (56));
+        presets.removeFromLeft (6);
+        riseBtn.setBounds (presets.removeFromLeft (84));
+        presets.removeFromLeft (6);
+        fallBtn.setBounds (presets.removeFromLeft (84));
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
         if (! cardRect().contains (e.getPosition())) { close(); return; }
         auto list = listRect();
-        if (! list.contains (e.getPosition())) return;
-        const int i = (e.getPosition().y - list.getY() - 2) / rowH;
-        if (i >= 0 && i < (int) shown.size())
+        if (list.contains (e.getPosition()))
         {
-            sel = i;
-            if (onSelectIndex) onSelectIndex (sel);
-            setChannels (shown, sel);
+            const int i = (e.getPosition().y - list.getY() - 2) / rowH;
+            if (i >= 0 && i < (int) shown.size())
+            {
+                sel = i;
+                if (onSelectIndex) onSelectIndex (sel);
+                setChannels (shown, sel);
+            }
+            return;
         }
+        if (plotRect().contains (e.position) && sel >= 0)
+        {
+            dragging = true;
+            dragPts = shown[(size_t) sel].envelope;
+            dragPts.push_back (pointAt (e.position));
+            std::sort (dragPts.begin(), dragPts.end(),
+                       [] (const upic::EnvPoint& a, const upic::EnvPoint& b) { return a.x < b.x; });
+            repaint();
+        }
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! dragging || sel < 0 || sel >= (int) shown.size()) return;
+        dragPts.push_back (pointAt (e.position));
+        std::sort (dragPts.begin(), dragPts.end(),
+                   [] (const upic::EnvPoint& a, const upic::EnvPoint& b) { return a.x < b.x; });
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (! dragging) return;
+        dragging = false;
+        if (sel < 0 || sel >= (int) shown.size()) { dragPts.clear(); return; }
+        if (dragPts.size() >= 2 && onCurve) onCurve (sel, dragPts);
+        shown[(size_t) sel].envelope = dragPts;
+        dragPts.clear();
+        repaint();
     }
 
     bool keyPressed (const juce::KeyPress& k) override
@@ -225,6 +321,13 @@ public:
 
     // The selftest drives the commands without pixels.
     void newForTest() { if (onNew) onNew(); }
+    void curveForTest (const std::vector<upic::EnvPoint>& pts)
+    {
+        if (sel < 0 || sel >= (int) shown.size()) return;
+        if (onCurve) onCurve (sel, pts);
+        shown[(size_t) sel].envelope = pts;
+        repaint();
+    }
     void deleteForTest() { if (onDelete) onDelete(); }
     void selectForTest (int i)
     {
@@ -243,6 +346,7 @@ private:
     static constexpr int bottomH = 34;
     static constexpr int listW = 220;
     static constexpr int rowH = 22;
+    static constexpr int presetH = 30;
 
     void commitRename()
     {
@@ -257,11 +361,42 @@ private:
         if (onMuteSolo) onMuteSolo (sel, muteBtn.getToggleState(), soloBtn.getToggleState());
     }
 
+    upic::EnvPoint pointAt (juce::Point<float> p) const
+    {
+        const auto plot = plotRect();
+        upic::EnvPoint pt;
+        pt.x = juce::jlimit (0.0f, 1.0f, (p.x - plot.getX()) / juce::jmax (1.0f, plot.getWidth()));
+        pt.y = juce::jlimit (0.0f, 1.0f, (plot.getBottom() - p.y) / juce::jmax (1.0f, plot.getHeight()));
+        return pt;
+    }
+    float xFor (float x) const
+    {
+        const auto plot = plotRect();
+        return plot.getX() + juce::jlimit (0.0f, 1.0f, x) * plot.getWidth();
+    }
+    float yFor (float y) const
+    {
+        const auto plot = plotRect();
+        return plot.getBottom() - juce::jlimit (0.0f, 1.0f, y) * plot.getHeight();
+    }
+    void commitPreset (int p)
+    {
+        if (sel < 0 || sel >= (int) shown.size()) return;
+        std::vector<upic::EnvPoint> pts;
+        if (p == 1)      pts = { { 0.0f, 0.0f }, { 1.0f, 1.0f } };
+        else if (p == 2) pts = { { 0.0f, 1.0f }, { 1.0f, 0.0f } };
+        if (onCurve) onCurve (sel, pts);
+        shown[(size_t) sel].envelope = pts;
+        repaint();
+    }
     std::vector<upic::Channel> shown;
     int sel = -1;
 
     juce::TextButton newBtn { "New" }, delBtn { "Del" }, renameBtn { "Rename" },
-                     closeBtn { "Close" }, muteBtn { "Mute" }, soloBtn { "Solo" };
+                     closeBtn { "Close" }, muteBtn { "Mute" }, soloBtn { "Solo" },
+                     flatBtn { "Flat" }, riseBtn { "Rise" }, fallBtn { "Fall" };
+    std::vector<upic::EnvPoint> dragPts;
+    bool dragging = false;
     juce::TextEditor nameEd;
     juce::Slider gainSl;
     juce::Label gainLab;

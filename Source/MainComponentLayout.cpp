@@ -988,6 +988,10 @@ void MainComponent::resized()
     groups.push_back ({ "mod", { FI(&arcModLab, 30, &arcModBox, 100),
                                   FI(&arcModTgtLab, 26, &arcModTgtBox, 66),
                                   FI(&arcModDepthLab, 36, &arcModSlider, 110) } });
+    // --- WP6.4: the mixer (WP7 adds its own card in its marked block) ---
+    groups.push_back ({ "ch", { FI(&channelLab, 26, &channelBox, 100),
+                                F(&channelBtn, 62) } });
+    // --- end WP6.4 ---
 
     // --- WP6.4: the mixer (WP7 adds its own card in its marked block) ---
     groups.push_back ({ "ch", { FI(&channelLab, 26, &channelBox, 100),

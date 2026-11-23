@@ -502,6 +502,22 @@ public:
     { return (i >= 0 && i < (int) curPage().groups.size()) ? curPage().groups[(size_t) i].id : -1; }
     int groupMemberCountAtForTest (int i) const
     { return (i >= 0 && i < (int) curPage().groups.size()) ? (int) curPage().groups[(size_t) i].arcIds.size() : -1; }
+    // --- WP6.4 test accessors ---
+    bool channelMutedAtForTest (int i) const { return i >= 0 && i < (int) channels.size() && channels[(size_t) i].muted; }
+    bool channelSoloAtForTest (int i) const { return i >= 0 && i < (int) channels.size() && channels[(size_t) i].solo; }
+    bool channelPanelOpenForTest() const { return channelPanel != nullptr && channelPanel->isVisible(); }
+    void openChannelPanelForTest() { showChannelPanel(); }
+    void closeChannelPanelForTest() { closeChannelPanel(); }
+    void channelNewForTest() { if (channelPanel != nullptr) channelPanel->newForTest(); }
+    void channelDeleteForTest() { if (channelPanel != nullptr) channelPanel->deleteForTest(); }
+    void channelSelectForTest (int i) { if (channelPanel != nullptr) channelPanel->selectForTest (i); }
+    void channelMuteForTest (bool on) { if (channelPanel != nullptr) channelPanel->muteForTest (on); }
+    void channelSoloForTest (bool on) { if (channelPanel != nullptr) channelPanel->soloForTest (on); }
+    void channelGainForTest (float v) { if (channelPanel != nullptr) channelPanel->gainForTest (v); }
+    void channelCurveForTest (const std::vector<upic::EnvPoint>& pts) { if (channelPanel != nullptr) channelPanel->curveForTest (pts); }
+    void channelRenameForTest (const juce::String& n) { if (channelPanel != nullptr) channelPanel->renameForTest (n); }
+    void channelAssignForTest (int id) { setChannelOnSelection (id); }
+    // --- end WP6.4 ---
     int arcGroupIdForTest (int arcId) const
     {
         for (auto& g : curPage().groups)
@@ -2076,6 +2092,21 @@ private:
 
     // WP4: the performance sequences.
     juce::Label seqLab{ {}, "Seq" };
+    // --- WP6.4: the mixer UI (the channel model is WP6.1) ---
+    // NOTE: WP7 adds its library/extraction controls in its own marked
+    // block below; keep edits inside these markers.
+    juce::Label channelLab{ {}, "Ch" };
+    juce::ComboBox channelBox;
+    juce::TextButton channelBtn{ "Mix..." };
+    std::unique_ptr<ChannelPanel> channelPanel;
+    bool channelBoxReady = false;
+    bool channelBoxRefreshing = false;
+    // v1.36: true while refreshBoxes() repopulates the controls. A combo
+    // change caused by that refresh must not edit the model or begin an
+    // undo transaction - a stroke-end refresh would otherwise apply the
+    // previous toolbar selection to the arc that was just drawn.
+    bool refreshingControls = false;
+    // --- end WP6.4 ---
 
     // --- WP6.4: the mixer UI (the channel model is WP6.1) ---
     // NOTE: WP7 adds its library/extraction controls in its own marked
