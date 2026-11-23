@@ -661,6 +661,14 @@ render checks, `.upic.json` old-fixture render identity, Android build
       selftest fixture is included. The tree is restaged and inspected,
       and the release and documentation repositories are committed and
       pushed.
-- [ ] `origin/guerrero-dialog` rebase/push (the branch is at `70bd7fb` and
-      still has to be replayed on top of this release). See
-      `docs/plans/wp1-wp6-audit.md` for the WP6 defect and UI-merge note.
+- [x] `origin/guerrero-dialog` replayed on top of this release and pushed
+      (was `70bd7fb`, now `baa95cc`). The replay settled three compile
+      conflicts (a duplicate `setCurrentPageForTest()` hook,
+      `guerreroTargetUnchanged()` defined outside its guarded block, and a
+      modal message pump that JUCE 8 compiles out), repaired the CP1253
+      mojibake, and exposed one sanitizer-only defect: a stale deferred
+      level-slider notification cancelled a live sample-extraction
+      preview. The rebased tree passes the 0.35.0 gate (1,508/1,508
+      checks, legacy SHA-256 8BF28ABA7975..., plugin 0.35.0, smoke 22/22,
+      pluginval strictness 5 SUCCESS). See `docs/plans/wp1-wp6-audit.md`
+      for the WP6 defect and UI-merge note.
