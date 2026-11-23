@@ -4,6 +4,342 @@
 #include <memory>
 
 //==============================================================================
+// WP7: one route token arbitrates every preview material. The extraction
+// route carries its snapshot generation; the ordinary routes carry their
+// reset serial so every publication has a distinct, ordered token.
+void MainComponent::setAudioPreviewRoute (AudioPreviewRoute route)
+{
+    // The lock is re-entrant. Route owners take it before preparing their
+    // state, so this nested lock keeps direct callers safe too.
+    juce::ScopedLock lock (audioPreviewRouteLock);
+    std::uint64_t generation = 0;
+    switch (route)
+    {
+        case AudioPreviewRoute::sampleExtract:
+            generation = sampleExtractPreviewState.generation;
+            break;
+        case AudioPreviewRoute::scrub:
+        case AudioPreviewRoute::freeze:
+            generation = ordinaryPreviewGeneration.load (
+                std::memory_order_acquire);
+            break;
+        case AudioPreviewRoute::none:
+        default:
+            break;
+    }
+    audioPreviewRouteToken.store (makeAudioPreviewRouteToken (route, generation),
+                                  std::memory_order_release);
+}
+
+void MainComponent::releaseAudioPreviewRouteIf (AudioPreviewRoute route)
+{
+    juce::ScopedLock lock (audioPreviewRouteLock);
+    const auto none = makeAudioPreviewRouteToken (AudioPreviewRoute::none, 0);
+    auto token = audioPreviewRouteToken.load (std::memory_order_acquire);
+    while (audioPreviewRouteFromToken (token) == route)
+    {
+        if (audioPreviewRouteToken.compare_exchange_weak (
+                token, none, std::memory_order_acq_rel,
+                std::memory_order_acquire))
+            break;
+    }
+}
+
+void MainComponent::releaseAudioPreviewRouteTokenIf (std::uint64_t expectedToken)
+{
+    juce::ScopedLock lock (audioPreviewRouteLock);
+    const auto none = makeAudioPreviewRouteToken (AudioPreviewRoute::none, 0);
+    auto token = audioPreviewRouteToken.load (std::memory_order_acquire);
+    while (token == expectedToken)
+    {
+        if (audioPreviewRouteToken.compare_exchange_weak (
+                token, none, std::memory_order_acq_rel,
+                std::memory_order_acquire))
+            break;
+    }
+}
+
+std::uint64_t MainComponent::audioPreviewRouteEpochForClaim() const
+{
+    return audioPreviewLifecycleEpoch.load (std::memory_order_acquire);
+}
+
+bool MainComponent::audioPreviewRouteClaimIsCurrent (std::uint64_t epoch) const
+{
+    // The caller holds audioPreviewRouteLock. The cancelling flag closes the
+    // short interval in which a lifecycle boundary has begun but has not
+    // yet taken the lock. The epoch is odd while the boundary is active and
+    // even between boundaries, so a publisher that captured either side of
+    // the boundary is rejected rather than merely delayed.
+    return ! audioPreviewLifecycleCancelling.load (std::memory_order_acquire)
+        && (epoch & 1u) == 0
+        && epoch == audioPreviewLifecycleEpoch.load (std::memory_order_acquire);
+}
+
+//==============================================================================
+// WP7: the ordinary scrub/freeze request publication.
+//
+// The request is an immutable record handed to the audio thread through the
+// same allocation-free snapshot handover as the model. A seqlock made from
+// independent atomics is not enough here: the reader could legally combine
+// fields from two generations. The handover guarantees that every field came
+// from one publication, and the audio thread then owns that generation's
+// private transport.
+std::uint64_t MainComponent::ordinaryPreviewCoherenceTag (
+    const OrdinaryPreviewState& state) noexcept
+{
+    const auto mix = [] (std::uint64_t hash, std::uint64_t value) noexcept
+    {
+        hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+        return hash;
+    };
+    const auto doubleBits = [] (double value) noexcept
+    {
+        std::uint64_t bits = 0;
+        std::memcpy (&bits, &value, sizeof (bits));
+        return bits;
+    };
+
+    std::uint64_t hash = 0xcbf29ce484222325ull;
+    hash = mix (hash, state.generation);
+    hash = mix (hash, state.scrubTransport);
+    hash = mix (hash, state.freezeTransport);
+    hash = mix (hash, state.freezePhase);
+    hash = mix (hash, state.scrubActive ? 1u : 0u);
+    hash = mix (hash, state.freezeActive ? 1u : 0u);
+    hash = mix (hash, doubleBits (state.scrubPlayhead));
+    hash = mix (hash, doubleBits (state.scrubRate));
+    hash = mix (hash, doubleBits (state.freezePlayhead));
+    hash = mix (hash, doubleBits (state.freezeStopAtMs));
+    hash = mix (hash, doubleBits (state.transitionStartMs));
+    hash = mix (hash, doubleBits (state.transitionEndMs));
+    hash = mix (hash, static_cast<std::uint64_t> (
+                          static_cast<std::uint32_t> (state.scrubRemaining)));
+    return hash;
+}
+
+MainComponent::OrdinaryPreviewState
+MainComponent::copyOrdinaryPreviewStateForMessageThread() const noexcept
+{
+    // Every caller holds audioPreviewRouteLock, so the source state cannot
+    // change while this copy is made.
+    return ordinaryPreviewState;
+}
+
+void MainComponent::publishOrdinaryPreviewState (
+    const OrdinaryPreviewState& state)
+{
+    // The caller holds audioPreviewRouteLock, so there is one writer. Build
+    // the complete record first, then hand that immutable object to the
+    // audio thread. The allocation happens on the writer's side only.
+    OrdinaryPreviewState published = state;
+    published.coherenceTag = ordinaryPreviewCoherenceTag (published);
+    ordinaryPreviewState = published;
+
+    ordinaryPreviewGeneration.store (published.generation,
+                                     std::memory_order_release);
+    ordinaryPreviewScrubTransport.store (published.scrubTransport,
+                                         std::memory_order_release);
+    ordinaryPreviewFreezeTransport.store (published.freezeTransport,
+                                          std::memory_order_release);
+    ordinaryPreviewFreezePhase.store (published.freezePhase,
+                                      std::memory_order_release);
+
+    ordinaryPreviewSnapshots.publish (
+        new OrdinaryPreviewSnapshot (published));
+}
+
+void MainComponent::clearOrdinaryPreviewRoutes()
+{
+    OrdinaryPreviewState state = copyOrdinaryPreviewStateForMessageThread();
+
+    ++state.generation;
+    ++state.scrubTransport;
+    ++state.freezeTransport;
+    state.scrubActive = false;
+    state.scrubPlayhead = 0.0;
+    state.scrubRemaining = 0;
+    state.scrubRate = 1.0;
+    state.freezeActive = false;
+    state.freezePlayhead = 0.0;
+    state.freezeStopAtMs = 0.0;
+    state.transitionStartMs = 0.0;
+    state.transitionEndMs = 0.0;
+    publishOrdinaryPreviewState (state);
+}
+
+void MainComponent::cancelOrdinaryPreviewRoutes()
+{
+    juce::ScopedLock routeLock (audioPreviewRouteLock);
+
+    // Capture the exact token before publishing the inactive record. Only
+    // that ordinary owner may be released; an extraction route is never
+    // stolen by this helper.
+    const auto token = audioPreviewRouteToken.load (std::memory_order_acquire);
+    const auto route = audioPreviewRouteFromToken (token);
+
+    OrdinaryPreviewState state = copyOrdinaryPreviewStateForMessageThread();
+    ++state.generation;
+    ++state.scrubTransport;
+    ++state.freezeTransport;
+    state.scrubActive = false;
+    state.scrubPlayhead = 0.0;
+    state.scrubRemaining = 0;
+    state.scrubRate = 1.0;
+    state.freezeActive = false;
+    state.freezePlayhead = 0.0;
+    state.freezeStopAtMs = 0.0;
+    state.transitionStartMs = 0.0;
+    state.transitionEndMs = 0.0;
+    publishOrdinaryPreviewState (state);
+
+    if (route == AudioPreviewRoute::scrub || route == AudioPreviewRoute::freeze)
+        releaseAudioPreviewRouteTokenIf (token);
+}
+
+bool MainComponent::claimScrubPreviewRoute (double timeSec, double rate)
+{
+    // A stopped score may be auditioned, but a running transport owns the
+    // score output. Refuse the preview rather than letting it resume after
+    // Stop with stale transport state.
+    if (transportActive())
+        return false;
+
+    const auto routeEpoch = audioPreviewRouteEpochForClaim();
+
+    // Selftest-only: hold the claim after its epoch capture so the host
+    // lifecycle boundary can run first. Production never enables this.
+    if (audioPreviewRouteClaimPauseRequestedForTest.exchange (
+            false, std::memory_order_acq_rel))
+    {
+        audioPreviewRouteClaimPausedFlagForTest.store (true, std::memory_order_release);
+        const auto deadline = juce::Time::getMillisecondCounterHiRes() + 2000.0;
+        while (! audioPreviewRouteClaimResumeForTest.load (std::memory_order_acquire)
+               && juce::Time::getMillisecondCounterHiRes() < deadline)
+            juce::Thread::sleep (1);
+        // A missed test handshake must never hang the suite. The claim is
+        // stale by construction if its resume signal did not arrive.
+        if (! audioPreviewRouteClaimResumeForTest.load (std::memory_order_acquire))
+            return false;
+    }
+
+    juce::ScopedLock routeLock (audioPreviewRouteLock);
+    if (! audioPreviewRouteClaimIsCurrent (routeEpoch))
+        return false;
+
+    // The ordinary scrub and the extraction A/B are exclusive routes. A
+    // scrub cancels the extraction preview instead of mixing two materials.
+    if (sampleExtractPreviewState.route != SampleExtractRoute::none)
+        cancelSampleExtractPreview();
+
+    OrdinaryPreviewState state = copyOrdinaryPreviewStateForMessageThread();
+
+    ++state.generation;
+    ++state.scrubTransport;
+    ++state.freezeTransport;
+    state.scrubActive = true;
+    state.scrubPlayhead = timeSec;
+    state.scrubRemaining = scrubPreviewLen.load (std::memory_order_relaxed);
+    state.scrubRate = rate;
+    state.freezeActive = false;
+    state.freezePlayhead = 0.0;
+    state.freezeStopAtMs = 0.0;
+    state.transitionStartMs = 0.0;
+    state.transitionEndMs = 0.0;
+    publishOrdinaryPreviewState (state);
+
+    // The token is published last. Its generation identifies exactly the
+    // request above, and an acquire load makes every field visible.
+    setAudioPreviewRoute (AudioPreviewRoute::scrub);
+    return true;
+}
+
+bool MainComponent::claimScrubFreezeRoute (double timeSec)
+{
+    if (transportActive())
+        return false;
+
+    const auto routeEpoch = audioPreviewRouteEpochForClaim();
+    juce::ScopedLock routeLock (audioPreviewRouteLock);
+    if (! audioPreviewRouteClaimIsCurrent (routeEpoch))
+        return false;
+
+    // The freeze route replaces the extraction route; the two never sound
+    // together.
+    if (sampleExtractPreviewState.route != SampleExtractRoute::none)
+        cancelSampleExtractPreview();
+
+    OrdinaryPreviewState state = copyOrdinaryPreviewStateForMessageThread();
+
+    ++state.generation;
+    ++state.scrubTransport;
+    ++state.freezeTransport;
+    ++state.freezePhase;
+    state.scrubActive = true;
+    state.scrubPlayhead = timeSec;
+    state.scrubRemaining = scrubPreviewLen.load (std::memory_order_relaxed);
+    state.scrubRate = 1.0;
+    state.freezeActive = true;
+    state.freezePlayhead = timeSec;
+    state.freezeStopAtMs = 0.0;
+    const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+    state.transitionStartMs = nowMs;
+    state.transitionEndMs = nowMs + scrubCrossMs;
+    publishOrdinaryPreviewState (state);
+
+    // The phase handoff and the playhead reset are consumed by the audio
+    // thread when it sees this generation. Publish the request before the
+    // route token, never after it.
+    setAudioPreviewRoute (AudioPreviewRoute::freeze);
+    return true;
+}
+
+void MainComponent::updateScrubFreezeStop (double stopAtMs)
+{
+    juce::ScopedLock routeLock (audioPreviewRouteLock);
+    const auto token = audioPreviewRouteToken.load (std::memory_order_acquire);
+    if (audioPreviewRouteFromToken (token) != AudioPreviewRoute::freeze)
+        return;
+
+    OrdinaryPreviewState state = copyOrdinaryPreviewStateForMessageThread();
+    if (state.generation != audioPreviewGenerationFromToken (token)
+        || ! state.freezeActive)
+        return;
+
+    // A tail update is a new record generation, but it does not advance the
+    // freeze transport or phase. The audio thread therefore keeps its held
+    // voice and only adopts the new stop time.
+    ++state.generation;
+    state.freezeStopAtMs = stopAtMs;
+    publishOrdinaryPreviewState (state);
+    setAudioPreviewRoute (AudioPreviewRoute::freeze);
+}
+
+void MainComponent::cancelScrubFreezeRoute()
+{
+    juce::ScopedLock routeLock (audioPreviewRouteLock);
+    const auto token = audioPreviewRouteToken.load (std::memory_order_acquire);
+    if (audioPreviewRouteFromToken (token) != AudioPreviewRoute::freeze)
+        return;
+
+    OrdinaryPreviewState state = copyOrdinaryPreviewStateForMessageThread();
+    ++state.generation;
+    ++state.scrubTransport;
+    ++state.freezeTransport;
+    state.scrubActive = false;
+    state.scrubRemaining = 0;
+    state.freezeActive = false;
+    state.freezeStopAtMs = 0.0;
+    state.transitionStartMs = 0.0;
+    state.transitionEndMs = 0.0;
+    publishOrdinaryPreviewState (state);
+
+    // Release this exact freeze token. A stale cancel cannot steal a scrub
+    // or extraction route that was claimed after this freeze began.
+    releaseAudioPreviewRouteTokenIf (token);
+}
+
+//==============================================================================
 // The realtime audio path: the snapshot the audio thread reads, the block
 // callback, the score render and the device settings.
 
@@ -35,13 +371,39 @@ void MainComponent::prepareVocodersIfNeeded (int sampleMode, int liveMode)
             else if (a.mode == 2 && engine.effectiveMode (a, liveMode) == 2) needLive = true;
         }
     }
-    if (! needSample && ! needLive) return;
+
+    const auto sampleVoices = needSample ? arcs : 0;
+    const auto liveVoices = needLive ? arcs : 0;
+
+    // Publish and apply the requirement under one gate. A host-thread
+    // preparation may be changing the engine at the same time; whichever
+    // side owns the gate last leaves the engine prepared for the latest
+    // published requirement.
+    juce::ScopedLock engineLock (audioEnginePreparationLock);
+    publishedSampleVocoderVoices.store (sampleVoices, std::memory_order_release);
+    publishedLiveVocoderVoices.store (liveVoices, std::memory_order_release);
+
     // the audio thread hands the voice slots out in order, so the first N
     // arcs to sound are the ones that find a prepared voice
-    engine.prepareSampleVocoderMemory (needSample ? arcs : 0);
-    engine.prepareLiveVocoderMemory (needLive ? arcs : 0);
-    scrubEngine.prepareSampleVocoderMemory (needSample ? arcs : 0);
-    scrubEngine.prepareLiveVocoderMemory (needLive ? arcs : 0);
+    engine.prepareSampleVocoderMemory (sampleVoices);
+    engine.prepareLiveVocoderMemory (liveVoices);
+    scrubEngine.prepareSampleVocoderMemory (sampleVoices);
+    scrubEngine.prepareLiveVocoderMemory (liveVoices);
+}
+
+void MainComponent::preparePublishedVocoderMemory()
+{
+    // The caller owns audioEnginePreparationLock. The message thread
+    // published the counts; this path applies them without reading the
+    // model or running on the host's setup thread.
+    const auto sampleVoices = publishedSampleVocoderVoices.load (
+        std::memory_order_acquire);
+    const auto liveVoices = publishedLiveVocoderVoices.load (
+        std::memory_order_acquire);
+    engine.prepareSampleVocoderMemory (sampleVoices);
+    engine.prepareLiveVocoderMemory (liveVoices);
+    scrubEngine.prepareSampleVocoderMemory (sampleVoices);
+    scrubEngine.prepareLiveVocoderMemory (liveVoices);
 }
 
 void MainComponent::publishModelSnapshot()
@@ -57,6 +419,29 @@ void MainComponent::publishModelSnapshot()
     snap->channels = channels;
     snap->pages = pages;
     snap->slots = sampleSlots; // shared buffers: only the pointers are copied
+    // WP7: the sample extraction panel's A/B preview is built here, on the
+    // message thread. The audio thread only reads the finished page.
+    addSampleExtractPreview (*snap);
+
+    // Keep a message-thread-owned copy for the selftest. The audio reader's
+    // liveSnapshot pointer is not safe to inspect from this thread: the
+    // reader may retire and the writer may free that snapshot at any time.
+    publishedSampleExtractPreview.state = snap->sampleExtractPreview;
+    publishedSampleExtractPreview.page = snap->samplePreviewPage;
+    publishedSampleExtractPreview.slots = snap->samplePreviewSlots;
+    publishedSampleExtractPreview.waves = snap->samplePreviewWaves;
+    publishedSampleExtractPreview.envelopes = snap->samplePreviewEnvelopes;
+
+    {
+        const auto route = static_cast<std::uint64_t> (
+            snap->sampleExtractPreview.route);
+        const bool hasPayload = snap->samplePreviewPage != nullptr
+                             && (! snap->samplePreviewSlots.empty()
+                                 || ! snap->samplePreviewWaves.empty());
+        publishedSampleExtractSnapshotState.store (
+            route | (hasPayload ? std::uint64_t { 4 } : std::uint64_t { 0 }),
+            std::memory_order_release);
+    }
     snap->currentPage = currentPage;
     snap->pageEpoch = pageEpoch.load(std::memory_order_relaxed);
     snap->seqPages = seqPages;
@@ -128,6 +513,12 @@ void MainComponent::startPlayback()
     // it mid-phrase - the reported "Start/Stop" bug.
     if (state == TransportState::starting || state == TransportState::playing)
         return;
+
+    // WP7: the score and the preview routes are separate. Play ends both
+    // the ordinary scrub/freeze request and the extraction preview; neither
+    // may resume with stale transport state after Stop.
+    cancelOrdinaryPreviewRoutes();
+    cancelSampleExtractPreview();
 
     // Play while the stop fade is still running: cancel it with the SAME
     // gain envelope. The fade had not finished, so the engine was not reset
@@ -217,11 +608,91 @@ void MainComponent::prepareAudioBuffers (int samplesPerBlockExpected)
     const int n = juce::jmax (kMaxAudioBlock, samplesPerBlockExpected);
     scoreBuf.setSize (2, n, false, false, true);
     freezeBuf.setSize (2, n, false, false, true);
+    sampleExtractBuf.setSize (2, n, false, false, true);
 }
 
 //==============================================================================
 void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
 {
+    // A host preparation is a request, not permission for the host thread to
+    // touch the model or its engines. Publish the request first; the
+    // requested and published generations then tell the audio callback
+    // whether the matching preparation is live.
+    std::uint64_t generation = 0;
+    {
+        juce::ScopedLock requestLock (audioPreparationRequestLock);
+        generation = requestedAudioPreparationGeneration.fetch_add (
+            1, std::memory_order_acq_rel) + 1;
+    }
+
+    auto* const messages = juce::MessageManager::getInstanceWithoutCreating();
+    const bool onMessageThread = messages != nullptr
+                              && messages->isThisTheMessageThread();
+    if (onMessageThread)
+    {
+        applyAudioPreparation (generation, samplesPerBlockExpected, sampleRate);
+        return;
+    }
+
+    // End the old device's routes immediately, even though the new engine
+    // preparation has to wait for the message thread. The actual preparation
+    // repeats the boundary when it applies the request.
+    cancelPreviewRoutesForHostLifecycle();
+
+    if (messages != nullptr)
+    {
+        postToMessageThread ([generation, samplesPerBlockExpected, sampleRate]
+                            (MainComponent& component)
+        {
+            component.applyAudioPreparation (generation,
+                                             samplesPerBlockExpected,
+                                             sampleRate);
+        });
+    }
+    else
+    {
+        // There is no message thread to own the model/engine preparation.
+        // Leave the requested generation unpublished; the callback stays
+        // silent rather than mutating message-owned state on this thread.
+        juce::Logger::writeToLog (
+            "UPICuitous: host preparation could not reach the message thread");
+    }
+}
+
+void MainComponent::invalidateAudioPreparation()
+{
+    juce::ScopedLock requestLock (audioPreparationRequestLock);
+    requestedAudioPreparationGeneration.fetch_add (1, std::memory_order_acq_rel);
+}
+
+void MainComponent::applyAudioPreparation (std::uint64_t generation,
+                                            int samplesPerBlockExpected,
+                                            double sampleRate)
+{
+    if (requestedAudioPreparationGeneration.load (std::memory_order_acquire)
+        != generation)
+        return;
+
+    // The lifecycle boundary covers the engine reset. A route publisher that
+    // starts during this window captures the odd epoch and is refused.
+    juce::ScopedLock lifecycleLock (audioPreviewLifecycleLock);
+    if (requestedAudioPreparationGeneration.load (std::memory_order_acquire)
+        != generation)
+        return;
+
+    const auto extractionGeneration = beginPreviewRoutesForHostLifecycle();
+    struct LifecycleEnd
+    {
+        MainComponent& owner;
+        ~LifecycleEnd() { owner.endPreviewRoutesForHostLifecycle(); }
+    } lifecycleEnd { *this };
+    cancelSampleExtractPreviewForHostLifecycle (extractionGeneration);
+
+    juce::ScopedLock engineLock (audioEnginePreparationLock);
+    if (requestedAudioPreparationGeneration.load (std::memory_order_acquire)
+        != generation)
+        return;
+
     // v1.33.4 (L14): the rate crosses the thread boundary, so it is an
     // atomic count of frames per second (the audio thread reads it).
     audioSampleRateHz.store ((int) std::lround (sampleRate > 0.0 ? sampleRate : 44100.0),
@@ -232,11 +703,16 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
     engine.setOverloadGuardEnabled (true);
     scrubEngine.prepare(audioSampleRate(), samplesPerBlockExpected);
     scrubEngine.setScrubPreview(true);
+    // WP7: the extraction A/B preview has its own engine. It is prepared on
+    // the message thread just like the score and scrub engines, so its first
+    // audio block cannot allocate.
+    sampleExtractEngine.prepare(audioSampleRate(), samplesPerBlockExpected);
+    sampleExtractEngine.setScrubPreview(true);
     // v1.33.4 (M21): the voice pools exist now, so the vocoder's working
-    // memory can be prepared - the mode may have been chosen before the
-    // device started (a piece that carries its own pitch modes)
-    prepareVocodersIfNeeded (engine.getSamplePitchMode(), engine.getLivePitchMode());
-    scrubPreviewLen = juce::jmax(256, (int) (audioSampleRate() * 0.05)); // ~50 ms
+    // memory can be prepared from the requirement published by the model.
+    preparePublishedVocoderMemory();
+    scrubPreviewLen.store (juce::jmax (256, (int) (audioSampleRate() * 0.05)),
+                            std::memory_order_relaxed); // ~50 ms
     liveRingSize = juce::jmax(1024, (int) (audioSampleRate() * kLiveRingSec));
     liveRingA.assign((size_t) liveRingSize, 0.0f);
     liveRingB.assign((size_t) liveRingSize, 0.0f);
@@ -282,10 +758,40 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
     // Device restarted under a running take: the buffered rate is stale, so
     // the next audio block hands the partial take off for discard.
     if (capturing.load()) capAbortPending = true;
+
+    // Publish only the request that is still current. A release or a newer
+    // preparation that arrived while this one was running leaves the
+    // requested and published generations different, so the audio callback
+    // stays silent until the newest request is applied.
+    if (requestedAudioPreparationGeneration.load (std::memory_order_acquire)
+        == generation)
+        publishedAudioPreparationGeneration.store (generation,
+                                                    std::memory_order_release);
 }
 
 void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 {
+    // Preparation may run on a host setup thread while this callback is
+    // active. The callback never waits for it: if preparation owns the
+    // engine gate, this block is silent and the next one continues from the
+    // fully prepared state.
+    juce::CriticalSection::ScopedTryLockType engineLock (audioEnginePreparationLock);
+    const auto requestedPreparation =
+        requestedAudioPreparationGeneration.load (std::memory_order_acquire);
+    const auto publishedPreparation =
+        publishedAudioPreparationGeneration.load (std::memory_order_acquire);
+    if (! engineLock.isLocked() || requestedPreparation == 0
+        || requestedPreparation != publishedPreparation)
+    {
+        const int outCh = juce::jmin (outChannels.load (std::memory_order_relaxed),
+                                      info.buffer->getNumChannels());
+        for (int c = 0; c < outCh; ++c)
+            juce::FloatVectorOperations::clear (
+                info.buffer->getWritePointer (c, info.startSample),
+                info.numSamples);
+        return;
+    }
+
     // Live input runs before the clear: the player buffer initially carries
     // the input channels, and the clear would wipe them.
     const bool mon = tapLiveInput(info);
@@ -300,6 +806,15 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
                                             info.numSamples);
 
     const int n = info.numSamples;
+    // The scratch buffers are allocated on the message thread in
+    // prepareAudioBuffers/prepareToPlay. Never grow them here: a host that
+    // sends a block larger than the prepared capacity gets silence, not an
+    // audio-thread allocation (and never an out-of-bounds write).
+    if (scoreBuf.getNumChannels() < 2 || scoreBuf.getNumSamples() < n
+        || freezeBuf.getNumChannels() < 2 || freezeBuf.getNumSamples() < n
+        || sampleExtractBuf.getNumChannels() < 2 || sampleExtractBuf.getNumSamples() < n)
+        return;
+
     float* L = info.buffer->getWritePointer(0, info.startSample);
     float* R = outCh > 1 ? info.buffer->getWritePointer(1, info.startSample) : nullptr;
     // v1.33.4 (L14): the rate crosses the thread boundary, so it is read
@@ -317,19 +832,19 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     // zero is a click - and it happens whatever the host's buffer size is.
     //
     // v1.33.4 (M21): the buffers are preallocated for the largest block a
-    // host may send (prepareAudioBuffers), so this only grows them for a
-    // host that breaks the VST3 block-size limit - never in the normal case.
-    if (scoreBuf.getNumChannels() < 2 || scoreBuf.getNumSamples() < n)
-        scoreBuf.setSize(2, n, false, false, true);
+    // host may send (prepareAudioBuffers). The capacity check above refuses
+    // an oversized host block instead of allocating on the audio thread.
     scoreBuf.clear();
     float* SL = scoreBuf.getWritePointer(0);
     float* SR = scoreBuf.getWritePointer(1);
 
-    if (freezeBuf.getNumChannels() < 2 || freezeBuf.getNumSamples() < n)
-        freezeBuf.setSize(2, n, false, false, true);
     freezeBuf.clear();
     float* FL = freezeBuf.getWritePointer(0);
     float* FR = freezeBuf.getWritePointer(1);
+
+    sampleExtractBuf.clear();
+    float* XL = sampleExtractBuf.getWritePointer(0);
+    float* XR = sampleExtractBuf.getWritePointer(1);
 
     bool rendered = false;
     bool modelChanged = false;
@@ -339,7 +854,62 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         // v1.18 (wave 15): no lock on the audio thread. Take the newest
         // immutable model snapshot and render from it - the message thread
         // owns the live model and frees retired snapshots on its own thread.
-        ModelSnapshot* snap = snapshots.take(liveSnapshot);
+        ModelSnapshot* snap = audioPreviewSkipSnapshotForTest.load (
+                                  std::memory_order_relaxed)
+                                ? nullptr
+                                : snapshots.take(liveSnapshot);
+
+        // The route is chosen once for the whole block. The extraction
+        // generation must also match the snapshot, so an old extraction
+        // request cannot survive a cancellation or an ordinary scrub.
+        std::uint64_t routeToken = audioPreviewRouteToken.load (
+            std::memory_order_acquire);
+
+        // Selftest-only: reproduce a route change after the snapshot was
+        // taken but before the route token is read. The effective token is
+        // local to this block, so the test cannot corrupt the published
+        // route. The old snapshot and the new route still cannot mix: the
+        // same generation gate below decides the extraction material.
+        const auto forcedOverride = audioPreviewRouteTestOverride.load (
+            std::memory_order_acquire);
+        const int forcedRoute = forcedOverride == ~std::uint64_t { 0 }
+            ? -1 : static_cast<int> (static_cast<std::uint32_t> (forcedOverride));
+        if (forcedRoute >= 0)
+        {
+            const int generationOffset = static_cast<int> (forcedOverride >> 32);
+            switch (static_cast<AudioPreviewRoute> (forcedRoute))
+            {
+                case AudioPreviewRoute::scrub:
+                    routeToken = makeAudioPreviewRouteToken (
+                        AudioPreviewRoute::scrub, 0);
+                    break;
+                case AudioPreviewRoute::freeze:
+                    routeToken = makeAudioPreviewRouteToken (
+                        AudioPreviewRoute::freeze, 0);
+                    break;
+                case AudioPreviewRoute::sampleExtract:
+                {
+                    const auto snapshotGeneration = snap != nullptr
+                        ? snap->sampleExtractPreview.generation
+                        : std::uint64_t { 0 };
+                    routeToken = makeAudioPreviewRouteToken (
+                        AudioPreviewRoute::sampleExtract,
+                        snapshotGeneration
+                            + static_cast<std::uint64_t> (generationOffset));
+                    break;
+                }
+                case AudioPreviewRoute::none:
+                default:
+                    routeToken = makeAudioPreviewRouteToken (
+                        AudioPreviewRoute::none, 0);
+                    break;
+            }
+        }
+
+        audioPreviewRouteTokenSeenForTest.store (routeToken,
+                                                  std::memory_order_release);
+        const auto route = audioPreviewRouteFromToken (routeToken);
+        const auto routeGeneration = audioPreviewGenerationFromToken (routeToken);
 
         // a seek / scrub from the UI moves the audio playhead
         const int seek = seekSerial.load(std::memory_order_relaxed);
@@ -350,12 +920,72 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             engine.reset();
         }
 
-        const int fs = scrubFreezeStartSerial.load(std::memory_order_relaxed);
-        if (fs != seenFreezeStartSerial)
+        // The ordinary route's request is one immutable record. Taking it
+        // through the handover cannot mix fields from two generations. The
+        // token generation must match it; otherwise a block that loaded an
+        // old token cannot consume a newer scrub/freeze record.
+        OrdinaryPreviewState ordinaryState;
+        bool ordinaryStateValid = false;
+        if (const auto* const ordinarySnapshot =
+                ordinaryPreviewSnapshots.take (liveOrdinaryPreviewSnapshot);
+            ordinarySnapshot != nullptr)
         {
-            seenFreezeStartSerial = fs;
-            audioPlayhead = scrubFreezePlayhead.load(std::memory_order_relaxed);
-            engine.reset();
+            ordinaryState = ordinarySnapshot->state;
+            if (ordinaryState.coherenceTag != ordinaryPreviewCoherenceTag (ordinaryState))
+                ordinaryPreviewCoherenceFailureCount.fetch_add (
+                    1, std::memory_order_relaxed);
+            ordinaryStateValid = ordinaryState.generation == routeGeneration;
+        }
+
+        if (ordinaryStateValid)
+        {
+            if (ordinaryState.generation != seenOrdinaryPreviewGeneration)
+            {
+                seenOrdinaryPreviewGeneration = ordinaryState.generation;
+                // A freeze-tail update changes the record generation but not
+                // its transport or phase. Adopt the new deadline without
+                // restarting the held voice. Re-adopt the active flag too:
+                // an older block may have expired its own generation after
+                // this record was published.
+                audioFreezeGeneration = ordinaryState.generation;
+                audioFreezeExpired = false;
+                audioFreezeStopAtMs = ordinaryState.freezeStopAtMs;
+                if (route == AudioPreviewRoute::freeze)
+                    audioFreezeActive = ordinaryState.freezeActive;
+            }
+
+            if (ordinaryState.scrubTransport != seenScrubPreviewTransport)
+            {
+                seenScrubPreviewTransport = ordinaryState.scrubTransport;
+                audioScrubPreviewActive = ordinaryState.scrubActive;
+                audioScrubPreviewPlayhead = ordinaryState.scrubPlayhead;
+                audioScrubPreviewRemaining = ordinaryState.scrubRemaining;
+                audioScrubRate = ordinaryState.scrubRate;
+                scrubEngine.reset(); // re-anchor to the dragged playhead
+            }
+
+            if (route == AudioPreviewRoute::freeze)
+            {
+                if (ordinaryState.freezeTransport != seenFreezeTransport)
+                {
+                    seenFreezeTransport = ordinaryState.freezeTransport;
+                    audioFreezeActive = ordinaryState.freezeActive;
+                    audioFreezeGeneration = ordinaryState.generation;
+                    audioFreezeExpired = false;
+                }
+
+                if (ordinaryState.freezePhase != seenFreezePhase)
+                {
+                    seenFreezePhase = ordinaryState.freezePhase;
+                    audioPlayhead = ordinaryState.freezePlayhead;
+                    engine.reset();
+                    // The phase handoff belongs to the audio thread: both
+                    // engines' phase pools are audio-thread state. The
+                    // destination pool is preallocated, so this fixed-
+                    // capacity copy does not allocate.
+                    engine.copyOscillatorPhasesFrom(scrubEngine);
+                }
+            }
         }
 
         // Play asks for fresh voices (no fade: the transport is starting)
@@ -395,24 +1025,55 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 
             // v1.28: gain crossfade between preview and freeze
             const double nowMs = juce::Time::getMillisecondCounterHiRes();
-            double previewGain = scrubPreviewActive.load(std::memory_order_relaxed) ? 1.0 : 0.0;
-            double freezeGain = scrubFreezeActive.load(std::memory_order_relaxed) ? 1.0 : 0.0;
-            const double ts = scrubFreezeTransitionStartMs.load(std::memory_order_relaxed);
-            const double te = scrubFreezeTransitionEndMs.load(std::memory_order_relaxed);
-            if (scrubFreezeActive.load(std::memory_order_relaxed) && te > ts && nowMs < te)
+            double previewGain = 0.0;
+            double freezeGain = 0.0;
+            if (ordinaryStateValid)
             {
-                const double prog = juce::jlimit(0.0, 1.0, (nowMs - ts) / (te - ts));
-                freezeGain = prog;
-                if (scrubPreviewActive.load(std::memory_order_relaxed))
-                    previewGain = 1.0 - prog;
+                if (route == AudioPreviewRoute::scrub
+                    && audioScrubPreviewActive)
+                    previewGain = 1.0;
+
+                if (route == AudioPreviewRoute::freeze)
+                {
+                    if (audioScrubPreviewActive)
+                        previewGain = 1.0;
+                    if (audioFreezeActive)
+                        freezeGain = 1.0;
+
+                    const double ts = ordinaryState.transitionStartMs;
+                    const double te = ordinaryState.transitionEndMs;
+                    if (audioFreezeActive && te > ts && nowMs < te)
+                    {
+                        const double prog = juce::jlimit(
+                            0.0, 1.0, (nowMs - ts) / (te - ts));
+                        freezeGain = prog;
+                        if (audioScrubPreviewActive)
+                            previewGain = 1.0 - prog;
+                    }
+                    else if (audioFreezeActive)
+                    {
+                        // The short preview belongs to the crossfade only.
+                        // Once the freeze has taken over, the two ordinary
+                        // materials never sound together.
+                        previewGain = 0.0;
+                    }
+                }
             }
 
             // v1.28: scrub audition (short preview while dragging the playhead)
             // and the freeze sustain (the click without a drag)
-            AudioBlock block { L, R, SL, SR, FL, FR, n, playingAtStart };
+            AudioBlock block { L, R, SL, SR, FL, FR, XL, XR, n, playingAtStart, sr };
             block.sr = sr;   // v1.33.4 (L14): the rate, read once per block
-            renderScrubPreview (*snap, block, previewGain);
-            renderScrubFreeze (*snap, block, freezeGain);
+            renderScrubPreview (*snap, block, previewGain, routeGeneration);
+            renderScrubFreeze (*snap, block, freezeGain, routeGeneration);
+            // WP7: the extraction preview is a separate route. It never
+            // replaces the ordinary score scrub and never reads the score's
+            // sample slots. Its generation must match the route token.
+            const bool extractionRoute = route == AudioPreviewRoute::sampleExtract
+                                      && snap->sampleExtractPreview.route != SampleExtractRoute::none
+                                      && snap->sampleExtractPreview.generation
+                                           == audioPreviewGenerationFromToken (routeToken);
+            renderSampleExtractPreview (*snap, block, extractionRoute ? 1.0 : 0.0);
 
             // Absorb model edits while stopped (no sound to fade).
             const int epoch = modelEpoch.load(std::memory_order_relaxed);
@@ -563,17 +1224,24 @@ void MainComponent::mixMasterGain (float* L, float* R, const float* SL, const fl
     }
 }
 
-void MainComponent::renderScrubPreview (const ModelSnapshot& snap, AudioBlock& b, double previewGain)
+void MainComponent::renderScrubPreview (const ModelSnapshot& snap, AudioBlock& b,
+                                        double previewGain,
+                                        std::uint64_t routeGeneration)
 {
-    if (b.playingAtStart || ! scrubPreviewActive.load(std::memory_order_relaxed))
+    if (b.playingAtStart || previewGain <= 0.0
+        || ! audioScrubPreviewActive)
         return;
 
-    int remaining = scrubPreviewRemaining.load(std::memory_order_relaxed);
-    if (remaining <= 0 || snap.pages.empty())
-    {
-        scrubPreviewActive.store(false, std::memory_order_relaxed);
+    // A newer route publication owns the request now. The old block keeps
+    // its private transport, but it must not mix that material with the new
+    // route or write anything back into the published record.
+    if (ordinaryPreviewGeneration.load (std::memory_order_acquire)
+        != routeGeneration)
         return;
-    }
+
+    const int remaining = audioScrubPreviewRemaining;
+    if (remaining <= 0 || snap.pages.empty())
+        return;
 
     const int p = juce::jlimit(0, (int) snap.pages.size() - 1, audioPage);
     const upic::Page& pg = snap.pages[(size_t) p];
@@ -581,18 +1249,15 @@ void MainComponent::renderScrubPreview (const ModelSnapshot& snap, AudioBlock& b
     juce::FloatVectorOperations::clear (b.scoreL, chunk);
     if (b.scoreR != nullptr) juce::FloatVectorOperations::clear (b.scoreR, chunk);
 
-    double ph = scrubPreviewPlayhead.load(std::memory_order_relaxed);
-    const double rate = scrubRate.load(std::memory_order_relaxed);
-    const int sps = scrubPreviewSerial.load(std::memory_order_relaxed);
-    if (sps != seenScrubPreviewSerial)
-    {
-        seenScrubPreviewSerial = sps;
-        scrubEngine.reset(); // re-anchor to the dragged playhead
-    }
+    const double ph = audioScrubPreviewPlayhead;
+    const double rate = audioScrubRate;
 
+    // WP7: the extraction preview has its own renderer and transport. The
+    // ordinary score scrub always renders the real page and the real slots.
     scrubEngine.render (pg, ph, snap.waveforms, snap.envelopes, snap.slots,
                         b.scoreL, (b.scoreR != nullptr ? b.scoreR : b.scoreL),
-                        chunk, 1.0f, rate, false, snap.lutsFor (p), &snap.amplitudeTables,
+                        chunk, 1.0f, rate, false,
+                        snap.lutsFor (p), &snap.amplitudeTables,
                         snap.overridesFor (p));
 
     const int fade = juce::jmin (chunk / 4, (int) (b.sr * 0.005));
@@ -616,23 +1281,111 @@ void MainComponent::renderScrubPreview (const ModelSnapshot& snap, AudioBlock& b
             b.outR[i] += (b.scoreR != nullptr ? b.scoreR[i] : b.scoreL[i]) * mg;
     }
 
-    scrubPreviewPlayhead.store (ph + (double) chunk * rate / b.sr, std::memory_order_relaxed);
     const int left = remaining - chunk;
-    scrubPreviewRemaining.store (left, std::memory_order_relaxed);
-    if (left <= 0) scrubPreviewActive.store (false, std::memory_order_relaxed);
+    // The transport belongs to this exact published generation. If a newer
+    // drag or lifecycle boundary claimed the route while this block was
+    // rendering, the next block will adopt that new record. This block only
+    // advances its private copy and never overwrites published state.
+    if (ordinaryPreviewScrubTransport.load (std::memory_order_acquire)
+            == seenScrubPreviewTransport
+        && ordinaryPreviewGeneration.load (std::memory_order_acquire)
+            == routeGeneration)
+    {
+        audioScrubPreviewPlayhead = ph + (double) chunk * rate / b.sr;
+        audioScrubPreviewRemaining = left;
+        if (left <= 0)
+            audioScrubPreviewActive = false;
+    }
 }
 
-void MainComponent::renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& b, double freezeGain)
+//==============================================================================
+// WP7: the sample extraction A/B preview. It is deliberately a separate
+// route: its engine, playhead and remaining count are private, and its
+// material is the snapshot's isolated preview-slot vector. An invalid route
+// is silence - it never falls through to the score.
+void MainComponent::renderSampleExtractPreview (const ModelSnapshot& snap, AudioBlock& b,
+                                                double previewGain)
 {
-    if (b.playingAtStart || ! scrubFreezeActive.load(std::memory_order_relaxed))
+    if (b.playingAtStart || previewGain <= 0.0
+        || snap.sampleExtractPreview.route == SampleExtractRoute::none)
+        return;
+
+    const auto& request = snap.sampleExtractPreview;
+    if (request.route == SampleExtractRoute::none || snap.samplePreviewPage == nullptr
+        || (snap.samplePreviewSlots.empty() && snap.samplePreviewWaves.empty()))
+        return;
+
+    // A generation is adopted as one unit. The message thread publishes the
+    // request and its material together; an older audio block can never
+    // write a playhead or a remaining count back over the new request.
+    if (request.generation != seenSampleExtractPreviewGeneration)
+    {
+        seenSampleExtractPreviewGeneration = request.generation;
+        sampleExtractPreviewPlayhead = 0.0;
+        sampleExtractPreviewRemaining = request.durationFrames;
+        sampleExtractEngine.reset();
+    }
+
+    if (sampleExtractPreviewRemaining <= 0) return;
+
+    const int chunk = juce::jmin (b.numSamples, sampleExtractPreviewRemaining);
+    juce::FloatVectorOperations::clear (b.extractL, chunk);
+    if (b.extractR != nullptr) juce::FloatVectorOperations::clear (b.extractR, chunk);
+
+    // The extracted side owns an isolated wavetable bank. Reading the
+    // piece's bank here could select a different waveform with the same id
+    // and break the promise that A/B and "To wave" use the exact same
+    // converted asset. The original side has no oscillator arc, so the
+    // piece's bank is harmless for that route.
+    const auto& routeWaves = snap.wavesForSampleExtractRoute();
+
+    sampleExtractEngine.render (*snap.samplePreviewPage, sampleExtractPreviewPlayhead,
+                                 routeWaves, snap.samplePreviewEnvelopes,
+                                 snap.samplePreviewSlots,
+                                 b.extractL, (b.extractR != nullptr ? b.extractR : b.extractL),
+                                 chunk, 1.0f, 1.0, false,
+                                 nullptr, nullptr, nullptr);
+
+    // No block-local fade: applying one to every block modulates the
+    // preview at the host's block rate. The transport's own gain envelope
+    // owns the route boundary.
+    const float mg = masterGain.load (std::memory_order_relaxed) * (float) previewGain;
+    for (int i = 0; i < chunk; ++i)
+    {
+        b.outL[i] += b.extractL[i] * mg;
+        if (b.outR != nullptr)
+            b.outR[i] += (b.extractR != nullptr ? b.extractR[i] : b.extractL[i]) * mg;
+    }
+
+    sampleExtractPreviewPlayhead += (double) chunk / b.sr;
+    sampleExtractPreviewRemaining -= chunk;
+}
+
+void MainComponent::renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& b,
+                                       double freezeGain,
+                                       std::uint64_t routeGeneration)
+{
+    if (b.playingAtStart || freezeGain <= 0.0
+        || ! audioFreezeActive)
+        return;
+
+    // A freeze block may only use the state that belongs to its exact token.
+    // A newer freeze, scrub, extraction route or lifecycle boundary changes
+    // the ordinary generation before publishing its token. Expiry is tagged
+    // with the same generation, so an old block cannot expire a newer tail.
+    if (audioFreezeGeneration != routeGeneration || audioFreezeExpired)
+        return;
+    if (ordinaryPreviewGeneration.load (std::memory_order_acquire)
+        != routeGeneration)
         return;
 
     const double nowMs = juce::Time::getMillisecondCounterHiRes();
-    const double stopAt = scrubFreezeStopAtMs.load(std::memory_order_relaxed);
+    const double stopAt = audioFreezeStopAtMs;
     if (stopAt > 0.0 && nowMs >= stopAt)
     {
-        scrubFreezeActive.store (false, std::memory_order_relaxed);
-        scrubFreezeStopAtMs.store (0.0, std::memory_order_relaxed);
+        // Expiry is private, generation-tagged audio-thread state. It never
+        // writes the published record or clears the shared active flag.
+        audioFreezeExpired = true;
         return;
     }
 
@@ -745,9 +1498,13 @@ void MainComponent::applyTransportGain (float* SL, float* SR, int n, double sr,
                                                     std::memory_order_relaxed))
         {
             engine.reset();
-            // UI must not be touched from the audio thread -> SafePointer.
-            juce::Component::SafePointer<MainComponent> sp(this);
-            juce::MessageManager::callAsync([sp]{ if (sp != nullptr) sp->stopPlayback(true); });
+            // UI must not be touched from the audio thread. The shared
+            // callback gate makes the queued stop safe even if a host
+            // destroys the component on another thread.
+            postToMessageThread ([] (MainComponent& component)
+            {
+                component.stopPlayback (true);
+            });
         }
     }
 }
@@ -787,19 +1544,21 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
     const auto publishPlayhead = [this]
     { playheadPublished.store(audioPlayhead, std::memory_order_relaxed); };
 
-    // UI must not be touched from the audio thread, and `this` may be gone by
-    // the time the callback runs -> SafePointer. The epoch guard drops a late
-    // notification if the user picked another page meanwhile.
+    // UI must not be touched from the audio thread. The shared callback gate
+    // keeps the queued notification safe if the host destroys the component
+    // on another thread. The epoch guard drops a late notification if the
+    // user picked another page meanwhile.
     const auto notifyPage = [this](int next)
     {
         const int epoch = pageEpoch.load(std::memory_order_relaxed);
-        juce::Component::SafePointer<MainComponent> sp(this);
-        juce::MessageManager::callAsync([sp, next, epoch]{
-            if (sp == nullptr) return;
-            if (sp->pageEpoch.load(std::memory_order_relaxed) != epoch) return;
-            sp->currentPage = juce::jlimit(0, (int) sp->pages.size() - 1, next);
-            sp->refreshBoxes();
-            sp->refreshScoreBinding();
+        postToMessageThread ([next, epoch] (MainComponent& component)
+        {
+            if (component.pageEpoch.load(std::memory_order_relaxed) != epoch)
+                return;
+            component.currentPage = juce::jlimit (
+                0, (int) component.pages.size() - 1, next);
+            component.refreshBoxes();
+            component.refreshScoreBinding();
         });
     };
 
@@ -931,8 +1690,10 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                               std::memory_order_relaxed);
                         playheadAtEnd.store(false, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
-                        juce::Component::SafePointer<MainComponent> sp(this);
-                        juce::MessageManager::callAsync([sp]{ if (sp != nullptr) sp->stopPlayback(true); });
+                        postToMessageThread ([] (MainComponent& component)
+                        {
+                            component.stopPlayback (true);
+                        });
                         return;
                     }
                 }
@@ -962,8 +1723,10 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                           std::memory_order_relaxed);
                     playheadAtEnd.store(false, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
-                    juce::Component::SafePointer<MainComponent> sp(this);
-                    juce::MessageManager::callAsync([sp]{ if (sp != nullptr) sp->stopPlayback(true); });
+                    postToMessageThread ([] (MainComponent& component)
+                    {
+                        component.stopPlayback (true);
+                    });
                     return;
                 }
             }
@@ -983,8 +1746,10 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                               std::memory_order_relaxed);
                         playheadAtEnd.store(true, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
-                        juce::Component::SafePointer<MainComponent> sp(this);
-                        juce::MessageManager::callAsync([sp]{ if (sp != nullptr) sp->stopPlayback(true); });
+                        postToMessageThread ([] (MainComponent& component)
+                        {
+                            component.stopPlayback (true);
+                        });
                         return;
                     }
                 }
@@ -1003,8 +1768,10 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                           std::memory_order_relaxed);
                     playheadAtEnd.store(true, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
-                    juce::Component::SafePointer<MainComponent> sp(this);
-                    juce::MessageManager::callAsync([sp]{ if (sp != nullptr) sp->stopPlayback(true); });
+                    postToMessageThread ([] (MainComponent& component)
+                    {
+                        component.stopPlayback (true);
+                    });
                     return;
                 }
             }
@@ -1054,8 +1821,90 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
     publishPlayhead();
 }
 
+std::uint64_t MainComponent::beginPreviewRoutesForHostLifecycle()
+{
+    // WP7: a device/host restart cancels every preview route, not only the
+    // extraction one. The caller holds audioPreviewLifecycleLock, so
+    // overlapping preparation/release calls cannot end one another's gate.
+    audioPreviewLifecycleCancelling.store (true, std::memory_order_release);
+    juce::ScopedLock lock (audioPreviewRouteLock);
+
+    // Stable epochs are even; an active lifecycle boundary is odd. A
+    // publisher that captures the old even epoch or the active odd epoch is
+    // rejected when it eventually tries to publish.
+    audioPreviewLifecycleEpoch.fetch_add (1, std::memory_order_acq_rel);
+
+    const auto extractionGeneration = sampleExtractPreviewGenerationPublished.load (
+        std::memory_order_acquire);
+    clearOrdinaryPreviewRoutes();
+    audioPreviewRouteToken.store (makeAudioPreviewRouteToken (
+        AudioPreviewRoute::none, 0), std::memory_order_release);
+    return extractionGeneration;
+}
+
+void MainComponent::endPreviewRoutesForHostLifecycle()
+{
+    juce::ScopedLock lock (audioPreviewRouteLock);
+    // Odd -> even: publishers that captured the active odd epoch now see a
+    // different value and refuse their stale claim.
+    audioPreviewLifecycleEpoch.fetch_add (1, std::memory_order_acq_rel);
+    audioPreviewLifecycleCancelling.store (false, std::memory_order_release);
+}
+
+void MainComponent::cancelPreviewRoutesForHostLifecycle()
+{
+    juce::ScopedLock lifecycleLock (audioPreviewLifecycleLock);
+    const auto extractionGeneration = beginPreviewRoutesForHostLifecycle();
+    struct LifecycleEnd
+    {
+        MainComponent& owner;
+        ~LifecycleEnd() { owner.endPreviewRoutesForHostLifecycle(); }
+    } lifecycleEnd { *this };
+    cancelSampleExtractPreviewForHostLifecycle (extractionGeneration);
+}
+
+void MainComponent::cancelSampleExtractPreviewForHostLifecycle (
+    std::uint64_t generation)
+{
+    // The extraction state and panel belong to the message thread. The
+    // generation was captured at the lifecycle boundary; a deferred
+    // cancellation must not cancel a newer extraction preview that was
+    // armed after that request.
+    auto* const messages = juce::MessageManager::getInstanceWithoutCreating();
+    if (messages != nullptr && messages->isThisTheMessageThread())
+    {
+        cancelSampleExtractPreviewGeneration (generation);
+        return;
+    }
+
+    if (messages != nullptr)
+    {
+        postToMessageThread ([generation] (MainComponent& component)
+        {
+            component.cancelSampleExtractPreviewGeneration (generation);
+        });
+    }
+}
+
+void MainComponent::closeAudioPreviewCallbackGate()
+{
+    const auto gate = audioPreviewCallbackGate;
+    if (gate == nullptr)
+        return;
+
+    std::lock_guard<std::mutex> lock (gate->mutex);
+    gate->alive.store (false, std::memory_order_release);
+    gate->closed.store (true, std::memory_order_release);
+}
+
 void MainComponent::releaseResources()
 {
+    // A release invalidates a preparation that may still be queued on the
+    // message thread. The requested and published generations then differ,
+    // so the audio callback stays silent until a newer prepare is applied.
+    invalidateAudioPreparation();
+    cancelPreviewRoutesForHostLifecycle();
+
     // v1.18: keep the live snapshot across a device/host restart - it is
     // immutable and valid; only the destructor hands it back (after the audio
     // thread has been shut down). Retiring it here would leave a restarted

@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "LibraryManager.h"
 #include "UpicModel.h"
 
 //==============================================================================
@@ -21,6 +22,10 @@ public:
     std::function<void()> onRecordToggle, onPlayToggle, onClear, onLoopToggle, onClose;
     std::function<void (const std::vector<upic::PerformancePoint>&)> onPointsEdited;
     std::function<void()> onTrim, onReplace;
+
+    // WP7: the panel's own sequence controls stay here. The shared manager
+    // supplies only the Piece/User bridge and the library rows.
+    LibraryManager library { "seq" };
 
     SequencePanel()
     {
@@ -56,6 +61,13 @@ public:
         trimBtn.onClick = [this] { if (onTrim) onTrim(); };
         replaceBtn.onClick = [this] { if (onReplace) onReplace(); };
         closeBtn.onClick = [this] { close(); };
+
+        // WP7: the source switch, the user-library selector and the
+        // Publish/Import/Folder commands live in the shared manager. The
+        // panel keeps its own recorder and editing commands.
+        addAndMakeVisible (library);
+        library.setPieceCommandsVisible (false);
+        library.setSelector (libraryBox);
 
         setVisible (false);
     }
@@ -99,6 +111,7 @@ public:
     {
         auto card = cardRect().reduced (18, 12);
         card.removeFromTop (titleH);
+        card.removeFromTop (libraryH);
         card.removeFromBottom (buttonH);
         return card.toFloat();
     }
@@ -195,6 +208,7 @@ public:
     {
         auto card = cardRect().reduced (18, 12);
         card.removeFromTop (titleH);
+        library.setBounds (card.removeFromTop (libraryH).reduced (0, 2));
         auto row = card.removeFromBottom (buttonH).reduced (0, 4);
         recBtn.setBounds (row.removeFromLeft (66));
         row.removeFromLeft (6);
@@ -299,6 +313,7 @@ public:
 
 private:
     static constexpr int titleH = 26;
+    static constexpr int libraryH = 28;
     static constexpr int buttonH = 36;
 
     double pageDuration (int page) const
@@ -361,6 +376,7 @@ private:
                      clearBtn { "Clear" }, loopBtn { "Loop" },
                      trimBtn { "Trim" }, replaceBtn { "Replace" },
                      closeBtn { "Close" };
+    juce::ComboBox libraryBox;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SequencePanel)
 };

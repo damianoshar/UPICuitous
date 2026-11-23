@@ -118,8 +118,18 @@ void ScoreEditor::beginZoneDragForTest(juce::Point<float> pos)
 void ScoreEditor::dragZoneToForTest(juce::Point<float> pos)
 { dragZoneTo (pos); }
 
-void ScoreEditor::commitLineForTest(juce::Point<float> p0, juce::Point<float> p1)
-{ commitLine (p0, p1); }
+bool ScoreEditor::commitLineForTest(juce::Point<float> p0, juce::Point<float> p1)
+{ return commitLine (p0, p1); }
+
+bool ScoreEditor::commitStrokeForTest(const std::vector<juce::Point<float>>& points)
+{
+    strokePts.clear();
+    for (const auto& point : points)
+        strokePts.push_back ({ point, 1.0f });
+    const bool added = commitStroke();
+    strokePts.clear();
+    return added;
+}
 
 bool ScoreEditor::lastArcPointsSortedForTest() const
 {
@@ -420,14 +430,16 @@ bool ScoreEditor::setSelectionTime (double tSec)
     const double dt = tSec - aT;
     if (std::abs (dt) < 1e-9) return false;
 
-    const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
-    for (auto& a : page->arcs)
     {
-        if (! isSel (a.id)) continue;
-        for (auto& p : a.points)
-            p.t = juce::jlimit (0.0, page->durationSec, p.t + dt);
-        std::stable_sort (a.points.begin(), a.points.end(),
-                          [] (const upic::ArcPoint& x, const upic::ArcPoint& y){ return x.t < y.t; });
+        const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+        for (auto& a : page->arcs)
+        {
+            if (! isSel (a.id)) continue;
+            for (auto& p : a.points)
+                p.t = juce::jlimit (0.0, page->durationSec, p.t + dt);
+            std::stable_sort (a.points.begin(), a.points.end(),
+                              [] (const upic::ArcPoint& x, const upic::ArcPoint& y){ return x.t < y.t; });
+        }
     }
     notify();
     if (onViewChanged) onViewChanged();
@@ -442,12 +454,14 @@ bool ScoreEditor::setSelectionFreq (double hz)
     const double ratio = hz / juce::jmax (1e-6, aF);
     if (std::abs (ratio - 1.0) < 1e-9) return false;
 
-    const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
-    for (auto& a : page->arcs)
     {
-        if (! isSel (a.id)) continue;
-        for (auto& p : a.points)
-            p.freq = juce::jlimit (upic::kMinFreq, upic::kMaxFreq, p.freq * ratio);
+        const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+        for (auto& a : page->arcs)
+        {
+            if (! isSel (a.id)) continue;
+            for (auto& p : a.points)
+                p.freq = juce::jlimit (upic::kMinFreq, upic::kMaxFreq, p.freq * ratio);
+        }
     }
     notify();
     if (onViewChanged) onViewChanged();
@@ -482,13 +496,17 @@ void ScoreEditor::deleteSelected()
         // v1.33.4 (L15, part 2): the undo transaction - the app keeps the
         // state from before the change.
         if (onEditStart) onEditStart ("Delete");
-        const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
-        auto& v = page->arcs;
-        v.erase(std::remove_if(v.begin(), v.end(),
-                [&](auto& a){ return std::find(selArcs.begin(), selArcs.end(), a.id) != selArcs.end(); }),
-                v.end());
+        {
+            const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+            auto& v = page->arcs;
+            v.erase(std::remove_if(v.begin(), v.end(),
+                    [&](auto& a){ return std::find(selArcs.begin(), selArcs.end(), a.id) != selArcs.end(); }),
+                    v.end());
+        }
         selArcs.clear();
         if (selectedZone >= 0 && tool != Zone) selectedZone = -1;
+        // The callback refreshes the controls and takes the model lock itself;
+        // it must never run while that lock is held.
         notify();
         if (onEditEnd) onEditEnd();
     }
@@ -536,27 +554,31 @@ void ScoreEditor::duplicateSelected()
 void ScoreEditor::toggleMuteSelected()
 {
         if (! page || selArcs.empty()) return;
-        const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
-        bool muteTo = false;
-        for (auto& a : page->arcs)
-            if (std::find(selArcs.begin(), selArcs.end(), a.id) != selArcs.end())
-                { muteTo = ! a.muted; break; } // unify on the first selected arc
-        for (auto& a : page->arcs)
-            if (std::find(selArcs.begin(), selArcs.end(), a.id) != selArcs.end())
-                a.muted = muteTo;
+        {
+            const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+            bool muteTo = false;
+            for (auto& a : page->arcs)
+                if (std::find(selArcs.begin(), selArcs.end(), a.id) != selArcs.end())
+                    { muteTo = ! a.muted; break; } // unify on the first selected arc
+            for (auto& a : page->arcs)
+                if (std::find(selArcs.begin(), selArcs.end(), a.id) != selArcs.end())
+                    a.muted = muteTo;
+        }
         notify();
     }
 
 void ScoreEditor::remagnetizeSelected()
 {
         if (! page || selArcs.empty()) return;
-        const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
-        for (auto& a : page->arcs)
         {
-            if (std::find(selArcs.begin(), selArcs.end(), a.id) == selArcs.end()) continue;
-            for (auto& pt : a.points) quantizeXY(pt.t, pt.freq);
-            std::stable_sort(a.points.begin(), a.points.end(),
-                             [](auto& x, auto& y){ return x.t < y.t; });
+            const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+            for (auto& a : page->arcs)
+            {
+                if (std::find(selArcs.begin(), selArcs.end(), a.id) == selArcs.end()) continue;
+                for (auto& pt : a.points) quantizeXY(pt.t, pt.freq);
+                std::stable_sort(a.points.begin(), a.points.end(),
+                                 [](auto& x, auto& y){ return x.t < y.t; });
+            }
         }
         notify();
     }
@@ -564,17 +586,19 @@ void ScoreEditor::remagnetizeSelected()
 void ScoreEditor::nudgeSelected(double dt, int dSemi)
 {
         if (! page || selArcs.empty()) return;
-        const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
-        for (auto& a : page->arcs)
         {
-            if (std::find(selArcs.begin(), selArcs.end(), a.id) == selArcs.end()) continue;
-            for (auto& pt : a.points)
+            const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+            for (auto& a : page->arcs)
             {
-                pt.t = juce::jlimit(0.0, page->durationSec, pt.t + dt);
-                if (dSemi != 0) pt.freq = nudgePitch(pt.t, pt.freq, dSemi);
+                if (std::find(selArcs.begin(), selArcs.end(), a.id) == selArcs.end()) continue;
+                for (auto& pt : a.points)
+                {
+                    pt.t = juce::jlimit(0.0, page->durationSec, pt.t + dt);
+                    if (dSemi != 0) pt.freq = nudgePitch(pt.t, pt.freq, dSemi);
+                }
+                std::stable_sort(a.points.begin(), a.points.end(),
+                                 [](auto& x, auto& y){ return x.t < y.t; });
             }
-            std::stable_sort(a.points.begin(), a.points.end(),
-                             [](auto& x, auto& y){ return x.t < y.t; });
         }
         notify();
     }
@@ -2206,21 +2230,28 @@ bool ScoreEditor::pitchMagnetAt(double t, double f) const
         return pitchMagnet (m, R, t, f);
     }
 
-void ScoreEditor::commitStroke()
+bool ScoreEditor::commitStroke()
 {
-        if (!page || strokePts.size() < 2) return;
+        if (!page) return false;
+        if (strokePts.size() < 2)
+        {
+            notice ("The stroke is too short to draw");
+            return false;
+        }
         // v1.33.4 (H13): the page's arc count is capped by the piece format.
         if (atArcLimit())
         {
             notice ("This page already holds " + juce::String (upic::limits::kMaxArcsPerPage)
                     + " arcs (the limit) - delete one before drawing another");
-            return;
+            return false;
         }
+        bool added = false;
+        {
         const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
         // sort by x, convert to (t,f), drop duplicates in time
         std::sort(strokePts.begin(), strokePts.end(), [](auto& a, auto& b){ return a.pos.x < b.pos.x; });
         upic::Arc a;
-        a.id = page->nextArcId++;
+        a.id = page->nextArcId;
         a.waveformId = curWave; a.envelopeId = curEnv; a.intensity = curInten;
         a.mode = curMode(); a.sampleId = curSampleId; a.refFreq = curRef;
         a.stepDivisions = curStep;   // v1.32: the discrete frequency space
@@ -2240,6 +2271,11 @@ void ScoreEditor::commitStroke()
             double f = yToFreq(q.pos.y);
             a.points.push_back({ t, f, q.press });
             lastT = t;
+        }
+        if (a.points.size() < 2)
+        {
+            notice ("The stroke is too short to draw");
+            return false;
         }
         // simplify the raw freehand curve to a manageable control-point count
         //
@@ -2291,25 +2327,40 @@ void ScoreEditor::commitStroke()
             for (auto& p : a.points) magnetised.push_back (pitchMagnetAt (p.t, p.freq));
             quantiseArcPoints (a, magnetised);
         }
-        if (a.points.size() >= 2) { page->arcs.push_back(a); selArcs = { a.id }; notify(); }
+        if (a.points.size() >= 2)
+        {
+            ++page->nextArcId;
+            page->arcs.push_back(a);
+            selArcs = { a.id };
+            added = true;
+        }
+        }
+        if (added) notify();
+        return added;
     }
 
-void ScoreEditor::commitLine(juce::Point<float> p0, juce::Point<float> p1, float press)
+bool ScoreEditor::commitLine(juce::Point<float> p0, juce::Point<float> p1, float press)
 {
-        if (!page) return;
+        if (!page) return false;
         // v1.33.4 (H13): the page's arc count is capped by the piece format.
         if (atArcLimit())
         {
             notice ("This page already holds " + juce::String (upic::limits::kMaxArcsPerPage)
                     + " arcs (the limit) - delete one before drawing another");
-            return;
+            return false;
         }
+        bool added = false;
+        {
         const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
         double t0 = juce::jlimit(0.0, page->durationSec, xToTime(p0.x));
         double t1 = juce::jlimit(0.0, page->durationSec, xToTime(p1.x));
-        if (std::abs(t1 - t0) < minLineLengthSec()) return;
+        if (std::abs(t1 - t0) < minLineLengthSec())
+        {
+            notice ("The line is too short to draw - drag a little farther");
+            return false;
+        }
         if (t1 < t0) { std::swap(t0, t1); std::swap(p0, p1); }
-        upic::Arc a; a.id = page->nextArcId++;
+        upic::Arc a; a.id = page->nextArcId;
         a.waveformId = curWave; a.envelopeId = curEnv; a.intensity = curInten;
         a.mode = curMode(); a.sampleId = curSampleId; a.refFreq = curRef;
         a.stepDivisions = curStep;   // v1.32: the discrete frequency space
@@ -2338,7 +2389,16 @@ void ScoreEditor::commitLine(juce::Point<float> p0, juce::Point<float> p1, float
             for (auto& p : a.points) magnetised.push_back (pitchMagnetAt (p.t, p.freq));
             quantiseArcPoints (a, magnetised);
         }
-        if (a.points.size() >= 2) { page->arcs.push_back(a); selArcs = { a.id }; notify(); }
+        if (a.points.size() >= 2)
+        {
+            ++page->nextArcId;
+            page->arcs.push_back(a);
+            selArcs = { a.id };
+            added = true;
+        }
+        }
+        if (added) notify();
+        return added;
     }
 
 void ScoreEditor::notify()

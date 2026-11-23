@@ -38,6 +38,13 @@ void UpicEngine::prepare(double sampleRate_, int blockSize)
             const int n = juce::jmax (blockSize, kMaxBlockSize);
             if (scratch.capacity() < (size_t) n) scratch.reserve ((size_t) n);
             if (scratch.size() < (size_t) n) scratch.resize ((size_t) n);
+
+            // WP6.3: the channel buckets have the same rule. They are sized
+            // here, on the message thread, so the render path never grows
+            // them (and never allocates) on the audio thread.
+            const size_t channelNeed = (size_t) 16 * (size_t) n;
+            if (chanBuf.capacity() < channelNeed) chanBuf.reserve (channelNeed);
+            if (chanBuf.size() < channelNeed) chanBuf.resize (channelNeed);
         }
         // v1.33.4 (M21): the first slots of the voice pools are built here,
         // on the message thread. A sample voice and a live voice hold the
@@ -103,8 +110,18 @@ void UpicEngine::resetLiveVoices()
 
 void UpicEngine::copyOscillatorPhasesFrom(const UpicEngine& other)
 {
-        // v1.33.4 (M21): the phase slots are copied, not the map's nodes
-        phases = other.phases;
+        // v1.33.4 (M21): the phase slots are copied, not the map's nodes.
+        // This handoff now runs on the audio thread, where both pools are
+        // private. The destination capacity was reserved during prepare(); the
+        // guard makes that invariant explicit and keeps the copy allocation-free
+        // even if a future pool size changes.
+        const auto count = other.phases.size();
+        if (phases.capacity() < count)
+            return;
+
+        phases.resize (count);
+        for (size_t i = 0; i < count; ++i)
+            phases[i] = other.phases[i];
     }
 
 void UpicEngine::noteOffArc(int arcId)
@@ -217,7 +234,10 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
 {
         if (numSamples <= 0) return;
         if (! freeze && std::abs(rate) < 1e-6) return; // stopped transport: silence
-        if (scratch.size() < (size_t) numSamples) scratch.resize((size_t) numSamples);
+        // The render path is realtime-safe: prepare() sized these buffers on
+        // the message thread. A host that breaks the documented block limit
+        // gets silence for the oversized request instead of an allocation.
+        if (scratch.size() < (size_t) numSamples) return;
         std::fill(scratch.begin(), scratch.begin() + numSamples, 0.0f);
 
         // WP6.3: channel routing only when the piece has channels.
@@ -227,7 +247,7 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
         if (chanRoutingActive)
         {
             const size_t need = (size_t) 16 * (size_t) numSamples;
-            if (chanBuf.size() < need) chanBuf.resize (need);
+            if (chanBuf.size() < need) return;
             std::fill (chanBuf.begin(), chanBuf.begin() + (std::ptrdiff_t) need, 0.0f);
         }
 

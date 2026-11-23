@@ -363,10 +363,12 @@ void MainComponent::updateMidiScrub()
             dirChangeSerial.fetch_add (1, std::memory_order_relaxed);
         }
     }
-    else if (transportActive())
+    else
     {
-        // the jog is over: the transport stops and the speed goes back to the
-        // app's own (the Rev toggle's speed), so the next playback is normal
+        // The jog is over: the speed goes back to the app's own (the Rev
+        // toggle's speed), so the next playback is normal. Clear the jog
+        // even if the transport has already stopped on its own; otherwise
+        // a stale jog can remain armed indefinitely.
         scrubActive = false;
         const double base = basePlayRate();
         if (playRate.load (std::memory_order_relaxed) != base)
@@ -375,7 +377,8 @@ void MainComponent::updateMidiScrub()
             playRate.store (base, std::memory_order_relaxed);
             dirChangeSerial.fetch_add (1, std::memory_order_relaxed);
         }
-        stopPlayback();
+        if (transportActive())
+            stopPlayback();
     }
 }
 

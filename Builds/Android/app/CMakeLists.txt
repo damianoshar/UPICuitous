@@ -14,7 +14,7 @@ add_subdirectory (${OBOE_DIR} ./oboe)
 add_library("cpufeatures" STATIC "${ANDROID_NDK}/sources/android/cpufeatures/cpu-features.c")
 set_source_files_properties("${ANDROID_NDK}/sources/android/cpufeatures/cpu-features.c" PROPERTIES COMPILE_FLAGS "-Wno-sign-conversion -Wno-gnu-statement-expression")
 
-add_definitions([[-DJUCE_ANDROID=1]] [[-DJUCE_ANDROID_API_VERSION=24]] [[-DJUCE_PUSH_NOTIFICATIONS=1]] [[-DJUCE_PUSH_NOTIFICATIONS_ACTIVITY="com/rmsl/juce/JuceActivity"]] [[-DJUCE_ANDROID_GL_ES_VERSION_3_0=1]] [[-DJUCE_WEB_BROWSER=0]] [[-DJUCE_USE_CURL=0]] [[-DJUCE_VST3_CAN_REPLACE_VST2=0]] [[-DJUCE_DISPLAY_SPLASH_SCREEN=0]] [[-DJUCE_REPORT_APP_USAGE=0]] [[-DJUCE_STRICT_REFCOUNTEDPOINTER=1]] [[-DJUCE_CORE_INCLUDE_JNI_HELPERS=1]] [[-DJUCER_ANDROIDSTUDIO_7F0E4A25=1]] [[-DJUCE_APP_VERSION=0.34.0]] [[-DJUCE_APP_VERSION_HEX=0x2200]])
+add_definitions([[-DJUCE_ANDROID=1]] [[-DJUCE_ANDROID_API_VERSION=24]] [[-DJUCE_PUSH_NOTIFICATIONS=1]] [[-DJUCE_PUSH_NOTIFICATIONS_ACTIVITY="com/rmsl/juce/JuceActivity"]] [[-DJUCE_ANDROID_GL_ES_VERSION_3_0=1]] [[-DJUCE_WEB_BROWSER=0]] [[-DJUCE_USE_CURL=0]] [[-DJUCE_VST3_CAN_REPLACE_VST2=0]] [[-DJUCE_DISPLAY_SPLASH_SCREEN=0]] [[-DJUCE_REPORT_APP_USAGE=0]] [[-DJUCE_STRICT_REFCOUNTEDPOINTER=1]] [[-DJUCE_CORE_INCLUDE_JNI_HELPERS=1]] [[-DJUCER_ANDROIDSTUDIO_7F0E4A25=1]] [[-DJUCE_APP_VERSION=0.35.0]] [[-DJUCE_APP_VERSION_HEX=0x2300]])
 
 include_directories( AFTER
     "../../../JuceLibraryCode"
@@ -25,9 +25,9 @@ include_directories( AFTER
 enable_language(ASM)
 
 if(JUCE_BUILD_CONFIGURATION MATCHES "DEBUG")
-    add_definitions([[-DJUCE_PROJUCER_VERSION=0x80010]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_devices=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_formats=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors_headless=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_utils=1]] [[-DJUCE_MODULE_AVAILABLE_juce_core=1]] [[-DJUCE_MODULE_AVAILABLE_juce_data_structures=1]] [[-DJUCE_MODULE_AVAILABLE_juce_dsp=1]] [[-DJUCE_MODULE_AVAILABLE_juce_events=1]] [[-DJUCE_MODULE_AVAILABLE_juce_graphics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_extra=1]] [[-DJUCE_MODULE_AVAILABLE_juce_osc=1]] [[-DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1]] [[-DJUCE_STANDALONE_APPLICATION=1]] [[-DJUCE_WEB_BROWSER=0]] [[-DJUCE_USE_CURL=0]] [[-DJUCE_VST3_CAN_REPLACE_VST2=0]] [[-DJUCE_DISPLAY_SPLASH_SCREEN=0]] [[-DJUCE_REPORT_APP_USAGE=0]] [[-DJUCE_STRICT_REFCOUNTEDPOINTER=1]] [[-DJUCE_CORE_INCLUDE_JNI_HELPERS=1]] [[-DJUCER_ANDROIDSTUDIO_7F0E4A25=1]] [[-DJUCE_APP_VERSION=0.34.0]] [[-DJUCE_APP_VERSION_HEX=0x2200]] [[-DDEBUG=1]] [[-D_DEBUG=1]])
+    add_definitions([[-DJUCE_PROJUCER_VERSION=0x80010]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_devices=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_formats=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors_headless=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_utils=1]] [[-DJUCE_MODULE_AVAILABLE_juce_core=1]] [[-DJUCE_MODULE_AVAILABLE_juce_data_structures=1]] [[-DJUCE_MODULE_AVAILABLE_juce_dsp=1]] [[-DJUCE_MODULE_AVAILABLE_juce_events=1]] [[-DJUCE_MODULE_AVAILABLE_juce_graphics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_extra=1]] [[-DJUCE_MODULE_AVAILABLE_juce_osc=1]] [[-DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1]] [[-DJUCE_STANDALONE_APPLICATION=1]] [[-DJUCE_WEB_BROWSER=0]] [[-DJUCE_USE_CURL=0]] [[-DJUCE_VST3_CAN_REPLACE_VST2=0]] [[-DJUCE_DISPLAY_SPLASH_SCREEN=0]] [[-DJUCE_REPORT_APP_USAGE=0]] [[-DJUCE_STRICT_REFCOUNTEDPOINTER=1]] [[-DJUCE_CORE_INCLUDE_JNI_HELPERS=1]] [[-DJUCER_ANDROIDSTUDIO_7F0E4A25=1]] [[-DJUCE_APP_VERSION=0.35.0]] [[-DJUCE_APP_VERSION_HEX=0x2300]] [[-DDEBUG=1]] [[-D_DEBUG=1]])
 elseif(JUCE_BUILD_CONFIGURATION MATCHES "RELEASE")
-    add_definitions([[-DJUCE_PROJUCER_VERSION=0x80010]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_devices=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_formats=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors_headless=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_utils=1]] [[-DJUCE_MODULE_AVAILABLE_juce_core=1]] [[-DJUCE_MODULE_AVAILABLE_juce_data_structures=1]] [[-DJUCE_MODULE_AVAILABLE_juce_dsp=1]] [[-DJUCE_MODULE_AVAILABLE_juce_events=1]] [[-DJUCE_MODULE_AVAILABLE_juce_graphics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_extra=1]] [[-DJUCE_MODULE_AVAILABLE_juce_osc=1]] [[-DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1]] [[-DJUCE_STANDALONE_APPLICATION=1]] [[-DJUCE_WEB_BROWSER=0]] [[-DJUCE_USE_CURL=0]] [[-DJUCE_VST3_CAN_REPLACE_VST2=0]] [[-DJUCE_DISPLAY_SPLASH_SCREEN=0]] [[-DJUCE_REPORT_APP_USAGE=0]] [[-DJUCE_STRICT_REFCOUNTEDPOINTER=1]] [[-DJUCE_CORE_INCLUDE_JNI_HELPERS=1]] [[-DJUCER_ANDROIDSTUDIO_7F0E4A25=1]] [[-DJUCE_APP_VERSION=0.34.0]] [[-DJUCE_APP_VERSION_HEX=0x2200]] [[-DNDEBUG=1]])
+    add_definitions([[-DJUCE_PROJUCER_VERSION=0x80010]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_devices=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_formats=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_processors_headless=1]] [[-DJUCE_MODULE_AVAILABLE_juce_audio_utils=1]] [[-DJUCE_MODULE_AVAILABLE_juce_core=1]] [[-DJUCE_MODULE_AVAILABLE_juce_data_structures=1]] [[-DJUCE_MODULE_AVAILABLE_juce_dsp=1]] [[-DJUCE_MODULE_AVAILABLE_juce_events=1]] [[-DJUCE_MODULE_AVAILABLE_juce_graphics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_basics=1]] [[-DJUCE_MODULE_AVAILABLE_juce_gui_extra=1]] [[-DJUCE_MODULE_AVAILABLE_juce_osc=1]] [[-DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1]] [[-DJUCE_STANDALONE_APPLICATION=1]] [[-DJUCE_WEB_BROWSER=0]] [[-DJUCE_USE_CURL=0]] [[-DJUCE_VST3_CAN_REPLACE_VST2=0]] [[-DJUCE_DISPLAY_SPLASH_SCREEN=0]] [[-DJUCE_REPORT_APP_USAGE=0]] [[-DJUCE_STRICT_REFCOUNTEDPOINTER=1]] [[-DJUCE_CORE_INCLUDE_JNI_HELPERS=1]] [[-DJUCER_ANDROIDSTUDIO_7F0E4A25=1]] [[-DJUCE_APP_VERSION=0.35.0]] [[-DJUCE_APP_VERSION_HEX=0x2300]] [[-DNDEBUG=1]])
 else()
     message( FATAL_ERROR "No matching build-configuration found." )
 endif()
@@ -59,6 +59,11 @@ add_library( ${BINARY_NAME}
     "../../../Source/MainComponentExport.cpp"
     "../../../Source/MainComponentJobs.cpp"
     "../../../Source/MainComponentRecovery.cpp"
+    "../../../Source/MainComponentSampleExtract.cpp"
+    "../../../Source/UserLibrary.h"
+    "../../../Source/SampleAnalysis.h"
+    "../../../Source/SampleExtractPanel.h"
+    "../../../Source/SelfTestWP7.cpp"
     "../../../Source/MainComponent.h"
     "../../../Source/UpicButtonIcons.h"
     "../../../Source/UpicButtonIconData.h"
@@ -90,6 +95,7 @@ add_library( ${BINARY_NAME}
     "../../../Source/LivePitch.h"
     "../../../Source/AndroidBars.h"
     "../../../Source/ModelSnapshot.h"
+    "../../../Source/ChannelPanel.h"
     "../../../Source/ArcListPanel.h"
     "../../../Source/MidiHub.h"
     "../../../Source/AsioConfig.h"
@@ -2552,6 +2558,9 @@ add_library( ${BINARY_NAME}
 set_source_files_properties(
     "../../../Source/SelfTest.h"
     "../../../Source/AllocCounter.h"
+    "../../../Source/UserLibrary.h"
+    "../../../Source/SampleAnalysis.h"
+    "../../../Source/SampleExtractPanel.h"
     "../../../Source/MainComponent.h"
     "../../../Source/UpicButtonIcons.h"
     "../../../Source/UpicButtonIconData.h"
@@ -2581,6 +2590,7 @@ set_source_files_properties(
     "../../../Source/LivePitch.h"
     "../../../Source/AndroidBars.h"
     "../../../Source/ModelSnapshot.h"
+    "../../../Source/ChannelPanel.h"
     "../../../Source/ArcListPanel.h"
     "../../../Source/MidiHub.h"
     "../../../Source/AsioConfig.h"

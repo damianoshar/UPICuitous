@@ -7,7 +7,7 @@ class UpicApplication : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "UPICuitous"; }
-    const juce::String getApplicationVersion() override { return "0.34.0"; } // keep in sync with Plugin/CMakeLists.txt
+    const juce::String getApplicationVersion() override { return "0.35.0"; } // keep in sync with Plugin/CMakeLists.txt
     bool moreThanOneInstanceAllowed() override { return true; }
 
     void initialise(const juce::String& commandLine) override

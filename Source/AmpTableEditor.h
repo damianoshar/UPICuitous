@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "LibraryManager.h"
 #include "UpicModel.h"
 
 //==============================================================================
@@ -24,6 +25,11 @@ public:
     std::function<void (int index, const juce::String&)> onRename;
     std::function<void()> onNew, onDuplicate, onDelete, onClose;
     std::function<void (int index)> onAssign;
+
+    // WP7: the panel's own piece-bank commands stay here. The shared
+    // manager is only the Piece/User bridge, so it hides its duplicate
+    // New/Dup/Rename/Delete/Unique buttons.
+    LibraryManager library { "amp" };
 
     AmpTableEditor()
     {
@@ -79,6 +85,13 @@ public:
             addAndMakeVisible (presetBtn[i]);
         }
 
+        // WP7: the source switch, the user-library selector and the
+        // Publish/Import/Folder commands live in the shared manager. The
+        // panel keeps its own piece-bank list and commands.
+        addAndMakeVisible (library);
+        library.setPieceCommandsVisible (false);
+        library.setSelector (libraryBox);
+
         setVisible (false);
     }
 
@@ -131,6 +144,7 @@ public:
     {
         auto inner = cardRect().reduced (18, 12);
         inner.removeFromTop (titleH);
+        inner.removeFromTop (libraryH);
         inner.removeFromBottom (bottomH);
         return inner.removeFromLeft (listW);
     }
@@ -139,6 +153,7 @@ public:
     {
         auto inner = cardRect().reduced (18, 12);
         inner.removeFromTop (titleH);
+        inner.removeFromTop (libraryH);
         inner.removeFromBottom (bottomH);
         inner.removeFromLeft (listW + 16);
         inner.removeFromBottom (presetH);
@@ -235,6 +250,7 @@ public:
     {
         auto inner = cardRect().reduced (18, 12);
         inner.removeFromTop (titleH);
+        library.setBounds (inner.removeFromTop (libraryH).reduced (0, 2));
         auto bottom = inner.removeFromBottom (bottomH).reduced (0, 4);
         auto list = inner.removeFromLeft (listW);
         list.removeFromTop ((int) bank.size() * rowH + 4);
@@ -277,6 +293,7 @@ public:
             {
                 sel = i;
                 nameEd.setText (bank[(size_t) i].name, false);
+                library.selectAsset (bank[(size_t) i].id);
                 if (onSelectIndex) onSelectIndex (sel);
                 const bool canEdit = true;
                 for (auto* b : { &dupBtn, &delBtn, &renameBtn, &assignBtn }) b->setEnabled (canEdit);
@@ -331,6 +348,7 @@ public:
         if (i < 0 || i >= (int) bank.size()) return;
         sel = i;
         nameEd.setText (bank[(size_t) i].name, false);
+        library.selectAsset (bank[(size_t) i].id);
         if (onSelectIndex) onSelectIndex (sel);
         repaint();
     }
@@ -342,6 +360,7 @@ public:
 
 private:
     static constexpr int titleH = 26;
+    static constexpr int libraryH = 28;
     static constexpr int bottomH = 34;
     static constexpr int presetH = 30;
     static constexpr int listW = 210;
@@ -387,6 +406,7 @@ private:
                      closeBtn { "Close" };
     juce::TextEditor nameEd;
     juce::TextButton presetBtn[5];
+    juce::ComboBox libraryBox;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AmpTableEditor)
 };

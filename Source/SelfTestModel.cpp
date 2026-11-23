@@ -1601,7 +1601,8 @@ void upic::runLibraryModelChecks (upic::SelfTest& t)
                "library: the round-trip setup commands succeed");
 
         const auto saved = mc.pieceToVar();
-        MainComponent mc2 (true);
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
         const bool loaded = mc2.loadFromVar (saved);
         auto waveIndex2 = [&mc2] (int id)
         {
@@ -1793,7 +1794,8 @@ void upic::runFreqTableChecks (upic::SelfTest& t)
 
     // WP1-h: the Table... button path - open, draw, undo.
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         mc.openFreqTableForTest (2);
         check (mc.freqTableOpenForTest(), "freq tables: the editor opens");
 
@@ -1908,7 +1910,8 @@ void upic::runAmpTableChecks (upic::SelfTest& t)
 
     // WP2-d: assignment, the drawn curve, undo and the round trip.
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String json = R"({"currentPage":0,"ampTables":[{"id":1,"name":"Table 1","colour":-1,"points":[{"x":0,"y":0},{"x":1,"y":1}]}],"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":440},{"t":2,"f":440}]}]}]})";
         check (mc.loadFromVar (juce::JSON::parse (json)), "amp tables: the test piece loads");
 
@@ -1937,7 +1940,8 @@ void upic::runAmpTableChecks (upic::SelfTest& t)
         mc.ampTableDrawForTest ({ { 0.0f, 0.0f }, { 0.5f, 0.25f }, { 1.0f, 1.0f } });
         const auto saved = mc.pieceToVar();
         check (saved.hasProperty ("ampTables"), "amp tables: the bank travels with the piece");
-        MainComponent mc2 (true);
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
         check (mc2.loadFromVar (saved) && mc2.ampTableCountForTest() == 1,
                "amp tables: the piece loads with its bank");
         check (std::abs (mc2.ampTableValueForTest (0, 0.5f) - 0.25f) < 1e-5f
@@ -1952,7 +1956,8 @@ void upic::runAmpTableChecks (upic::SelfTest& t)
 
     // WP2-e: an old piece (no new keys) loads with no table and no reference.
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String oldJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":220},{"t":2,"f":440}]}]}]})";
         check (mc.loadFromVar (juce::JSON::parse (oldJson)), "amp tables: an old piece loads");
         check (mc.ampTableCountForTest() == 0 && mc.arcAmpTableIdForTest (1) == -1,
@@ -2183,7 +2188,8 @@ void upic::runGroupChecks (upic::SelfTest& t)
     // WP3-e: the panel's commands through MainComponent.
     // WP3-e: the panel's commands through MainComponent.
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":440},{"t":2,"f":440}]},{"id":2,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":330},{"t":2,"f":330}]}]}]})";
         check (mc.loadFromVar (juce::JSON::parse (json)), "groups: the test piece loads");
 
@@ -2242,7 +2248,8 @@ void upic::runGroupChecks (upic::SelfTest& t)
         const auto saved = mc.pieceToVar();
         check (saved.hasProperty ("pages") && mc.groupCountForTest() == 2,
                "groups: the piece still saves");
-        MainComponent mc2 (true);
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
         check (mc2.loadFromVar (saved) && mc2.groupCountForTest() == 2,
                "groups: the groups survive a piece round trip");
 
@@ -2257,7 +2264,8 @@ void upic::runGroupChecks (upic::SelfTest& t)
     // WP3-f: an old piece has no groups.
     // WP3-f: an old piece has no groups.
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String oldJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":220},{"t":2,"f":440}]}]}]})";
         check (mc.loadFromVar (juce::JSON::parse (oldJson)) && mc.groupCountForTest() == 0,
                "groups: an old piece has no groups");
@@ -2311,7 +2319,8 @@ void upic::runSequenceChecks (upic::SelfTest& t)
     // WP4-b: the recorder bank through MainComponent.
     // WP4-b: the recorder bank through MainComponent.
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[]},{"duration":3.0,"arcs":[]}]})";
         check (mc.loadFromVar (juce::JSON::parse (json)), "sequences: the two-page piece loads");
         check (mc.seqCountForTest() == 0, "sequences: a new piece has no sequence");
@@ -2354,7 +2363,8 @@ void upic::runSequenceChecks (upic::SelfTest& t)
         // the piece round trip keeps the sequence
         const auto saved = mc.pieceToVar();
         check (saved.hasProperty ("sequences"), "sequences: the bank travels with the piece");
-        MainComponent mc2 (true);
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
         check (mc2.loadFromVar (saved) && mc2.seqCountForTest() == 1
                && mc2.seqPointCountAtForTest (0) == 4,
                "sequences: the points survive a piece round trip");
@@ -2368,7 +2378,8 @@ void upic::runSequenceChecks (upic::SelfTest& t)
     // WP4-c2: the panel edits a recording (drag, Trim, Replace-tail) and the
     // ordinary Stop releases the sequence source.
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[]}]})";
         check (mc.loadFromVar (juce::JSON::parse (json)), "sequences: the edit piece loads");
         mc.openSeqPanelForTest();
@@ -2440,7 +2451,8 @@ void upic::runSequenceChecks (upic::SelfTest& t)
     // WP4-c: a hostile file is clamped to the pages and the limits.
     // WP4-c: a hostile file is clamped to the pages and the limits.
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[]}],"sequences":[{"id":1,"name":"Hostile","points":[{"t":1.0,"page":9,"pos":99.0},{"t":0.5,"page":0,"pos":0.5},{"t":0.5,"page":0,"pos":0.6}]},{"id":2,"name":"Second","points":[{"t":0,"page":0,"pos":0},{"t":1,"page":0,"pos":1}]},{"id":3,"name":"Third","points":[{"t":0,"page":0,"pos":0}]}]})";
         check (mc.loadFromVar (juce::JSON::parse (json)), "sequences: the hostile piece loads");
         check (mc.seqCountForTest() == 2, "sequences: the sequence bank is capped",
@@ -2456,7 +2468,8 @@ void upic::runSequenceChecks (upic::SelfTest& t)
     // WP4-d: an old piece has no sequences.
     // WP4-d: an old piece has no sequences.
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String oldJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[]}]})";
         check (mc.loadFromVar (juce::JSON::parse (oldJson)) && mc.seqCountForTest() == 0,
                "sequences: an old piece has no sequences");
@@ -2591,7 +2604,8 @@ void upic::runModulationChecks (upic::SelfTest& t)
 
     // load sanitisation and the UI command
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"mod":2,"modArcDepth":0.25,"points":[{"t":0,"f":440},{"t":2,"f":440}]},{"id":2,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":220},{"t":2,"f":880}]}]}]})";
         check (mc.loadFromVar (juce::JSON::parse (json)), "modulation: the test piece loads");
         check (mc.arcModulatorForTest (1) == 2 && std::abs (mc.arcModDepthForTest (1) - 0.25) < 1e-9,
@@ -2618,13 +2632,15 @@ void upic::runModulationChecks (upic::SelfTest& t)
                "modulation: the panel refuses self-modulation");
 
         const juce::String cycJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"mod":2,"points":[{"t":0,"f":440},{"t":2,"f":440}]},{"id":2,"waveformId":0,"envelopeId":0,"mod":1,"points":[{"t":0,"f":220},{"t":2,"f":880}]}]}]})";
-        MainComponent mc2 (true);
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
         check (mc2.loadFromVar (juce::JSON::parse (cycJson))
                && mc2.arcModulatorForTest (1) == -1 && mc2.arcModulatorForTest (2) == -1,
                "modulation: a cyclic file is repaired on load");
 
         const juce::String missJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"mod":99,"points":[{"t":0,"f":440},{"t":2,"f":440}]}]}]})";
-        MainComponent mc3 (true);
+        auto mc3Holder = std::make_unique<MainComponent> (true);
+        auto& mc3 = *mc3Holder;
         check (mc3.loadFromVar (juce::JSON::parse (missJson))
                && mc3.arcModulatorForTest (1) == -1,
                "modulation: a missing modulator is dropped on load");
@@ -2778,7 +2794,8 @@ void upic::runChannelModelChecks (upic::SelfTest& t)
 
     // the bank travels with the piece
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String json = R"({"currentPage":0,"channels":[{"id":1,"name":"A","gain":0.5,"env":[{"x":0,"y":0},{"x":1,"y":1}]},{"id":2,"name":"B","mute":true}],"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"ch":2,"points":[{"t":0,"f":440},{"t":2,"f":440}]}]}]})";
         check (mc.loadFromVar (juce::JSON::parse (json)), "channels: the test piece loads");
         check (mc.channelCountForTest() == 2 && mc.channelIdAtForTest (0) == 1
@@ -2789,7 +2806,8 @@ void upic::runChannelModelChecks (upic::SelfTest& t)
 
         const auto saved = mc.pieceToVar();
         check (saved.hasProperty ("channels"), "channels: the bank travels with the piece");
-        MainComponent mc2 (true);
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
         check (mc2.loadFromVar (saved) && mc2.channelCountForTest() == 2
                && mc2.arcChannelForTest (1) == 2,
                "channels: the bank survives a round trip");
@@ -2798,9 +2816,41 @@ void upic::runChannelModelChecks (upic::SelfTest& t)
                "channels: a piece with channels writes the key");
     }
 
+    // WP6.4: the mixer panel's commands
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":440},{"t":2,"f":440}]},{"id":2,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":330},{"t":2,"f":330}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)), "channels: the mixer piece loads");
+        mc.openChannelPanelForTest();
+        check (mc.channelPanelOpenForTest(), "channels: the mixer opens");
+        mc.channelNewForTest();
+        check (mc.channelCountForTest() == 1, "channels: New adds a channel");
+        const int id = mc.channelIdAtForTest (0);
+        mc.channelRenameForTest ("Wood");
+        mc.channelGainForTest (0.6f);
+        mc.channelMuteForTest (true);
+        check (std::abs (mc.channelGainAtForTest (0) - 0.6f) < 1e-6f
+               && mc.channelMutedAtForTest (0),
+               "channels: the panel's gain and mute reach the model");
+        mc.channelMuteForTest (false);
+        mc.selectArcsForTest ({ 1, 2 });
+        mc.channelAssignForTest (id);
+        check (mc.arcChannelForTest (1) == id && mc.arcChannelForTest (2) == id,
+               "channels: the panel routes the selection");
+        mc.channelDeleteForTest();
+        check (mc.channelCountForTest() == 0 && mc.arcChannelForTest (1) == 0,
+               "channels: deleting the channel returns its arcs to Main");
+        mc.undo();
+        check (mc.channelCountForTest() == 1 && mc.arcChannelForTest (1) == id,
+               "channels: the delete is one undo step");
+        mc.closeChannelPanelForTest();
+        check (! mc.channelPanelOpenForTest(), "channels: the mixer closes");
+    }
     // an old piece has no bank and no routing
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String oldJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":220},{"t":2,"f":440}]}]}]})";
         check (mc.loadFromVar (juce::JSON::parse (oldJson))
                && mc.channelCountForTest() == 0 && mc.arcChannelForTest (1) == 0,
@@ -2811,7 +2861,8 @@ void upic::runChannelModelChecks (upic::SelfTest& t)
 
     // hostile references are repaired deterministically
     {
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
         const juce::String json = R"({"currentPage":0,"channels":[{"id":1,"name":"A"}],"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"ch":99,"points":[{"t":0,"f":440},{"t":2,"f":440}]}]}]})";
         check (mc.loadFromVar (juce::JSON::parse (json))
                && mc.arcChannelForTest (1) == 0,
@@ -2821,7 +2872,8 @@ void upic::runChannelModelChecks (upic::SelfTest& t)
         for (int i = 1; i <= 40; ++i)
             big += juce::String (i > 1 ? "," : "") + "{\"id\":" + juce::String (i) + ",\"name\":\"C" + juce::String (i) + "\"}";
         big += "],\"pages\":[{\"duration\":1.0,\"arcs\":[]}]}";
-        MainComponent mc2 (true);
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
         check (mc2.loadFromVar (juce::JSON::parse (big))
                && mc2.channelCountForTest() == upic::limits::kMaxChannels,
                "channels: the bank is capped",

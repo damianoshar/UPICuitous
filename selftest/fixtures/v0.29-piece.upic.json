@@ -1,0 +1,58 @@
+{
+  "app": "UPICuitous",
+  "version": 1,
+  "master": 0.8,
+  "currentPage": 0,
+  "seqPages": false,
+  "recordPressure": false,
+  "scrubAudition": true,
+  "muteWhileDragging": true,
+  "dragSmoothMs": 20,
+  "scrubGrainMs": 20,
+  "sampleGrainMs": 40,
+  "liveGrainMs": 40,
+  "sieveOn": false,
+  "sieveM": 12,
+  "samplePitchMode": 0,
+  "livePitchMode": 0,
+  "sieveR": [0],
+  "stickiness": 1.0,
+  "timeGrid": 0.0,
+  "samples": [],
+  "pages": [
+    {
+      "duration": 4.0,
+      "nextArcId": 2,
+      "arcs": [
+        {
+          "id": 1,
+          "waveformId": 0,
+          "envelopeId": 0,
+          "intensity": 0.8,
+          "muted": false,
+          "mode": 0,
+          "pmRatio": 2.0,
+          "pmIndex": 1.5,
+          "pmIndexEnv": 0,
+          "pmFeedback": 0.0,
+          "pmOps": 2,
+          "pmR2": 2.0,
+          "pmR3": 3.0,
+          "pmR4": 5.0,
+          "pmI2": 1.0,
+          "pmI3": 1.0,
+          "pmI4": 1.0,
+          "sampleId": 1,
+          "refFreq": 261.63,
+          "waveUse": 0,
+          "modRate": 1.0,
+          "modDepth": 0.0,
+          "points": [
+            { "t": 0.0, "f": 220.0 },
+            { "t": 4.0, "f": 440.0 }
+          ]
+        }
+      ]
+    }
+  ]
+}

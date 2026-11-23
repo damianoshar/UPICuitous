@@ -2,6 +2,7 @@
 #include "UpicModel.h"
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <type_traits>
 #include <vector>
@@ -154,6 +155,30 @@ private:
 };
 
 //==============================================================================
+// WP7: the sample extraction preview's transport request.
+//
+// The request is part of the immutable snapshot, not a collection of
+// independent atomics. The message thread starts a new generation and
+// publishes the finished material together with it; the audio thread adopts
+// the generation as one unit and owns the playhead and remaining count from
+// then on. An old audio block can therefore never write its transport state
+// over a newer preview.
+//==============================================================================
+enum class SampleExtractRoute : uint8_t
+{
+    none = 0,
+    original,
+    extracted
+};
+
+struct SampleExtractPreviewState
+{
+    uint64_t generation = 0;
+    SampleExtractRoute route = SampleExtractRoute::none;
+    int durationFrames = 0;
+};
+
+//==============================================================================
 // The immutable view of the piece the audio thread renders from. It is built
 // on the message thread (a 30 Hz status-timer tick, or right after a change
 // that must be audible immediately: a load, a captured take). Sample audio is
@@ -168,6 +193,31 @@ struct ModelSnapshot : SnapshotBase
     std::vector<upic::Channel> channels;                 // WP6 (model only)
     std::vector<upic::Page>       pages;
     std::vector<upic::SampleSlot> slots;
+    // WP7: the sample extraction panel's A/B preview. It is an isolated
+    // one-arc page (the real pages are untouched), and its material lives
+    // in a separate slot vector. The score and freeze paths always read
+    // `slots`; only the dedicated extraction preview reads these slots.
+    std::shared_ptr<const upic::Page> samplePreviewPage;
+    std::vector<upic::SampleSlot> samplePreviewSlots;
+    // The extracted side is an oscillator preview of the converted
+    // wavetable, kept outside the piece's waveform bank. It is copied
+    // into the snapshot so the audio thread never sees a mutable panel.
+    std::vector<upic::Waveform> samplePreviewWaves;
+    // The extraction preview uses its own flat envelope bank. It must not
+    // inherit an edited or deleted envelope from the piece's global bank.
+    std::vector<upic::Envelope> samplePreviewEnvelopes;
+    SampleExtractPreviewState sampleExtractPreview;
+
+    // The extracted route renders from its isolated wavetable bank. The
+    // original route has no oscillator arc, so the piece's bank is harmless
+    // there. Keeping the choice with the snapshot prevents the audio path
+    // from accidentally reading a same-id waveform from the piece bank.
+    const std::vector<upic::Waveform>& wavesForSampleExtractRoute() const
+    {
+        return sampleExtractPreview.route == SampleExtractRoute::extracted
+                 ? samplePreviewWaves : waveforms;
+    }
+
     int  currentPage = 0;   // the message thread's view of the page
     int  pageEpoch   = 0;   // bumped when the page changes -> the reader adopts it
     bool seqPages    = false;

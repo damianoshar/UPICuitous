@@ -355,6 +355,34 @@ function Remove-StaleVersionResource {
     }
 }
 
+# A Visual Studio update can remove the compiler version recorded in an
+# existing CMake cache. The next configure then fails before the plugin can
+# build, even though the current Visual Studio installation is valid. Find a
+# cached absolute compiler path that no longer exists and discard only the
+# generated plugin build tree; the configure below recreates it with the
+# current toolchain.
+function Test-CMakeCompilersExist {
+    $build = Join-Path $root "Builds\Plugin"
+    if (-not (Test-Path $build)) { return $true }
+
+    $caches = Get-ChildItem $build -Recurse -Filter "CMakeCache.txt" -File -ErrorAction SilentlyContinue
+    foreach ($cache in $caches) {
+        foreach ($line in (Get-Content $cache.FullName -ErrorAction SilentlyContinue)) {
+            if ($line -notmatch '^CMAKE_[A-Z0-9_]+:[^=]+=(.+)$') { continue }
+            $tool = $matches[1].Trim()
+            # Visual Studio's generator also records the archiver and linker
+            # in its helper caches, so a removed MSVC toolset can be detected
+            # even when the failed configure deleted the compiler file.
+            if ($tool -match '^[A-Za-z]:[\\/].*[\\/]VC[\\/]Tools[\\/]MSVC[\\/]' -and
+                -not (Test-Path -LiteralPath $tool)) {
+                Write-Host "    stale CMake compiler path: $tool" -ForegroundColor Yellow
+                return $false
+            }
+        }
+    }
+    return $true
+}
+
 # ------------------------------------------------------- the version bump ---
 # Before anything is built: the app's getApplicationVersion() and the .jucer
 # (the Android manifest) must carry the new version, and the app is built
@@ -365,6 +393,7 @@ Test-VersionSync
 # ------------------------------------------------------------------- app ---
 $appOk = $true
 $appSummary = "skipped"
+$legacySummary = "skipped"
 if (-not $SkipApp) {
     Step "App build (Debug|x64)"
     Get-Process UPICuitous -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -383,21 +412,38 @@ if (-not $SkipApp) {
     if (-not (Test-Path $exe)) { Die "app exe not found: $exe" }
 
     Step "App selftest"
-    & $exe --selftest | Out-Null
-    $rc = $LASTEXITCODE
     $log = Join-Path $env:TEMP "upic_selftest.txt"
+    Remove-Item $log -Force -ErrorAction SilentlyContinue
+    # The app is a Windows GUI subsystem binary, so PowerShell does not wait
+    # for it when it is invoked with the call operator. Start-Process gives
+    # the gate the real exit code and waits for the log to be written.
+    $selftest = Start-Process -FilePath $exe -ArgumentList "--selftest" -Wait -PassThru
+    $rc = $selftest.ExitCode
     $checks = 0; $fails = 0
     if (Test-Path $log) {
         $lines = Get-Content $log
         $checks = ($lines | Select-String -Pattern "^(PASS|FAIL)").Count
         $fails  = ($lines | Select-String -Pattern "^FAIL").Count
     }
-    if ($rc -ne 0 -or $fails -gt 0) {
+    if ($rc -ne 0 -or $checks -eq 0 -or $fails -gt 0) {
         $lines = Get-Content $log -ErrorAction SilentlyContinue | Select-String -Pattern "^FAIL" | ForEach-Object { $_.Line }
-        Die "app selftest failed ($fails of $checks) - $($lines -join ' | ')"
+        Die "app selftest failed (exit $rc, $fails of $checks) - $($lines -join ' | ')"
     }
     $appSummary = "$checks/$checks"
     Write-Host "    app selftest $appSummary" -ForegroundColor Green
+
+    Step "Legacy v0.29 fixture"
+    $legacyFixture = Join-Path $root "selftest\fixtures\v0.29-piece.upic.json"
+    if (-not (Test-Path $legacyFixture -PathType Leaf)) {
+        Die "legacy fixture missing: $legacyFixture"
+    }
+    $legacyHash = (Get-FileHash -Algorithm SHA256 $legacyFixture).Hash.ToUpperInvariant()
+    $expectedLegacyHash = "8BF28ABA7975825321703D61D5E984B7280757523665424162BAD4D11EDB7BB9"
+    if ($legacyHash -ne $expectedLegacyHash) {
+        Die "legacy fixture changed (expected $expectedLegacyHash, got $legacyHash)"
+    }
+    $legacySummary = "v0.29 SHA-256 $($legacyHash.Substring(0, 12))"
+    Write-Host "    legacy fixture unchanged: $legacyHash" -ForegroundColor Green
 }
 
 # ---------------------------------------------------------------- plugin ---
@@ -409,6 +455,12 @@ $vst3Path = Join-Path $root "Builds\Plugin\UPICuitousPlugin_artefacts\Release\VS
 if (-not $SkipPlugin) {
     Step "Plugin build (Release)"
     $cmake = Find-CMake
+    $pluginBuild = Join-Path $root "Builds\Plugin"
+    $compilersExist = Test-CMakeCompilersExist
+    if ((Test-Path (Join-Path $pluginBuild "CMakeCache.txt")) -and (-not $compilersExist)) {
+        Write-Host "    removing the stale plugin build tree so CMake can use the current compiler" -ForegroundColor Yellow
+        Remove-Item $pluginBuild -Recurse -Force
+    }
     if (-not (Test-Path (Join-Path $root "Builds\Plugin\CMakeCache.txt"))) {
         # The configure is retried with the next cmake when one fails (the
         # cmake builds are not interchangeable - see Get-CMakeCandidates).
@@ -464,12 +516,11 @@ if (-not $SkipPlugin) {
         Write-Host "    pluginval: SUCCESS" -ForegroundColor Green
     }
     else {
-        Write-Host "    pluginval not installed - run scripts\fetch_pluginval.ps1 to enable the gate" -ForegroundColor Yellow
-        $validateSummary = "pluginval missing"
+        Die "pluginval not installed - run scripts\fetch_pluginval.ps1 to enable the release gate"
     }
 }
 
 Write-Host ""
 $versionSummary = "version " + (Get-ProjectVersion)
-Write-Host "app selftest: $appSummary   |   plugin: $pluginSummary   |   smoke: $smokeSummary   |   $validateSummary   |   $versionSummary" -ForegroundColor Green
+Write-Host "app selftest: $appSummary   |   legacy: $legacySummary   |   plugin: $pluginSummary   |   smoke: $smokeSummary   |   $validateSummary   |   $versionSummary" -ForegroundColor Green
 Write-Host ""

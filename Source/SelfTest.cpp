@@ -70,10 +70,10 @@ int upic::runSelfTest()
     // at the next start)
     MainComponent::setRecoveryAllowed (false);
 
-
     upic::runDspChecks (t);
     upic::runAudioThreadChecks (t);
     upic::runLoadedPieceChecks (t);
+    upic::runLegacyFixtureChecks (t);
     upic::runThreadValueChecks (t);
     upic::runPieceStateChecks (t);
     upic::runHostTransportChecks (t);
@@ -93,11 +93,12 @@ int upic::runSelfTest()
     upic::runChannelRoutingChecks (t);
     upic::runUntrustedPieceChecks (t);
     upic::runModelMathChecks (t);
-upic::runLibraryModelChecks (t);
+    upic::runLibraryModelChecks (t);
+    upic::runWP7Checks (t);
     upic::runExportChecks (t);
     upic::runSieveChecks (t);
-    upic::runTuningChecks (t);   // M4: the Scala tuning import
-    upic::runMaterialChecks (t); // M5: the per-slot Ref and the material's edits
+    upic::runTuningChecks (t);
+    upic::runMaterialChecks (t);
     upic::runEditorChecks (t);
     upic::runSnapshotChecks (t);
     upic::runContinuityChecks (t);

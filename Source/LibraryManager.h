@@ -28,7 +28,14 @@ public:
         juce::String name;
         juce::Colour colour;
         int uses = 0;
+        // WP7: the user library's assets carry the file they live in (the
+        // piece's own assets have none - they are the piece's).
+        juce::String fileName;
     };
+
+    // WP7: where the list comes from. The piece's bank is the working set;
+    // the user library is the folder of assets that outlive the piece.
+    enum class Source { Piece, User };
 
     explicit LibraryManager (const juce::String& prefix) : kind (prefix)
     {
@@ -44,6 +51,11 @@ public:
         replaceBox.setName (kind + "ReplaceBox");
         deleteOk.setName (kind + "DeleteOk");
         deleteCancel.setName (kind + "DeleteCancel");
+        // WP7: the source switch and the library commands.
+        sourceBox.setName (kind + "SourceBox");
+        publishBtn.setName (kind + "PublishBtn");
+        importBtn.setName (kind + "ImportBtn");
+        revealBtn.setName (kind + "RevealBtn");
 
         newBtn.setButtonText ("New");
         dupBtn.setButtonText ("Dup");
@@ -55,6 +67,9 @@ public:
         deleteOk.setButtonText ("Delete");
         deleteCancel.setButtonText ("Cancel");
         replaceBox.setTextWhenNothingSelected ("Replace with...");
+        publishBtn.setButtonText ("Publish");
+        importBtn.setButtonText ("Import");
+        revealBtn.setButtonText ("Folder");
 
         newBtn.setTooltip ("Add a new asset to the bank");
         dupBtn.setTooltip ("Copy the selected asset");
@@ -63,18 +78,36 @@ public:
         uniqueBtn.setTooltip ("Give the selected arcs their own copy of this asset");
         nameEditor.setTooltip ("The new name");
         replaceBox.setTooltip ("The asset that takes over every reference");
+        sourceBox.setTooltip ("The piece's own bank, or the user library\n"
+                              "(the folder of assets that outlive the piece)");
+        publishBtn.setTooltip ("Copy the selected asset into the user library");
+        importBtn.setTooltip ("Copy the selected library asset into this piece");
+        revealBtn.setTooltip ("Open the user library's folder");
+
+        sourceBox.addItem ("Piece", 1);
+        sourceBox.addItem ("User", 2);
+        sourceBox.setSelectedId (1, juce::dontSendNotification);
+        sourceBox.onChange = [this]
+        {
+            setSource (sourceBox.getSelectedId() == 2 ? Source::User : Source::Piece);
+        };
 
         for (auto* b : { &newBtn, &dupBtn, &renameBtn, &delBtn, &uniqueBtn,
-                         &renameOk, &renameCancel, &deleteOk, &deleteCancel })
+                         &renameOk, &renameCancel, &deleteOk, &deleteCancel,
+                         &publishBtn, &importBtn, &revealBtn })
             addAndMakeVisible (b);
         addAndMakeVisible (nameEditor);
         addAndMakeVisible (replaceBox);
+        addAndMakeVisible (sourceBox);
 
         newBtn.onClick    = [this]{ if (onNew) onNew(); };
         dupBtn.onClick    = [this]{ if (onDuplicate) onDuplicate(); };
         renameBtn.onClick = [this]{ beginRename(); };
         delBtn.onClick    = [this]{ beginDelete(); };
         uniqueBtn.onClick = [this]{ if (onMakeUnique) onMakeUnique(); };
+        publishBtn.onClick = [this]{ if (onPublish) onPublish(); };
+        importBtn.onClick  = [this]{ if (onImport) onImport(); };
+        revealBtn.onClick  = [this]{ if (onReveal) onReveal(); };
 
         renameOk.onClick = [this]{ commitRename(); };
         renameCancel.onClick = [this]{ endMode(); };
@@ -109,20 +142,70 @@ public:
     // Refill the bank. `selectedId` is an asset id, not a combo item id.
     void setItems (const std::vector<Item>& newItems, int selectedId)
     {
-        items = newItems;
-        selectAsset (selectedId);
+        pieceItems = newItems;
+        if (currentSource == Source::Piece)
+            selectAsset (selectedId);
         rebuildSelector(); // the item text carries the new names and counts
     }
+
+    // WP7: the user library's assets (the folder outside the piece).
+    void setUserItems (const std::vector<Item>& newItems)
+    {
+        // A refresh of the other library must not move this list's
+        // selection. Keep the selected file when it is still there; only a
+        // file that really disappeared falls back to the first row.
+        const auto keep = selectedFileName();
+        userItems = newItems;
+        if (currentSource == Source::User)
+        {
+            selected = -1;
+            for (size_t i = 0; i < userItems.size(); ++i)
+                if (userItems[i].fileName == keep) { selected = (int) i; break; }
+            rebuildSelector();
+            updateButtons();
+            repaint();
+        }
+    }
+
+    // WP7: the source switch. In "User" the list is the library's, and the
+    // bank commands (New, Dup, Rename, Delete, Unique) are hidden - they act
+    // on the piece's own bank.
+    void setSource (Source newSource)
+    {
+        if (currentSource == newSource) return;
+        currentSource = newSource;
+        sourceBox.setSelectedId (currentSource == Source::User ? 2 : 1, juce::dontSendNotification);
+        // The source switch deliberately starts with no selection. The owner
+        // then fills the requested source; an item from the other source
+        // must never be mistaken for a library asset.
+        selected = -1;
+        rebuildSelector();
+        showModeControls();
+        resized();
+        repaint();
+        ++sourceChangeCount;
+        if (onSourceChanged) onSourceChanged (currentSource);
+    }
+
+    Source source() const { return currentSource; }
 
     // Move the selection without telling the selector (the model already
     // knows): used when the toolbar follows an arc. The bank commands always
     // act on the model's selection, so this only changes what is shown.
     void selectAsset (int assetId)
     {
+        // A model id belongs to the piece bank. Never use it to select a
+        // row from the user library: the two id spaces are deliberately
+        // independent, and a coincidentally equal number must not turn a
+        // library row into a model selection.
+        if (currentSource != Source::Piece)
+            return;
+
+        const auto& list = activeItems();
         int found = -1;
-        for (size_t i = 0; i < items.size(); ++i)
-            if (items[(size_t) i].id == assetId) { found = (int) i; break; }
-        if (found < 0 && ! items.empty()) found = 0;
+        for (size_t i = 0; i < list.size(); ++i)
+            if (list[(size_t) i].id == assetId) { found = (int) i; break; }
+        if (found < 0 && ! list.empty()) found = 0;
         selected = found;
 
         if (selector != nullptr)
@@ -134,7 +217,16 @@ public:
 
     int selectedAssetId() const
     {
-        return selected >= 0 && selected < (int) items.size() ? items[(size_t) selected].id : -1;
+        const auto& list = activeItems();
+        return selected >= 0 && selected < (int) list.size() ? list[(size_t) selected].id : -1;
+    }
+
+    // WP7: the selected user asset's file (empty in the piece's own list).
+    juce::String selectedFileName() const
+    {
+        const auto& list = activeItems();
+        return selected >= 0 && selected < (int) list.size()
+             ? list[(size_t) selected].fileName : juce::String();
     }
 
     // --- the model callbacks ------------------------------------------------
@@ -145,23 +237,61 @@ public:
     std::function<bool()> onMakeUnique;
     std::function<bool (const juce::String&)> onRename;
     std::function<bool (int)> onDelete; // the replacement asset id, -1 = unused
+    // WP7: the user library's commands. Publish copies the piece's selected
+    // asset into the library; Import copies a library asset into the piece;
+    // Reveal opens the library's folder.
+    std::function<bool()> onPublish, onImport, onReveal;
+    // WP7: the source changed. The owner reads the new source's folder and
+    // fills the list (the manager owns no disk or model logic).
+    std::function<void (Source)> onSourceChanged;
+    // The owner can follow a selection made in the manager's selector. It
+    // is only sent for the piece source; a user-library id belongs to the
+    // file and is never treated as a model id.
+    std::function<void (int)> onSelectedId;
+
+    // Some panels already have their own piece-bank commands (the amplitude
+    // tables, the sequences and the four page spaces do). In those panels
+    // this manager is only the Piece/User bridge, so the duplicate New /
+    // Dup / Rename / Delete / Unique buttons are hidden.
+    void setPieceCommandsVisible (bool visible)
+    {
+        pieceCommandsVisible = visible;
+        showModeControls();
+        resized();
+        repaint();
+    }
 
     // --- the selftest hooks ------------------------------------------------
-    int itemCountForTest() const { return (int) items.size(); }
+    int itemCountForTest() const { return (int) activeItems().size(); }
     int selectedIndexForTest() const { return selected; }
     int usesForTest (int index) const
     {
-        return index >= 0 && index < (int) items.size() ? items[(size_t) index].uses : -1;
+        const auto& list = activeItems();
+        return index >= 0 && index < (int) list.size() ? list[(size_t) index].uses : -1;
     }
     bool isRenameModeForTest() const { return mode == Mode::rename; }
     bool isDeleteModeForTest() const { return mode == Mode::remove; }
+    // WP7
+    bool isUserSourceForTest() const { return currentSource == Source::User; }
+    int sourceChangeCountForTest() const { return sourceChangeCount; }
+    int userItemCountForTest() const { return (int) userItems.size(); }
+    int pieceItemCountForTest() const { return (int) pieceItems.size(); }
+    juce::String selectedFileNameForTest() const { return selectedFileName(); }
+    void setSourceForTest (bool user) { setSource (user ? Source::User : Source::Piece); }
+    void selectIndexForTest (int index)
+    {
+        selected = index;
+        if (selector != nullptr) selector->setSelectedId (selected + 1, juce::dontSendNotification);
+        updateButtons();
+    }
 
     void paint (juce::Graphics& g) override
     {
         g.fillAll (upic::uiBackground());
-        if (mode == Mode::none && selected >= 0 && selected < (int) items.size())
+        const auto& list = activeItems();
+        if (mode == Mode::none && selected >= 0 && selected < (int) list.size())
         {
-            const auto c = items[(size_t) selected].colour;
+            const auto c = list[(size_t) selected].colour;
             g.setColour (c);
             g.fillRoundedRectangle (swatch.toFloat(), 2.0f);
             g.setColour (juce::Colours::black.withAlpha (0.55f));
@@ -198,36 +328,59 @@ public:
             return;
         }
 
-        int widths[5] = { (int) std::lround (36.0f * k), (int) std::lround (42.0f * k),
-                          (int) std::lround (52.0f * k), (int) std::lround (48.0f * k),
-                          (int) std::lround (52.0f * k) }; // New Dup Rename Delete Unique
+        // WP7: the source switch is on the left, the buttons on the right.
+        // The button set follows the source: the piece's bank has the five
+        // bank commands plus Publish, the user library has Import and the
+        // folder button.
+        const int srcW = (int) std::lround (58.0f * k);
+        sourceBox.setBounds (r.removeFromLeft (srcW).reduced (1));
+        r.removeFromLeft (gap);
+
+        std::vector<juce::TextButton*> row;
+        std::vector<int> widths;
+        if (currentSource == Source::Piece)
+        {
+            row = { &newBtn, &dupBtn, &renameBtn, &delBtn, &uniqueBtn, &publishBtn };
+            widths = { (int) std::lround (36.0f * k), (int) std::lround (42.0f * k),
+                       (int) std::lround (52.0f * k), (int) std::lround (48.0f * k),
+                       (int) std::lround (52.0f * k), (int) std::lround (56.0f * k) };
+            if (! pieceCommandsVisible)
+            {
+                row = { &publishBtn };
+                widths = { (int) std::lround (56.0f * k) };
+            }
+        }
+        else
+        {
+            row = { &importBtn, &revealBtn };
+            widths = { (int) std::lround (56.0f * k), (int) std::lround (52.0f * k) };
+        }
+
         const int sw = juce::jmax (8, (int) std::lround (14.0f * k));
-        // keep the selector readable: the buttons give way first (a narrow
-        // editor column is still a usable bank, a vanished selector is not)
+        // Keep the selector readable: the buttons give way first (a narrow
+        // editor column is still a usable bank, a vanished selector is not).
+        // The source switch has already been removed from `r`, so it is not
+        // part of the space this calculation divides.
         const int minSelector = (int) std::lround (70.0f * k);
-        int fixed = sw + 5 * gap + minSelector;
+        int fixed = sw + (int) widths.size() * gap + minSelector;
         for (int w : widths) fixed += w;
         const int avail = r.getWidth();
         if (fixed > avail)
         {
-            const int room = juce::jmax (5 * 14, avail - 5 * gap - sw - minSelector);
+            const int room = juce::jmax ((int) widths.size() * 14,
+                                         avail - (int) widths.size() * gap - sw - minSelector);
             int sum = 0;
             for (int w : widths) sum += w;
             if (sum > 0)
-                for (int& w : widths)
+                for (auto& w : widths)
                     w = juce::jmax (14, (int) std::lround ((float) w * (float) room / (float) sum));
         }
 
-        uniqueBtn.setBounds (r.removeFromRight (widths[4]).reduced (1));
-        r.removeFromRight (gap);
-        delBtn.setBounds (r.removeFromRight (widths[3]).reduced (1));
-        r.removeFromRight (gap);
-        renameBtn.setBounds (r.removeFromRight (widths[2]).reduced (1));
-        r.removeFromRight (gap);
-        dupBtn.setBounds (r.removeFromRight (widths[1]).reduced (1));
-        r.removeFromRight (gap);
-        newBtn.setBounds (r.removeFromRight (widths[0]).reduced (1));
-        r.removeFromRight (gap);
+        for (int i = (int) row.size() - 1; i >= 0; --i)
+        {
+            row[(size_t) i]->setBounds (r.removeFromRight (widths[(size_t) i]).reduced (1));
+            if (i > 0) r.removeFromRight (gap);
+        }
 
         swatch = r.removeFromRight (sw).reduced (1, juce::jmax (2, r.getHeight() / 5));
         r.removeFromRight (gap);
@@ -240,10 +393,18 @@ private:
     enum class Mode { none, rename, remove };
 
     juce::String kind;
-    std::vector<Item> items;
+    std::vector<Item> pieceItems;   // the piece's own bank
+    std::vector<Item> userItems;    // WP7: the user library
+    Source currentSource = Source::Piece;
+    bool pieceCommandsVisible = true;
     int selected = -1;
+    int sourceChangeCount = 0;
     Mode mode = Mode::none;
-    juce::ComboBox* selector = nullptr;
+    // The selector belongs to the owner, not to this manager. Some owners
+    // declare their selector after the manager, so C++ destroys the combo
+    // first. A SafePointer becomes null as soon as that happens and keeps
+    // the manager's destructor from touching the freed listener list.
+    juce::Component::SafePointer<juce::ComboBox> selector;
     juce::Rectangle<int> swatch;
 
     juce::TextButton newBtn, dupBtn, renameBtn, delBtn, uniqueBtn;
@@ -251,28 +412,39 @@ private:
     juce::TextButton renameOk, renameCancel;
     juce::ComboBox replaceBox;
     juce::TextButton deleteOk, deleteCancel;
+    // WP7: the source switch and the library commands.
+    juce::ComboBox sourceBox;
+    juce::TextButton publishBtn, importBtn, revealBtn;
+
+    const std::vector<Item>& activeItems() const
+    {
+        return currentSource == Source::User ? userItems : pieceItems;
+    }
 
     bool hasSelection() const
     {
-        return selected >= 0 && selected < (int) items.size();
+        const auto& list = activeItems();
+        return selected >= 0 && selected < (int) list.size();
     }
 
     void comboBoxChanged (juce::ComboBox*) override
     {
         if (selector == nullptr) return;
         selected = selector->getSelectedId() - 1;
-        if (selected < 0 || selected >= (int) items.size()) selected = -1;
+        if (selected < 0 || selected >= (int) activeItems().size()) selected = -1;
         updateButtons();
         repaint();
+        if (currentSource == Source::Piece && selected >= 0 && onSelectedId)
+            onSelectedId (activeItems()[(size_t) selected].id);
     }
 
     void rebuildSelector()
     {
         if (selector == nullptr) return;
         selector->clear (juce::dontSendNotification);
-        for (size_t i = 0; i < items.size(); ++i)
+        for (size_t i = 0; i < activeItems().size(); ++i)
         {
-            const auto& it = items[(size_t) i];
+            const auto& it = activeItems()[(size_t) i];
             selector->addItem (juce::String (it.id) + ": " + it.name
                                  + "  (" + juce::String (it.uses)
                                  + (it.uses == 1 ? " use)" : " uses)"),
@@ -283,18 +455,23 @@ private:
 
     void updateButtons()
     {
+        const auto& list = activeItems();
         const bool has = hasSelection();
-        dupBtn.setEnabled (has);
-        renameBtn.setEnabled (has);
-        delBtn.setEnabled (has && items.size() > 1);
-        uniqueBtn.setEnabled (has && items[(size_t) selected].uses > 0);
+        const bool piece = (currentSource == Source::Piece);
+        dupBtn.setEnabled (has && piece);
+        renameBtn.setEnabled (has && piece);
+        delBtn.setEnabled (has && piece && list.size() > 1);
+        uniqueBtn.setEnabled (has && piece && list[(size_t) selected].uses > 0);
+        publishBtn.setEnabled (has && piece);
+        importBtn.setEnabled (has && ! piece);
+        revealBtn.setEnabled (! piece);
     }
 
     void beginRename()
     {
-        if (! hasSelection()) return;
+        if (! hasSelection() || currentSource != Source::Piece) return;
         mode = Mode::rename;
-        nameEditor.setText (items[(size_t) selected].name, false);
+        nameEditor.setText (activeItems()[(size_t) selected].name, false);
         showModeControls();
         resized();
         nameEditor.grabKeyboardFocus();
@@ -311,8 +488,8 @@ private:
 
     void beginDelete()
     {
-        if (! hasSelection() || items.size() <= 1) return;
-        const auto& item = items[(size_t) selected];
+        if (! hasSelection() || currentSource != Source::Piece || activeItems().size() <= 1) return;
+        const auto& item = activeItems()[(size_t) selected];
         if (item.uses == 0)
         {
             // nothing references it: no replacement to ask for
@@ -322,10 +499,10 @@ private:
 
         mode = Mode::remove;
         replaceBox.clear (juce::dontSendNotification);
-        for (size_t i = 0; i < items.size(); ++i)
+        for (size_t i = 0; i < activeItems().size(); ++i)
         {
             if ((int) i == selected) continue;
-            const auto& other = items[i];
+            const auto& other = activeItems()[i];
             replaceBox.addItem (juce::String (other.id) + ": " + other.name
                                   + "  (" + juce::String (other.uses)
                                   + (other.uses == 1 ? " use)" : " uses)"),
@@ -342,8 +519,8 @@ private:
     {
         if (mode != Mode::remove) return;
         const int idx = replaceBox.getSelectedId() - 1;
-        if (idx < 0 || idx >= (int) items.size()) return;
-        if (onDelete && onDelete (items[(size_t) idx].id))
+        if (idx < 0 || idx >= (int) activeItems().size()) return;
+        if (onDelete && onDelete (activeItems()[(size_t) idx].id))
             endMode();
     }
 
@@ -352,13 +529,18 @@ private:
         const bool ren = (mode == Mode::rename);
         const bool rem = (mode == Mode::remove);
         const bool normal = (mode == Mode::none);
+        const bool piece = (currentSource == Source::Piece);
 
         if (selector != nullptr) selector->setVisible (normal);
-        newBtn.setVisible (normal);
-        dupBtn.setVisible (normal);
-        renameBtn.setVisible (normal);
-        delBtn.setVisible (normal);
-        uniqueBtn.setVisible (normal);
+        sourceBox.setVisible (normal);
+        newBtn.setVisible (normal && piece && pieceCommandsVisible);
+        dupBtn.setVisible (normal && piece && pieceCommandsVisible);
+        renameBtn.setVisible (normal && piece && pieceCommandsVisible);
+        delBtn.setVisible (normal && piece && pieceCommandsVisible);
+        uniqueBtn.setVisible (normal && piece && pieceCommandsVisible);
+        publishBtn.setVisible (normal && piece);
+        importBtn.setVisible (normal && ! piece);
+        revealBtn.setVisible (normal && ! piece);
 
         nameEditor.setVisible (ren);
         renameOk.setVisible (ren);

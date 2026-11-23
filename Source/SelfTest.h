@@ -26,6 +26,7 @@ namespace upic
     void runDspChecks (SelfTest& t);
     void runAudioThreadChecks (SelfTest& t);
     void runLoadedPieceChecks (SelfTest& t);
+    void runLegacyFixtureChecks (SelfTest& t); // the v0.29 file compatibility guard
     void runThreadValueChecks (SelfTest& t);
     void runPieceStateChecks (SelfTest& t);
     void runHostTransportChecks (SelfTest& t);
@@ -46,6 +47,7 @@ namespace upic
     void runUntrustedPieceChecks (SelfTest& t);
     void runModelMathChecks (SelfTest& t);
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
+    void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);
     void runSieveChecks (SelfTest& t);
     void runTuningChecks (SelfTest& t);   // M4: the Scala tuning import

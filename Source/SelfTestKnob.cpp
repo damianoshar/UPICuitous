@@ -50,7 +50,8 @@ void upic::runKnobChecks (upic::SelfTest& t)
         return nullptr;
     };
 
-    MainComponent mc (true);
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
     mc.setSize (1280, 800);
 
     auto find = [&] (const juce::String& n) { return findByNameKnob (mc, n); };
@@ -171,7 +172,8 @@ void upic::runKnobChecks (upic::SelfTest& t)
         const auto saved = mc.pieceToVar();
         const double savedIntensity = arcIntensity (saved, 1);
 
-        MainComponent mc2 (true);
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
         mc2.setSize (1280, 800);
         mc2.loadFromVar (juce::JSON::parse (juce::JSON::toString (saved)));
         const double loadedIntensity = arcIntensity (mc2.pieceToVar(), 1);

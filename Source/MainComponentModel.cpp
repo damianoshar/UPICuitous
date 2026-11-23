@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "UserLibrary.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -31,12 +32,9 @@ const upic::Page& MainComponent::curPage() const
 namespace
 {
     template <typename Bank>
-    int nextBankId (const Bank& bank)
+    int nextBankId (const Bank& bank, int minId = 0)
     {
-        int id = 0;
-        for (const auto& x : bank)
-            id = juce::jmax (id, x.id + 1);
-        return id;
+        return upic::nextBankId (bank, minId);
     }
 
     template <typename Bank>
@@ -74,10 +72,128 @@ void MainComponent::refreshLibraryBoxes()
     for (const auto& e : envelopes)
         envItems.push_back ({ e.id, e.name, e.colour, envelopeUseCount (e.id) });
     envLib.setItems (envItems, selEnv);
+
+    // WP7: the overlay panels keep their own piece-bank commands, but their
+    // shared managers still list the piece's assets on the Piece side.
+    std::vector<LibraryManager::Item> ampItems;
+    ampItems.reserve (ampTables.size());
+    for (const auto& t : ampTables)
+        ampItems.push_back ({ t.id, t.name, t.colour, ampTableUseCount (t.id) });
+    ampTableEd.library.setItems (ampItems, selAmpTableId);
+
+    std::vector<LibraryManager::Item> seqItems;
+    seqItems.reserve (sequences.size());
+    for (const auto& s : sequences)
+        seqItems.push_back ({ s.id, s.name, juce::Colour (0xffa07fd8), 0 });
+    seqPanel.library.setItems (seqItems, selSeqId);
+
+    const int freqPage = juce::jlimit (0, juce::jmax (0, (int) pages.size() - 1),
+                                       freqTablePage);
+    const int freqSpace = juce::jlimit (0, 3, freqTableSpace);
+    const std::vector<LibraryManager::Item> freqItems
+    { { 0, "Page " + juce::String (freqPage + 1) + " space "
+                   + juce::String (freqSpace + 1),
+        juce::Colour (0xff5ac8fa), 0 } };
+    freqTableEd.library.setItems (freqItems, 0);
+}
+
+//==============================================================================
+// WP7 (Wave F, 2026-11-21): the user library's rows.
+//
+// The disk is read only when the source switch asks for the library. The
+// manager owns no model logic: it gets plain rows, and the commands below
+// publish and import the assets themselves.
+void MainComponent::refreshUserLibraryBoxes (upic::UserAssetKind kind)
+{
+    int skipped = 0;
+    juce::StringArray failures;
+    const auto assets = upic::UserLibrary::list (kind, &skipped, &failures);
+    std::vector<LibraryManager::Item> items;
+    items.reserve (assets.size());
+    for (const auto& a : assets)
+        items.push_back ({ a.id, a.name, a.colour, 0, a.fileName });
+
+    switch (kind)
+    {
+        case upic::UserAssetKind::Wave:
+            waveLib.setUserItems (items);
+            break;
+        case upic::UserAssetKind::Envelope:
+            envLib.setUserItems (items);
+            break;
+        case upic::UserAssetKind::AmpTable:
+            ampTableEd.library.setUserItems (items);
+            break;
+        case upic::UserAssetKind::FreqTable:
+            freqTableEd.library.setUserItems (items);
+            break;
+        case upic::UserAssetKind::Sequence:
+            seqPanel.library.setUserItems (items);
+            break;
+        default:
+            break;
+    }
+
+    // Keep the failures per kind. Refreshing a healthy library must not
+    // erase the reason another library showed, and the two table kinds
+    // share a folder, so the visible union is deduplicated by file name.
+    userLibraryFailuresByKind[kind] = failures;
+    std::map<juce::String, juce::String> uniqueFailures;
+    for (const auto& perKind : userLibraryFailuresByKind)
+    {
+        for (const auto& failure : perKind.second)
+        {
+            const auto split = failure.indexOf (": ");
+            if (split > 0)
+                uniqueFailures[failure.substring (0, split)] =
+                    failure.substring (split + 2);
+            else
+                uniqueFailures[failure] = juce::String();
+        }
+    }
+
+    if (uniqueFailures.empty())
+    {
+        lastUserLibraryFailureText.clear();
+    }
+    else
+    {
+        juce::String first;
+        int count = 0;
+        for (const auto& failure : uniqueFailures)
+        {
+            if (count == 0)
+                first = failure.first + (failure.second.isEmpty()
+                                             ? juce::String()
+                                             : ": " + failure.second);
+            ++count;
+        }
+        const juce::String summary = count == 1
+            ? first
+            : juce::String (count) + " files were refused (first: " + first + ")";
+        if (summary != lastUserLibraryFailureText)
+        {
+            lastUserLibraryFailureText = summary;
+            flash ("User library: " + summary);
+        }
+    }
 }
 
 void MainComponent::refreshBoxes()
 {
+    // v1.36: a control refresh is a read-back of the model. It must never
+    // run a control's own command: a stroke ends by calling this function,
+    // and the old notification-enabled setSelectedId() calls re-entered the
+    // edit commands (and began/ended undo transactions) while the stroke's
+    // transaction was still open.
+    if (refreshingControls) return;
+    refreshingControls = true;
+    struct RefreshGuard
+    {
+        bool& flag;
+        ~RefreshGuard() { flag = false; }
+    } refreshGuard { refreshingControls };
+
     arcListDirty = true; // v1.21: the panel's rows follow the model
     pageBox.setName("pageBox");
     // v1.33.4 (H13): the page buttons are named too, so the selftest can
@@ -101,6 +217,7 @@ void MainComponent::refreshBoxes()
     refreshGroupPanel();    // WP3
     refreshSequencePanel();  // WP4
     refreshModBox();         // WP5
+    refreshChannelBox();     // WP6.4
 
     // v1.33: the ambitus - the combo shows the preset that matches, or
     // "Custom" when the page carries an interval of its own
@@ -240,8 +357,12 @@ bool MainComponent::prepareWaveEdit()
             }
 
             upic::Waveform copy = *src;
-            int newId = 0;
-            for (const auto& w : waveforms) newId = juce::jmax(newId, w.id + 1);
+            const int newId = upic::nextBankId (waveforms, 0);
+            if (newId < 0 || newId > upic::limits::kMaxItemId)
+            {
+                flash ("The wavetable bank has no free id left");
+                return false;
+            }
             copy.id = newId;
             const juce::String base = copy.name;
             juce::String name = base + " copy";
@@ -311,8 +432,11 @@ int MainComponent::envelopeUseCount (int id) const
         {
             if (a.envelopeId == id) ++n;
             // F3: the PM index envelope is a reference too. Counting only
-            // the amp slot is the silent re-point L13 was about.
-            if (a.pmIndexEnv == id) ++n;
+            // the amp slot is the silent re-point L13 was about. Zero is
+            // the engine's "no PM index envelope" sentinel, so it must not
+            // be counted as a use of a real envelope whose id happens to
+            // be zero (the first free envelope id).
+            if (a.pmIndexEnv > 0 && a.pmIndexEnv == id) ++n;
         }
     return n;
 }
@@ -342,6 +466,11 @@ bool MainComponent::libraryNewWave()
     {
         const juce::ScopedLock l (dataLock);
         const int id = nextBankId (waveforms);
+        if (id < 0 || id > upic::limits::kMaxItemId)
+        {
+            flash ("The wavetable bank has no free id left");
+            return false;
+        }
         upic::Waveform w (id, uniqueBankName (waveforms, "Wave " + juce::String (id)),
                           upic::paletteColour (id));
         w.makeSine();
@@ -369,7 +498,13 @@ bool MainComponent::libraryDuplicateWave()
         if (src == nullptr) return false;
 
         upic::Waveform copy = *src;
-        copy.id = nextBankId (waveforms);
+        const int id = nextBankId (waveforms);
+        if (id < 0 || id > upic::limits::kMaxItemId)
+        {
+            flash ("The wavetable bank has no free id left");
+            return false;
+        }
+        copy.id = id;
         copy.name = uniqueBankName (waveforms, src->name + " copy");
         waveforms.push_back (copy);
         selWave = copy.id;
@@ -492,6 +627,11 @@ bool MainComponent::libraryNewEnvelope()
     {
         const juce::ScopedLock l (dataLock);
         const int id = nextBankId (envelopes);
+        if (id < 0 || id > upic::limits::kMaxItemId)
+        {
+            flash ("The envelope bank has no free id left");
+            return false;
+        }
         upic::Envelope e (id, uniqueBankName (envelopes, "Envelope " + juce::String (id)),
                           upic::paletteColour (id));
         e.presetFlat();
@@ -519,7 +659,13 @@ bool MainComponent::libraryDuplicateEnvelope()
         if (src == nullptr) return false;
 
         upic::Envelope copy = *src;
-        copy.id = nextBankId (envelopes);
+        const int id = nextBankId (envelopes);
+        if (id < 0 || id > upic::limits::kMaxItemId)
+        {
+            flash ("The envelope bank has no free id left");
+            return false;
+        }
+        copy.id = id;
         copy.name = uniqueBankName (envelopes, src->name + " copy");
         envelopes.push_back (copy);
         selEnv = copy.id;
@@ -643,7 +789,13 @@ bool MainComponent::forkEnvelopeForSelection (bool& forked)
         }
 
         upic::Envelope copy = *src;
-        copy.id = nextBankId (envelopes);
+        const int id = nextBankId (envelopes);
+        if (id < 0 || id > upic::limits::kMaxItemId)
+        {
+            flash ("The envelope bank has no free id left");
+            return false;
+        }
+        copy.id = id;
         copy.name = uniqueBankName (envelopes, src->name + " copy");
         envelopes.push_back (copy);
         selEnv = copy.id;
@@ -679,6 +831,598 @@ bool MainComponent::libraryMakeEnvelopeUnique()
         return false;
     }
     publishModelSnapshot();
+    return true;
+}
+
+//==============================================================================
+// WP7 (Wave F, 2026-11-21): publish / import / reveal.
+//
+// Publishing writes a copy to the user's library and changes no piece state,
+// so it is not an undo transaction. Importing changes the bank, and its
+// caller wraps it in exactly one beginEdit/endEdit. A broken or oversized
+// file is refused with the reason; it is never repaired in the background.
+bool MainComponent::libraryPublishWave()
+{
+    upic::Waveform wave;
+    {
+        const juce::ScopedLock l (dataLock);
+        const upic::Waveform* src = nullptr;
+        for (const auto& w : waveforms)
+            if (w.id == selWave) { src = &w; break; }
+        if (src == nullptr)
+        {
+            flash ("Choose a wavetable to publish");
+            return false;
+        }
+        wave = *src;
+    }
+
+    juce::String error;
+    if (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, wave.id,
+                                      wave.name, wave.colour, wave.toVar(), error))
+    {
+        flash (error);
+        return false;
+    }
+
+    flash ("Published \"" + wave.name + "\" to the user library");
+    return true;
+}
+
+bool MainComponent::libraryImportWave()
+{
+    if (waveLib.source() != LibraryManager::Source::User)
+    {
+        flash ("Switch the wavetable library to User before importing");
+        return false;
+    }
+
+    const auto fileName = waveLib.selectedFileName();
+    if (fileName.isEmpty())
+    {
+        flash ("Choose a library asset to import");
+        return false;
+    }
+
+    upic::UserAsset asset;
+    juce::String error;
+    const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave)
+                        .getChildFile (fileName);
+    if (! upic::UserLibrary::read (upic::UserAssetKind::Wave, file, asset, error))
+    {
+        flash ("The library asset was refused: " + error);
+        return false;
+    }
+    if ((int) waveforms.size() >= upic::limits::kMaxWaveforms)
+    {
+        flash ("A piece holds at most " + juce::String (upic::limits::kMaxWaveforms)
+               + " wavetables (the limit) - delete one before importing another");
+        return false;
+    }
+
+    int newId = 0;
+    {
+        const juce::ScopedLock l (dataLock);
+        newId = nextBankId (waveforms);
+        // A wave bank may legitimately use id 0 (its built-in assets do), so
+        // only -1 means that no free id is left.
+        if (newId < 0 || newId > upic::limits::kMaxItemId)
+        {
+            flash ("The wavetable bank has no free id left");
+            return false;
+        }
+
+        upic::Waveform imported = upic::Waveform::fromVar (asset.payload, newId);
+        imported.id = newId; // the library's id never becomes a local id
+        imported.name = uniqueBankName (waveforms, asset.name);
+        imported.colour = asset.colour;
+        waveforms.push_back (imported);
+        selWave = newId;
+    }
+
+    // Show the piece's bank again, with the imported wavetable selected.
+    waveLib.setSource (LibraryManager::Source::Piece);
+    afterLibraryChange();
+    flash ("Imported \"" + asset.name + "\" as wavetable " + juce::String (newId));
+    return true;
+}
+
+bool MainComponent::libraryRevealWave()
+{
+    const auto fileName = waveLib.source() == LibraryManager::Source::User
+                            ? waveLib.selectedFileName() : juce::String();
+    upic::UserLibrary::folderFor (upic::UserAssetKind::Wave).createDirectory();
+    juce::String error;
+    if (! upic::UserLibrary::reveal (upic::UserAssetKind::Wave, fileName, error))
+    {
+        flash ("The user library could not reveal that wavetable: " + error);
+        return false;
+    }
+    return true;
+}
+
+bool MainComponent::libraryPublishEnvelope()
+{
+    upic::Envelope envelope;
+    {
+        const juce::ScopedLock l (dataLock);
+        const upic::Envelope* src = nullptr;
+        for (const auto& e : envelopes)
+            if (e.id == selEnv) { src = &e; break; }
+        if (src == nullptr)
+        {
+            flash ("Choose an envelope to publish");
+            return false;
+        }
+        envelope = *src;
+    }
+
+    juce::String error;
+    if (! upic::UserLibrary::publish (upic::UserAssetKind::Envelope, envelope.id,
+                                      envelope.name, envelope.colour, envelope.toVar(), error))
+    {
+        flash (error);
+        return false;
+    }
+
+    flash ("Published \"" + envelope.name + "\" to the user library");
+    return true;
+}
+
+bool MainComponent::libraryImportEnvelope()
+{
+    if (envLib.source() != LibraryManager::Source::User)
+    {
+        flash ("Switch the envelope library to User before importing");
+        return false;
+    }
+
+    const auto fileName = envLib.selectedFileName();
+    if (fileName.isEmpty())
+    {
+        flash ("Choose a library asset to import");
+        return false;
+    }
+
+    upic::UserAsset asset;
+    juce::String error;
+    const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::Envelope)
+                        .getChildFile (fileName);
+    if (! upic::UserLibrary::read (upic::UserAssetKind::Envelope, file, asset, error))
+    {
+        flash ("The library asset was refused: " + error);
+        return false;
+    }
+    if ((int) envelopes.size() >= upic::limits::kMaxEnvelopes)
+    {
+        flash ("A piece holds at most " + juce::String (upic::limits::kMaxEnvelopes)
+               + " envelopes (the limit) - delete one before importing another");
+        return false;
+    }
+
+    int newId = 0;
+    {
+        const juce::ScopedLock l (dataLock);
+        newId = nextBankId (envelopes);
+        // As with the wave bank, id 0 is a valid envelope id.
+        if (newId < 0 || newId > upic::limits::kMaxItemId)
+        {
+            flash ("The envelope bank has no free id left");
+            return false;
+        }
+
+        upic::Envelope imported = upic::Envelope::fromVar (asset.payload, newId);
+        imported.id = newId; // the library's id never becomes a local id
+        imported.name = uniqueBankName (envelopes, asset.name);
+        imported.colour = asset.colour;
+        envelopes.push_back (imported);
+        selEnv = newId;
+    }
+
+    envLib.setSource (LibraryManager::Source::Piece);
+    afterLibraryChange();
+    flash ("Imported \"" + asset.name + "\" as envelope " + juce::String (newId));
+    return true;
+}
+
+bool MainComponent::libraryRevealEnvelope()
+{
+    const auto fileName = envLib.source() == LibraryManager::Source::User
+                            ? envLib.selectedFileName() : juce::String();
+    upic::UserLibrary::folderFor (upic::UserAssetKind::Envelope).createDirectory();
+    juce::String error;
+    if (! upic::UserLibrary::reveal (upic::UserAssetKind::Envelope, fileName, error))
+    {
+        flash ("The user library could not reveal that envelope: " + error);
+        return false;
+    }
+    return true;
+}
+
+//==============================================================================
+// WP7: the amplitude-table bank. The table is an envelope-shaped transfer
+// curve, but it lives in its own bank and can never be selected as an
+// amplitude envelope.
+bool MainComponent::libraryPublishAmpTable()
+{
+    upic::AmplitudeTable table;
+    {
+        const juce::ScopedLock l (dataLock);
+        const upic::AmplitudeTable* src = nullptr;
+        for (const auto& t : ampTables)
+            if (t.id == selAmpTableId) { src = &t; break; }
+        if (src == nullptr)
+        {
+            flash ("Choose an amplitude table to publish");
+            return false;
+        }
+        table = *src;
+    }
+
+    juce::String error;
+    if (! upic::UserLibrary::publish (upic::UserAssetKind::AmpTable, table.id,
+                                      table.name, table.colour, table.toVar(), error))
+    {
+        flash (error);
+        return false;
+    }
+
+    flash ("Published \"" + table.name + "\" to the user library");
+    return true;
+}
+
+bool MainComponent::libraryImportAmpTable()
+{
+    if (ampTableEd.library.source() != LibraryManager::Source::User)
+    {
+        flash ("Switch the amplitude-table library to User before importing");
+        return false;
+    }
+
+    const auto fileName = ampTableEd.library.selectedFileName();
+    if (fileName.isEmpty())
+    {
+        flash ("Choose a library asset to import");
+        return false;
+    }
+
+    upic::UserAsset asset;
+    juce::String error;
+    const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::AmpTable)
+                        .getChildFile (fileName);
+    if (! upic::UserLibrary::read (upic::UserAssetKind::AmpTable, file, asset, error))
+    {
+        flash ("The library asset was refused: " + error);
+        return false;
+    }
+    if ((int) ampTables.size() >= upic::limits::kMaxAmplitudeTables)
+    {
+        flash ("A piece holds at most " + juce::String (upic::limits::kMaxAmplitudeTables)
+               + " amplitude tables (the limit) - delete one before importing another");
+        return false;
+    }
+
+    int newId = 0;
+    {
+        const juce::ScopedLock l (dataLock);
+        newId = nextBankId (ampTables, 1);
+        if (newId < 1 || newId > upic::limits::kMaxItemId)
+        {
+            flash ("The amplitude-table bank has no free id left");
+            return false;
+        }
+
+        upic::AmplitudeTable imported = upic::Envelope::fromVar (asset.payload, newId);
+        imported.id = newId; // the library's id never becomes a local id
+        imported.name = uniqueBankName (ampTables, asset.name);
+        imported.colour = asset.colour;
+        ampTables.push_back (std::move (imported));
+        selAmpTableId = newId;
+    }
+
+    ampTableEd.library.setSource (LibraryManager::Source::Piece);
+    afterLibraryChange();
+    refreshAmpTableEditor();
+    flash ("Imported \"" + asset.name + "\" as amplitude table "
+           + juce::String (newId));
+    return true;
+}
+
+bool MainComponent::libraryRevealAmpTable()
+{
+    const auto fileName = ampTableEd.library.source() == LibraryManager::Source::User
+                            ? ampTableEd.library.selectedFileName() : juce::String();
+    upic::UserLibrary::folderFor (upic::UserAssetKind::AmpTable).createDirectory();
+    juce::String error;
+    if (! upic::UserLibrary::reveal (upic::UserAssetKind::AmpTable, fileName, error))
+    {
+        flash ("The user library could not reveal that amplitude table: " + error);
+        return false;
+    }
+    return true;
+}
+
+//==============================================================================
+// WP7: frequency tables are destination-bound. Their stable local identity
+// is (page, space), not a bank id. Publishing records the source destination;
+// importing always asks for the editor's current page/space and never lets
+// a library id become a model id.
+bool MainComponent::libraryPublishFreqTable()
+{
+    if (! freqTableDestinationIsValid())
+    {
+        flash ("Open a frequency-table destination before publishing");
+        return false;
+    }
+
+    upic::FreqSpaceDef def;
+    int page = -1, space = -1;
+    {
+        const juce::ScopedLock l (dataLock);
+        page = freqTablePage;
+        space = freqTableSpace;
+        def = pages[(size_t) page].spaceDefs[(size_t) space];
+    }
+
+    auto payload = def.toVar (space);
+    if (auto* object = payload.getDynamicObject())
+        object->setProperty ("page", page);
+
+    const auto name = "Page " + juce::String (page + 1)
+                    + " space " + juce::String (space + 1);
+
+    // A frequency table has no bank in the piece - its identity is the
+    // (page, space) it was captured from - so the library gives it a real
+    // id of its own: the first free one in the library's frequency-table
+    // bank. The id never becomes a model id (the import lands in the
+    // editor's captured destination).
+    const auto libraryId = upic::UserLibrary::nextLibraryId (
+        upic::UserAssetKind::FreqTable);
+    if (libraryId < 0)
+    {
+        flash ("The frequency-table library has no free id left");
+        return false;
+    }
+
+    juce::String error;
+    if (! upic::UserLibrary::publish (upic::UserAssetKind::FreqTable, libraryId,
+                                      name, juce::Colour (0xff5ac8fa),
+                                      payload, error))
+    {
+        flash (error);
+        return false;
+    }
+
+    flash ("Published \"" + name + "\" to the user library");
+    return true;
+}
+
+bool MainComponent::libraryImportFreqTable()
+{
+    if (! freqTableDestinationIsValid())
+    {
+        flash ("Open a frequency-table destination before importing");
+        return false;
+    }
+
+    if (freqTableEd.library.source() != LibraryManager::Source::User)
+    {
+        flash ("Switch the frequency-table library to User before importing");
+        return false;
+    }
+
+    const auto fileName = freqTableEd.library.selectedFileName();
+    if (fileName.isEmpty())
+    {
+        flash ("Choose a library asset to import");
+        return false;
+    }
+
+    upic::UserAsset asset;
+    juce::String error;
+    const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::FreqTable)
+                        .getChildFile (fileName);
+    if (! upic::UserLibrary::read (upic::UserAssetKind::FreqTable, file, asset, error))
+    {
+        flash ("The library asset was refused: " + error);
+        return false;
+    }
+
+    int page = -1, space = -1;
+    {
+        const juce::ScopedLock l (dataLock);
+        page = freqTablePage;
+        space = freqTableSpace;
+        if (page < 0 || page >= (int) pages.size()
+            || space < 0 || space >= (int) pages[(size_t) page].spaceDefs.size())
+        {
+            flash ("Open a frequency-table destination before importing");
+            return false;
+        }
+
+        auto imported = upic::FreqSpaceDef::fromVar (asset.payload);
+        auto& destination = pages[(size_t) page].spaceDefs[(size_t) space];
+        destination = imported;
+        pages[(size_t) page].spaces[(size_t) space] = imported.preset;
+    }
+
+    freqTableEd.library.setSource (LibraryManager::Source::Piece);
+    markModelChanged();
+    publishModelSnapshot();
+    refreshSpaceBox();
+    score.repaint();
+
+    // Refresh the open editor with the imported curve. The destination is
+    // explicit in the message, so a table never lands in an unnamed space.
+    {
+        upic::FreqSpaceDef shown;
+        double lo = upic::kDefaultPitchLo, hi = upic::kDefaultPitchHi;
+        {
+            const juce::ScopedLock l (dataLock);
+            const auto& pg = pages[(size_t) page];
+            shown = pg.spaceDefs[(size_t) space];
+            lo = pg.pitchLo;
+            hi = pg.pitchHi;
+        }
+        freqTableEd.open (shown, lo, hi, "Frequency table - page "
+                                      + juce::String (page + 1) + ", space "
+                                      + juce::String (space + 1));
+    }
+
+    flash ("Imported \"" + asset.name + "\" into page "
+           + juce::String (page + 1) + ", space " + juce::String (space + 1));
+    return true;
+}
+
+bool MainComponent::libraryRevealFreqTable()
+{
+    const auto fileName = freqTableEd.library.source() == LibraryManager::Source::User
+                            ? freqTableEd.library.selectedFileName() : juce::String();
+    upic::UserLibrary::folderFor (upic::UserAssetKind::FreqTable).createDirectory();
+    juce::String error;
+    if (! upic::UserLibrary::reveal (upic::UserAssetKind::FreqTable, fileName, error))
+    {
+        flash ("The user library could not reveal that frequency table: " + error);
+        return false;
+    }
+    return true;
+}
+
+//==============================================================================
+// WP7: performance sequences.
+bool MainComponent::libraryPublishSequence()
+{
+    upic::PerformanceSequence sequence;
+    {
+        const juce::ScopedLock l (dataLock);
+        const upic::PerformanceSequence* src = nullptr;
+        for (const auto& s : sequences)
+            if (s.id == selSeqId) { src = &s; break; }
+        if (src == nullptr)
+        {
+            flash ("Choose a performance sequence to publish");
+            return false;
+        }
+        sequence = *src;
+    }
+
+    juce::String error;
+    if (! upic::UserLibrary::publish (upic::UserAssetKind::Sequence, sequence.id,
+                                      sequence.name, juce::Colour (0xffa07fd8),
+                                      sequence.toVar(), error))
+    {
+        flash (error);
+        return false;
+    }
+
+    flash ("Published \"" + sequence.name + "\" to the user library");
+    return true;
+}
+
+bool MainComponent::libraryImportSequence()
+{
+    if (seqPanel.library.source() != LibraryManager::Source::User)
+    {
+        flash ("Switch the sequence library to User before importing");
+        return false;
+    }
+
+    const auto fileName = seqPanel.library.selectedFileName();
+    if (fileName.isEmpty())
+    {
+        flash ("Choose a library asset to import");
+        return false;
+    }
+
+    upic::UserAsset asset;
+    juce::String error;
+    const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::Sequence)
+                        .getChildFile (fileName);
+    if (! upic::UserLibrary::read (upic::UserAssetKind::Sequence, file, asset, error))
+    {
+        flash ("The library asset was refused: " + error);
+        return false;
+    }
+    if ((int) sequences.size() >= upic::limits::kMaxSequences)
+    {
+        flash ("A piece holds at most " + juce::String (upic::limits::kMaxSequences)
+               + " performance sequences (the limit) - delete one before importing another");
+        return false;
+    }
+
+    int newId = 0;
+    juce::String destinationError;
+    {
+        const juce::ScopedLock l (dataLock);
+
+        // A sequence names the pages and positions it performs. Those
+        // references belong to the destination piece: importing a point that
+        // names a missing page or a position beyond that page would otherwise
+        // be silently clamped during playback.
+        if (auto* points = asset.payload.getProperty ("points", juce::var()).getArray())
+        {
+            for (const auto& value : *points)
+            {
+                const int page = (int) value.getProperty ("page", -1);
+                const double pos = (double) value.getProperty ("pos", -1.0);
+                if (page < 0 || page >= (int) pages.size())
+                {
+                    destinationError = "The sequence names page "
+                        + juce::String (page + 1) + ", but this piece has "
+                        + juce::String ((int) pages.size()) + " page(s)";
+                    break;
+                }
+                const double duration = pages[(size_t) page].durationSec;
+                if (pos < 0.0 || pos > duration + 1.0e-6)
+                {
+                    destinationError = "The sequence points past the end of page "
+                        + juce::String (page + 1);
+                    break;
+                }
+            }
+        }
+
+        if (destinationError.isEmpty())
+        {
+            newId = nextBankId (sequences, 1);
+            if (newId < 1 || newId > upic::limits::kMaxItemId)
+            {
+                flash ("The sequence bank has no free id left");
+                return false;
+            }
+
+            upic::PerformanceSequence imported =
+                upic::PerformanceSequence::fromVar (asset.payload, newId);
+            imported.id = newId; // the library's id never becomes a local id
+            imported.name = uniqueBankName (sequences, asset.name);
+            sequences.push_back (std::move (imported));
+            selSeqId = newId;
+        }
+    }
+
+    if (destinationError.isNotEmpty())
+    {
+        flash ("The sequence was refused: " + destinationError);
+        return false;
+    }
+
+    seqPanel.library.setSource (LibraryManager::Source::Piece);
+    afterLibraryChange();
+    flash ("Imported \"" + asset.name + "\" as sequence " + juce::String (newId));
+    return true;
+}
+
+bool MainComponent::libraryRevealSequence()
+{
+    const auto fileName = seqPanel.library.source() == LibraryManager::Source::User
+                            ? seqPanel.library.selectedFileName() : juce::String();
+    upic::UserLibrary::folderFor (upic::UserAssetKind::Sequence).createDirectory();
+    juce::String error;
+    if (! upic::UserLibrary::reveal (upic::UserAssetKind::Sequence, fileName, error))
+    {
+        flash ("The user library could not reveal that sequence: " + error);
+        return false;
+    }
     return true;
 }
 
@@ -843,6 +1587,9 @@ void MainComponent::editMaterial (int what)
     }
     if (ok)
     {
+        // WP7: the captured extraction source described the material before
+        // this edit. Close it instead of saving an analysis of older audio.
+        invalidateSampleExtractSource();
         markModelChanged();       // the material changed -> the piece changed
         publishModelSnapshot();   // the audio thread must see it now
     }
@@ -1080,58 +1827,94 @@ void MainComponent::closeClearWarning()
 // or a mic take) becomes a wavetable: the whole take is resampled into one
 // loop of the oscillator.
 //==============================================================================
-void MainComponent::waveFromSelectedSlot()
+bool MainComponent::waveFromSelectedSlot()
 {
-    const upic::SampleSlot* slot = nullptr;
+    // Copy the immutable material pointer under the lock. The model itself
+    // stays on the message thread, so the captured slot cannot be replaced
+    // while this command builds the wavetable.
+    upic::SampleSlot material;
     {
-        const juce::ScopedLock l(dataLock);
+        const juce::ScopedLock l (dataLock);
         if (selSlot >= 0 && selSlot < (int) sampleSlots.size())
-            slot = &sampleSlots[(size_t) selSlot];
+            material = sampleSlots[(size_t) selSlot];
     }
 
-    if (slot == nullptr || slot->data == nullptr || slot->data->getNumSamples() <= 0)
+    if (! material.loaded())
     {
         flash ("No sample in this slot - load or capture one first");
-        return;
+        return false;
     }
 
+    if ((int) waveforms.size() >= upic::limits::kMaxWaveforms)
+    {
+        flash ("A piece holds at most " + juce::String (upic::limits::kMaxWaveforms)
+               + " wavetables (the limit) - delete one before digitising another");
+        return false;
+    }
+
+    // Slot -> Wave is one model command and therefore one labelled undo
+    // transaction. A refusal changes neither the bank nor the undo stack.
+    beginEdit ("Digitise the wavetable");
+    bool ok = false;
     upic::Waveform wave;
     {
-        const juce::ScopedLock l(dataLock);
-        int newId = 0;
-        for (const auto& w : waveforms) newId = juce::jmax (newId, w.id + 1);
-
-        juce::String name = slot->name.isNotEmpty() ? slot->name : juce::String ("Slot " + juce::String (slot->id));
-        name += " wave";
-        int n = 2;
-        for (;;)
+        const juce::ScopedLock l (dataLock);
+        if ((int) waveforms.size() >= upic::limits::kMaxWaveforms)
         {
-            bool used = false;
-            for (const auto& w : waveforms) if (w.name == name) { used = true; break; }
-            if (! used) break;
-            name = (slot->name.isNotEmpty() ? slot->name : juce::String ("Slot " + juce::String (slot->id)))
-                 + " wave " + juce::String (n++);
+            flash ("A piece holds at most " + juce::String (upic::limits::kMaxWaveforms)
+                   + " wavetables (the limit) - delete one before digitising another");
         }
+        else
+        {
+            const int newId = upic::nextBankId (waveforms, 0);
+            if (newId < 0 || newId > upic::limits::kMaxItemId)
+            {
+                flash ("The wavetable bank has no free id left");
+            }
+            else
+            {
+                juce::String name = material.name.isNotEmpty()
+                                  ? material.name
+                                  : juce::String ("Slot " + juce::String (material.id));
+                name += " wave";
+                int n = 2;
+                for (;;)
+                {
+                    bool used = false;
+                    for (const auto& w : waveforms)
+                        if (w.name == name) { used = true; break; }
+                    if (! used) break;
+                    name = (material.name.isNotEmpty() ? material.name
+                                                      : juce::String ("Slot " + juce::String (material.id)))
+                         + " wave " + juce::String (n++);
+                }
 
-        // M5: the wavetable is made from the material's REGION (the trim) -
-        // it must be the part that is actually played, not the whole file.
-        const int ch = slot->data->getNumChannels();
-        const int frames = slot->regionFrames();
-        juce::AudioBuffer<float> region (ch, frames);
-        for (int c = 0; c < ch; ++c)
-            region.copyFrom (c, 0, *slot->data, c, slot->regionStart(), frames);
+                // M5: the wavetable is made from the material's REGION (the
+                // trim) - it must be the part that is actually played, not
+                // the whole file.
+                const int ch = material.data->getNumChannels();
+                const int frames = material.regionFrames();
+                juce::AudioBuffer<float> region (ch, frames);
+                for (int c = 0; c < ch; ++c)
+                    region.copyFrom (c, 0, *material.data, c,
+                                     material.regionStart(), frames);
 
-        wave = upic::waveFromTake (region, newId, name);
-        waveforms.push_back (wave);
-        selWave = newId;
+                wave = upic::waveFromTake (region, newId, name);
+                waveforms.push_back (wave);
+                selWave = newId;
+                ok = true;
+            }
+        }
     }
 
-    refreshBoxes();
-    waveEd.bind (&waveforms, &selWave, [this]{ markModelChanged(); });
-    pushVoice();
-    publishModelSnapshot();
-    markModelChanged();
-    flash ("Wave page digitised: \"" + wave.name + "\" (one loop)");
+    if (ok)
+    {
+        waveEd.bind (&waveforms, &selWave, [this]{ markModelChanged(); });
+        afterLibraryChange();
+        flash ("Wave page digitised: \"" + wave.name + "\" (one loop)");
+    }
+    endEdit();
+    return ok;
 }
 
 void MainComponent::clearCurrentPage()
@@ -1142,14 +1925,14 @@ void MainComponent::clearCurrentPage()
     {
         const juce::ScopedLock l(dataLock);
         curPage().arcs.clear();
-        score.setSelectedArc(-1);
-        selectedArcId = -1;
-        lastArcSelection.clear();
-        arcListPanel.setSelectedArcs(currentPage, {});
-        refreshBoxes();
-        markModelChanged(); // clearing while playing fades instead of clicking
-        publishModelSnapshot();
     }
+    score.setSelectedArc(-1);
+    selectedArcId = -1;
+    lastArcSelection.clear();
+    arcListPanel.setSelectedArcs(currentPage, {});
+    refreshBoxes();
+    markModelChanged(); // clearing while playing fades instead of clicking
+    publishModelSnapshot();
     endEdit();
     repaint();
 }

@@ -397,6 +397,11 @@ bool MainComponent::loadFromVar(const juce::var& v)
                                       : " arcs pointed at material that was not there");
 
     // --- the piece is good: swap it in ---
+    // An ordinary scrub/freeze request belongs to the piece that is about
+    // to be replaced. End it before the swap so the next model snapshot
+    // cannot be rendered through the old request. Undo and redo restore
+    // through this same loader, so they are covered too.
+    cancelOrdinaryPreviewRoutes();
     {
         juce::ScopedLock l(dataLock);
         stopPlayback();
@@ -417,6 +422,15 @@ bool MainComponent::loadFromVar(const juce::var& v)
         pages = std::move (newPages);
         sampleSlots = std::move (newSlots);
     }
+    // The frequency-table editor captured a page/space in the piece that was
+    // just replaced. Close it before any stale callback can use that
+    // destination in the new model. Undo and redo restore through this same
+    // loader, so they are covered too.
+    invalidateFreqTableDestination();
+    // WP7: a captured extraction source belongs to the piece that was just
+    // replaced. Closing it here also covers undo and redo, which restore a
+    // piece through this same path.
+    invalidateSampleExtractSource();
     {
         juce::ScopedLock l(dataLock);
         // clamp ids
@@ -532,6 +546,11 @@ bool MainComponent::loadFromVar(const juce::var& v)
     seekPlayhead(0.0);
     bumpPageEpoch();
     masterSlider.setValue(masterGain.load(), juce::dontSendNotification);
+    } // the settings scope
+
+    // Control refreshes and the model publication run after the model lock
+    // has been released. A refresh can repopulate controls whose callbacks
+    // read the model, so it must never run inside that lock.
     refreshBoxes(); refreshScoreBinding();
     // v1.18: the next audio block must already render the loaded piece (the
     // timer alone would be up to 33 ms late - and a host may not run it).
@@ -542,7 +561,6 @@ bool MainComponent::loadFromVar(const juce::var& v)
         flash ("This piece is bigger than the app supports - not loaded: " + droppedMsg);
     else if (! adjustedMsg.isEmpty())
         flash ("This piece was adjusted: " + adjustedMsg);
-    } // the settings scope
 
     // v1.33.4 (L15): the loaded piece is what the file holds, so there is
     // nothing to save yet (the app must not ask to save a piece that was
@@ -861,6 +879,59 @@ bool MainComponent::decodeSampleFile (const juce::File& f, SampleImport& out, ju
     }
 }
 
+// The selftest installs synthetic material through the same limits as a
+// decoded file. A test-only hook must not be able to create state that the
+// production loader would refuse.
+bool MainComponent::setSampleSlotForTest (int slotIndex,
+                                          const juce::AudioBuffer<float>& data,
+                                          double sampleRate)
+{
+    if (slotIndex < 0 || slotIndex >= (int) sampleSlots.size()) return false;
+    if (data.getNumChannels() < 1 || data.getNumChannels() > 2) return false;
+    if (data.getNumSamples() <= 0
+        || data.getNumSamples() > upic::limits::kMaxFramesPerSample) return false;
+    if (! (sampleRate >= 1000.0 && sampleRate <= upic::limits::kMaxSampleRate)) return false;
+    if ((double) data.getNumSamples() / sampleRate > upic::limits::kMaxSampleSeconds)
+        return false;
+
+    for (int c = 0; c < data.getNumChannels(); ++c)
+        for (int i = 0; i < data.getNumSamples(); ++i)
+            if (! std::isfinite (data.getSample (c, i))) return false;
+
+    const juce::int64 newBytes = (juce::int64) data.getNumSamples()
+                               * (juce::int64) data.getNumChannels()
+                               * (juce::int64) sizeof (float);
+    {
+        const juce::ScopedLock l (dataLock);
+        juce::int64 totalBytes = 0;
+        for (size_t i = 0; i < sampleSlots.size(); ++i)
+        {
+            if ((int) i == slotIndex || ! sampleSlots[i].loaded()) continue;
+            totalBytes += (juce::int64) sampleSlots[i].data->getNumSamples()
+                        * (juce::int64) sampleSlots[i].data->getNumChannels()
+                        * (juce::int64) sizeof (float);
+        }
+        if (totalBytes + newBytes > (juce::int64) upic::limits::kMaxTotalSampleBytes)
+            return false;
+
+        // WP7: the test hook follows the production replacement path.
+        invalidateSampleExtractSource();
+
+        auto& slot = sampleSlots[(size_t) slotIndex];
+        slot.data = std::make_shared<const juce::AudioBuffer<float>> (data);
+        slot.sampleRate = sampleRate;
+        slot.resetEdits();
+    }
+
+    selSlot = slotIndex;
+    score.sampleDurations[sampleSlots[(size_t) slotIndex].id] =
+        sampleSlots[(size_t) slotIndex].durationSec();
+    markModelChanged();
+    publishModelSnapshot();
+    updateSampleView();
+    return true;
+}
+
 // The install, on the message thread: the model is read by the audio thread,
 // so it is mutated under the lock.
 void MainComponent::installSample (int slotIndex, SampleImport&& import)
@@ -869,6 +940,9 @@ void MainComponent::installSample (int slotIndex, SampleImport&& import)
     // v1.33.4 (L15, part 2): the undo transaction - the state from before
     // the material was replaced.
     beginEdit ("Load the material");
+    // WP7: the replacement invalidates any analysis captured from the old
+    // material before the new buffer enters the model.
+    invalidateSampleExtractSource();
     {
         // model is read by the audio thread -> mutate under the lock.
         // v1.18: the buffer is immutable + shared, so the pointer is

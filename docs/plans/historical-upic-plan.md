@@ -1,10 +1,10 @@
-# Historical UPIC restoration — implementation plan
+# Historical UPIC restoration β€” implementation plan
 
 Branch: `feature/historical-upic-p1` (created 2026-11-18 from `main` @ `5278224`, v0.29.0)
 Inputs (snapshot copies kept in `docs/plans/reference/` so the branch is
 self-contained):
-- `ACTIONS-LIST.md` — the functional spec and priorities (P1–P4).
-- `ACTIONS-LIST-RESEARCH.md` — the historical gap analysis behind it.
+- `ACTIONS-LIST.md` β€” the functional spec and priorities (P1β€“P4).
+- `ACTIONS-LIST-RESEARCH.md` β€” the historical gap analysis behind it.
 
 This plan turns the action list into shippable work packages that fit the
 **current** codebase (v0.29.0 file layout), not the file names assumed by the
@@ -56,7 +56,7 @@ Structural difference vs. the research note: there is **no**
    message thread into `ModelSnapshot`; the render path only reads. Enforced by
    `AllocCounter` in the selftest.
 4. **One undo transaction per command.** Group create/edit/delete, table edit,
-   sequence record/trim, channel edit, transform — each wrapped in
+   sequence record/trim, channel edit, transform β€” each wrapped in
    `beginEdit`/`endEdit` with a label (`undoLabel()`).
 5. **Refuse and explain, never truncate silently** (existing H13 pattern):
    cycles, duplicate members, missing assets, oversized sequences.
@@ -72,16 +72,16 @@ Structural difference vs. the research note: there is **no**
 
 | Wave | Version | Package | Action-list item | Effort |
 |---|---|---|---|---|
-| A | 0.30.0 | WP1 Frequency conversion tables | P1.3 | 6–8 d |
-| A | 0.30.0 | WP2 Amplitude conversion tables | P1.4 | 4–5 d |
-| B | 0.31.0 | WP3 Persistent arc groups | P1.2 | 7–9 d |
-| C | 0.32.0 | WP4 Editable performance sequences | P1.1 | 10–14 d |
-| D | 0.33.0 | WP5 Independent modulating arcs | P1.5 | 8–10 d |
-| E | 0.34.0 | WP6 Multichannel routing + channel envelopes | P2.6 | 10–13 d |
-| F | 0.35.0 | WP7 Asset libraries + sample extraction | P2.7, P2.10 | 8–11 d |
-| G | 0.36.0 | WP8 Geometric transforms + performance view | P2.8, P3.12 | 7–9 d |
-| H | 0.37.0 | WP9 Generalized curves + multi-page workspace | P3.11, P2.9 | 12–16 d |
-| I | 0.38.0 | WP10 Capacity lifts (benchmark-gated) | P4 | 5–8 d |
+| A | 0.30.0 | WP1 Frequency conversion tables | P1.3 | 6β€“8 d |
+| A | 0.30.0 | WP2 Amplitude conversion tables | P1.4 | 4β€“5 d |
+| B | 0.31.0 | WP3 Persistent arc groups | P1.2 | 7β€“9 d |
+| C | 0.32.0 | WP4 Editable performance sequences | P1.1 | 10β€“14 d |
+| D | 0.33.0 | WP5 Independent modulating arcs | P1.5 | 8β€“10 d |
+| E | 0.34.0 | WP6 Multichannel routing + channel envelopes | P2.6 | 10β€“13 d |
+| F | 0.35.0 | WP7 Asset libraries + sample extraction | P2.7, P2.10 | 8β€“11 d |
+| G | 0.36.0 | WP8 Geometric transforms + performance view | P2.8, P3.12 | 7β€“9 d |
+| H | 0.37.0 | WP9 Generalized curves + multi-page workspace | P3.11, P2.9 | 12β€“16 d |
+| I | 0.38.0 | WP10 Capacity lifts (benchmark-gated) | P4 | 5β€“8 d |
 
 Each wave = one or two commits series on this branch; WP9/WP10 may move to
 sibling branches (`feature/wp9-curves`, `feature/wp10-capacity`) if review load
@@ -89,10 +89,10 @@ suggests it.
 
 ---
 
-## 4. WP1 — Frequency conversion tables (P1.3)
+## 4. WP1 β€” Frequency conversion tables (P1.3)
 
 **Goal.** A page's four spaces stop being presets-only: each can hold a drawn,
-nonlinear, possibly discrete table mapping vertical position → frequency,
+nonlinear, possibly discrete table mapping vertical position β†’ frequency,
 while the seven presets remain one-click starting points.
 
 **Model** (`Source/FreqSpace.h`, `Page.h`)
@@ -115,10 +115,10 @@ struct FreqSpaceDef {
 
 **Engine**
 - Build a 1024-entry `FreqLut` per space **on the message thread**, stored in
-  `ModelSnapshot::pageLuts` (`1 KB × 4 × 100 pages ≈ 400 KB` worst case,
+  `ModelSnapshot::pageLuts` (`1 KB Γ— 4 Γ— 100 pages β‰ 400 KB` worst case,
   built only for pages that need it).
 - `render()` takes the current page's LUT array; `arcPitch()` uses
-  `lut[arc.space].apply(hz)` — 2 reads + lerp, no per-sample scan of table
+  `lut[arc.space].apply(hz)` β€” 2 reads + lerp, no per-sample scan of table
   points. The identity preset keeps its "bit-exact passthrough" fast path
   (protects the phase vocoder, see the `SpaceMap::identity` comment).
 - `stepped` reuses `upic::applyTemperament` after the curve; `Arc::stepDivisions`
@@ -128,7 +128,7 @@ struct FreqSpaceDef {
 - New `Source/FreqTableEditor.h`: x = page position, y = log2 Hz (note names
   from the piece's `Tuning`); tools Draw/Line/Erase/Preset; "Invert", "Stepped
   (n div/oct)".
-- Entry points: page space selector → "Edit table…" (per space), plus a
+- Entry points: page space selector β†’ "Edit tableβ€¦" (per space), plus a
   "Tables" section in the existing library area.
 - Canvas: a faint heat-tint overlay showing which space an arc is in (optional
   per `Arcs` view toggle).
@@ -137,8 +137,8 @@ struct FreqSpaceDef {
 divisions, inverted}]`; `Arc::space` already persisted.
 
 **Tests (selftest)**
-- identity preset → bit-exact pitch (existing check must still pass).
-- drawn table: y→Hz at x = 0/0.25/0.5/0.75/1 matches the LUT within 1e-6.
+- identity preset β†’ bit-exact pitch (existing check must still pass).
+- drawn table: yβ†’Hz at x = 0/0.25/0.5/0.75/1 matches the LUT within 1e-6.
 - stepped table quantises to n divisions; `Arc::stepDivisions` still wins.
 - LUT built on message thread; render path allocation-free (AllocCounter).
 - old fixture loads unchanged; new piece round-trips exactly.
@@ -150,13 +150,13 @@ same space hear it; switching the space back to a preset restores the old sound
 exactly.
 
 **Risks.** Per-arc vs per-space table semantics (locked: per space, assigned
-per arc — matches the historical "table assigned to the arc, table lives on the
+per arc β€” matches the historical "table assigned to the arc, table lives on the
 page"). LUT build cost for 100 pages (build lazily per snapshot, current page
 first).
 
 ---
 
-## 5. WP2 — Amplitude conversion tables (P1.4)
+## 5. WP2 β€” Amplitude conversion tables (P1.4)
 
 **Goal.** Separate *envelope shape* from *amplitude mapping*: the same envelope
 through different tables produces linear, compressed or expanded dynamics.
@@ -175,8 +175,8 @@ struct AmplitudeTable {
 
 **Engine**
 - `findAmpTable(ampTables, id)` beside `findEnv`; per-arc `EnvCursor atc`.
-- Order is fixed and documented: `level = intensity × envelope(life) ×
-  ampTable(envelope) × pressure(t) × edge`. Group gain (WP3) and channel gain
+- Order is fixed and documented: `level = intensity Γ— envelope(life) Γ—
+  ampTable(envelope) Γ— pressure(t) Γ— edge`. Group gain (WP3) and channel gain
   (WP6) multiply later.
 - Applies to oscillator, sample, live and PM paths, so it is one helper
   `static inline float mappedEnv(...)` used by all four.
@@ -189,7 +189,7 @@ struct AmplitudeTable {
 - Per-arc assignment in the arc inspector + ArcList column.
 
 **Tests**
-- Table identity (y = x) → output equals the pre-WP2 render bit-exactly.
+- Table identity (y = x) β†’ output equals the pre-WP2 render bit-exactly.
 - Square-law on a Percussive envelope changes peak level by the expected gain
   while the envelope's stored points are untouched.
 - All four arc modes consume the table.
@@ -199,12 +199,12 @@ struct AmplitudeTable {
 audibly changes dynamics, not timing or pitch; the envelope drawing is
 identical in both.
 
-**Risk.** Confusion with envelopes in the UI — mitigated by naming, separate
+**Risk.** Confusion with envelopes in the UI β€” mitigated by naming, separate
 bank, and a distinct tick/colour.
 
 ---
 
-## 6. WP3 — Persistent arc groups (P1.2)
+## 6. WP3 β€” Persistent arc groups (P1.2)
 
 **Goal.** Named, saved groups with non-destructive shared attributes (mute,
 solo, gain, transpose, timbre overrides, channel), usable for performance and
@@ -230,7 +230,7 @@ struct ArcGroup {
 - At snapshot publish, build
   `std::vector<std::vector<ArcRenderOverride>>` parallel to pages/arcs:
   `{ muted, gain, transposeSemitones, waveformId, envelopeId, amplitudeTableId,
-  channelId }` with solo already resolved (any group solo → non-solo groups
+  channelId }` with solo already resolved (any group solo β†’ non-solo groups
   muted; arc-level `muted` still wins).
 - `render()` takes an optional override pointer; resolving is O(arcs) on the
   message thread.
@@ -239,7 +239,7 @@ struct ArcGroup {
 - `level *= ov.gain`; `wave`/`env`/`ampTable` lookups use the override ids.
 - Transpose is applied **after** space mapping and temperament, in semitones:
   `hz *= 2^(st/12)` then clamp to `[kMinFreq, kMaxFreq]`. Documented order:
-  `space → temperament → group transpose`.
+  `space β†’ temperament β†’ group transpose`.
 - Sample/live ratios derive from the transposed Hz, so groups transpose
   material arcs consistently.
 
@@ -260,7 +260,7 @@ struct ArcGroup {
 - Render with overrides matches a hand-edited equivalent piece within 1e-6.
 
 **Acceptance.** Two groups on one page: solo one during playback, mute the
-other, transpose one by +7 st and set its envelope override — no arc's stored
+other, transpose one by +7 st and set its envelope override β€” no arc's stored
 data changes, save/reload restores it.
 
 **Risk.** Semantics of group solo vs arc mute (documented above); auto-generated
@@ -268,7 +268,7 @@ harmonic groups (a "future idea", not in scope) will later reuse this.
 
 ---
 
-## 7. WP4 — Editable performance sequences (P1.1)
+## 7. WP4 β€” Editable performance sequences (P1.1)
 
 **Goal.** Record, redraw, trim and replay the performer's movement through the
 score (page + position vs. performance time), independently of the page data.
@@ -288,7 +288,7 @@ struct PerformanceSequence {
 
 **Recording**
 - Recorded on the message thread from the 30 Hz timer **and** every seek/scrub
-  event; points deduped to ≥ 8 ms (historical ≈ 6 ms), capped by decimation
+  event; points deduped to β‰¥ 8 ms (historical β‰ 6 ms), capped by decimation
   (drop every other point past the limit) with a flash if decimated.
 - Clock: monotonic wall time from record start (`getMillisecondCounterHiRes`),
   stored as `t`; replay never consults the wall clock.
@@ -297,12 +297,12 @@ struct PerformanceSequence {
 - New transport source enum `{ Internal, Sequence }`; when Sequence:
   audio thread advances its own `seqSampleClock`, looks up `(page, pos)` at
   `t = seqSampleClock / sr`, interpolating position linearly and deriving a
-  block rate = Δpos/Δt clamped to ±4× (feeds the existing dirCrossfade and
+  block rate = Ξ”pos/Ξ”t clamped to Β±4Γ— (feeds the existing dirCrossfade and
   scrub-rate paths).
 - Page switching happens on the audio thread via a dedicated atomic
   `seqPageRequest` (validated against `snapshot->pages.size()`), so a sequence
   cannot outrun the snapshot; the UI adopts the audio page for display.
-- Holding a position (Δt > 0, Δpos = 0) freezes the playhead like scrub-hold.
+- Holding a position (Ξ”t > 0, Ξ”pos = 0) freezes the playhead like scrub-hold.
 - Reverse segments reuse the existing `playRate` direction machinery, so
   sample/live reversal stays correct.
 - MIDI scrub and Sequence are mutually exclusive (source selector); switching
@@ -326,7 +326,7 @@ struct PerformanceSequence {
 
 **Acceptance.** Record a performance that slows down, reverses, holds, then
 jumps to page 2; replay it from the transport, from the editor and after
-save/reload — identical motion each time.
+save/reload β€” identical motion each time.
 
 **Risk.** Highest-risk package (transport authority). Mitigations: explicit
 source enum, audio-thread-owned clock, snapshot-bounded page index, reuse of
@@ -334,7 +334,7 @@ existing fade/direction code, smoke test with a fake playhead.
 
 ---
 
-## 8. WP5 — Independent modulating arcs (P1.5)
+## 8. WP5 β€” Independent modulating arcs (P1.5)
 
 **Goal.** One drawn arc modulates another's pitch or amplitude, with its own
 trajectory (distinct from the existing `waveUse` self-LFO and PM tab).
@@ -346,16 +346,16 @@ int    modTarget = 0;        // 0 = pitch, 1 = amplitude
 double modDepth  = 0.5;      // 0..1
 int    modAlign  = 0;        // 0 = absolute page time, 1 = carrier start
 ```
-- Validation on the message thread: no cycles (DFS over ≤ arcs), one modulator
+- Validation on the message thread: no cycles (DFS over β‰¤ arcs), one modulator
   per carrier, modulator must exist on the page; refusal flashes.
 
 **Engine**
 - Preallocate a flat `ModVoice { carrierId, modId, cursor, value }` vector in
   `prepare()`; no map, no allocation.
 - Pitch target: modulator contour deviation from its own mean, in semitones
-  `± depth × 12`, summed into the carrier Hz before space/temperament (so the
+  `Β± depth Γ— 12`, summed into the carrier Hz before space/temperament (so the
   mod is musical in the drawn space).
-- Amplitude target: `level *= 1 - depth × (1 - modNorm)` (tremolo), clamped ≥ 0.
+- Amplitude target: `level *= 1 - depth Γ— (1 - modNorm)` (tremolo), clamped β‰¥ 0.
 - A muted modulator still modulates (it is a control source); document it and
   add a "audible" checkbox separate from mute if needed (defer).
 
@@ -364,17 +364,17 @@ int    modAlign  = 0;        // 0 = absolute page time, 1 = carrier start
 - Canvas: dashed connector + arrow from modulator to carrier (view toggle).
 
 **Tests**
-- Pitch deviation equals `depth × 12` semitones at the modulator's peak.
+- Pitch deviation equals `depth Γ— 12` semitones at the modulator's peak.
 - Amplitude tremolo depth/level bounds (never < 0, never > 1).
 - Cycle rejected; self-reference rejected; missing id refused.
 - Round-trip; mod cursor state survives page switch (reset semantics tested).
 
-**Acceptance.** A slow drawn arc bends a fast carrier ±5 st audibly, with the
+**Acceptance.** A slow drawn arc bends a fast carrier Β±5 st audibly, with the
 carrier's own stored points unchanged; save/reload keeps the relationship.
 
 ---
 
-## 9. WP6 — Multichannel routing + channel envelopes (P2.6)
+## 9. WP6 β€” Multichannel routing + channel envelopes (P2.6)
 
 **Goal.** Assign arcs to channels; per-channel gain, mute, solo and a page-long
 dynamic envelope; mix to stereo now, physical multi-out for the plugin next.
@@ -394,8 +394,8 @@ struct Channel {
 **Engine**
 - Preallocated `chanScratch[16]` mono buffers sized in `prepare()`.
 - Arc render target becomes `chanScratch[channelId]`; after the arc loop, sum
-  channels into L/R with `gain × envelope(playhead/duration) × mute/solo`,
-  block-rate envelope evaluation (documented as block-quantised, ≤ 1 block).
+  channels into L/R with `gain Γ— envelope(playhead/duration) Γ— mute/solo`,
+  block-rate envelope evaluation (documented as block-quantised, β‰¤ 1 block).
 - `render()` signature gains a `const ChannelMix*` (resolved on message thread
   in the snapshot: solo flags, gains, envelope LUTs at 64 points).
 - Master gain remains last.
@@ -418,7 +418,7 @@ and open a follow-up card.
 
 ---
 
-## 10. WP7 — Cross-project libraries + sample extraction (P2.7, P2.10)
+## 10. WP7 β€” Cross-project libraries + sample extraction (P2.7, P2.10)
 
 **Goal (libraries).** A user-level asset library outside the piece: waveforms,
 envelopes, amplitude/frequency tables and sequences can be published to it and
@@ -428,26 +428,26 @@ imported into any piece; the piece still embeds what it uses.
   `userApplicationDataDirectory/UPICuitous/Library/{waves,envelopes,tables,sequences}/`,
   each asset one JSON file (`kind`, `id`, `name`, `colour`, payload, `version`).
   Reads validate against `PieceLimits`; writes atomic (temp + rename).
-- `LibraryManager` gains "Import…", "Publish", "Reveal" and a source switch
+- `LibraryManager` gains "Importβ€¦", "Publish", "Reveal" and a source switch
   (Piece / User). Ids are re-minted on import; references stay local.
-- Tests: publish→import round-trip, corrupt/oversized asset refused, no piece
-  dependency on the library (delete library dir → piece still plays).
+- Tests: publishβ†’import round-trip, corrupt/oversized asset refused, no piece
+  dependency on the library (delete library dir β†’ piece still plays).
 
-**Goal (extraction).** `Slot → Wave` gains cycle-aware extraction; new
-`Slot → Env`.
+**Goal (extraction).** `Slot β†’ Wave` gains cycle-aware extraction; new
+`Slot β†’ Env`.
 
 - New `Source/SampleAnalysis.h`: `findBestCycle(buf, sr, targetLen)` using
   normalised autocorrelation + zero-crossing alignment; `extractEnvelope(buf,
-  sr, mode RMS|Peak, points ≤ 1000)`.
+  sr, mode RMS|Peak, points β‰¤ 1000)`.
 - UI in the Sample tab: cycle preview (start/length, "align zero crossing"),
   A/B preview (original vs reconstructed) through the scrub engine, then
   "Save to wave bank" / "Save to envelope bank".
-- Tests: 441 Hz synthetic sine → extracted cycle period matches within 1 %;
-  ramp → RMS envelope monotonic; determinism; caps respected.
+- Tests: 441 Hz synthetic sine β†’ extracted cycle period matches within 1 %;
+  ramp β†’ RMS envelope monotonic; determinism; caps respected.
 
 ---
 
-## 11. WP8 — Geometric transforms + performance view (P2.8, P3.12)
+## 11. WP8 β€” Geometric transforms + performance view (P2.8, P3.12)
 
 **Transforms** (in `ScoreEditor` + model helpers in `Arc.h`/`Page.h`):
 `rotate(anchor, angle)`, `reflect(axis)`, `align(edge)` (start/end/pitch),
@@ -469,7 +469,7 @@ transforms respect group membership; undo restores exact point arrays.
 
 ---
 
-## 12. WP9 — Generalized curves + multi-page workspace (P3.11, P2.9)
+## 12. WP9 β€” Generalized curves + multi-page workspace (P3.11, P2.9)
 
 **Generalized curves** (`Source/GraphicalCurve.h`):
 ```cpp
@@ -481,33 +481,33 @@ struct GraphicalCurve {
 ```
 Converters: `arcToCurve`, `curveToWaveform` (resample to wave size),
 `curveToEnvelope`, `curveToTable`, `waveformToCurve`. Commands
-"Convert As →" produce **new** assets (never reinterpret in place), so old
+"Convert As β†’" produce **new** assets (never reinterpret in place), so old
 objects remain authoritative. Wire `WaveformEditor`/`EnvelopeEditor` to edit a
 curve and save as either type.
 
-**Multi-page workspace** (`Source/PageWorkspace.h`): 2–4 `ScoreEditor`
+**Multi-page workspace** (`Source/PageWorkspace.h`): 2β€“4 `ScoreEditor`
 instances side by side, each bound to a different page with independent
 zoom/scroll; one transport; active playback page indicated; workspace layout
 saved in the piece (`workspace: {pages:[...], split}`).
 
-**Tests**: conversions are lossless within the target resolution; arc→curve→
+**Tests**: conversions are lossless within the target resolution; arcβ†’curveβ†’
 arc round-trip matches; two canvases edit independent pages without cross-talk;
 workspace persists; audio page remains single.
 
 ---
 
-## 13. WP10 — Capacity (P4, benchmark-gated)
+## 13. WP10 β€” Capacity (P4, benchmark-gated)
 
 | Item | Change | Gate |
 |---|---|---|
-| Envelopes 50 → 128 | `limits::kMaxEnvelopes`; lists/UI scroll | memory + layout sweep |
-| Arcs/page 2024 → 4000 | limit + overload guard tuning | benchmark: worst-case block ≤ 70 % budget at 4000 arcs/48 kHz/128 samples |
-| Wavetables 1024 → optional 4096 | `Waveform::samples.size()`-aware `valueAt`, serialized length, UI | engine + JSON round-trip + CPU |
-| Page 12 min → 60 min | `kMaxPageSeconds = 3600`; confirm export streams to disk | export memory ceiling test (peak RSS < 300 MB) |
+| Envelopes 50 β†’ 128 | `limits::kMaxEnvelopes`; lists/UI scroll | memory + layout sweep |
+| Arcs/page 2024 β†’ 4000 | limit + overload guard tuning | benchmark: worst-case block β‰¤ 70 % budget at 4000 arcs/48 kHz/128 samples |
+| Wavetables 1024 β†’ optional 4096 | `Waveform::samples.size()`-aware `valueAt`, serialized length, UI | engine + JSON round-trip + CPU |
+| Page 12 min β†’ 60 min | `kMaxPageSeconds = 3600`; confirm export streams to disk | export memory ceiling test (peak RSS < 300 MB) |
 | Conversion table 16384 | cap already planned in WP1 | parse/UI |
 
 Rule: no capacity lift before its benchmark passes in `SelfTestEngine.cpp`
-(new timing checks with generous headroom, not flaky wall-clock asserts — use
+(new timing checks with generous headroom, not flaky wall-clock asserts β€” use
 work-per-block curves, not absolute ms in CI).
 
 ---
@@ -525,11 +525,11 @@ key's *meaning* changes; this plan avoids that.
 `kMaxModulators` (1 per arc). All parsers clamp; load never fails on a bad
 count, it truncates and flashes (existing policy).
 
-**Undo/redo integration**: every message-thread mutation in WP1–WP9 is inside
+**Undo/redo integration**: every message-thread mutation in WP1β€“WP9 is inside
 `beginEdit`/`endEdit`; snapshot handover makes undo audible immediately via
 `markModelChanged()` where the sound changes.
 
-**Test additions per wave** (target ≥ 30 new checks, totals tracked in
+**Test additions per wave** (target β‰¥ 30 new checks, totals tracked in
 `PROGRESS.md`):
 model round-trip, engine math, refusal paths, undo depth, old-fixture
 bit-exactness, allocation-free render, and one historical reference fixture per
@@ -543,10 +543,10 @@ spectral centroid tolerances, not hashes (float codegen may differ).
 
 ## 15. Branch, commit and review strategy
 
-- This branch (`feature/historical-upic-p1`) carries **WP1–WP5** (all P1) in
-  waves A–D, one commit series per wave (`wp1-freq-tables`, `wp2-amp-tables`,
+- This branch (`feature/historical-upic-p1`) carries **WP1β€“WP5** (all P1) in
+  waves Aβ€“D, one commit series per wave (`wp1-freq-tables`, `wp2-amp-tables`,
   `wp3-groups`, `wp4-sequences`, `wp5-modulating-arcs`).
-- WP6–WP10 open sibling branches off `main` once WP3/WP4 merge (they depend on
+- WP6β€“WP10 open sibling branches off `main` once WP3/WP4 merge (they depend on
   groups/sequences).
 - Each wave PR: model + engine + UI + selftest + docs (`docs/waves/NN-*.md`),
   version bump via `.\scripts\build.ps1 -Version 0.XX.0`, pluginval 5 green.
@@ -563,7 +563,7 @@ render checks, `.upic.json` old-fixture render identity, Android build
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Sequence transport fights MIDI scrub / host transport | High | Single explicit source enum; sequence clock owned by audio thread; refuse conflicting arms |
-| Per-arc LUT cost at 2024 arcs × 4 spaces | Medium | Shared per-page LUTs, rebuilt only on model revision |
+| Per-arc LUT cost at 2024 arcs Γ— 4 spaces | Medium | Shared per-page LUTs, rebuilt only on model revision |
 | Group/override semantics become opaque | Medium | One resolved override table in snapshot + selftest truth table + UI badges |
 | Multi-out plugin breaks host/pluginval | Medium | Ship stereo-sum first; aux buses behind a separate change |
 | Wavetable size change ripples through serialization | Medium | Optional size, 1024 default; size-aware `valueAt`; round-trip checks |
@@ -575,7 +575,7 @@ render checks, `.upic.json` old-fixture render identity, Android build
 ## 17. Open questions (decide before the owning wave)
 
 1. **WP1**: Should a table be per-space (page) or per-arc? Plan: per-space, arc
-   assigns — confirm against Robindoré's wording if the user's manual becomes
+   assigns β€” confirm against RobindorΓ©'s wording if the user's manual becomes
    available.
 2. **WP3**: Can an arc belong to two groups? Plan: no (override ambiguity).
 3. **WP4**: Should sequence recording be allowed while the transport is
@@ -596,7 +596,7 @@ render checks, `.upic.json` old-fixture render identity, Android build
 - [x] WP1.1: `FreqSpaceDef` + `limits` + JSON (omitted-when-default).
 - [x] WP1.2: `FreqLut` in `ModelSnapshot` + `arcPitch` LUT path (identity
       fast path preserved; offline export builds its own set).
-- [x] WP1.3: `FreqTableEditor.h` (overlay) + page-card "Table…" button.
+- [x] WP1.3: `FreqTableEditor.h` (overlay) + page-card "Tableβ€¦" button.
 - [x] WP1.4: selftest checks (14) + `docs/waves/26-freq-tables.md`.
 - [x] WP2: amplitude tables - `AmplitudeTable.h` bank (`ampTables`, omitted
       when empty), `Arc::amplitudeTableId`, applied in all four arc modes and
@@ -631,14 +631,36 @@ render checks, `.upic.json` old-fixture render identity, Android build
       `docs/waves/31-modulating-arcs.md`.
 - [x] Wave D gate at **0.33.0**: selftest 1133/1133, plugin 0.33.0,
       smoke 22/22, pluginval 5 SUCCESS.
-- [x] WP6.1–WP6.3 + export (Wave E, 0.34.0): `Channel.h` model (16 cap,
+- [x] WP6.1β€“WP6.3 + export (Wave E, 0.34.0): `Channel.h` model (16 cap,
       omitted when empty), `Arc::channelId`, snapshot carry, load repair,
       per-channel mixer (Main bucket + gain/mute/solo/curve, solo silences
       Main), channel filter and per-channel stems, legacy path bit-exact,
       allocation-free mixer, 21 checks, `docs/waves/32-channels.md`.
-- [ ] WP6.4 UI: the mixer panel was implemented but withdrawn after a
-      reproducible stack overflow on open/teardown in the selftest; reintroduce
-      as its own gated milestone (lazy, message-thread only).
+- [x] WP6.4 UI: the mixer panel (lazy, message-thread only) with list,
+      gain, mute/solo, rename, new/delete, undo; the Ch combo + Mix button.
+      Green with the WP7 tree; the gain-curve editor + UI tests live on
+      `feature/wp6-mixer-and-ui` (`2bb3173`) and still need merging.
 - [x] Wave E gate at **0.34.0**: selftest 1163/1163, plugin 0.34.0,
       smoke 22/22, pluginval 5 SUCCESS.
-- [ ] WP7 (Wave F): asset libraries + sample extraction - next.
+- [x] WP7 (Wave F, 0.35.0): user asset libraries (five kinds, exact schema,
+      atomic writes, re-minted import ids), cycle-aware RMS/Peak extraction,
+      channel-selected isolated A/B preview, generation-safe preview routes,
+      legacy fixture gate. WP7 suite green.
+- [x] Wave F gate at **0.35.0**: selftest 1470/1470, legacy SHA-256
+      8BF28ABA7975…, plugin 0.35.0, smoke 22/22, pluginval 5 SUCCESS.
+- [x] Release hardening for 0.35.0: ASan selftest 1470/1470 with no
+      sanitizer report; full PageHeap (`!gflag +hpa`, NtGlobalFlag
+      0x02000070) selftest 1470/1470 with no heap error; Release
+      benchmark 2.52x / 2.56x of the realtime budget (allowed 5x); the
+      golden render hash 0x6d7571bdd80e3cd9 and the exact identity
+      frequency output are unchanged.
+- [x] Release packaging: `upic-clone-juce-release-v1.27.0.zip` regenerated
+      from the tracked tree plus the vendored JUCE source - no generated
+      `JuceLibraryCode` amalgamation, no `CMakeSettings.json`, no VCD
+      trace, no pluginval binary, no build output - and the legacy
+      selftest fixture is included. The tree is restaged and inspected,
+      and the release and documentation repositories are committed and
+      pushed.
+- [ ] `origin/guerrero-dialog` rebase/push (the branch is at `70bd7fb` and
+      still has to be replayed on top of this release). See
+      `docs/plans/wp1-wp6-audit.md` for the WP6 defect and UI-merge note.

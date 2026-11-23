@@ -117,12 +117,20 @@ void MainComponent::undo()
 
     // the piece is replaced through the normal loader, so the same checks
     // and the same limits apply as to a loaded piece
+    const int waveId = selWave;
+    const int envelopeId = selEnv;
+    const int ampTableId = selAmpTableId;
+    const int sequenceId = selSeqId;
+    const int sampleSlotIndex = selSlot;
     const bool wasPlaying = transportActive();
     if (! loadFromVar (upic::pieceToVar (entry.model)))
     {
         flash ("The undo could not be applied");
         return;
     }
+
+    restoreHistorySelections (waveId, envelopeId, ampTableId, sequenceId,
+                              sampleSlotIndex);
 
     // the piece on the screen is not what is on the disk any more
     markModelChanged();
@@ -152,6 +160,11 @@ void MainComponent::redo()
     redoStack.pop_back();
     redoBytes -= entry.bytes;
 
+    const int waveId = selWave;
+    const int envelopeId = selEnv;
+    const int ampTableId = selAmpTableId;
+    const int sequenceId = selSeqId;
+    const int sampleSlotIndex = selSlot;
     const bool wasPlaying = transportActive();
     if (! loadFromVar (upic::pieceToVar (entry.model)))
     {
@@ -159,9 +172,53 @@ void MainComponent::redo()
         return;
     }
 
+    restoreHistorySelections (waveId, envelopeId, ampTableId, sequenceId,
+                              sampleSlotIndex);
     markModelChanged();
     if (wasPlaying) startPlayback();
     flash ("Redo: " + entry.label);
+}
+
+void MainComponent::restoreHistorySelections (int waveId, int envelopeId,
+                                              int ampTableId, int sequenceId,
+                                              int sampleSlotIndex)
+{
+    const auto hasWave = [this, waveId]
+    {
+        for (const auto& w : waveforms) if (w.id == waveId) return true;
+        return false;
+    };
+    const auto hasEnvelope = [this, envelopeId]
+    {
+        for (const auto& e : envelopes) if (e.id == envelopeId) return true;
+        return false;
+    };
+    const auto hasAmpTable = [this, ampTableId]
+    {
+        for (const auto& t : ampTables) if (t.id == ampTableId) return true;
+        return false;
+    };
+    const auto hasSequence = [this, sequenceId]
+    {
+        for (const auto& s : sequences) if (s.id == sequenceId) return true;
+        return false;
+    };
+
+    if (hasWave() && ! waveforms.empty()) selWave = waveId;
+    else if (! waveforms.empty()) selWave = waveforms.front().id;
+    if (hasEnvelope() && ! envelopes.empty()) selEnv = envelopeId;
+    else if (! envelopes.empty()) selEnv = envelopes.front().id;
+
+    if (hasAmpTable()) selAmpTableId = ampTableId;
+    else selAmpTableId = ampTables.empty() ? -1 : ampTables.front().id;
+
+    if (hasSequence()) selSeqId = sequenceId;
+    else selSeqId = sequences.empty() ? -1 : sequences.front().id;
+
+    selSlot = juce::jlimit (0, juce::jmax (0, (int) sampleSlots.size() - 1),
+                            sampleSlotIndex);
+    refreshBoxes();
+    refreshAmpTableEditor();
 }
 
 //==============================================================================

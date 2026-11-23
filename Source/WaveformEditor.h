@@ -43,6 +43,7 @@ public:
     // material to trim.
     bool setSampleRegionForTest (int startFrame, int endFrame)
     {
+        const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
         auto* s = currentSampleMutable();
         if (s == nullptr) return false;
         const int n = s->totalFrames();
@@ -51,6 +52,22 @@ public:
         s->loopEnd = juce::jlimit (s->loopStart + 1, n, endFrame);
         repaint();
         return true;
+    }
+
+    // The same trim path as a mouse drag, for the selftest. The callbacks
+    // are deliberately used here: the production owner invalidates a
+    // captured extraction source in its sample-edit-end callback.
+    bool trimSampleForTest (int startFrame, int endFrame)
+    {
+        {
+            const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+            if (currentSampleMutable() == nullptr) return false;
+        }
+        if (onSampleEditStart && ! onSampleEditStart()) return false;
+        const bool ok = setSampleRegionForTest (startFrame, endFrame);
+        if (ok && onSampleChanged) onSampleChanged();
+        if (onSampleEditEnd) onSampleEditEnd();
+        return ok;
     }
     int sampleRegionStartForTest() const
     {

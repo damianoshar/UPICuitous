@@ -289,6 +289,10 @@ void MainComponent::buildScoreArea()
     });
     waveEd.setOnSampleEditEnd([this]{
         endEdit();
+        // WP7: a trim changes the material that was analysed. Close the
+        // captured extraction source before the new snapshot is published,
+        // so no preview or save can use the old region.
+        invalidateSampleExtractSource();
         // the trimmed material is a different length
         if (selSlot >= 0 && selSlot < (int) sampleSlots.size())
         {
@@ -318,16 +322,10 @@ void MainComponent::buildScoreArea()
         }
         if (std::abs(rate) < 0.25)
             rate = (t >= lastScrubT) ? 1.0 : -1.0;
-        scrubRate.store(rate, std::memory_order_relaxed);
         lastScrubT = t;
         lastScrubMs = nowMs;
         if (!transportActive() && scrubAudition)
-        {
-            scrubPreviewPlayhead.store(t, std::memory_order_relaxed);
-            scrubPreviewRemaining.store(scrubPreviewLen, std::memory_order_relaxed);
-            scrubPreviewActive.store(true, std::memory_order_relaxed);
-            scrubPreviewSerial.fetch_add(1, std::memory_order_relaxed);
-        }
+            claimScrubPreviewRoute (t, rate);
         // reflect scrub position in the material view
         double frac = -1.0;
         if (drawMatMode == 1)
@@ -364,32 +362,14 @@ void MainComponent::buildScoreArea()
     };
     score.onScrubFreezeStart = [this](double t){
         if (scrubAudition)
-        {
-            scrubPreviewActive.store(false, std::memory_order_relaxed);
-            // start a short preview slice for the crossfade
-            scrubPreviewPlayhead.store(t, std::memory_order_relaxed);
-            scrubPreviewRemaining.store(scrubPreviewLen, std::memory_order_relaxed);
-            scrubPreviewActive.store(true, std::memory_order_relaxed);
-            scrubFreezePlayhead.store(t, std::memory_order_relaxed);
-            scrubFreezeStopAtMs.store(0.0, std::memory_order_relaxed);
-            engine.copyOscillatorPhasesFrom(scrubEngine);
-            scrubFreezeTransitionStartMs.store(juce::Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
-            scrubFreezeTransitionEndMs.store(juce::Time::getMillisecondCounterHiRes() + scrubCrossMs, std::memory_order_relaxed);
-            scrubFreezeActive.store(true, std::memory_order_relaxed);
-            scrubFreezeStartSerial.fetch_add(1, std::memory_order_relaxed);
-        }
+            claimScrubFreezeRoute (t);
     };
     score.onScrubFreezeStop = [this](){
-        if (scrubFreezeActive.load(std::memory_order_relaxed))
-            scrubFreezeStopAtMs.store(juce::Time::getMillisecondCounterHiRes()
-                                     + (double) scrubTailMs.load (std::memory_order_relaxed),
-                                     std::memory_order_relaxed);
+        updateScrubFreezeStop (juce::Time::getMillisecondCounterHiRes()
+                               + (double) scrubTailMs.load (std::memory_order_relaxed));
     };
     score.onScrubFreezeCancel = [this](){
-        scrubFreezeActive.store(false, std::memory_order_relaxed);
-        scrubFreezeStopAtMs.store(0.0, std::memory_order_relaxed);
-        scrubFreezeTransitionEndMs.store(0.0, std::memory_order_relaxed);
-        scrubPreviewActive.store(false, std::memory_order_relaxed);
+        cancelScrubFreezeRoute();
         waveEd.setPlayhead(-1.0);
     };
     score.onScrubDragRelease = [this](double /*t*/){
@@ -406,18 +386,20 @@ void MainComponent::buildScoreArea()
     score.onModelEdited = [this]{ markModelChanged(); };
     score.onArcEditingChanged = [this](bool editing){
         arcEditing.store(editing, std::memory_order_relaxed);
-        if (! editing)
-        {
-            // apply the edited score on release
-            markModelChanged();
-            publishModelSnapshot();
-        }
+        // A successful stroke or line calls notify() after it has added the
+        // arc, and that callback marks the revision. Marking it merely
+        // because the gesture ended would turn a refused stroke (the page is
+        // full, or the line is too short) into an undo step.
     };
     // v1.33.4 (L15, part 2): the undo transaction. The editor says when a
     // change starts and when it is over; the app keeps the state from
     // before it (one snapshot per gesture - a drag is one undo step).
     score.onEditStart = [this](const juce::String& what){ beginEdit (what); };
-    score.onEditEnd   = [this]{ endEdit(); };
+    score.onEditEnd   = [this]{
+        endEdit();
+        // v1.36: publish after the commit, not before it.
+        publishModelSnapshot();
+    };
     score.onUndo = [this]{ undo(); };
     score.onRedo = [this]{ redo(); };
 }
@@ -531,21 +513,23 @@ void MainComponent::buildEditors()
     eStr.onClick = [editEnv]{ editEnv([](upic::Envelope& e){ e.presetStrings(); }); };
 
     assignBtn.onClick = [this]{
-        juce::ScopedLock l(dataLock);
-        const auto ids = score.getSelectedArcs();
-        for (auto& a : curPage().arcs)
         {
-            if (std::find(ids.begin(), ids.end(), a.id) == ids.end()) continue;
-            int w = waveBox.getSelectedId() - 1;
-            int e = envBox.getSelectedId() - 1;
-            if (w >= 0) a.waveformId = waveforms[(size_t)w].id;
-            if (e >= 0) a.envelopeId = envelopes[(size_t)e].id;
-            a.intensity = (float) intenSlider.getValue();
-            a.mode = drawMatMode; // the current tab's material
-            if (drawMatMode == 3) { int _ei = pmIndexEnvBox.getSelectedId(); a.pmIndexEnv = (_ei >= 2 && _ei - 2 < (int) envelopes.size()) ? envelopes[(size_t)(_ei - 2)].id : 0; }
-            int si = sampleBox.getSelectedId() - 1;
-            if (si >= 0 && si < (int) sampleSlots.size()) a.sampleId = sampleSlots[(size_t) si].id;
-            a.refFreq = refSlider.getValue();
+            juce::ScopedLock l(dataLock);
+            const auto ids = score.getSelectedArcs();
+            for (auto& a : curPage().arcs)
+            {
+                if (std::find(ids.begin(), ids.end(), a.id) == ids.end()) continue;
+                int w = waveBox.getSelectedId() - 1;
+                int e = envBox.getSelectedId() - 1;
+                if (w >= 0) a.waveformId = waveforms[(size_t)w].id;
+                if (e >= 0) a.envelopeId = envelopes[(size_t)e].id;
+                a.intensity = (float) intenSlider.getValue();
+                a.mode = drawMatMode; // the current tab's material
+                if (drawMatMode == 3) { int _ei = pmIndexEnvBox.getSelectedId(); a.pmIndexEnv = (_ei >= 2 && _ei - 2 < (int) envelopes.size()) ? envelopes[(size_t)(_ei - 2)].id : 0; }
+                int si = sampleBox.getSelectedId() - 1;
+                if (si >= 0 && si < (int) sampleSlots.size()) a.sampleId = sampleSlots[(size_t) si].id;
+                a.refFreq = refSlider.getValue();
+            }
         }
         score.repaint(); updateStatus(); refreshBoxes();
     };
@@ -603,6 +587,33 @@ void MainComponent::buildEditors()
     envLib.onMakeUnique = [this, bankEdit]{ return bankEdit("Make the envelope unique",
                                        [this]{ return libraryMakeEnvelopeUnique(); }); };
 
+    // WP7 (Wave F, 2026-11-21): the user library. Publishing changes no
+    // piece state, so it is not an undo transaction. Importing is one bank
+    // command and therefore exactly one transaction. Reveal opens the folder.
+    waveLib.onPublish = [this]{ return libraryPublishWave(); };
+    waveLib.onImport  = [this, bankEdit]{ return bankEdit("Import the wavetable",
+                                       [this]{ return libraryImportWave(); }); };
+    waveLib.onReveal  = [this]{ return libraryRevealWave(); };
+    envLib.onPublish  = [this]{ return libraryPublishEnvelope(); };
+    envLib.onImport   = [this, bankEdit]{ return bankEdit("Import the envelope",
+                                       [this]{ return libraryImportEnvelope(); }); };
+    envLib.onReveal   = [this]{ return libraryRevealEnvelope(); };
+
+    waveLib.onSourceChanged = [this] (LibraryManager::Source source)
+    {
+        if (source == LibraryManager::Source::User)
+            refreshUserLibraryBoxes (upic::UserAssetKind::Wave);
+        else
+            refreshLibraryBoxes();
+    };
+    envLib.onSourceChanged = [this] (LibraryManager::Source source)
+    {
+        if (source == LibraryManager::Source::User)
+            refreshUserLibraryBoxes (upic::UserAssetKind::Envelope);
+        else
+            refreshLibraryBoxes();
+    };
+
     voiceLab.setText("VOICE (new + assign)", juce::dontSendNotification);
     voiceLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));
     voiceLab.setColour(juce::Label::textColourId, juce::Colour(0xffc9c9d4));
@@ -638,6 +649,25 @@ void MainComponent::updateWaveButtonColours()
 
 MainComponent::~MainComponent()
 {
+    // Close the deferred lifecycle-callback gate before any member can be
+    // destroyed. A callback queued by an off-thread release then observes
+    // the closed gate and never dereferences this partially torn-down object.
+    closeAudioPreviewCallbackGate();
+
+    // appLaf is a member, so it is destroyed before the Component base. Drop
+    // the base class's weak reference first; otherwise the LookAndFeel
+    // destructor sees a live owner and trips its debug assertion.
+    setLookAndFeel (nullptr);
+
+    // A plugin host can destroy the processor away from the message thread.
+    // Stop the timer first, then wait for an already-running timer callback
+    // to leave the message manager. No new callback can start after stopTimer.
+    stopTimer();
+    std::unique_ptr<juce::MessageManager::Lock> messageLock;
+    if (auto* const messages = juce::MessageManager::getInstanceWithoutCreating();
+        messages != nullptr && ! messages->isThisTheMessageThread())
+        messageLock = std::make_unique<juce::MessageManager::Lock>();
+
     // F5: remember the fold levels and the view toggles (the app only; the
     // selftest never enables the file).
     saveSessionSettings();
@@ -651,6 +681,8 @@ MainComponent::~MainComponent()
     shutdownAudio();
     snapshots.retireReader(liveSnapshot);
     snapshots.clear();
+    ordinaryPreviewSnapshots.retireReader (liveOrdinaryPreviewSnapshot);
+    ordinaryPreviewSnapshots.clear();
 }
 
 //==============================================================================
@@ -800,7 +832,7 @@ void MainComponent::resized()
                                            &levelLab, &levelSlider,
                                            &normMatBtn, &fadeMatBtn, &resetMatBtn,
                                            &inGainLab, &inGainSlider, &monBtn, &capBtn,
-                                           &waveFromSlotBtn };
+                                           &waveFromSlotBtn, &sampleExtractBtn };  // WP7
     for (auto* c : sampleCtl) c->setVisible(showSampleCtl);
     juce::Component* const liveCtl[] = { &livePitchLab, &livePitchBox,
                                          &liveGrainLab, &liveGrainSlider,
@@ -902,7 +934,7 @@ void MainComponent::resized()
                           // material view)
                           F(&normMatBtn, 64), F(&fadeMatBtn, 64), F(&resetMatBtn, 64),
                           FK(&inGainLab, 30, &inGainSlider), F(&monBtn, 64), F(&capBtn, 84),
-                          F(&waveFromSlotBtn, 110) };
+                          F(&waveFromSlotBtn, 110), F(&sampleExtractBtn, 82) };  // WP7
         else if (showLiveCtl)
             mat.items = { FK(&refLab, 34, &refSlider),
                           FL(&livePitchLab, 42, &livePitchBox, 180),
@@ -956,6 +988,11 @@ void MainComponent::resized()
     groups.push_back ({ "mod", { FI(&arcModLab, 30, &arcModBox, 100),
                                   FI(&arcModTgtLab, 26, &arcModTgtBox, 66),
                                   FI(&arcModDepthLab, 36, &arcModSlider, 110) } });
+
+    // --- WP6.4: the mixer (WP7 adds its own card in its marked block) ---
+    groups.push_back ({ "ch", { FI(&channelLab, 26, &channelBox, 100),
+                                F(&channelBtn, 62) } });
+    // --- end WP6.4 ---
 
     // WP4: the performance sequences.
     groups.push_back ({ "seq", { FI(&seqLab, 30, &seqBox, 110),
@@ -2035,6 +2072,10 @@ void MainComponent::layoutOverlays (float s)
     ampTableEd.setBounds (getLocalBounds());
     groupPanel.setBounds (getLocalBounds());
     seqPanel.setBounds (getLocalBounds());
+    if (channelPanel != nullptr) channelPanel->setBounds (getLocalBounds()); // WP6.4
+    // WP7: the sample extraction panel is lazy, so it has no bounds until
+    // it has been built once.
+    if (sampleExtractPanel) sampleExtractPanel->setBounds (getLocalBounds());
 
     // v1.7 audio settings overlay: full-window backdrop + centred card
     audioOverlay.setBounds(getLocalBounds());

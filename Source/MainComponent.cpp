@@ -104,6 +104,7 @@ MainComponent::MainComponent(bool pluginMode)
     for (auto* slider : themedSliders)
         applyMasterVolumeSliderTheme (*slider);
     groupPanel.themeSliders();   // WP3
+    // WP6.4: the mixer slider is themed when the panel is lazily built (see showChannelPanel).
     // Icon-only controls remain discoverable with mouse/pen hover. Preserve
     // any more specific tooltips that the individual controls already set.
     pageAddBtn.setTooltip ("Add a page");
@@ -116,7 +117,7 @@ MainComponent::MainComponent(bool pluginMode)
                      &assignBtn, &delArcBtn, &muteArcBtn,
                      &loadSampleBtn, &pmImportBtn, &pmExportBtn,
                      &normMatBtn, &fadeMatBtn, &resetMatBtn,
-                     &liveRevBtn, &revBtn, &waveFromSlotBtn })
+                     &liveRevBtn, &revBtn, &waveFromSlotBtn, &sampleExtractBtn })
         if (b->getTooltip().isEmpty()) b->setTooltip (b->getButtonText());
     // v1.29: listen for the phone/MobMuPlat scrub. Message-loop callbacks
     // mean the playhead moves on the message thread exactly like a drag.
@@ -232,8 +233,14 @@ void MainComponent::buildTransportControls()
     scrubCrossSlider.setTextValueSuffix(" ms");
     scrubTailSlider.setTextValueSuffix(" ms");
     scrubLenSlider.setRange(20.0, 1000.0, 1.0);
-    scrubLenSlider.setValue(scrubPreviewLen * 1000.0 / audioSampleRate(), juce::dontSendNotification);
-    scrubLenSlider.onValueChange = [this]{ scrubPreviewLen = juce::jmax(64, (int)(audioSampleRate() * scrubLenSlider.getValue() / 1000.0)); };
+    scrubLenSlider.setValue(scrubPreviewLen.load (std::memory_order_relaxed) * 1000.0
+                                / audioSampleRate(),
+                            juce::dontSendNotification);
+    scrubLenSlider.onValueChange = [this]{
+        scrubPreviewLen.store (
+            juce::jmax (64, (int) (audioSampleRate() * scrubLenSlider.getValue() / 1000.0)),
+            std::memory_order_relaxed);
+    };
     scrubCrossSlider.setRange(0.0, 1000.0, 1.0);
     scrubCrossSlider.setValue((double) scrubCrossMs, juce::dontSendNotification);
     scrubCrossSlider.onValueChange = [this]{ scrubCrossMs = (int) scrubCrossSlider.getValue(); };
@@ -654,61 +661,80 @@ void MainComponent::buildCombos()
     };
 
     pageAddBtn.onClick = [this]{
-        juce::ScopedLock l(dataLock);
-        // v1.33.4 (H13): the piece format caps the page count, so the page
-        // that does not fit is refused here instead of being dropped when
-        // the piece is loaded again.
-        if ((int) pages.size() >= upic::limits::kMaxPages)
         {
-            flash ("A piece holds at most " + juce::String (upic::limits::kMaxPages)
-                   + " pages (the limit) - delete one before adding another");
-            return;
+            juce::ScopedLock l(dataLock);
+            // v1.33.4 (H13): the piece format caps the page count, so the page
+            // that does not fit is refused here instead of being dropped when
+            // the piece is loaded again.
+            if ((int) pages.size() >= upic::limits::kMaxPages)
+            {
+                flash ("A piece holds at most " + juce::String (upic::limits::kMaxPages)
+                       + " pages (the limit) - delete one before adding another");
+                return;
+            }
+            upic::Page p; p.durationSec = curPage().durationSec;
+            pages.insert(pages.begin() + currentPage + 1, p);
+            currentPage++;
+            seekPlayhead(0.0);
+            bumpPageEpoch();
         }
-        upic::Page p; p.durationSec = curPage().durationSec;
-        pages.insert(pages.begin() + currentPage + 1, p);
-        currentPage++;
-        seekPlayhead(0.0);
-        bumpPageEpoch();
-    publishModelSnapshot();
+        // Inserting a page shifts every later page index. A frequency-table
+        // editor is bound to one captured page/space, so close it instead of
+        // letting a later commit land on a different page.
+        invalidateFreqTableDestination();
+        publishModelSnapshot();
         refreshBoxes(); refreshScoreBinding();
     };
     pageDupBtn.onClick = [this]{
-        juce::ScopedLock l(dataLock);
-        // v1.33.4 (H13): the same page cap (see pageAddBtn).
-        if ((int) pages.size() >= upic::limits::kMaxPages)
         {
-            flash ("A piece holds at most " + juce::String (upic::limits::kMaxPages)
-                   + " pages (the limit) - delete one before duplicating one");
-            return;
+            juce::ScopedLock l(dataLock);
+            // v1.33.4 (H13): the same page cap (see pageAddBtn).
+            if ((int) pages.size() >= upic::limits::kMaxPages)
+            {
+                flash ("A piece holds at most " + juce::String (upic::limits::kMaxPages)
+                       + " pages (the limit) - delete one before duplicating one");
+                return;
+            }
+            pages.insert(pages.begin() + currentPage + 1, curPage());
+            currentPage++;
+            seekPlayhead(0.0);
+            bumpPageEpoch();
         }
-        pages.insert(pages.begin() + currentPage + 1, curPage());
-        currentPage++;
-        seekPlayhead(0.0);
-        bumpPageEpoch();
-    publishModelSnapshot();
+        invalidateFreqTableDestination();
+        publishModelSnapshot();
         refreshBoxes(); refreshScoreBinding();
     };
     pageDelBtn.onClick = [this]{
         if (pages.size() <= 1) return;
-        juce::ScopedLock l(dataLock);
-        pages.erase(pages.begin() + currentPage);
-        currentPage = juce::jlimit(0, (int)pages.size() - 1, currentPage);
-        seekPlayhead(0.0);
-        bumpPageEpoch();
-    publishModelSnapshot();
+        {
+            juce::ScopedLock l(dataLock);
+            pages.erase(pages.begin() + currentPage);
+            currentPage = juce::jlimit(0, (int)pages.size() - 1, currentPage);
+            seekPlayhead(0.0);
+            bumpPageEpoch();
+        }
+        invalidateFreqTableDestination();
+        publishModelSnapshot();
         refreshBoxes(); refreshScoreBinding();
     };
     pageBox.onChange = [this]{
-        int id = pageBox.getSelectedId();
-        juce::ScopedLock l(dataLock);
-        if (id >= 1 && id <= (int)pages.size())
+        const int id = pageBox.getSelectedId();
+        bool changed = false;
         {
-            currentPage = id - 1;
-            tempoSlider.setValue (pages[(size_t) currentPage].tempoBpm, juce::dontSendNotification);
-            seekPlayhead(0.0);
-            bumpPageEpoch();
-            markModelChanged(); // v1.15: a page change replaces the sound -> fade across it
-    publishModelSnapshot();
+            juce::ScopedLock l(dataLock);
+            if (id >= 1 && id <= (int)pages.size())
+            {
+                currentPage = id - 1;
+                tempoSlider.setValue (pages[(size_t) currentPage].tempoBpm, juce::dontSendNotification);
+                seekPlayhead(0.0);
+                bumpPageEpoch();
+                markModelChanged(); // v1.15: a page change replaces the sound -> fade across it
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            publishModelSnapshot();
             refreshScoreBinding();
         }
     };
@@ -771,6 +797,11 @@ void MainComponent::buildToolbarControls()
     };
 
     waveEditBox.onChange = [this]{
+        if (refreshingControls) return; // a refresh is not a command
+        // The manager's selector is shared by the piece bank and the user
+        // library. A library row has its own id space; selecting one must
+        // never change the piece's selected wavetable.
+        if (waveLib.source() != LibraryManager::Source::Piece) return;
         int idx = waveEditBox.getSelectedId() - 1;
         // v1.33.4 (M22): bind() replaces the change callback, so the mark
         // has to be passed here too
@@ -778,6 +809,10 @@ void MainComponent::buildToolbarControls()
         updateWaveButtonColours();
     };
     envEditBox.onChange = [this]{
+        if (refreshingControls) return; // a refresh is not a command
+        // As with the wavetable selector, a user-library row is not a
+        // piece-envelope selection.
+        if (envLib.source() != LibraryManager::Source::Piece) return;
         int idx = envEditBox.getSelectedId() - 1;
         if (idx >= 0 && idx < (int)envelopes.size()) { selEnv = envelopes[(size_t)idx].id; envEd.bind(&envelopes, &selEnv, [this]{ markModelChanged(); }); envBox.setSelectedId(idx + 1, juce::dontSendNotification); pushVoice(); }
     };
@@ -1058,15 +1093,11 @@ void MainComponent::timerCallback()
         {
             statusLayoutPending = true;
             lastStatusLayoutMs = __nowMs;
-            juce::MessageManager::callAsync (
-                [safe = juce::Component::SafePointer<MainComponent> (this)]
-                {
-                    if (safe != nullptr)
-                    {
-                        safe->statusLayoutPending = false;
-                        safe->resized();
-                    }
-                });
+            postToMessageThread ([] (MainComponent& component)
+            {
+                component.statusLayoutPending = false;
+                component.resized();
+            });
         }
     }
     {
@@ -1075,6 +1106,7 @@ void MainComponent::timerCallback()
             || std::abs (ph - lastScoreRepaintPlayhead) > 1.0e-4)
         {
             lastScoreRepaintPlayhead = ph;
+            ++scoreTimerRepaintRequestCount;
             score.repaint();
         }
     }
@@ -1093,7 +1125,8 @@ void MainComponent::timerCallback()
     // v1.33.4 (H3): the host's transport drives the app when the mode is on
     applyHostTransport();
 
-    // v1.36: idle at 10 Hz; 30 Hz only while a gesture is running.
+    // v1.36: idle at 10 Hz; the 30 Hz pace is only needed while a gesture is
+    // running (the score paint and the status digits move then).
     const int wantHz = (transportActive() || scrubActive || seqRecording) ? 30 : 10;
     if (wantHz != timerHzNow)
     {

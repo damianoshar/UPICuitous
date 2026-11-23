@@ -42,6 +42,12 @@ namespace upic
         // rejected.
         constexpr size_t kMaxPieceBytes = (kMaxTotalSampleBytes / 3u) * 2u;
 
+        // --- WP7: the user-level asset library ---
+        // A library asset is one JSON file. The cap is generous for a
+        // wavetable, an envelope or a recorded sequence, but it keeps a
+        // crafted file from being read in wholesale.
+        constexpr size_t kMaxUserAssetBytes = 4u * 1024u * 1024u;
+
         // --- the ids ---
         // The arcs, the sieve zones, the wavetables and the envelopes are
         // keyed by their id (the selection, the drag map, the arc list and

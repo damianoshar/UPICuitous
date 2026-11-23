@@ -18,6 +18,7 @@ void MainComponent::buildMaterialControls()
     addAndMakeVisible(samplePitchBox); addAndMakeVisible(samplePitchLab);
     addAndMakeVisible(monBtn); addAndMakeVisible(capBtn);
     addAndMakeVisible(waveFromSlotBtn);
+    addAndMakeVisible(sampleExtractBtn);   // WP7
     addAndMakeVisible(inGainSlider); addAndMakeVisible(inGainLab);
     addAndMakeVisible(slotLab); addAndMakeVisible(refLab); addAndMakeVisible(matHintLab);
     // M5: the slot's level and the material's own edits
@@ -43,8 +44,8 @@ void MainComponent::buildSieveControls()
     sieveREdit.setTextToShowWhenEmpty("0,7", juce::Colour(0xff6a6a76));
     sieveMEdit.setFont(juce::Font(juce::FontOptions(12.0f)));
     sieveREdit.setFont(juce::Font(juce::FontOptions(12.0f)));
-    sieveMEdit.setText("12", juce::dontSendNotification);
-    sieveREdit.setText("0", juce::dontSendNotification);
+    sieveMEdit.setText("12");
+    sieveREdit.setText("0");
     sieveMEdit.onTextChange = [this]{ pushSieve(); };
     sieveREdit.onTextChange = [this]{ pushSieve(); };
     sieveBtn.onClick = [this]{ pushSieve(); };
@@ -96,18 +97,18 @@ void MainComponent::buildSieveControls()
     modUseBox.addItem("Oscillator", 1);
     modUseBox.addItem("+ Amplitude LFO", 2);
     modUseBox.addItem("+ Frequency LFO", 3);
-    modUseBox.setSelectedId (1, juce::dontSendNotification);
+    modUseBox.setSelectedId (1);
     modUseBox.setTooltip ("What the arc's drawn wave does besides being\n"
                           "the timbre - the UPIC let the same curve be\n"
                           "the sound and a control signal at once.");
     modRateSlider.setRange (0.05, 20.0, 0.05);
-    modRateSlider.setValue (1.0, juce::dontSendNotification);
+    modRateSlider.setValue (1.0);
     modRateSlider.setNumDecimalPlacesToDisplay (2);
     modRateSlider.setTextValueSuffix (" Hz");
     modRateSlider.setTooltip ("The LFO's rate: 1 Hz is one sweep over a\n"
                               "second of score time.");
     modDepthSlider.setRange (0.0, 1.0, 0.01);
-    modDepthSlider.setValue (0.0, juce::dontSendNotification);
+    modDepthSlider.setValue (0.0);
     modDepthSlider.setNumDecimalPlacesToDisplay (2);
     modDepthSlider.setTooltip ("How deep the modulation goes: 1 is an octave\n"
                               "of pitch, or a full swing of the amplitude.");
@@ -161,19 +162,19 @@ void MainComponent::buildSieveControls()
         const auto presets = upic::sievePresets();
         if (idx < 0 || idx >= (int) presets.size()) return;
         const auto& pr = presets[(size_t) idx];
-        sieveMEdit.setText(juce::String(pr.m), juce::dontSendNotification);
+        sieveMEdit.setText(juce::String(pr.m));
         juce::String rt;
         for (size_t i = 0; i < pr.remainders.size(); ++i)
             rt += (i > 0 ? "," : "") + juce::String(pr.remainders[i]);
-        sieveREdit.setText(rt, juce::dontSendNotification);
-        sieveBtn.setToggleState(true, juce::dontSendNotification);
+        sieveREdit.setText(rt);
+        sieveBtn.setToggleState (true, juce::dontSendNotification);
         pushSieve();
         flash("Sieve preset: " + pr.name);
-        sievePresetBox.setSelectedId(0, juce::dontSendNotification); // back to placeholder
+        sievePresetBox.setSelectedId(0); // back to placeholder
     };
 
     stickSlider.setRange(0.0, 1.0, 0.05);
-    stickSlider.setValue(1.0, juce::dontSendNotification);
+    stickSlider.setValue(1.0);
     stickSlider.onValueChange = [this]{
         stickiness = stickSlider.getValue();
         score.setStickiness(stickiness);
@@ -183,7 +184,7 @@ void MainComponent::buildSieveControls()
     gridBox.addItem("Off", 1);
     gridBox.addItem("0.5/s", 2); gridBox.addItem("1/s", 3); gridBox.addItem("2/s", 4);
     gridBox.addItem("4/s", 5);   gridBox.addItem("8/s", 6); gridBox.addItem("16/s", 7);
-    gridBox.setSelectedId(1, juce::dontSendNotification);
+    gridBox.setSelectedId(1);
     gridBox.onChange = [this]{
         static const double divs[] = { 0.0, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0 };
         const int i = juce::jlimit(0, 6, gridBox.getSelectedId() - 1);
@@ -199,7 +200,7 @@ void MainComponent::buildSieveControls()
     genBox.onChange = [this]{
         const int kind = genBox.getSelectedId() - 1;
         if (kind >= 0) runGenerator(kind);
-        genBox.setSelectedId(0, juce::dontSendNotification);
+        genBox.setSelectedId(0);
     };
 
     // NOTE: keep UI string literals ASCII-only: juce::String(const char*) is an
@@ -233,7 +234,7 @@ void MainComponent::buildSieveControls()
 // function. The frequency space could be the continuum (a diagonal line is
 // a glissando) or discrete, with equal temperaments of 1..99 divisions per
 // octave: "the same diagonal arc would then sound like discrete steps in a
-// defined temperament" (RobindorΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β©, in "From Xenakis's UPIC to Graphic
+// defined temperament" (RobindorΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β©, in "From Xenakis's UPIC to Graphic
 // Notation Today", Hatje Cantz 2024).
 //
 // The sieve (the row below) snaps the DRAWN points; this steps the SOUND:
@@ -250,7 +251,7 @@ void MainComponent::buildStepControls()
                         "per octave, so a glissando is heard as a staircase\n"
                         "of discrete steps. Off = the continuum.");
     stepDivSlider.setRange (1.0, 99.0, 1.0);
-    stepDivSlider.setValue (12.0, juce::dontSendNotification);
+    stepDivSlider.setValue (12.0);
     stepDivSlider.setTooltip ("Equal divisions per octave: 12 is the\n"
                               "chromatic scale, 19 and 31 the tempered\n"
                               "ones, 7 the diatonic one.");
@@ -295,7 +296,7 @@ void MainComponent::applyStepToSelection()
 // simultaneous tables or grids that could be superimposed on each page.
 // These grids were invisible to the eye, however, and accessed by
 // assigning one of four tables to whatever arc was being drawn, the same
-// way as one would assign the waveform or envelope to it." (RobindorΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β©)
+// way as one would assign the waveform or envelope to it." (RobindorΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β²ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β¬ΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬Ξβ€™Ξ’ΒΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ’Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ²β‚¬β„ΆΞβ€™Ξ’ΒΞΒΞ’ΒΞβ€™Ξ’Β²ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞβ€™Ξ’Β¬ΞΒΞ’Β²ΞΒ²Ξ²β€Β¬Ξ’ΒΞΒΞ²β‚¬Β ΞΒΞ’ΒΞβ€™Ξ’ΒΞΒΞ’Β²ΞΒ²Ξ²β‚¬ΒΞ’Β¬ΞΒ²Ξ²β‚¬ΒΞβ€ ΞΒΞ’ΒΞΒ²Ξ²β€Β¬Ξ²β€Ξ†ΞΒΞ²β‚¬β„ΆΞβ€™Ξ’Β©)
 //
 // So: the PAGE owns the four spaces, and an arc names the one it is
 // played in. A space is a range of the frequency axis - the position on
@@ -315,14 +316,14 @@ void MainComponent::buildFrequencyControls()
             ambitusBox.addItem (juce::String (presets[(size_t) i].name), i + 1);
         ambitusBox.addItem ("Custom", (int) presets.size() + 1);
     }
-    ambitusBox.setSelectedId (1, juce::dontSendNotification);
+    ambitusBox.setSelectedId (1);
     ambitusBox.onChange = [this]{ pushAmbitus(); };
 
     // ---- the page's acceleration: a tempo sweep across the page ----
     addAndMakeVisible(warpSlider); addAndMakeVisible(warpLab);
     warpSlider.setName("warpSlider");
     warpSlider.setRange (-0.9, 0.9, 0.05);
-    warpSlider.setValue (0.0, juce::dontSendNotification);
+    warpSlider.setValue (0.0);
     warpSlider.setNumDecimalPlacesToDisplay (2);
     warpSlider.setTooltip ("The page's acceleration: the page's own time runs\n"
                             "at a varying rate. Positive starts slow and speeds\n"
@@ -350,11 +351,12 @@ void MainComponent::buildFrequencyControls()
         const auto& presets = upic::freqSpacePresets();
         for (int p = 0; p < (int) presets.size(); ++p)
             spaceDefBox[i].addItem (juce::String (presets[(size_t) p].name), p + 1);
-        spaceDefBox[i].setSelectedId (1, juce::dontSendNotification);
+        spaceDefBox[i].setSelectedId (1);
         spaceDefBox[i].onChange = [this]{ pushSpaceDefs(); };
     }
 
     spaceBox.onChange = [this]{
+        if (refreshingControls) return; // a refresh is not a command
         applySpaceToSelection();
         const int s = juce::jlimit (0, 3, spaceBox.getSelectedId() - 1);
         flash ("Space " + juce::String (s + 1) + ": "
@@ -376,6 +378,26 @@ void MainComponent::buildFrequencyControls()
     addChildComponent (freqTableEd);
     freqTableEd.onClose = [this]{ closeFreqTableEditor(); };
 
+    // WP7: the frequency table's source-aware library bridge. The model
+    // command is wrapped in exactly one undo transaction.
+    freqTableEd.library.onPublish = [this] { return libraryPublishFreqTable(); };
+    freqTableEd.library.onImport = [this]
+    {
+        beginEdit ("Import the frequency table");
+        const bool ok = libraryImportFreqTable();
+        endEdit();
+        return ok;
+    };
+    freqTableEd.library.onReveal = [this] { return libraryRevealFreqTable(); };
+    freqTableEd.library.onSourceChanged = [this] (LibraryManager::Source source)
+    {
+        if (source == LibraryManager::Source::User)
+            refreshUserLibraryBoxes (upic::UserAssetKind::FreqTable);
+        else
+            refreshLibraryBoxes();
+    };
+    freqTableEd.library.onSelectedId = [this] (int) {};
+
     // WP2: the amplitude conversion tables.
     addAndMakeVisible (ampTableLab);
     addAndMakeVisible (ampTableBox);
@@ -390,6 +412,7 @@ void MainComponent::buildFrequencyControls()
     ampTableBtn.setTooltip ("The amplitude table bank: draw, duplicate, rename,\n"
                             "delete and assign tables");
     ampTableBox.onChange = [this]{
+        if (refreshingControls) return; // a refresh is not a command
         const int item = ampTableBox.getSelectedId();
         if (item <= 1) { selAmpTableId = -1; applyAmpTableToSelection (-1); return; }
         const int idx = juce::jlimit (0, (int) ampTables.size() - 1, item - 2);
@@ -401,6 +424,31 @@ void MainComponent::buildFrequencyControls()
     refreshAmpTableBox();
     addChildComponent (ampTableEd);
     ampTableEd.onClose = [this]{ closeAmpTableEditor(); };
+
+    // WP7: the panel's own New/Dup/Rename/Delete commands stay in the
+    // panel. The shared manager is only the Piece/User bridge.
+    ampTableEd.library.onPublish = [this] { return libraryPublishAmpTable(); };
+    ampTableEd.library.onImport = [this]
+    {
+        beginEdit ("Import the amplitude table");
+        const bool ok = libraryImportAmpTable();
+        endEdit();
+        return ok;
+    };
+    ampTableEd.library.onReveal = [this] { return libraryRevealAmpTable(); };
+    ampTableEd.library.onSourceChanged = [this] (LibraryManager::Source source)
+    {
+        if (source == LibraryManager::Source::User)
+            refreshUserLibraryBoxes (upic::UserAssetKind::AmpTable);
+        else
+            refreshLibraryBoxes();
+    };
+    ampTableEd.library.onSelectedId = [this] (int id)
+    {
+        selAmpTableId = id;
+        refreshAmpTableEditor();
+        refreshAmpTableBox();
+    };
 
     // WP3: the arc-group panel.
     addAndMakeVisible (groupBtn);
@@ -430,6 +478,7 @@ void MainComponent::buildFrequencyControls()
     seqEditBtn.setTooltip ("Open the sequence panel");
     seqBox.onChange = [this]
     {
+        if (refreshingControls) return; // a refresh is not a command
         const int i = seqBox.getSelectedId() - 1;
         if (i >= 0 && i < (int) sequences.size()) selSeqId = sequences[(size_t) i].id;
         refreshSequencePanel();
@@ -446,6 +495,30 @@ void MainComponent::buildFrequencyControls()
     seqEditBtn.onClick = [this]{ showSequencePanel(); };
     addChildComponent (seqPanel);
     seqPanel.onClose = [this]{ closeSequencePanel(); };
+
+    // WP7: the panel's own recorder and editing commands stay in the panel.
+    // The shared manager is only the Piece/User bridge.
+    seqPanel.library.onPublish = [this] { return libraryPublishSequence(); };
+    seqPanel.library.onImport = [this]
+    {
+        beginEdit ("Import the performance sequence");
+        const bool ok = libraryImportSequence();
+        endEdit();
+        return ok;
+    };
+    seqPanel.library.onReveal = [this] { return libraryRevealSequence(); };
+    seqPanel.library.onSourceChanged = [this] (LibraryManager::Source source)
+    {
+        if (source == LibraryManager::Source::User)
+            refreshUserLibraryBoxes (upic::UserAssetKind::Sequence);
+        else
+            refreshLibraryBoxes();
+    };
+    seqPanel.library.onSelectedId = [this] (int id)
+    {
+        selSeqId = id;
+        refreshSequencePanel();
+    };
     refreshSequencePanel();
 
 
@@ -475,6 +548,7 @@ void MainComponent::buildFrequencyControls()
     arcModTgtBox.addItem ("Amp", 2);
     arcModBox.onChange = [this]
     {
+        if (refreshingControls) return; // a refresh is not a command
         const int i = arcModBox.getSelectedId();
         setModOnSelection (i <= 1 ? -1 : i - 1,
                            arcModTgtBox.getSelectedId() == 2 ? 1 : 0,
@@ -482,6 +556,7 @@ void MainComponent::buildFrequencyControls()
     };
     arcModTgtBox.onChange = [this]
     {
+        if (refreshingControls) return; // a refresh is not a command
         const int i = arcModBox.getSelectedId();
         setModOnSelection (i <= 1 ? -1 : i - 1,
                            arcModTgtBox.getSelectedId() == 2 ? 1 : 0,
@@ -493,6 +568,7 @@ void MainComponent::buildFrequencyControls()
     };
     arcModSlider.onValueChange = [this]
     {
+        if (refreshingControls) return; // a refresh is not a command
         const int i = arcModBox.getSelectedId();
         if (i <= 1) return;
         const bool standalone = ! modLevelsEditing;
@@ -512,8 +588,34 @@ void MainComponent::buildFrequencyControls()
     };
     refreshModBox();
 
-    refreshModBox();
 
+    // --- WP6.4: the mixer UI ---
+    // NOTE FOR WP7: this block only adds the Ch combo / Mix button. WP7's
+    // library and extraction controls belong in their own marked block so a
+    // parallel merge keeps both toolbars intact.
+    addAndMakeVisible (channelLab);
+    addAndMakeVisible (channelBox);
+    addAndMakeVisible (channelBtn);
+    channelLab.setName ("channelLab");
+    channelBox.setName ("channelBox");
+    channelBtn.setName ("channelBtn");
+    channelLab.setJustificationType (juce::Justification::centredRight);
+    channelLab.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+    channelBox.setTooltip ("The mixer channel the selected arcs play on");
+    channelBtn.setTooltip ("The mixer: channel levels, mute/solo and routing");
+    channelBtn.onClick = [this]{ showChannelPanel(); };
+    refreshChannelBox();
+    channelBox.onChange = [this]
+    {
+        if (! channelBoxReady || channelBoxRefreshing || refreshingControls) return;
+        const int item = channelBox.getSelectedId();
+        if (item <= 1) { setChannelOnSelection (0); return; }
+        const int idx2 = juce::jlimit (0, (int) channels.size() - 1, item - 2);
+        if (idx2 >= 0 && idx2 < (int) channels.size())
+            setChannelOnSelection (channels[(size_t) idx2].id);
+    };
+    channelBoxReady = true;
+    // --- end WP6.4 ---
 }
 
 // The page's four spaces -> the model.
@@ -550,24 +652,52 @@ void MainComponent::pushSpaceDefs()
 // WP1: the drawn frequency-table editor. It edits one page space; every
 // commit is one undo transaction and republishes the snapshot so the change
 // is audible immediately.
+bool MainComponent::freqTableDestinationIsValid() const
+{
+    const juce::ScopedLock l (dataLock);
+    return freqTablePage >= 0 && freqTablePage < (int) pages.size()
+        && freqTableSpace >= 0 && freqTableSpace < (int) pages[(size_t) freqTablePage].spaceDefs.size();
+}
+
+void MainComponent::invalidateFreqTableDestination()
+{
+    // The editor belongs to the piece that owned the captured page/space.
+    // Closing it on a model replacement prevents a stale callback from
+    // indexing a different piece (and keeps undo/redo safe as well).
+    freqTableEd.setVisible (false);
+    freqTablePage = -1;
+    freqTableSpace = -1;
+}
+
 void MainComponent::showFreqTableEditor (int space)
 {
+    // WP7: the destination is captured when the editor opens. A later page
+    // change can never redirect an edit or a library import to another
+    // page/space by accident.
+    freqTablePage = juce::jlimit (0, juce::jmax (0, (int) pages.size() - 1),
+                                  currentPage);
     freqTableSpace = juce::jlimit (0, 3, space);
     upic::FreqSpaceDef def;
     double lo = upic::kDefaultPitchLo, hi = upic::kDefaultPitchHi;
     {
         const juce::ScopedLock l (dataLock);
-        def = curPage().spaceDefs[(size_t) freqTableSpace];
-        lo = curPage().pitchLo;
-        hi = curPage().pitchHi;
+        const auto& pg = pages[(size_t) freqTablePage];
+        def = pg.spaceDefs[(size_t) freqTableSpace];
+        lo = pg.pitchLo;
+        hi = pg.pitchHi;
     }
 
     freqTableEd.onCommitCurve = [this] (const std::vector<upic::TablePoint>& pts)
     {
+        if (! freqTableDestinationIsValid())
+        {
+            flash ("The frequency-table destination is no longer part of this piece");
+            return;
+        }
         beginEdit ("Draw the frequency table");
         {
             const juce::ScopedLock l (dataLock);
-            auto& d = curPage().spaceDefs[(size_t) freqTableSpace];
+            auto& d = pages[(size_t) freqTablePage].spaceDefs[(size_t) freqTableSpace];
             d.points = pts;
             d.editable = pts.size() >= 2;
         }
@@ -581,10 +711,15 @@ void MainComponent::showFreqTableEditor (int space)
 
     freqTableEd.onCommitFlags = [this] (bool inverted, bool stepped, int divisions)
     {
+        if (! freqTableDestinationIsValid())
+        {
+            flash ("The frequency-table destination is no longer part of this piece");
+            return;
+        }
         beginEdit ("Edit the frequency table");
         {
             const juce::ScopedLock l (dataLock);
-            auto& d = curPage().spaceDefs[(size_t) freqTableSpace];
+            auto& d = pages[(size_t) freqTablePage].spaceDefs[(size_t) freqTableSpace];
             d.inverted = inverted;
             d.stepped = stepped;
             d.stepDivisions = divisions;
@@ -597,12 +732,17 @@ void MainComponent::showFreqTableEditor (int space)
 
     freqTableEd.onReset = [this]
     {
+        if (! freqTableDestinationIsValid())
+        {
+            flash ("The frequency-table destination is no longer part of this piece");
+            return;
+        }
         beginEdit ("Reset the frequency table");
         {
             const juce::ScopedLock l (dataLock);
-            auto& d = curPage().spaceDefs[(size_t) freqTableSpace];
+            auto& d = pages[(size_t) freqTablePage].spaceDefs[(size_t) freqTableSpace];
             d = upic::FreqSpaceDef {};
-            d.preset = curPage().spaces[(size_t) freqTableSpace];
+            d.preset = pages[(size_t) freqTablePage].spaces[(size_t) freqTableSpace];
         }
         markModelChanged();
         endEdit();
@@ -612,7 +752,12 @@ void MainComponent::showFreqTableEditor (int space)
         flash ("Space " + juce::String (freqTableSpace + 1) + ": back to the preset");
     };
 
-    freqTableEd.open (def, lo, hi, "Frequency table - space "
+    refreshLibraryBoxes();
+    if (freqTableEd.library.source() == LibraryManager::Source::User)
+        refreshUserLibraryBoxes (upic::UserAssetKind::FreqTable);
+
+    freqTableEd.open (def, lo, hi, "Frequency table - page "
+                                  + juce::String (freqTablePage + 1) + ", space "
                                   + juce::String (freqTableSpace + 1));
     freqTableEd.setBounds (getLocalBounds());
     freqTableEd.toFront (true);
@@ -620,8 +765,8 @@ void MainComponent::showFreqTableEditor (int space)
 
 void MainComponent::closeFreqTableEditor()
 {
-    freqTableEd.setVisible (false);
-    grabKeyboardFocus();
+    invalidateFreqTableDestination();
+    if (isShowing()) grabKeyboardFocus();
 }
 
 //---------------- WP2: the amplitude conversion tables ----------------
@@ -757,8 +902,12 @@ void MainComponent::showAmpTableEditor()
     {
         if ((int) ampTables.size() >= upic::limits::kMaxAmplitudeTables)
         { flash ("The amplitude table bank is full"); return; }
-        int nextId = 1;
-        for (auto& t : ampTables) nextId = juce::jmax (nextId, t.id + 1);
+        const int nextId = upic::nextBankId (ampTables, 1);
+        if (nextId < 1 || nextId > upic::limits::kMaxItemId)
+        {
+            flash ("The amplitude-table bank has no free id left");
+            return;
+        }
         beginEdit ("New amplitude table");
         {
             const juce::ScopedLock l (dataLock);
@@ -780,8 +929,12 @@ void MainComponent::showAmpTableEditor()
         const int i = ampTableIndexOfId (selAmpTableId);
         if (i < 0 || (int) ampTables.size() >= upic::limits::kMaxAmplitudeTables)
         { flash ("The amplitude table bank is full"); return; }
-        int nextId = 1;
-        for (auto& t : ampTables) nextId = juce::jmax (nextId, t.id + 1);
+        const int nextId = upic::nextBankId (ampTables, 1);
+        if (nextId < 1 || nextId > upic::limits::kMaxItemId)
+        {
+            flash ("The amplitude-table bank has no free id left");
+            return;
+        }
         beginEdit ("Duplicate the amplitude table");
         {
             const juce::ScopedLock l (dataLock);
@@ -823,6 +976,10 @@ void MainComponent::showAmpTableEditor()
         applyAmpTableToSelection (ampTables[(size_t) i].id);
         refreshAmpTableEditor();
     };
+
+    refreshLibraryBoxes();
+    if (ampTableEd.library.source() == LibraryManager::Source::User)
+        refreshUserLibraryBoxes (upic::UserAssetKind::AmpTable);
 
     ampTableEd.open (ampTables, uses, juce::jmax (0, idx));
     ampTableEd.setBounds (getLocalBounds());
@@ -1183,6 +1340,10 @@ void MainComponent::showSequencePanel()
         startSequenceRecording();
     };
 
+    refreshLibraryBoxes();
+    if (seqPanel.library.source() == LibraryManager::Source::User)
+        refreshUserLibraryBoxes (upic::UserAssetKind::Sequence);
+
     refreshSequencePanel();
     seqPanel.setVisible (true);
     seqPanel.toFront (true);
@@ -1211,9 +1372,12 @@ void MainComponent::startSequenceRecording()
                 return;
             }
             upic::PerformanceSequence s;
-            s.id = 1;
-            for (auto& other : sequences)
-                s.id = juce::jmax (s.id, other.id + 1);
+            s.id = upic::nextBankId (sequences, 1);
+            if (s.id < 1 || s.id > upic::limits::kMaxItemId)
+            {
+                flash ("The sequence bank has no free id left");
+                return;
+            }
             s.name = "Sequence " + juce::String (s.id);
             sequences.push_back (s);
             idx = (int) sequences.size() - 1;
@@ -1388,6 +1552,159 @@ void MainComponent::toggleSequenceLoop()
     refreshSequencePanel();
     flash (sequences[(size_t) idx].loop ? "Sequence loops" : "Sequence plays once");
 }
+// --- WP6.4: the mixer commands ---
+// NOTE FOR WP7: keep the library/extraction host commands in their own
+// marked section; these functions only touch the channel bank.
+
+int MainComponent::channelIndexOfId (int id) const
+{
+    for (int i = 0; i < (int) channels.size(); ++i)
+        if (channels[(size_t) i].id == id) return i;
+    return -1;
+}
+
+void MainComponent::refreshChannelBox()
+{
+    channelBoxRefreshing = true;
+    channelBox.clear (juce::dontSendNotification);
+    channelBox.addItem ("Main", 1);
+    for (int i = 0; i < (int) channels.size(); ++i)
+        channelBox.addItem (channels[(size_t) i].name, i + 2);
+    int cur = 0;
+    const auto ids = score.getSelectedArcs();
+    if (! ids.empty())
+        for (auto& a : curPage().arcs)
+            if (a.id == ids.front()) { cur = a.channelId; break; }
+    const int idx = channelIndexOfId (cur);
+    channelBox.setSelectedId (idx < 0 ? 1 : idx + 2, juce::dontSendNotification);
+    channelBoxRefreshing = false;
+}
+
+void MainComponent::setChannelOnSelection (int channelId)
+{
+    if (channelId > 0 && channelIndexOfId (channelId) < 0)
+    { flash ("That channel is not in the mixer"); return; }
+    const auto ids = score.getSelectedArcs();
+    if (ids.empty()) { flash ("Select arcs first"); return; }
+    beginEdit ("Routing the arcs");
+    {
+        const juce::ScopedLock l (dataLock);
+        for (auto& a : curPage().arcs)
+            if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
+                a.channelId = channelId;
+    }
+    markModelChanged();
+    endEdit();
+    publishModelSnapshot();
+    refreshChannelBox();
+    score.repaint();
+    flash (channelId == 0 ? "Arcs on Main"
+                          : "Arcs on " + channels[(size_t) juce::jmax (0, channelIndexOfId (channelId))].name);
+}
+
+void MainComponent::refreshChannelPanel()
+{
+    if (channelPanel != nullptr)
+        channelPanel->setChannels (channels, juce::jmax (0, channelIndexOfId (selChannelId)));
+}
+
+void MainComponent::showChannelPanel()
+{
+    auto colourFor = [] (int id)
+    {
+        static const juce::uint32 palette[] = { 0xff5ac8fa, 0xff9a7ad0, 0xff6ac08a,
+                                                0xffd0a050, 0xffd07272, 0xff50b8b8 };
+        return juce::Colour (palette[(size_t) (juce::jmax (0, id - 1) % 6)]);
+    };
+
+    // WP6.4 safety: construct lazily, on the message thread, once.
+    if (channelPanel == nullptr)
+    {
+        channelPanel = std::make_unique<ChannelPanel>();
+        addChildComponent (*channelPanel);
+        channelPanel->onClose = [this]{ closeChannelPanel(); };
+        channelPanel->themeSliders();
+    }
+    channelPanel->onSelectIndex = [this] (int i)
+    {
+        if (i >= 0 && i < (int) channels.size()) selChannelId = channels[(size_t) i].id;
+        refreshChannelBox();
+    };
+    channelPanel->onRename = [this] (int i, const juce::String& name)
+    {
+        if (i < 0 || i >= (int) channels.size() || name.isEmpty()) return;
+        beginEdit ("Rename the channel");
+        { const juce::ScopedLock l (dataLock); channels[(size_t) i].name = name.substring (0, 64); }
+        markModelChanged(); endEdit(); publishModelSnapshot();
+        refreshChannelPanel(); refreshChannelBox();
+    };
+    channelPanel->onMuteSolo = [this] (int i, bool muted, bool solo)
+    {
+        if (i < 0 || i >= (int) channels.size()) return;
+        beginEdit ("Channel mute/solo");
+        { const juce::ScopedLock l (dataLock); channels[(size_t) i].muted = muted; channels[(size_t) i].solo = solo; }
+        markModelChanged(); endEdit(); publishModelSnapshot(); refreshChannelPanel(); score.repaint();
+    };
+    channelPanel->onGain = [this] (int i, float gain)
+    {
+        if (i < 0 || i >= (int) channels.size()) return;
+        beginEdit ("Channel gain");
+        { const juce::ScopedLock l (dataLock); channels[(size_t) i].gain = juce::jlimit (0.0f, 2.0f, gain); }
+        markModelChanged(); endEdit(); publishModelSnapshot(); score.repaint();
+    };
+    channelPanel->onNew = [this, colourFor]
+    {
+        if ((int) channels.size() >= upic::limits::kMaxChannels) { flash ("The mixer is full"); return; }
+        beginEdit ("New channel");
+        int newId = 1;
+        {
+            const juce::ScopedLock l (dataLock);
+            newId = juce::jlimit (1, upic::limits::kMaxItemId, nextChannelId);
+            nextChannelId = juce::jmin (upic::limits::kMaxItemId, newId + 1);
+            upic::Channel c;
+            c.id = newId;
+            c.name = "Channel " + juce::String (newId);
+            c.colour = colourFor (newId);
+            channels.push_back (c);
+        }
+        selChannelId = newId;
+        markModelChanged(); endEdit(); publishModelSnapshot();
+        refreshChannelPanel(); refreshChannelBox();
+        flash ("Channel " + juce::String (newId) + " added");
+    };
+    channelPanel->onDelete = [this]
+    {
+        const int i = channelIndexOfId (selChannelId);
+        if (i < 0) return;
+        const int removedId = channels[(size_t) i].id;
+        beginEdit ("Delete the channel");
+        {
+            const juce::ScopedLock l (dataLock);
+            channels.erase (channels.begin() + i);
+            for (auto& pg : pages)
+            {
+                for (auto& a : pg.arcs) if (a.channelId == removedId) a.channelId = 0;
+                for (auto& g : pg.groups) if (g.channelId == removedId) g.channelId = -1;
+            }
+        }
+        selChannelId = channels.empty() ? -1 : channels.front().id;
+        markModelChanged(); endEdit(); publishModelSnapshot();
+        refreshChannelPanel(); refreshChannelBox(); score.repaint();
+        flash ("Channel deleted - its arcs return to Main");
+    };
+
+    refreshChannelPanel();
+    channelPanel->setVisible (true);
+    channelPanel->toFront (true);
+    channelPanel->setBounds (getLocalBounds());
+}
+
+void MainComponent::closeChannelPanel()
+{
+    if (channelPanel != nullptr) channelPanel->setVisible (false);
+    grabKeyboardFocus();
+}
+// --- end WP6.4 ---
 //---------------- WP5: the independent modulating arcs ----------------
 
 bool MainComponent::modWouldCycle (int carrierId, int modId) const
@@ -1624,13 +1941,13 @@ void MainComponent::buildArcListPanel()
         arcListDirty = true;
     };
     arcListPanel.onPageClicked = [this](int page){
-        juce::ScopedLock l(dataLock);
-        if (page >= 0 && page < (int) pages.size())
         {
+            juce::ScopedLock l(dataLock);
+            if (page < 0 || page >= (int) pages.size()) return;
             currentPage = page;
-            refreshBoxes();
-            refreshScoreBinding();
         }
+        refreshBoxes();
+        refreshScoreBinding();
     };
 }
 
@@ -1656,7 +1973,7 @@ void MainComponent::buildMidiControls()
         if (! ok)
         {
             flash ("Could not open the MIDI input");
-            midiDevBox.setSelectedId (1, juce::dontSendNotification);
+            midiDevBox.setSelectedId (1);
             midi.close();
         }
         else
@@ -1719,14 +2036,14 @@ void MainComponent::buildMaterialTabs()
     matSampleTog.setTooltip("Sample tab: sample arcs - Slot, Load sample, In/Mon/Capture above");
     matLiveTog.setTooltip("Live tab: arcs transpose the mic input in realtime");
     matPmTog.setTooltip ("PM tab: 2-op phase-modulation arcs");
-    matOscTog.setToggleState(true, juce::dontSendNotification);
+    matOscTog.setToggleState (true, juce::dontSendNotification);
     matOscTog.onClick    = [this]{ setMaterial(0); };
     matSampleTog.onClick = [this]{ setMaterial(1); };
     matLiveTog.onClick   = [this]{ setMaterial(2); };
     matPmTog.onClick    = [this]{ setMaterial(3); };
     refSlider.setName("refSlider");
     refSlider.setNormalisableRange(juce::NormalisableRange<double>(20.0, 4000.0, 0.01, 0.4));
-    refSlider.setValue(upic::kDefaultRefFreq, juce::dontSendNotification);
+    refSlider.setValue(upic::kDefaultRefFreq);
     refSlider.setTextValueSuffix(" Hz");
     refSlider.setTooltip("Reference pitch: the 1x pitch of the material and the grid's 1x.\n"
                          "On the Sample tab it is the SLOT's Ref (the material's base\n"
@@ -1765,27 +2082,38 @@ void MainComponent::buildMaterialTabs()
         }
         if (changed)
         {
+            // WP7: the slot Ref is part of the captured material's identity.
+            // Invalidate an extraction source before publishing the new Ref.
+            if (drawMatMode == 1 && selSlot >= 0 && selSlot < (int) sampleSlots.size())
+                invalidateSampleExtractSource();
             publishModelSnapshot();
             score.repaint();
         }
         pushVoice();
     };
     tempoSlider.setNormalisableRange (juce::NormalisableRange<double> (40.0, 240.0, 1.0, 0.5));
-    tempoSlider.setValue (120.0, juce::dontSendNotification);
+    tempoSlider.setValue (120.0);
     tempoSlider.setName ("tempoSlider");
-    tempoSlider.onValueChange = [this]{ const juce::ScopedLock sl (dataLock); curPage().tempoBpm = (double) tempoSlider.getValue(); refreshBoxes(); };
+    tempoSlider.onValueChange = [this]
+    {
+        {
+            const juce::ScopedLock sl (dataLock);
+            curPage().tempoBpm = (double) tempoSlider.getValue();
+        }
+        refreshBoxes();
+    };
 }
 
 void MainComponent::buildPmControls()
 {
     pmRatioSlider.setName ("pmRatioSlider");
     pmRatioSlider.setNormalisableRange (juce::NormalisableRange<double> (0.1, 32.0, 0.01, 0.4));
-    pmRatioSlider.setValue (2.0, juce::dontSendNotification);
+    pmRatioSlider.setValue (2.0);
     pmIndexSlider.setName ("pmIndexSlider");
     pmIndexSlider.setNormalisableRange (juce::NormalisableRange<double> (0.0, 20.0, 0.01, 0.4));
-    pmIndexSlider.setValue (1.5, juce::dontSendNotification);
+    pmIndexSlider.setValue (1.5);
     pmFeedbackSlider.setNormalisableRange (juce::NormalisableRange<double> (0.0, 1.0, 0.001, 0.4));
-    pmFeedbackSlider.setValue (0.0, juce::dontSendNotification);
+    pmFeedbackSlider.setValue (0.0);
     pmFeedbackSlider.onValueChange = [this]{
         if (! score.getSelectedArcs().empty())
         {
@@ -1803,8 +2131,8 @@ void MainComponent::buildPmControls()
     pmPresetBox.addItem ("Pluck (3.0x, percussive)", 4);
     pmPresetBox.addItem ("Organ (1.0x, sustain, fb)", 5);
     pmPresetBox.addItem ("Metallic (1.414x, perc, fb)", 6);
-    pmPresetBox.setSelectedId (1, juce::dontSendNotification);
-    pmOpsBox.addItem ("2-op", 1); pmOpsBox.addItem ("4-op", 2); pmOpsBox.setSelectedId (1, juce::dontSendNotification);
+    pmPresetBox.setSelectedId (1);
+    pmOpsBox.addItem ("2-op", 1); pmOpsBox.addItem ("4-op", 2); pmOpsBox.setSelectedId (1);
     // names used by the selftest and UI automation
     waveBox.setName ("waveBox");
     sampleBox.setName ("sampleBox");
@@ -1894,10 +2222,10 @@ void MainComponent::buildPmControls()
         else if (sel == 6) { ratio = 1.414; idx = 5.0; envId = 1; fb = 0.2; }
         // the preset also sets the current voice, so the next PM arc drawn
         // is born with it (whether or not an arc is selected)
-        pmRatioSlider.setValue (ratio, juce::dontSendNotification);
-        pmIndexSlider.setValue (idx, juce::dontSendNotification);
-        { int ei = 1; for (size_t j = 0; j < envelopes.size(); ++j) if (envelopes[j].id == envId) { ei = (int) j + 2; break; } pmIndexEnvBox.setSelectedId (ei, juce::dontSendNotification); }
-        pmFeedbackSlider.setValue (fb, juce::dontSendNotification);
+        pmRatioSlider.setValue (ratio);
+        pmIndexSlider.setValue (idx);
+        { int ei = 1; for (size_t j = 0; j < envelopes.size(); ++j) if (envelopes[j].id == envId) { ei = (int) j + 2; break; } pmIndexEnvBox.setSelectedId (ei); }
+        pmFeedbackSlider.setValue (fb);
         const auto ids = score.getSelectedArcs();
         if (! ids.empty())
         {
@@ -1968,6 +2296,13 @@ void MainComponent::buildSampleControls()
     };
     loadSampleBtn.onClick = [this]{ loadSampleIntoSlot(selSlot); };
 
+    // WP7: the cycle-aware extraction panel. The panel is built lazily when
+    // it opens; this button only asks for it.
+    sampleExtractBtn.setName ("sampleExtractBtn");
+    sampleExtractBtn.setTooltip ("Find the repeating cycle in the selected material,\n"
+                                  "preview it, and save it as a wavetable or envelope");
+    sampleExtractBtn.onClick = [this]{ openSampleExtractPanel(); };
+
     // v1.19 (wave 17): the selected slot plays backwards. The engine mirrors
     // the material read, so the pitch modes all work unchanged. Session-only:
     // the piece format is untouched (FUTURE_IDEAS.md, UPIC-25).
@@ -1978,23 +2313,29 @@ void MainComponent::buildSampleControls()
     revBtn.onClick = [this]{
         if (selSlot < 0 || selSlot >= (int) sampleSlots.size()) return;
         const bool on = revBtn.getToggleState();
-        sampleSlots[(size_t) selSlot].reversed = on;
         // v1.26: the slot direction applies to the selected sample arcs too
-        // (a multi-selection may use more than one slot).
+        // (a multi-selection may use more than one slot). The selected slot
+        // and the arcs' slots change under one model lock.
         const auto ids = score.getSelectedArcs();
-        if (! ids.empty())
         {
             const juce::ScopedLock sl (dataLock);
-            for (auto& a : curPage().arcs)
+            sampleSlots[(size_t) selSlot].reversed = on;
+            if (! ids.empty())
             {
-                if (a.mode != 1
-                    || std::find (ids.begin(), ids.end(), a.id) == ids.end())
-                    continue;
-                for (auto& s : sampleSlots)
-                    if (s.id == a.sampleId) { s.reversed = on; break; }
+                for (auto& a : curPage().arcs)
+                {
+                    if (a.mode != 1
+                        || std::find (ids.begin(), ids.end(), a.id) == ids.end())
+                        continue;
+                    for (auto& s : sampleSlots)
+                        if (s.id == a.sampleId) { s.reversed = on; break; }
+                }
             }
         }
         updateRevButton();
+        // WP7: reversing the material changes the captured audio. The
+        // extraction source is stale until the user captures it again.
+        invalidateSampleExtractSource();
         markModelChanged();  // v1.15: the material changes -> fade across it
         publishModelSnapshot(); // v1.18: the audio thread must see it now
         flash(on ? "Selected slot(s): reversed" : "Selected slot(s): forward");
@@ -2007,7 +2348,7 @@ void MainComponent::buildSampleControls()
     // changes the sound, so it travels with the piece.
     levelSlider.setName("levelSlider");
     levelSlider.setNormalisableRange (juce::NormalisableRange<double> (0.0, 2.0, 0.01, 0.2));
-    levelSlider.setValue (1.0, juce::dontSendNotification);
+    levelSlider.setValue (1.0);
     levelSlider.setTooltip ("The slot's level - how loud the material is "
                             "(1 = as it was loaded)");
     levelSlider.onValueChange = [this]{
@@ -2017,6 +2358,9 @@ void MainComponent::buildSampleControls()
             juce::ScopedLock l (dataLock);
             sampleSlots[(size_t) selSlot].level = v;
         }
+        // WP7: the level is part of the captured material's identity. Do
+        // not leave an extraction preview pointing at the old take.
+        invalidateSampleExtractSource();
         markModelChanged();       // the level changes the sound
         publishModelSnapshot();   // the audio thread must see it now
     };
@@ -2049,7 +2393,7 @@ void MainComponent::buildSampleControls()
     samplePitchBox.addItem("Granular (stretch)", 2);
     samplePitchBox.addItem("Phase vocoder", 3);
     samplePitchBox.addItem("Granular (no stretch)", 4);
-    samplePitchBox.setSelectedId(1, juce::dontSendNotification);
+    samplePitchBox.setSelectedId(1);
     score.sampleGranularTab = (samplePitchBox.getSelectedId() == 2);
     samplePitchBox.setTooltip("Sample-tab arcs: how the slot is transposed.\n"
                               "At 1x (the arc sits on Ref) the pitch is unchanged; "
@@ -2078,7 +2422,7 @@ void MainComponent::buildLiveInputControls()
         if (! monBtn.getToggleState()) { monitoring = false; return; }
         ensureLiveInputFor([this](bool ok){
             if (ok) monitoring = true;
-            else monBtn.setToggleState(false, juce::dontSendNotification);
+            else monBtn.setToggleState (false, juce::dontSendNotification);
         });
     };
     capBtn.setClickingTogglesState(true);
@@ -2096,12 +2440,12 @@ void MainComponent::buildLiveInputControls()
         }
         ensureLiveInputFor([this](bool ok){
             if (ok) startCapture();
-            else capBtn.setToggleState(false, juce::dontSendNotification);
+            else capBtn.setToggleState (false, juce::dontSendNotification);
         });
     };
     inGainSlider.setName("inGainSlider");
     inGainSlider.setRange(0.0, 1.0, 0.01);
-    inGainSlider.setValue(0.8, juce::dontSendNotification);
+    inGainSlider.setValue(0.8);
     inGainSlider.onValueChange = [this]{ inputGain = (float) inGainSlider.getValue(); };
 
     // v1.31 (U4): the digitised wave page. The real UPIC could fill the

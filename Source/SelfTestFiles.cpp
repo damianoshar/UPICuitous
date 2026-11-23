@@ -3,6 +3,38 @@
 #include "SelfTest.h"
 #include "AllocCounter.h"
 
+namespace
+{
+    // The release gate runs from the repository root, but the selftest is also
+    // run by developers from the build directory. Search the current directory
+    // and the executable's parent directories so the same checked-in fixture
+    // is always the one under test.
+    juce::File findLegacyFixtureFile()
+    {
+        const juce::String relativePath ("selftest/fixtures/v0.29-piece.upic.json");
+        juce::Array<juce::File> roots;
+        roots.add (juce::File::getCurrentWorkingDirectory());
+
+        auto directory = juce::File::getSpecialLocation (
+            juce::File::currentExecutableFile).getParentDirectory();
+        for (int depth = 0; depth < 8; ++depth)
+        {
+            if (directory == juce::File())
+                break;
+            roots.add (directory);
+            directory = directory.getParentDirectory();
+        }
+
+        for (const auto& root : roots)
+        {
+            const auto candidate = root.getChildFile (relativePath);
+            if (candidate.existsAsFile())
+                return candidate;
+        }
+        return {};
+    }
+}
+
 //==============================================================================
 // The files: the ids of a loaded piece, the unsaved-changes flag, the undo,
 // the crash recovery, an untrusted piece, the exports, the PM presets and the
@@ -937,4 +969,104 @@ void upic::runChooserChecks (upic::SelfTest& t)
 
         work.deleteRecursively();
     }
+}
+
+//==============================================================================
+// The v0.29 file guard. The checked-in fixture is a complete piece in the
+// pre-WP1 format: it has no frequency tables, groups, sequences or mixer
+// channels. It must load without repair, keep the page's own frequency space
+// as an exact identity, render bit for bit, and survive a current save/load
+// round trip unchanged.
+void upic::runLegacyFixtureChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    const auto fixture = findLegacyFixtureFile();
+    check (fixture.existsAsFile(),
+           "legacy fixture: the checked-in v0.29 piece is present",
+           fixture.getFullPathName());
+    if (! fixture.existsAsFile())
+        return;
+
+    const auto sourceText = fixture.loadFileAsString();
+    const auto source = juce::JSON::parse (sourceText);
+    check (! source.isVoid(),
+           "legacy fixture: the v0.29 piece is valid JSON");
+
+    auto* sourcePages = source.getProperty ("pages", juce::var()).getArray();
+    const bool oldShape = sourcePages != nullptr && sourcePages->size() == 1
+                       && ! source.hasProperty ("ampTables")
+                       && ! source.hasProperty ("sequences")
+                       && ! source.hasProperty ("channels");
+    bool oldPageShape = false;
+    if (sourcePages != nullptr && sourcePages->size() == 1)
+    {
+        const auto& page = sourcePages->getReference (0);
+        oldPageShape = ! page.hasProperty ("spaceTables")
+                    && ! page.hasProperty ("groups");
+    }
+    check (oldShape && oldPageShape,
+           "legacy fixture: the v0.29 piece has no post-v0.29 feature keys");
+
+    if (sourcePages == nullptr || sourcePages->isEmpty())
+        return;
+
+    const auto legacyPage = upic::Page::fromVar (sourcePages->getReference (0));
+    check (legacyPage.arcs.size() == 1
+           && legacyPage.arcs.front().id == 1
+           && legacyPage.arcs.front().points.size() == 2,
+           "legacy fixture: the old page and arc load without repair",
+           juce::String (legacyPage.arcs.size()) + " arc(s)");
+
+    const double identityProbe = 2000.0;
+    check (legacyPage.placeInSpace (identityProbe, 0) == identityProbe,
+           "legacy fixture: the old page keeps the exact identity frequency map",
+           juce::String (legacyPage.placeInSpace (identityProbe, 0), 9) + " Hz");
+
+    // The parser's result and the equivalent page built by hand must render
+    // the same samples, bit for bit. This is the old-file compatibility
+    // promise; the separate golden render locks the engine itself.
+    upic::Page expectedPage;
+    expectedPage.durationSec = 4.0;
+    upic::Arc expectedArc;
+    expectedArc.id = 1;
+    expectedArc.intensity = 0.8f;
+    expectedArc.points = { { 0.0, 220.0 }, { 4.0, 440.0 } };
+    expectedPage.arcs.push_back (expectedArc);
+
+    const auto waves = upic::defaultWaveforms();
+    const auto envelopes = upic::defaultEnvelopes();
+    const std::vector<upic::SampleSlot> noSlots;
+    UpicEngine legacyEngine, expectedEngine;
+    legacyEngine.prepare (48000.0, 512);
+    expectedEngine.prepare (48000.0, 512);
+    std::vector<float> legacyLeft (512, 0.0f), expectedLeft (512, 0.0f);
+    legacyEngine.render (legacyPage, 0.0, waves, envelopes, noSlots,
+                         legacyLeft.data(), nullptr, 512, 0.8f);
+    expectedEngine.render (expectedPage, 0.0, waves, envelopes, noSlots,
+                           expectedLeft.data(), nullptr, 512, 0.8f);
+    check (legacyLeft == expectedLeft,
+           "legacy fixture: the v0.29 piece renders bit for bit");
+
+    // The full application load path must accept the file without a repair
+    // message, and the piece it writes must survive another load unchanged.
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
+    check (mc.loadFromVar (source),
+           "legacy fixture: the application loads the v0.29 piece");
+    check (mc.flashMessageForTest().isEmpty(),
+           "legacy fixture: loading the v0.29 piece needs no repair",
+           mc.flashMessageForTest());
+
+    const auto saved = mc.pieceToVar();
+    const auto savedText = juce::JSON::toString (saved, false);
+    auto secondHolder = std::make_unique<MainComponent> (true);
+    auto& second = *secondHolder;
+    check (second.loadFromVar (saved),
+           "legacy fixture: the current piece form loads again");
+    check (juce::JSON::toString (second.pieceToVar(), false) == savedText,
+           "legacy fixture: the current piece round trip is exact");
 }

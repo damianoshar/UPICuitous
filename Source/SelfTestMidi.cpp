@@ -120,7 +120,7 @@ void upic::runMidiScrubChecks (upic::SelfTest& t)
         // the release ends the jog and the speed goes back to normal
         mc.injectMidiMessage (juce::MidiMessage::noteOff (1, 64));
         mc.pollMidiForTest();
-        for (int i = 0; i < 40; ++i)
+        for (int i = 0; i < 200 && mc.midiScrubRunning(); ++i)
             mc.updateMidiScrubForTest();
         check (! mc.midiScrubRunning(),
                "the jog ends when the note is released");
@@ -151,7 +151,7 @@ void upic::runMidiScrubChecks (upic::SelfTest& t)
                juce::String (mc.playRateForTest(), 3));
 
         // the control comes back to the centre: the jog winds down
-        for (int i = 0; i < 40; ++i)
+        for (int i = 0; i < 200 && mc.midiScrubRunning(); ++i)
         {
             mc.injectMidiMessage (juce::MidiMessage::controllerEvent (1, 7, 64));
             mc.pollMidiForTest();

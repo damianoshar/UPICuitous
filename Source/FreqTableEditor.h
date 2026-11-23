@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "LibraryManager.h"
 #include "UpicModel.h"
 
 //==============================================================================
@@ -26,6 +27,11 @@ public:
     std::function<void (bool inverted, bool stepped, int divisions)> onCommitFlags;
     std::function<void()> onReset;
     std::function<void()> onClose;
+
+    // WP7: a frequency table is destination-bound (one page space), but it
+    // can still be published to and imported from the user library. The
+    // manager supplies the source switch and the library rows only.
+    LibraryManager library { "freq" };
 
     FreqTableEditor()
     {
@@ -70,6 +76,12 @@ public:
         int common[] = { 1, 2, 3, 4, 6, 7, 8, 12, 16, 19, 24, 31, 48, 53, 72, 96 };
         for (int d : common) cutBox.addItem (juce::String (d) + " / oct", d);
         cutBox.setSelectedId (12, juce::dontSendNotification);
+
+        // WP7: the panel has no separate piece-bank commands, so the shared
+        // manager supplies only the Piece/User bridge and its library rows.
+        addAndMakeVisible (library);
+        library.setPieceCommandsVisible (false);
+        library.setSelector (libraryBox);
 
         setVisible (false);
     }
@@ -117,6 +129,7 @@ public:
     {
         auto card = cardRect().reduced (18, 12);
         card.removeFromTop (titleH);
+        card.removeFromTop (libraryH);
         card.removeFromBottom (buttonH);
         return card.toFloat();
     }
@@ -211,6 +224,7 @@ public:
     {
         auto card = cardRect().reduced (18, 12);
         card.removeFromTop (titleH);
+        library.setBounds (card.removeFromTop (libraryH).reduced (0, 2));
         auto row = card.removeFromBottom (buttonH).reduced (0, 4);
         const int h = row.getHeight();
         lineBtn.setBounds (row.removeFromLeft (58).withHeight (h));
@@ -305,6 +319,7 @@ public:
 
 private:
     static constexpr int titleH = 26;
+    static constexpr int libraryH = 28;
     static constexpr int buttonH = 36;
 
     upic::TablePoint pointAt (juce::Point<float> p) const
@@ -356,6 +371,7 @@ private:
                      invertBtn { "Invert" }, stepBtn { "Step" },
                      resetBtn { "Reset" }, closeBtn { "Close" };
     juce::ComboBox cutBox;
+    juce::ComboBox libraryBox;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FreqTableEditor)
 };
