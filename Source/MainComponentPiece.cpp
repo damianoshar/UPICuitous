@@ -34,6 +34,10 @@ upic::PieceModel MainComponent::capturePieceModel() const
         const juce::ScopedLock l (dataLock);
         m.waveforms = waveforms;
         m.envelopes = envelopes;
+        m.amplitudeTables = ampTables;
+        m.sequences = sequences;
+        m.channels = channels;
+        m.nextChannelId = nextChannelId;
         m.sampleSlots = sampleSlots;
         m.pages = pages;
         m.currentPage = currentPage;
@@ -80,6 +84,9 @@ bool MainComponent::loadFromVar(const juce::var& v)
     //     touched yet, so a parse that fails leaves the piece alone) ---
     std::vector<upic::Waveform> newWaves;
     std::vector<upic::Envelope> newEnvelopes;
+    std::vector<upic::AmplitudeTable> newAmpTables;
+    std::vector<upic::PerformanceSequence> newSequences;
+    std::vector<upic::Channel> newChannels;
     std::vector<upic::Page> newPages;
     std::vector<upic::SampleSlot> newSlots;
     for (int i = 0; i < upic::kMaxSampleSlots; ++i)
@@ -163,6 +170,44 @@ bool MainComponent::loadFromVar(const juce::var& v)
                 noteDrop ("envelope point", "envelope points",
                           (int) ptsArr->size() - (int) newEnvelopes[(size_t) ei].points.size());
     }
+    // WP2: the amplitude conversion tables. Absent in older pieces, and an
+    // arc that names one must get its reference checked like any other.
+    if (auto* arr = v.getProperty("ampTables", juce::var()).getArray())
+    {
+        int i = 0;
+        for (auto& tv : *arr)
+        {
+            if ((int) newAmpTables.size() >= upic::limits::kMaxAmplitudeTables) break;
+            newAmpTables.push_back (upic::AmplitudeTable::fromVar (tv, i++));
+        }
+        noteDrop ("amplitude table", "amplitude tables",
+                  (int) arr->size() - (int) newAmpTables.size());
+    }
+    // WP4: the performance sequences (absent in older pieces).
+    if (auto* sarr = v.getProperty("sequences", juce::var()).getArray())
+    {
+        int si = 0;
+        for (auto& sv : *sarr)
+        {
+            if ((int) newSequences.size() >= upic::limits::kMaxSequences) break;
+            newSequences.push_back (upic::PerformanceSequence::fromVar (sv, si++));
+        }
+        noteDrop ("performance sequence", "performance sequences",
+                  (int) sarr->size() - (int) newSequences.size());
+    }
+    // WP6: the mixer channels (absent in older pieces -> the legacy path).
+    const int fileNextChannelId = (int) v.getProperty ("nextChannelId", 1);
+    if (auto* carr = v.getProperty ("channels", juce::var()).getArray())
+    {
+        int ci = 0;
+        for (auto& cv : *carr)
+        {
+            if ((int) newChannels.size() >= upic::limits::kMaxChannels) break;
+            newChannels.push_back (upic::Channel::fromVar (cv, ci++));
+        }
+        noteDrop ("channel", "channels", (int) carr->size() - (int) newChannels.size());
+    }
+    renamed += upic::uniquifyIds (newChannels);
     if (auto* arr = v.getProperty("pages", juce::var()).getArray())
     {
         for (auto& pv : *arr)
@@ -244,6 +289,8 @@ bool MainComponent::loadFromVar(const juce::var& v)
     // pointing at the same thing), a duplicate gets a free id.
     renamed += upic::uniquifyIds (newWaves);
     renamed += upic::uniquifyIds (newEnvelopes);
+    renamed += upic::uniquifyIds (newAmpTables);
+    renamed += upic::uniquifyIds (newSequences);
 
     // and the arcs' references to the material are checked: a piece can
     // point at a wavetable or an envelope that is not there (the arc then
@@ -256,10 +303,90 @@ bool MainComponent::loadFromVar(const juce::var& v)
             { a.waveformId = newWaves.front().id; ++fixedRefs; }
             if (! newEnvelopes.empty() && ! upic::hasId (newEnvelopes, a.envelopeId))
             { a.envelopeId = newEnvelopes.front().id; ++fixedRefs; }
+            // a table is optional: a missing one falls back to none
+            if (a.amplitudeTableId >= 0 && ! upic::hasId (newAmpTables, a.amplitudeTableId))
+            { a.amplitudeTableId = -1; ++fixedRefs; }
             // 0 is the "no envelope of its own" marker for the PM index
             if (a.pmIndexEnv != 0 && ! upic::hasId (newEnvelopes, a.pmIndexEnv))
             { a.pmIndexEnv = 0; ++fixedRefs; }
         }
+    // WP4: the sequences' pages and positions are checked against the
+    // pages that actually loaded.
+    for (auto& sq : newSequences)
+    {
+        std::vector<upic::PerformancePoint> kept;
+        double lastT = -1.0;
+        for (auto p : sq.points)
+        {
+            if (newPages.empty()) break;
+            p.page = juce::jlimit (0, (int) newPages.size() - 1, p.page);
+            p.pos = upic::limits::clampFinite (p.pos, 0.0,
+                                               newPages[(size_t) p.page].durationSec);
+            if (p.t <= lastT) continue;
+            lastT = p.t;
+            kept.push_back (p);
+        }
+        sq.points = std::move (kept);
+    }
+
+    // WP3: the groups' overrides point into the same banks; a missing one
+    // falls back to "the arc's own" rather than switching the timbre to
+    // unrelated material.
+    for (auto& pg : newPages)
+        for (auto& g : pg.groups)
+        {
+            if (g.waveformId >= 0 && ! upic::hasId (newWaves, g.waveformId))
+            { g.waveformId = -1; ++fixedRefs; }
+            if (g.envelopeId >= 0 && ! upic::hasId (newEnvelopes, g.envelopeId))
+            { g.envelopeId = -1; ++fixedRefs; }
+            if (g.amplitudeTableId >= 0 && ! upic::hasId (newAmpTables, g.amplitudeTableId))
+            { g.amplitudeTableId = -1; ++fixedRefs; }
+        }
+    // WP5: a modulator must exist on its own page and the chain must not
+    // loop back to the carrier.
+    for (auto& pg : newPages)
+    {
+        auto findArc = [&pg] (int id) -> const upic::Arc*
+        {
+            for (auto& a : pg.arcs) if (a.id == id) return &a;
+            return nullptr;
+        };
+        for (auto& a : pg.arcs)
+        {
+            if (a.modulatorArcId < 0) continue;
+            if (a.modulatorArcId == a.id || findArc (a.modulatorArcId) == nullptr)
+            { a.modulatorArcId = -1; ++fixedRefs; continue; }
+            bool cycle = false;
+            std::vector<int> chain;
+            int cur = a.modulatorArcId;
+            for (int guard = 0; guard < 64 && cur >= 0; ++guard)
+            {
+                if (cur == a.id) { cycle = true; break; }
+                chain.push_back (cur);
+                const upic::Arc* m = findArc (cur);
+                cur = (m != nullptr) ? m->modulatorArcId : -1;
+            }
+            if (cycle)
+            {
+                // break every edge of the loop, not just this arc's
+                a.modulatorArcId = -1;
+                for (int id : chain)
+                    for (auto& other : pg.arcs)
+                        if (other.id == id) other.modulatorArcId = -1;
+                ++fixedRefs;
+            }
+        }
+    }
+    // WP6: a channel reference must exist in the bank (0 = main).
+    for (auto& pg : newPages)
+    {
+        for (auto& a : pg.arcs)
+            if (a.channelId > 0 && ! upic::hasId (newChannels, a.channelId))
+            { a.channelId = 0; ++fixedRefs; }
+        for (auto& g : pg.groups)
+            if (g.channelId > 0 && ! upic::hasId (newChannels, g.channelId))
+            { g.channelId = -1; ++fixedRefs; }
+    }
     if (renamed > 0)
         droppedMsg += (droppedMsg.isEmpty() ? "" : ", ") + juce::String(renamed)
                     + (renamed == 1 ? " item had a duplicate id and has been renumbered"
@@ -270,6 +397,11 @@ bool MainComponent::loadFromVar(const juce::var& v)
                                       : " arcs pointed at material that was not there");
 
     // --- the piece is good: swap it in ---
+    // An ordinary scrub/freeze request belongs to the piece that is about
+    // to be replaced. End it before the swap so the next model snapshot
+    // cannot be rendered through the old request. Undo and redo restore
+    // through this same loader, so they are covered too.
+    cancelOrdinaryPreviewRoutes();
     {
         juce::ScopedLock l(dataLock);
         stopPlayback();
@@ -278,9 +410,27 @@ bool MainComponent::loadFromVar(const juce::var& v)
         transportState.store ((int) TransportState::stopped, std::memory_order_relaxed);
         waveforms = std::move (newWaves);
         envelopes = std::move (newEnvelopes);
+        ampTables = std::move (newAmpTables);
+        sequences = std::move (newSequences);
+        channels = std::move (newChannels);
+        nextChannelId = 1;
+        for (auto& c : channels) nextChannelId = juce::jmax (nextChannelId, c.id + 1);
+        if (fileNextChannelId > nextChannelId && fileNextChannelId <= upic::limits::kMaxItemId)
+            nextChannelId = fileNextChannelId;
+        selChannelId = channels.empty() ? -1 : channels.front().id;
+        selSeqId = sequences.empty() ? -1 : sequences.front().id;
         pages = std::move (newPages);
         sampleSlots = std::move (newSlots);
     }
+    // The frequency-table editor captured a page/space in the piece that was
+    // just replaced. Close it before any stale callback can use that
+    // destination in the new model. Undo and redo restore through this same
+    // loader, so they are covered too.
+    invalidateFreqTableDestination();
+    // WP7: a captured extraction source belongs to the piece that was just
+    // replaced. Closing it here also covers undo and redo, which restore a
+    // piece through this same path.
+    invalidateSampleExtractSource();
     {
         juce::ScopedLock l(dataLock);
         // clamp ids
@@ -396,6 +546,11 @@ bool MainComponent::loadFromVar(const juce::var& v)
     seekPlayhead(0.0);
     bumpPageEpoch();
     masterSlider.setValue(masterGain.load(), juce::dontSendNotification);
+    } // the settings scope
+
+    // Control refreshes and the model publication run after the model lock
+    // has been released. A refresh can repopulate controls whose callbacks
+    // read the model, so it must never run inside that lock.
     refreshBoxes(); refreshScoreBinding();
     // v1.18: the next audio block must already render the loaded piece (the
     // timer alone would be up to 33 ms late - and a host may not run it).
@@ -406,7 +561,6 @@ bool MainComponent::loadFromVar(const juce::var& v)
         flash ("This piece is bigger than the app supports - not loaded: " + droppedMsg);
     else if (! adjustedMsg.isEmpty())
         flash ("This piece was adjusted: " + adjustedMsg);
-    } // the settings scope
 
     // v1.33.4 (L15): the loaded piece is what the file holds, so there is
     // nothing to save yet (the app must not ask to save a piece that was
@@ -725,6 +879,59 @@ bool MainComponent::decodeSampleFile (const juce::File& f, SampleImport& out, ju
     }
 }
 
+// The selftest installs synthetic material through the same limits as a
+// decoded file. A test-only hook must not be able to create state that the
+// production loader would refuse.
+bool MainComponent::setSampleSlotForTest (int slotIndex,
+                                          const juce::AudioBuffer<float>& data,
+                                          double sampleRate)
+{
+    if (slotIndex < 0 || slotIndex >= (int) sampleSlots.size()) return false;
+    if (data.getNumChannels() < 1 || data.getNumChannels() > 2) return false;
+    if (data.getNumSamples() <= 0
+        || data.getNumSamples() > upic::limits::kMaxFramesPerSample) return false;
+    if (! (sampleRate >= 1000.0 && sampleRate <= upic::limits::kMaxSampleRate)) return false;
+    if ((double) data.getNumSamples() / sampleRate > upic::limits::kMaxSampleSeconds)
+        return false;
+
+    for (int c = 0; c < data.getNumChannels(); ++c)
+        for (int i = 0; i < data.getNumSamples(); ++i)
+            if (! std::isfinite (data.getSample (c, i))) return false;
+
+    const juce::int64 newBytes = (juce::int64) data.getNumSamples()
+                               * (juce::int64) data.getNumChannels()
+                               * (juce::int64) sizeof (float);
+    {
+        const juce::ScopedLock l (dataLock);
+        juce::int64 totalBytes = 0;
+        for (size_t i = 0; i < sampleSlots.size(); ++i)
+        {
+            if ((int) i == slotIndex || ! sampleSlots[i].loaded()) continue;
+            totalBytes += (juce::int64) sampleSlots[i].data->getNumSamples()
+                        * (juce::int64) sampleSlots[i].data->getNumChannels()
+                        * (juce::int64) sizeof (float);
+        }
+        if (totalBytes + newBytes > (juce::int64) upic::limits::kMaxTotalSampleBytes)
+            return false;
+
+        // WP7: the test hook follows the production replacement path.
+        invalidateSampleExtractSource();
+
+        auto& slot = sampleSlots[(size_t) slotIndex];
+        slot.data = std::make_shared<const juce::AudioBuffer<float>> (data);
+        slot.sampleRate = sampleRate;
+        slot.resetEdits();
+    }
+
+    selSlot = slotIndex;
+    score.sampleDurations[sampleSlots[(size_t) slotIndex].id] =
+        sampleSlots[(size_t) slotIndex].durationSec();
+    markModelChanged();
+    publishModelSnapshot();
+    updateSampleView();
+    return true;
+}
+
 // The install, on the message thread: the model is read by the audio thread,
 // so it is mutated under the lock.
 void MainComponent::installSample (int slotIndex, SampleImport&& import)
@@ -733,6 +940,9 @@ void MainComponent::installSample (int slotIndex, SampleImport&& import)
     // v1.33.4 (L15, part 2): the undo transaction - the state from before
     // the material was replaced.
     beginEdit ("Load the material");
+    // WP7: the replacement invalidates any analysis captured from the old
+    // material before the new buffer enters the model.
+    invalidateSampleExtractSource();
     {
         // model is read by the audio thread -> mutate under the lock.
         // v1.18: the buffer is immutable + shared, so the pointer is

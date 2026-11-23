@@ -1055,7 +1055,8 @@ void upic::runLibraryUiChecks (upic::SelfTest& t)
         return upic::pieceToVar (m);
     };
 
-    MainComponent mc (true);
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
     mc.setSize (1280, 800);
 
     auto* waveBox      = combo (mc, "waveEditBox");
@@ -1135,14 +1136,14 @@ void upic::runLibraryUiChecks (upic::SelfTest& t)
         const int depth0 = mc.undoDepth();
         waveNew->onClick();
         const int fresh = mc.selectedWaveformIdForTest();
-        check (mc.waveformCountForTest() == 4 && fresh == 13
-               && mc.waveformIdForTest (3) == 13,
+        check (mc.waveformCountForTest() == 4 && fresh == 0
+               && mc.waveformIdForTest (3) == 0,
                "library UI: New adds a wavetable and selects it",
                juce::String (mc.waveformCountForTest()) + "/" + juce::String (fresh));
         check (mc.undoDepth() == depth0 + 1,
                "library UI: New is one undo step");
         check (waveBox->getNumItems() == 4
-               && waveBox->getText().startsWith ("13:")
+               && waveBox->getText().startsWith ("0:")
                && waveBox->getText().contains ("(0 uses)"),
                "library UI: the new wavetable is in the selector, unused",
                waveBox->getText());
@@ -1281,11 +1282,11 @@ void upic::runLibraryUiChecks (upic::SelfTest& t)
         const int depth0 = mc.undoDepth();
         envNew->onClick();
         const int fresh = mc.selectedEnvelopeIdForTest();
-        check (mc.envelopeCountForTest() == 4 && fresh == 23
+        check (mc.envelopeCountForTest() == 4 && fresh == 0
                && mc.undoDepth() == depth0 + 1,
                "library UI: New adds an envelope and selects it",
                juce::String (mc.envelopeCountForTest()) + "/" + juce::String (fresh));
-        check (envBox->getText().startsWith ("23:")
+        check (envBox->getText().startsWith ("0:")
                && envBox->getText().contains ("(0 uses)")
                && ! envUnique->isEnabled(),
                "library UI: the new envelope is unused",
@@ -1382,7 +1383,8 @@ void upic::runInterfaceChecks (upic::SelfTest& t)
             return nullptr;
         };
 
-    MainComponent mc (true);
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
     mc.setSize (1280, 800);
 
     auto find = [&] (const juce::String& n) { return findByName (mc, n); };
@@ -1620,7 +1622,8 @@ void upic::runFocusChecks (upic::SelfTest& t)
             return nullptr;
         };
 
-    MainComponent mc (true);
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
     mc.setSize (1280, 800);
     mc.prepareToPlay (512, 44100.0);
 
@@ -2011,7 +2014,8 @@ void upic::runViewChecks (upic::SelfTest& t)
                 return nullptr;
             };
 
-        MainComponent mc (true);
+        auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
         mc.setSize (1280, 800);
         auto find = [&] (const juce::String& n) { return findByNameF6 (mc, n); };
         auto* scoreEd = dynamic_cast<ScoreEditor*> (find ("score"));

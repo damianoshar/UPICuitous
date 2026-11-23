@@ -93,8 +93,10 @@ public:
     // VALUE: through a reference the compiler has to reload its five fields
     // on every sample (it cannot prove they do not alias the arc), which
     // cost a third of the render path.
+    // WP5: `modFactor` scales the DRAWN frequency before the space map, so a
+    // modulating arc bends the pitch inside the same space as the carrier.
     static double arcPitch (const upic::Arc& arc, double t,
-                                   upic::Page::SpaceMap map);
+                                   upic::Page::SpaceMap map, double modFactor = 1.0);
 
 
     // v1.33.4 (U6-C): the cursor-based pitch. The render walks the samples
@@ -102,7 +104,20 @@ public:
     // searched for every sample.
     static double arcPitch (const upic::Arc& arc, double t,
                                    upic::Page::SpaceMap map,
-                                   upic::Arc::PitchCursor& cursor);
+                                   upic::Arc::PitchCursor& cursor,
+                                   double modFactor = 1.0);
+
+    // WP5: the resolved modulator, carried into the render paths. The map is
+    // the modulator's own space, so its contour bends the carrier in the
+    // same drawn space it was drawn in.
+    struct ModContext
+    {
+        const upic::Arc* arc = nullptr;
+        upic::Page::SpaceMap map;
+        int target = 0;
+        double depth = 0.0, lo = 0.0, hi = 0.0;
+        int align = 0;
+    };
 
 
     // Time scale for a sample voice. Mode 1 (granular stretch) uses the same
@@ -165,12 +180,20 @@ public:
     // Realtime render: playhead in seconds (page-local), outputs stereo (same mono sum).
     // Cost model: each arc only touches its active sample range, with the
     // waveform/envelope lookups hoisted out of the per-sample loop.
+    //
+    // WP1: `luts` carries the page's compiled frequency tables (from the
+    // snapshot). It is optional: without it the drawn tables are evaluated
+    // directly (correct, slower), which is what the UI and the tests use.
     void render(const upic::Page& page, double playhead,
                 const std::vector<upic::Waveform>& waves,
                 const std::vector<upic::Envelope>& envs,
                 const std::vector<upic::SampleSlot>& slots,
                 float* left, float* right, int numSamples, float masterGain,
-                double rate = 1.0, bool freeze = false);
+                double rate = 1.0, bool freeze = false,
+                const upic::PageLutSet* luts = nullptr,
+                const std::vector<upic::Envelope>* ampTables = nullptr,
+                const std::vector<upic::ArcRenderOverride>* overrides = nullptr,
+                const std::vector<upic::Channel>* channels = nullptr);
 
 
     // v1.33.4 (H8): the offline render, in blocks.
@@ -193,6 +216,8 @@ public:
                            const std::vector<upic::Waveform>& waves,
                            const std::vector<upic::Envelope>& envs,
                            const std::vector<upic::SampleSlot>& slots,
+                           const std::vector<upic::Envelope>* ampTables,
+                           const std::vector<upic::Channel>* channels,
                            double sr, float masterGain,
                            int totalFrames, BlockFn&& fn)
     {
@@ -211,6 +236,27 @@ public:
         int done = 0;
         double scorePos = 0.0;
 
+        // WP1: the export walks the page once, so the drawn frequency tables
+        // are compiled here, on the caller's (worker) thread, and passed to
+        // each block. A preset-only page gets no LUTs and renders exactly as
+        // it always did.
+        std::array<upic::FreqLut, 4> lutsOwned;
+        upic::PageLutSet lutSet;
+        for (int s = 0; s < 4; ++s)
+        {
+            const auto& def = page.spaceDefs[(size_t) s];
+            if (def.editable || def.inverted)
+            {
+                lutsOwned[(size_t) s] = upic::buildFreqLut (def, page.pitchLo, page.pitchHi);
+                lutSet.lut[s] = &lutsOwned[(size_t) s];
+            }
+        }
+        // WP3: the groups are resolved once for the whole page, on this
+        // (worker) thread - the block loop only indexes them.
+        std::vector<upic::ArcRenderOverride> overrides;
+        if (! page.groups.empty())
+            overrides = page.resolveArcOverrides();
+
         while (done < totalFrames)
         {
             const int n = juce::jmin (blockSize, totalFrames - done);
@@ -226,7 +272,8 @@ public:
             block.clear();
             render (page, scorePos, waves, envs, slots,
                     block.getWritePointer (0), block.getWritePointer (1),
-                    n, masterGain, avgRate);
+                    n, masterGain, avgRate, false, &lutSet, ampTables,
+                    overrides.empty() ? nullptr : &overrides, channels);
             if (! fn (block, n)) { guardOffline = savedGuardOffline; return false; }
 
             scorePos = s1;
@@ -277,6 +324,8 @@ public:
     // The app and the plugin turn the guard on in their prepare; the raw
     // engine leaves it off, so a test renders exactly what the score says.
     void setOverloadGuardEnabled (bool on) noexcept;
+    // WP6.3: -1 renders every channel; 0 = Main; i+1 = bank channel i.
+    void setChannelFilter (int ch) noexcept { channelFilter = ch; }
 
 
     // 0 = off, a positive number = that many arcs (the policy does not
@@ -324,6 +373,16 @@ private:
     std::vector<SampleSlot> sampleVoices; // mode-1 voice state per arc
     std::vector<PmSlot> pmVoices; // mode-3 PM voice state per arc
     std::vector<float> scratch; // per-block accumulation, reserved in prepare()
+
+    // WP6.3: the per-channel buckets. Routing is on only when the piece has
+    // channels, so the legacy single-scratch path stays bit-exact.
+    std::vector<float> chanBuf;
+    bool chanRoutingActive = false;
+    int  chanStride = 0;
+    int  mixChannel = 0;
+    int  channelFilter = -1;
+    void addToMix (int n, float v);
+
 
     // live input view (published each block by the host; audio thread only)
     const float* liveRingA = nullptr;
@@ -465,7 +524,8 @@ private:
     // the slot's seamless loop.
     void renderSampleArc(const upic::Arc& arc, const upic::SampleSlot& smp,
                          double playhead, int i0, int i1, double invSr,
-                         const upic::Envelope* e, const upic::Page::SpaceMap& map,
+                         const upic::Envelope* e, const upic::Envelope* ampTable,
+                         const ModContext& mod, const upic::Page::SpaceMap& map,
                          double rate = 1.0, bool freeze = false,
                          float g0 = 1.0f, float gStep = 0.0f);
 
@@ -480,10 +540,12 @@ private:
     // mode) and can read the REVERSED ring (the same content, mirrored in
     // time) instead of the forward one.
     void renderLiveArc(const upic::Arc& arc, double playhead, int i0, int i1,
-                       double invSr, const upic::Envelope* e, const upic::Page::SpaceMap& map,
+                       double invSr, const upic::Envelope* e, const upic::Envelope* ampTable,
+                       const ModContext& mod, const upic::Page::SpaceMap& map,
                        double rate = 1.0, float g0 = 1.0f, float gStep = 0.0f);
 
 
+    // WP6.3: -1 renders every channel; 0 = Main; i+1 = bank channel i.
     static const upic::Waveform* findWave(const std::vector<upic::Waveform>& v, int id);
 
     static const upic::Envelope* findEnv(const std::vector<upic::Envelope>& v, int id);
@@ -540,6 +602,9 @@ bool writePageToWavFile (const juce::File& target,
                                 int samplePitchMode = 0,
                                 int sampleGrainMs = 0,
                                 int liveGrainMs = 0,
+                                const std::vector<upic::Envelope>* ampTables = nullptr,
+                                const std::vector<upic::Channel>* channels = nullptr,
+                                int onlyChannel = -1,
                                 const std::function<bool (int percent)>& progress = {});
 
 
@@ -577,4 +642,7 @@ StemExport renderStems(const upic::Page& page,
                               int samplePitchMode = 0,
                               int sampleGrainMs = 0,
                               int liveGrainMs = 0,
+                              const std::vector<upic::Envelope>* ampTables = nullptr,
+                              const std::vector<upic::Channel>* channels = nullptr,
+                              int onlyChannel = -1,
                               const std::function<bool (int percent)>& progress = {});

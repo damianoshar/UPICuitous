@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<JUCERPROJECT id="up1c10" name="UPICuitous" projectType="guiapp" version="0.29.0"
+<JUCERPROJECT id="up1c10" name="UPICuitous" projectType="guiapp" version="0.35.0"
               bundleIdentifier="org.upicuitous" companyName="UPICuitous"
               defines="JUCE_WEB_BROWSER=0&#10;JUCE_USE_CURL=0&#10;JUCE_VST3_CAN_REPLACE_VST2=0&#10;JUCE_DISPLAY_SPLASH_SCREEN=0&#10;JUCE_REPORT_APP_USAGE=0&#10;JUCE_STRICT_REFCOUNTEDPOINTER=1&#10;JUCE_CORE_INCLUDE_JNI_HELPERS=1"
               cppLanguageStandard="17" useAppConfig="0" addUsingNamespaceToJuceHeader="1"
@@ -42,6 +42,17 @@
             file="Source/MainComponentJobs.cpp"/>
       <FILE id="mRec11" name="MainComponentRecovery.cpp" compile="1" resource="0"
             file="Source/MainComponentRecovery.cpp"/>
+      <!-- WP7 (Wave F): the sample extraction panel and the user library. -->
+      <FILE id="wp7Smp01" name="MainComponentSampleExtract.cpp" compile="1" resource="0"
+            file="Source/MainComponentSampleExtract.cpp"/>
+      <FILE id="wp7Lib02" name="UserLibrary.h" compile="0" resource="0"
+            file="Source/UserLibrary.h"/>
+      <FILE id="wp7Anl03" name="SampleAnalysis.h" compile="0" resource="0"
+            file="Source/SampleAnalysis.h"/>
+      <FILE id="wp7Pnl04" name="SampleExtractPanel.h" compile="0" resource="0"
+            file="Source/SampleExtractPanel.h"/>
+      <FILE id="wp7Tst05" name="SelfTestWP7.cpp" compile="1" resource="0"
+            file="Source/SelfTestWP7.cpp"/>
       <FILE id="mChdr3" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
       <FILE id="icMap1" name="UpicButtonIcons.h" compile="0" resource="0" file="Source/UpicButtonIcons.h"/>
       <FILE id="icData2" name="UpicButtonIconData.h" compile="0" resource="0" file="Source/UpicButtonIconData.h"/>
@@ -78,6 +89,8 @@
       <FILE id="uFvbxi" name="LivePitch.h" compile="0" resource="0" file="Source/LivePitch.h"/>
       <FILE id="qySKM1" name="AndroidBars.h" compile="0" resource="0" file="Source/AndroidBars.h"/>
       <FILE id="mSnp12" name="ModelSnapshot.h" compile="0" resource="0" file="Source/ModelSnapshot.h"/>
+      <!-- WP6.4: the lazily constructed mixer-panel overlay. -->
+      <FILE id="chPnl13" name="ChannelPanel.h" compile="0" resource="0" file="Source/ChannelPanel.h"/>
       <FILE id="aLsp13" name="ArcListPanel.h" compile="0" resource="0" file="Source/ArcListPanel.h"/>
     <FILE id="mHub22" name="MidiHub.h" compile="0" resource="0" file="Source/MidiHub.h"/>
     <FILE id="aSio23" name="AsioConfig.h" compile="0" resource="0" file="Source/AsioConfig.h"/>

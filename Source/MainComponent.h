@@ -1,9 +1,13 @@
 #pragma once
 #include <JuceHeader.h>
 #include <atomic>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <utility>
 #include "UpicModel.h"
 #include "UpicEngine.h"
 #include "ModelSnapshot.h"
@@ -16,9 +20,51 @@
 #include "EnvelopeEditor.h"
 #include "LibraryManager.h"
 #include "OverlayPanels.h"
+#include "FreqTableEditor.h"
+#include "AmpTableEditor.h"
+#include "GroupPanel.h"
+#include "SequencePanel.h"
+#include "ChannelPanel.h"
+#include "SampleExtractPanel.h"  // WP7
+#include "UserLibrary.h"          // WP7
 #include "OscScrubReceiver.h"
 #include "JobRunner.h"
 #include "UpicButtonIcons.h"
+
+//==============================================================================
+// WP7: the audio preview routes.
+//
+// The score's ordinary scrub/freeze routes and the sample-extraction A/B
+// route are mutually exclusive. One atomic token is the arbiter: its low two
+// bits name the route and its upper bits carry that route's generation (the
+// extraction generation, or the ordinary route's reset serial). The audio
+// thread reads the token once per block, so an old extraction snapshot can
+// never be combined with a newly enabled scrub or freeze.
+enum class AudioPreviewRoute : std::uint8_t
+{
+    none = 0,
+    scrub,
+    freeze,
+    sampleExtract
+};
+
+constexpr std::uint64_t makeAudioPreviewRouteToken (AudioPreviewRoute route,
+                                                    std::uint64_t generation) noexcept
+{
+    constexpr std::uint64_t generationMask = (std::uint64_t { 1 } << 62) - 1;
+    return ((generation & generationMask) << 2)
+         | static_cast<std::uint64_t> (route);
+}
+
+constexpr AudioPreviewRoute audioPreviewRouteFromToken (std::uint64_t token) noexcept
+{
+    return static_cast<AudioPreviewRoute> (token & std::uint64_t { 3 });
+}
+
+constexpr std::uint64_t audioPreviewGenerationFromToken (std::uint64_t token) noexcept
+{
+    return token >> 2;
+}
 
 //==============================================================================
 // Main UPIC window: transport + score page + wavetable/envelope editors.
@@ -65,6 +111,8 @@ public:
         float* scoreR = nullptr;
         float* freezeL = nullptr;   // the frozen (held) score
         float* freezeR = nullptr;
+        float* extractL = nullptr;  // WP7: the extraction preview's own output
+        float* extractR = nullptr;
         int numSamples = 0;
         bool playingAtStart = false;
         // v1.33.4 (L14): the sample rate, read once per block (it crosses
@@ -84,8 +132,10 @@ public:
     // must not fade a live microphone.
     void applyTransportGain (float* scoreLeft, float* scoreRight, int numSamples,
                              double sampleRate, bool scoreAudible);
-    void renderScrubPreview (const ModelSnapshot& snap, AudioBlock& block, double previewGain);
-    void renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& block, double freezeGain);
+    void renderScrubPreview (const ModelSnapshot& snap, AudioBlock& block,
+                             double previewGain, std::uint64_t routeGeneration);
+    void renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& block,
+                            double freezeGain, std::uint64_t routeGeneration);
 
     // v1.15: call after a change that replaces the sound that is playing
     // (page change, loaded material, pitch-mode switch) - the audio thread
@@ -185,6 +235,52 @@ public:
     bool libraryDeleteEnvelope (int replacementId);
     bool libraryMakeEnvelopeUnique();
 
+    // WP7: the user-level library. Publishing copies an asset out of the
+    // piece (it changes no model state); importing copies it back in with a
+    // NEW local id (the caller wraps it in one undo transaction); Reveal
+    // opens the library's folder.
+    bool libraryPublishWave();
+    bool libraryImportWave();
+    bool libraryRevealWave();
+
+    bool libraryPublishEnvelope();
+    bool libraryImportEnvelope();
+    bool libraryRevealEnvelope();
+
+    bool libraryPublishAmpTable();
+    bool libraryImportAmpTable();
+    bool libraryRevealAmpTable();
+
+    bool libraryPublishFreqTable();
+    bool libraryImportFreqTable();
+    bool libraryRevealFreqTable();
+
+    bool libraryPublishSequence();
+    bool libraryImportSequence();
+    bool libraryRevealSequence();
+
+    // WP7: the sample extraction panel. The panel itself is built lazily on
+    // the message thread; these commands are the paths its buttons use.
+    void openSampleExtractPanel();
+    void closeSampleExtractPanel();
+    void previewSampleExtract();
+    bool saveSampleCycleToWave();
+    bool saveSampleEnvelope();
+    // Cancels the extraction route. The optional snapshot publication makes
+    // the cancellation visible to the audio thread immediately.
+    void resetSampleExtractRoute();
+    void cancelSampleExtractPreview();
+    // Cancels only the named extraction generation. A deferred host
+    // lifecycle request uses this so it cannot cancel a newer preview.
+    void cancelSampleExtractPreviewGeneration (std::uint64_t generation);
+    // Advances the message-thread generation and publishes its atomic
+    // mirror for host-thread lifecycle requests.
+    void advanceSampleExtractPreviewGeneration();
+    // A material replacement, piece load or undo makes a captured extraction
+    // source stale. The panel is closed instead of silently saving a result
+    // derived from material that is no longer in the piece.
+    void invalidateSampleExtractSource();
+
     // v1.33.4 (M22): how many model snapshots were published (the timer
     // publishes only when the model changed). The selftest watches it.
     int modelSnapshotPublishCount() const { return snapshotPublishCount.load (std::memory_order_relaxed); }
@@ -264,7 +360,9 @@ public:
         upic::Page page;
         std::vector<upic::Waveform> waves;
         std::vector<upic::Envelope> envs;
-        std::vector<upic::SampleSlot> slots;
+        std::vector<upic::Envelope> ampTables;  // WP2
+        std::vector<upic::Channel> channels;    // WP6
+            std::vector<upic::SampleSlot> slots;
         double sr = 44100.0;
         float masterGain = 0.8f;
         int samplePitchMode = 0, sampleGrainMs = 0, liveGrainMs = 0;
@@ -307,10 +405,186 @@ public:
     juce::String oscMulticastGroupForTest() const { return osc.getMulticastGroup(); }
     bool settingsVisibleForTest() const { return settingsOverlay.isVisible(); }
     bool oscEnabledForTest() const { return osc.isEnabled(); }
+    // WP7: the host-preparation generation is current only after the
+    // message thread has applied the requested rate and block size.
+    bool audioPreparationIsCurrentForTest() const
+    {
+        const auto requested = requestedAudioPreparationGeneration.load (
+            std::memory_order_acquire);
+        return requested != 0
+            && requested == publishedAudioPreparationGeneration.load (
+                std::memory_order_acquire);
+    }
+    std::uint64_t audioPreparationGenerationForTest() const
+    { return publishedAudioPreparationGeneration.load (std::memory_order_acquire); }
     double pageDurationForTest() const { return curPage().durationSec; }
     // v1.33: the page's four spaces and an arc's space, so the selftest can
     // check that the controls really reach the model.
     int pageSpaceForTest (int i) const { return curPage().spaces[(size_t) juce::jlimit (0, 3, i)]; }
+    // WP1: the drawn tables, through the same paths the Table... button and
+    // the editor use.
+    bool spaceDefEditableForTest (int i) const
+    { return curPage().spaceDefs[(size_t) juce::jlimit (0, 3, i)].editable; }
+    int spaceDefPointCountForTest (int i) const
+    { return (int) curPage().spaceDefs[(size_t) juce::jlimit (0, 3, i)].points.size(); }
+    bool freqTableOpenForTest() const { return freqTableEd.isVisible(); }
+    int freqTablePageForTest() const { return freqTablePage; }
+    int freqTableSpaceForTest() const { return freqTableSpace; }
+    // WP7: the frequency table's destination is captured at open time. The
+    // test moves the current page afterwards to prove that an import still
+    // lands in the captured page/space.
+    void setCurrentPageForTest (int page)
+    {
+        currentPage = juce::jlimit (0, juce::jmax (0, (int) pages.size() - 1), page);
+    }
+    bool pageSpaceDefEditableForTest (int page, int space) const
+    {
+        if (page < 0 || page >= (int) pages.size()) return false;
+        return pages[(size_t) page].spaceDefs[(size_t) juce::jlimit (0, 3, space)].editable;
+    }
+    int pageSpaceDefPointCountForTest (int page, int space) const
+    {
+        if (page < 0 || page >= (int) pages.size()) return -1;
+        return (int) pages[(size_t) page].spaceDefs[(size_t) juce::jlimit (0, 3, space)].points.size();
+    }
+    void openFreqTableForTest (int s) { showFreqTableEditor (s); }
+    void commitFreqTableCurveForTest (const std::vector<upic::TablePoint>& pts)
+    { freqTableEd.commitCurveForTest (pts); }
+    void commitFreqTableFlagsForTest() { freqTableEd.commitFlagsForTest(); }
+    // WP2: the amplitude table bank, through the paths the UI uses.
+    int ampTableCountForTest() const { return (int) ampTables.size(); }
+    int ampTableIdAtForTest (int i) const
+    { return (i >= 0 && i < (int) ampTables.size()) ? ampTables[(size_t) i].id : -1; }
+    float ampTableValueForTest (int i, float x) const
+    { return (i >= 0 && i < (int) ampTables.size()) ? ampTables[(size_t) i].valueAt (x) : x; }
+    int arcAmpTableIdForTest (int arcId) const
+    {
+        for (auto& a : curPage().arcs) if (a.id == arcId) return a.amplitudeTableId;
+        return -2;
+    }
+    bool ampTableEditorOpenForTest() const { return ampTableEd.isVisible(); }
+    void openAmpTableEditorForTest() { showAmpTableEditor(); }
+    void ampTableDrawForTest (const std::vector<upic::EnvPoint>& pts)
+    { ampTableEd.drawCurveForTest (pts); }
+    void ampTableSelectForTest (int index) { ampTableEd.selectRowForTest (index); }
+    void ampTableAssignForTest (int id) { applyAmpTableToSelection (id); }
+    void ampTableNewForTest() { ampTableEd.newForTest(); }
+    void ampTableDeleteForTest() { ampTableEd.deleteForTest(); }
+    void ampTableDuplicateForTest() { ampTableEd.duplicateForTest(); }
+    void ampTableRenameForTest (const juce::String& n) { ampTableEd.renameForTest (n); }
+    // WP3: the groups, through the panel's commands.
+    int groupCountForTest() const { return (int) curPage().groups.size(); }
+    int channelCountForTest() const { return (int) channels.size(); }
+    int channelIdAtForTest (int i) const { return (i >= 0 && i < (int) channels.size()) ? channels[(size_t) i].id : -1; }
+    float channelGainAtForTest (int i) const { return (i >= 0 && i < (int) channels.size()) ? channels[(size_t) i].gain : -1.0f; }
+    int channelEnvelopePointsAtForTest (int i) const { return (i >= 0 && i < (int) channels.size()) ? (int) channels[(size_t) i].envelope.size() : -1; }
+    // --- WP6.4 test accessors ---
+    bool channelMutedAtForTest (int i) const { return i >= 0 && i < (int) channels.size() && channels[(size_t) i].muted; }
+    bool channelSoloAtForTest (int i) const { return i >= 0 && i < (int) channels.size() && channels[(size_t) i].solo; }
+    bool channelPanelOpenForTest() const { return channelPanel != nullptr && channelPanel->isVisible(); }
+    void openChannelPanelForTest() { showChannelPanel(); }
+    void closeChannelPanelForTest() { closeChannelPanel(); }
+    void channelNewForTest() { if (channelPanel != nullptr) channelPanel->newForTest(); }
+    void channelDeleteForTest() { if (channelPanel != nullptr) channelPanel->deleteForTest(); }
+    void channelSelectForTest (int i) { if (channelPanel != nullptr) channelPanel->selectForTest (i); }
+    void channelMuteForTest (bool on) { if (channelPanel != nullptr) channelPanel->muteForTest (on); }
+    void channelSoloForTest (bool on) { if (channelPanel != nullptr) channelPanel->soloForTest (on); }
+    void channelGainForTest (float v) { if (channelPanel != nullptr) channelPanel->gainForTest (v); }
+    void channelRenameForTest (const juce::String& n) { if (channelPanel != nullptr) channelPanel->renameForTest (n); }
+    void channelAssignForTest (int id) { setChannelOnSelection (id); }
+    // --- end WP6.4 ---
+    int arcChannelForTest (int arcId) const
+    {
+        for (auto& a : curPage().arcs) if (a.id == arcId) return a.channelId;
+        return -2;
+    }
+    int groupIdAtForTest (int i) const
+    { return (i >= 0 && i < (int) curPage().groups.size()) ? curPage().groups[(size_t) i].id : -1; }
+    int groupMemberCountAtForTest (int i) const
+    { return (i >= 0 && i < (int) curPage().groups.size()) ? (int) curPage().groups[(size_t) i].arcIds.size() : -1; }
+    int arcGroupIdForTest (int arcId) const
+    {
+        for (auto& g : curPage().groups)
+            for (int aid : g.arcIds) if (aid == arcId) return g.id;
+        return -1;
+    }
+    bool groupPanelOpenForTest() const { return groupPanel.isVisible(); }
+    void openGroupPanelForTest() { showGroupPanel(); }
+    void groupNewForTest() { groupPanel.newForTest(); }
+    void groupDeleteForTest() { groupPanel.deleteForTest(); }
+    void groupAddSelForTest() { groupPanel.addSelForTest(); }
+    void groupRemoveSelForTest() { groupPanel.removeSelForTest(); }
+    void groupSelectMembersForTest() { groupPanel.selectMembersForTest(); }
+    void groupMuteForTest (bool on) { groupPanel.setMuteForTest (on); }
+    void groupSoloForTest (bool on) { groupPanel.setSoloForTest (on); }
+    void groupGainForTest (float v) { groupPanel.setGainForTest (v); }
+    void groupTransposeForTest (double v) { groupPanel.setTransposeForTest (v); }
+    void groupOverrideForTest (int kind, int id) { groupPanel.setOverrideForTest (kind, id); }
+    void groupRenameForTest (const juce::String& n) { groupPanel.renameForTest (n); }
+    int selectedGroupIdForTest() const { return selGroupId; }
+    // WP4: the sequences.
+    int seqCountForTest() const { return (int) sequences.size(); }
+    int seqIdAtForTest (int i) const
+    { return (i >= 0 && i < (int) sequences.size()) ? sequences[(size_t) i].id : -1; }
+    int seqPointCountAtForTest (int i) const
+    { return (i >= 0 && i < (int) sequences.size()) ? (int) sequences[(size_t) i].points.size() : -1; }
+    juce::String seqNameAtForTest (int i) const
+    { return (i >= 0 && i < (int) sequences.size()) ? sequences[(size_t) i].name : juce::String(); }
+    bool seqLoopAtForTest (int i) const
+    { return i >= 0 && i < (int) sequences.size() && sequences[(size_t) i].loop; }
+    int selectedSeqIdForTest() const { return selSeqId; }
+    bool seqRecordingForTest() const { return seqRecording; }
+    bool seqPlayActiveForTest() const { return seqPlayActive.load(); }
+    bool seqPanelOpenForTest() const { return seqPanel.isVisible(); }
+    void openSeqPanelForTest() { showSequencePanel(); }
+    void seqRecordToggleForTest() { seqPanel.recordForTest(); }
+    void seqPlayToggleForTest() { seqPanel.playForTest(); }
+    void seqClearForTest() { seqPanel.clearForTest(); }
+    void seqLoopToggleForTest() { seqPanel.loopForTest(); }
+    void seqSelectPointForTest (int i) { seqPanel.selectPointForTest (i); }
+    void seqTrimForTest() { seqPanel.trimForTest(); }
+    void seqReplaceForTest() { seqPanel.replaceForTest(); }
+    void seqDragPointForTest (int i, double t, int page, double pos)
+    { seqPanel.dragPointForTest (i, t, page, pos); }
+    void seqAppendForTest (double t, int page, double pos)
+    { sequenceAppendRecorderPoint (t, page, pos); }
+    double seqPointTAtForTest (int i, int j) const
+    { return (i >= 0 && i < (int) sequences.size() && j >= 0 && j < (int) sequences[(size_t) i].points.size()) ? sequences[(size_t) i].points[(size_t) j].t : -1.0; }
+    int seqPointPageAtForTest (int i, int j) const
+    { return (i >= 0 && i < (int) sequences.size() && j >= 0 && j < (int) sequences[(size_t) i].points.size()) ? sequences[(size_t) i].points[(size_t) j].page : -1; }
+    double seqPointPosAtForTest (int i, int j) const
+    { return (i >= 0 && i < (int) sequences.size() && j >= 0 && j < (int) sequences[(size_t) i].points.size()) ? sequences[(size_t) i].points[(size_t) j].pos : -1.0; }
+    bool groupMutedAtForTest (int i) const
+    { return i >= 0 && i < (int) curPage().groups.size() && curPage().groups[(size_t) i].muted; }
+    bool groupSoloAtForTest (int i) const
+    { return i >= 0 && i < (int) curPage().groups.size() && curPage().groups[(size_t) i].solo; }
+    float groupGainAtForTest (int i) const
+    { return i >= 0 && i < (int) curPage().groups.size() ? curPage().groups[(size_t) i].gain : -1.0f; }
+    double groupTransposeAtForTest (int i) const
+    { return i >= 0 && i < (int) curPage().groups.size() ? curPage().groups[(size_t) i].transposeSemitones : 0.0; }
+    int arcModulatorForTest (int arcId) const
+    {
+        for (auto& a : curPage().arcs) if (a.id == arcId) return a.modulatorArcId;
+        return -2;
+    }
+    int arcModTargetForTest (int arcId) const
+    {
+        for (auto& a : curPage().arcs) if (a.id == arcId) return a.modTarget;
+        return -1;
+    }
+    double arcModDepthForTest (int arcId) const
+    {
+        for (auto& a : curPage().arcs) if (a.id == arcId) return a.modArcDepth;
+        return -1.0;
+    }
+    void modApplyForTest (int modId, int target, double depth)
+    { setModOnSelection (modId, target, depth); }
+    int groupOverrideAtForTest (int i, int kind) const
+    {
+        if (i < 0 || i >= (int) curPage().groups.size()) return -2;
+        const auto& g = curPage().groups[(size_t) i];
+        return kind == 0 ? g.waveformId : (kind == 1 ? g.envelopeId : g.amplitudeTableId);
+    }
     int arcSpaceForTest (int arcId) const
     {
         for (auto& a : curPage().arcs) if (a.id == arcId) return a.space;
@@ -321,6 +595,9 @@ public:
     // the selftest can check that the editor refuses the arc that does not
     // fit and that the loader says what it had to drop.
     int arcCountForTest() const { return (int) curPage().arcs.size(); }
+    int nextArcIdForTest() const { return curPage().nextArcId; }
+    ScoreEditor& scoreEditorForTest() { return score; }
+    bool waveFromSelectedSlotForTest() { return waveFromSelectedSlot(); }
     int zoneCountForTest() const { return (int) curPage().zones.size(); }
     int pageCountForTest() const { return (int) pages.size(); }
     juce::String flashMessageForTest() const { return flashMsg; }
@@ -380,6 +657,333 @@ public:
     bool waveLibraryDeleteModeForTest() const { return waveLib.isDeleteModeForTest(); }
     bool envLibraryRenameModeForTest() const { return envLib.isRenameModeForTest(); }
     bool envLibraryDeleteModeForTest() const { return envLib.isDeleteModeForTest(); }
+    // WP7: the user-library half of the two managers. The tests switch the
+    // source, publish and import through the same paths the buttons use.
+    void libraryWaveSourceForTest (bool user) { waveLib.setSourceForTest (user); }
+    void libraryEnvelopeSourceForTest (bool user) { envLib.setSourceForTest (user); }
+    int libraryWaveUserItemCountForTest() const { return waveLib.userItemCountForTest(); }
+    int libraryEnvelopeUserItemCountForTest() const { return envLib.userItemCountForTest(); }
+    juce::String libraryWaveUserFileForTest() const { return waveLib.selectedFileNameForTest(); }
+    juce::String libraryEnvelopeUserFileForTest() const { return envLib.selectedFileNameForTest(); }
+    void libraryWaveSelectUserForTest (int index)
+    { waveLib.selectIndexForTest (index); }
+    void libraryEnvelopeSelectUserForTest (int index)
+    { envLib.selectIndexForTest (index); }
+    bool libraryPublishWaveForTest() { return libraryPublishWave(); }
+    bool libraryImportWaveForTest() { return libraryImportWave(); }
+    bool libraryPublishEnvelopeForTest() { return libraryPublishEnvelope(); }
+    bool libraryImportEnvelopeForTest() { return libraryImportEnvelope(); }
+    // Transaction-exact variants: these use the same one beginEdit/endEdit
+    // boundary as the manager's Import button.
+    bool libraryImportWaveTransactionForTest()
+    { beginEdit ("Import the wavetable"); const bool ok = libraryImportWave(); endEdit(); return ok; }
+    bool libraryImportEnvelopeTransactionForTest()
+    { beginEdit ("Import the envelope"); const bool ok = libraryImportEnvelope(); endEdit(); return ok; }
+    bool libraryImportAmpTableTransactionForTest()
+    { beginEdit ("Import the amplitude table"); const bool ok = libraryImportAmpTable(); endEdit(); return ok; }
+    bool libraryImportFreqTableTransactionForTest()
+    { beginEdit ("Import the frequency table"); const bool ok = libraryImportFreqTable(); endEdit(); return ok; }
+    bool libraryImportSequenceTransactionForTest()
+    { beginEdit ("Import the performance sequence"); const bool ok = libraryImportSequence(); endEdit(); return ok; }
+
+    void libraryAmpTableSourceForTest (bool user)
+    { ampTableEd.library.setSourceForTest (user); }
+    void libraryFreqTableSourceForTest (bool user)
+    { freqTableEd.library.setSourceForTest (user); }
+    void librarySequenceSourceForTest (bool user)
+    { seqPanel.library.setSourceForTest (user); }
+    int libraryAmpTableUserItemCountForTest() const
+    { return ampTableEd.library.userItemCountForTest(); }
+    int libraryFreqTableUserItemCountForTest() const
+    { return freqTableEd.library.userItemCountForTest(); }
+    int librarySequenceUserItemCountForTest() const
+    { return seqPanel.library.userItemCountForTest(); }
+    int libraryAmpTableItemCountForTest() const
+    { return ampTableEd.library.itemCountForTest(); }
+    int libraryFreqTableItemCountForTest() const
+    { return freqTableEd.library.itemCountForTest(); }
+    int librarySequenceItemCountForTest() const
+    { return seqPanel.library.itemCountForTest(); }
+    juce::String libraryAmpTableUserFileForTest() const
+    { return ampTableEd.library.selectedFileNameForTest(); }
+    juce::String libraryFreqTableUserFileForTest() const
+    { return freqTableEd.library.selectedFileNameForTest(); }
+    juce::String librarySequenceUserFileForTest() const
+    { return seqPanel.library.selectedFileNameForTest(); }
+    void libraryAmpTableSelectUserForTest (int index)
+    { ampTableEd.library.selectIndexForTest (index); }
+    void libraryFreqTableSelectUserForTest (int index)
+    { freqTableEd.library.selectIndexForTest (index); }
+    void librarySequenceSelectUserForTest (int index)
+    { seqPanel.library.selectIndexForTest (index); }
+    bool libraryPublishAmpTableForTest() { return libraryPublishAmpTable(); }
+    bool libraryPublishFreqTableForTest() { return libraryPublishFreqTable(); }
+    bool libraryPublishSequenceForTest() { return libraryPublishSequence(); }
+    bool libraryImportAmpTableForTest() { return libraryImportAmpTable(); }
+    bool libraryImportFreqTableForTest() { return libraryImportFreqTable(); }
+    bool libraryImportSequenceForTest() { return libraryImportSequence(); }
+    void refreshUserLibraryForTest (upic::UserAssetKind kind)
+    { refreshUserLibraryBoxes (kind); }
+    juce::String lastUserLibraryFailureTextForTest() const
+    { return lastUserLibraryFailureText; }
+
+    // WP7: the sample extraction panel and a synthetic material for its
+    // checks. The material is installed exactly like a decoded file.
+    bool sampleExtractPanelOpenForTest() const
+    { return sampleExtractPanel != nullptr && sampleExtractPanel->isVisible(); }
+    void openSampleExtractForTest() { openSampleExtractPanel(); }
+    void closeSampleExtractForTest() { closeSampleExtractPanel(); }
+    void sampleExtractDetectForTest()
+    {
+        if (sampleExtractPanel == nullptr) return;
+        // Use the panel's command callback, not the analysis method alone:
+        // the real Detect button also refreshes the published preview route.
+        if (sampleExtractPanel->onDetect) sampleExtractPanel->onDetect();
+        else sampleExtractPanel->detectForTest();
+    }
+    void sampleExtractAlignForTest()
+    {
+        if (sampleExtractPanel == nullptr) return;
+        if (sampleExtractPanel->onAlign) sampleExtractPanel->onAlign();
+        else sampleExtractPanel->alignForTest();
+    }
+    void sampleExtractPreviewForTest() { previewSampleExtract(); }
+    void cancelSampleExtractPreviewGenerationForTest (std::uint64_t generation)
+    { cancelSampleExtractPreviewGeneration (generation); }
+    // WP7: the ordinary routes are cancelled on their own (a model
+    // replacement, a transport start). The helper must never take the
+    // extraction route with it.
+    void cancelOrdinaryPreviewRoutesForTest() { cancelOrdinaryPreviewRoutes(); }
+    bool sampleExtractPreviewUsesCycleForTest() const
+    { return sampleExtractPanel != nullptr && sampleExtractPanel->previewExtractedForTest(); }
+    bool sampleExtractPreviewActiveForTest() const
+    { return sampleExtractPreviewState.route != SampleExtractRoute::none; }
+    SampleExtractRoute sampleExtractPreviewRouteForTest() const
+    { return sampleExtractPreviewState.route; }
+    uint64_t sampleExtractPreviewGenerationForTest() const
+    { return sampleExtractPreviewState.generation; }
+    int sampleExtractCycleLengthForTest() const
+    { return sampleExtractPanel != nullptr ? sampleExtractPanel->cycleLengthForTest() : 0; }
+    int sampleExtractCycleStartForTest() const
+    { return sampleExtractPanel != nullptr ? sampleExtractPanel->cycleStartForTest() : 0; }
+    int sampleExtractSourceSlotIdForTest() const
+    { return sampleExtractPanel != nullptr ? sampleExtractPanel->sourceSlotIdForTest() : -1; }
+    std::vector<upic::EnvPoint> sampleExtractEnvelopePointsForTest() const
+    { return sampleExtractPanel != nullptr ? sampleExtractPanel->envelopePointsForTest()
+                                           : std::vector<upic::EnvPoint>(); }
+    int sampleExtractAnalysisChannelForTest() const
+    { return sampleExtractPanel != nullptr ? sampleExtractPanel->analysisChannelForTest() : -1; }
+    int sampleExtractSourceChannelCountForTest() const
+    { return sampleExtractPanel != nullptr ? sampleExtractPanel->sourceChannelCountForTest() : 0; }
+    void sampleExtractSelectChannelForTest (int channel)
+    {
+        if (sampleExtractPanel == nullptr) return;
+        sampleExtractPanel->setSourceChannelForTest (channel);
+        if (sampleExtractPanel->previewOnForTest())
+            restartSampleExtractPreview();
+    }
+    bool sampleExtractPreviewRequestedExtractedForTest() const
+    { return sampleExtractPanel != nullptr
+          && sampleExtractPanel->previewRequestedExtractedForTest(); }
+    int sampleExtractPreviewWaveSizeForTest() const
+    { return sampleExtractPanel != nullptr
+          ? (int) sampleExtractPanel->previewWaveformForTest().samples.size() : 0; }
+    float sampleExtractPreviewWaveSampleForTest (int i) const
+    {
+        if (sampleExtractPanel == nullptr) return 0.0f;
+        const auto& samples = sampleExtractPanel->previewWaveformForTest().samples;
+        return i >= 0 && i < (int) samples.size() ? samples[(size_t) i] : 0.0f;
+    }
+    void sampleExtractSetEnvelopeModeForTest (upic::EnvelopeMode mode)
+    { if (sampleExtractPanel) sampleExtractPanel->setEnvelopeModeForTest (mode); }
+    bool setSampleSlotForTest (int slotIndex, const juce::AudioBuffer<float>& data, double sampleRate);
+    bool sampleTrimForTest (int startFrame, int endFrame)
+    { return waveEd.trimSampleForTest (startFrame, endFrame); }
+    void sampleReverseForTest()
+    {
+        revBtn.setToggleState (! revBtn.getToggleState(), juce::dontSendNotification);
+        revBtn.onClick();
+    }
+    void sampleMaterialModeForTest()
+    {
+        drawMatMode = 1;
+        updateSampleView();
+    }
+    void sampleRefForTest (double hz)
+    {
+        drawMatMode = 1;
+        refSlider.setValue (hz, juce::dontSendNotification);
+        refSlider.onValueChange();
+    }
+    void sampleLevelForTest (double level)
+    {
+        levelSlider.setValue (level, juce::dontSendNotification);
+        levelSlider.onValueChange();
+    }
+    bool sampleExtractPreviewMatchesWaveForTest (int waveId) const
+    {
+        if (sampleExtractPanel == nullptr) return false;
+        const auto& preview = sampleExtractPanel->previewWaveformForTest();
+        for (const auto& wave : waveforms)
+        {
+            if (wave.id != waveId || wave.samples.size() != preview.samples.size()) continue;
+            return std::memcmp (wave.samples.data(), preview.samples.data(),
+                                wave.samples.size() * sizeof (float)) == 0;
+        }
+        return false;
+    }
+    bool sampleExtractSnapshotMatchesPreviewForTest() const
+    {
+        if (sampleExtractPanel == nullptr
+            || publishedSampleExtractPreview.state.route != SampleExtractRoute::extracted)
+            return false;
+        const auto& preview = sampleExtractPanel->previewWaveformForTest();
+        // Read the isolated vector directly. The renderer's route accessor is
+        // deliberately not part of this check: a renderer that accidentally
+        // selected the piece's same-id wave must fail this test.
+        const auto& routeWaves = publishedSampleExtractPreview.waves;
+        if (routeWaves.size() != 1 || preview.samples.size() != routeWaves.front().samples.size())
+            return false;
+        return std::memcmp (preview.samples.data(), routeWaves.front().samples.data(),
+                            preview.samples.size() * sizeof (float)) == 0;
+    }
+    bool sampleExtractSnapshotUsesSourceChannelForTest (int channel, int frame) const;
+    bool sampleExtractRenderedMatchesIsolatedWaveForTest (
+        const juce::AudioBuffer<float>& rendered, int blockSize) const;
+    void sampleExtractScrubForTest (double timeSec)
+    {
+        if (score.onScrubPreview) score.onScrubPreview (timeSec);
+    }
+    void sampleExtractFreezeForTest (double timeSec)
+    {
+        if (score.onScrubFreezeStart) score.onScrubFreezeStart (timeSec);
+    }
+    void sampleExtractFreezeStopForTest()
+    {
+        if (score.onScrubFreezeStop) score.onScrubFreezeStop();
+    }
+    void sampleExtractFreezeCancelForTest()
+    {
+        if (score.onScrubFreezeCancel) score.onScrubFreezeCancel();
+    }
+
+    // WP7 route arbitration: force a route change immediately after the
+    // audio callback has taken its snapshot. This reproduces the former
+    // extraction/scrub race deterministically: the snapshot is still the old
+    // one, while the route token and the ordinary-route flags are already
+    // the new ones. -1 clears the override. The optional generation offset
+    // lets the test force an old snapshot/new extraction-generation pair.
+    void setAudioPreviewRouteOverrideForTest (int route, int generationOffset = 0)
+    {
+        const auto packed = route < 0
+            ? ~std::uint64_t { 0 }
+            : (static_cast<std::uint64_t> (static_cast<std::uint32_t> (route))
+               | (static_cast<std::uint64_t> (
+                      static_cast<std::uint32_t> (juce::jmax (0, generationOffset)))
+                  << 32));
+        audioPreviewRouteTestOverride.store (packed, std::memory_order_release);
+    }
+    // Selftest-only: make the next audio callback take the null-snapshot
+    // path. This changes no handover pointer and is safe even if a host
+    // callback is active; production code never retires a live snapshot
+    // from the message thread.
+    void setAudioPreviewSkipSnapshotForTest (bool skip)
+    {
+        audioPreviewSkipSnapshotForTest.store (skip, std::memory_order_relaxed);
+    }
+    AudioPreviewRoute audioPreviewRouteForTest() const
+    {
+        return audioPreviewRouteFromToken (audioPreviewRouteToken.load (
+            std::memory_order_acquire));
+    }
+    std::uint64_t audioPreviewRouteGenerationForTest() const
+    {
+        return audioPreviewGenerationFromToken (audioPreviewRouteToken.load (
+            std::memory_order_acquire));
+    }
+    std::uint64_t ordinaryPreviewGenerationForTest() const
+    {
+        return ordinaryPreviewGeneration.load (std::memory_order_acquire);
+    }
+    // Selftest-only: pause the next ordinary route claim after it captures
+    // its lifecycle epoch. The host boundary can then run before the claim
+    // takes the route lock, making the stale-epoch rejection deterministic.
+    void pauseNextAudioPreviewRouteClaimForTest()
+    {
+        audioPreviewRouteClaimPausedFlagForTest.store (false, std::memory_order_relaxed);
+        audioPreviewRouteClaimResumeForTest.store (false, std::memory_order_relaxed);
+        audioPreviewRouteClaimPauseRequestedForTest.store (true, std::memory_order_release);
+    }
+    bool audioPreviewRouteClaimPausedForTest() const
+    {
+        return audioPreviewRouteClaimPausedFlagForTest.load (std::memory_order_acquire);
+    }
+    void resumeAudioPreviewRouteClaimForTest()
+    {
+        audioPreviewRouteClaimResumeForTest.store (true, std::memory_order_release);
+    }
+    AudioPreviewRoute audioPreviewRouteSeenForTest() const
+    {
+        return audioPreviewRouteFromToken (audioPreviewRouteTokenSeenForTest.load (
+            std::memory_order_acquire));
+    }
+    std::uint64_t audioPreviewRouteGenerationSeenForTest() const
+    {
+        return audioPreviewGenerationFromToken (audioPreviewRouteTokenSeenForTest.load (
+            std::memory_order_acquire));
+    }
+    bool sampleExtractPublishedRouteIsNoneForTest() const
+    {
+        const auto state = publishedSampleExtractSnapshotState.load (
+            std::memory_order_acquire);
+        return static_cast<SampleExtractRoute> (state & 3u)
+                 == SampleExtractRoute::none
+            && (state & 4u) == 0;
+    }
+    bool scrubPreviewActiveForTest() const
+    {
+        return ordinaryPreviewState.scrubActive;
+    }
+    bool scrubFreezeActiveForTest() const
+    {
+        return ordinaryPreviewState.freezeActive;
+    }
+    int scrubPreviewRemainingForTest() const
+    {
+        return ordinaryPreviewState.scrubRemaining;
+    }
+    double scrubFreezeStopAtForTest() const
+    {
+        return ordinaryPreviewState.freezeStopAtMs;
+    }
+    double scrubFreezeTransitionStartForTest() const
+    {
+        return ordinaryPreviewState.transitionStartMs;
+    }
+    double scrubFreezeTransitionEndForTest() const
+    {
+        return ordinaryPreviewState.transitionEndMs;
+    }
+    std::uint64_t ordinaryPreviewCoherenceFailureCountForTest() const
+    {
+        return ordinaryPreviewCoherenceFailureCount.load (std::memory_order_relaxed);
+    }
+    bool audioFreezeActiveForTest() const { return audioFreezeActive; }
+    bool audioFreezeExpiredForTest() const { return audioFreezeExpired; }
+    std::uint64_t audioFreezeGenerationForTest() const { return audioFreezeGeneration; }
+    std::shared_ptr<std::atomic<bool>> audioPreviewCallbackGateClosedFlagForTest() const
+    {
+        // An aliasing shared_ptr: it keeps the gate alive and observes the
+        // gate's own "closed" flag, so the production code carries one
+        // allocation for the gate and no separate observer.
+        if (audioPreviewCallbackGate == nullptr)
+            return {};
+
+        return std::shared_ptr<std::atomic<bool>> (audioPreviewCallbackGate,
+                                                   &audioPreviewCallbackGate->closed);
+    }
+    void sampleExtractFreezeStopAtForTest (double stopAtMs)
+    { updateScrubFreezeStop (stopAtMs); }
     int arcWaveformIdForTest (int arcId) const
     {
         for (const auto& a : curPage().arcs) if (a.id == arcId) return a.waveformId;
@@ -512,6 +1116,8 @@ public:
     void paint(juce::Graphics& g) override;
     void resized() override;
     void timerCallback() override;
+    std::uint64_t scoreTimerRepaintRequestCountForTest() const
+    { return scoreTimerRepaintRequestCount; }
 
 private:
     // --- construction ---
@@ -538,6 +1144,87 @@ private:
     void buildLiveInputControls();
     void buildScoreArea();
     void buildEditors();
+
+    // Undo/redo restores the model, not the UI's bank selections. Keep a
+    // selected asset selected when the restored piece still owns that id.
+    void restoreHistorySelections (int waveId, int envelopeId, int ampTableId,
+                                   int sequenceId, int sampleSlotIndex);
+
+    // WP7: publish the one route token that arbitrates the ordinary
+    // scrub/freeze routes and the extraction A/B route. The message thread
+    // calls this; the audio thread only reads the atomic token.
+    void setAudioPreviewRoute (AudioPreviewRoute route);
+
+    // Release the shared token only when the named route still owns it.
+    // This keeps one route's cancellation from stealing a route that was
+    // claimed after it (for example, a deferred extraction cancellation
+    // arriving after a new scrub).
+    void releaseAudioPreviewRouteIf (AudioPreviewRoute route);
+
+    // Release one exact token. The deferred lifecycle cancellation uses the
+    // extraction generation it captured, so it cannot cancel a newer preview.
+    void releaseAudioPreviewRouteTokenIf (std::uint64_t expectedToken);
+
+    // Capture a lifecycle epoch before preparing route state. After taking
+    // audioPreviewRouteLock, audioPreviewRouteClaimIsCurrent() decides
+    // whether that claim may still be published.
+    std::uint64_t audioPreviewRouteEpochForClaim() const;
+    bool audioPreviewRouteClaimIsCurrent (std::uint64_t epoch) const;
+
+    // The ordinary scrub/freeze request is published as one immutable
+    // versioned record. The message thread owns the source state; the audio
+    // thread takes the newest record through the same lock-free handover as
+    // the model snapshot, then owns the private transport state for that
+    // generation. No sequence of independent atomics can form a mixed record.
+    struct OrdinaryPreviewState
+    {
+        std::uint64_t generation = 0;
+        std::uint64_t scrubTransport = 0;
+        std::uint64_t freezeTransport = 0;
+        std::uint64_t freezePhase = 0;
+        bool scrubActive = false;
+        double scrubPlayhead = 0.0;
+        int scrubRemaining = 0;
+        double scrubRate = 1.0;
+        bool freezeActive = false;
+        double freezePlayhead = 0.0;
+        double freezeStopAtMs = 0.0;
+        double transitionStartMs = 0.0;
+        double transitionEndMs = 0.0;
+        std::uint64_t coherenceTag = 0;
+    };
+
+    struct OrdinaryPreviewSnapshot : SnapshotBase
+    {
+        explicit OrdinaryPreviewSnapshot (const OrdinaryPreviewState& s) : state (s) {}
+        OrdinaryPreviewState state;
+    };
+
+    static std::uint64_t ordinaryPreviewCoherenceTag (
+        const OrdinaryPreviewState& state) noexcept;
+    OrdinaryPreviewState copyOrdinaryPreviewStateForMessageThread() const noexcept;
+    void publishOrdinaryPreviewState (const OrdinaryPreviewState& state);
+    void clearOrdinaryPreviewRoutes();
+    // Ends an ordinary preview and releases its exact route token. Model
+    // replacement and transport start use this so an old request cannot
+    // render the replacement piece or resume after Stop.
+    void cancelOrdinaryPreviewRoutes();
+    bool claimScrubPreviewRoute (double timeSec, double rate);
+    bool claimScrubFreezeRoute (double timeSec);
+    void updateScrubFreezeStop (double stopAtMs);
+    void cancelScrubFreezeRoute();
+
+    // A host preparation/release is a hard boundary for every preview
+    // route. The lifecycle epoch is odd while the boundary is active and
+    // even between boundaries, so a publisher that captured either side of
+    // the boundary is rejected instead of arming a route during preparation.
+    // The caller holds audioPreviewLifecycleLock across the whole boundary.
+    std::uint64_t beginPreviewRoutesForHostLifecycle();
+    void endPreviewRoutesForHostLifecycle();
+    void cancelSampleExtractPreviewForHostLifecycle (std::uint64_t generation);
+    // Ends every preview route at a host preparation/release boundary.
+    void cancelPreviewRoutesForHostLifecycle();
+    void closeAudioPreviewCallbackGate();
 
     // --- F6 (2026-11-17): the view commands and the numeric edit ---------
     // The numeric edit moves the selected point through the same path as a
@@ -820,6 +1507,29 @@ private:
     // --- data ---
     std::vector<upic::Waveform> waveforms;
     std::vector<upic::Envelope> envelopes;
+    // WP2: the amplitude conversion tables (their own bank).
+    std::vector<upic::AmplitudeTable> ampTables;
+
+    // WP4: the performance sequences (piece-level, recorded and replayed by
+    // the audio thread's own clock).
+    std::vector<upic::PerformanceSequence> sequences;
+    // WP6: the mixer channels (model only; engine/UI in later milestones).
+    std::vector<upic::Channel> channels;
+    int nextChannelId = 1;
+    int selChannelId = -1;
+
+    int selSeqId = -1;
+    bool seqRecording = false;
+    double seqRecordStartMs = 0.0;
+    double seqRecordTimeOffset = 0.0;   // replace-tail recordings start at this t
+    double seqReplaceFromT = -1.0;      // armed replace-tail point
+    double seqOverwriteArmedMs = -1.0;  // two-step overwrite confirmation
+    bool seqDecimated = false;          // the recorder thinned the points to fit
+    bool seqEditOpen = false;           // the record session owns one undo step
+    std::atomic<bool> seqPlayActive { false };
+    std::atomic<int> seqActiveId { -1 };
+    std::atomic<double> seqClock { 0.0 };
+
     std::vector<upic::SampleSlot> sampleSlots; // fixed 8 slots, ids 1..8
     std::vector<upic::Page> pages;
     int currentPage = 0;
@@ -830,6 +1540,25 @@ private:
 
     UpicEngine engine;
     UpicEngine scrubEngine;   // v1.28: dedicated engine for scrub previews
+    // WP7: the sample extraction preview has its own engine and transport
+    // state. It can never share the score's scrub voice or playhead.
+    UpicEngine sampleExtractEngine;
+    // The host may prepare on a setup thread while an audio block is still
+    // finishing. This gate serialises engine/scratch preparation with the
+    // block; the audio side uses a non-blocking try-lock and stays silent
+    // while preparation owns the gate.
+    juce::CriticalSection audioEnginePreparationLock;
+    // A host preparation is published as a generation. The host thread only
+    // records the request; the message thread applies it to the engine and
+    // publishes the matching generation. The audio callback renders only
+    // while the requested and published generations are equal.
+    juce::CriticalSection audioPreparationRequestLock;
+    std::atomic<std::uint64_t> requestedAudioPreparationGeneration { 0 };
+    std::atomic<std::uint64_t> publishedAudioPreparationGeneration { 0 };
+    // The message thread publishes how many vocoder voices the current model
+    // needs. Host-thread preparation never inspects pages/currentPage.
+    std::atomic<int> publishedSampleVocoderVoices { 0 };
+    std::atomic<int> publishedLiveVocoderVoices { 0 };
     juce::CriticalSection dataLock;   // message-thread model lock; the audio
                                       // thread never takes it (v1.18)
     double playheadSec = 0.0;         // message thread's view (ScoreEditor)
@@ -900,20 +1629,139 @@ private:
     std::atomic<bool> arcEditing { false }; // an arc is being dragged/drawn
     std::atomic<bool> muteWhileDragging { true };        // skip model publishes while editing
     std::atomic<int> dragSmoothMs { 20 };              // fade time on release
-    std::atomic<bool> scrubPreviewActive { false };
-    std::atomic<bool> scrubFreezeActive { false };
-    std::atomic<double> scrubPreviewPlayhead { 0.0 };
-    std::atomic<double> scrubRate { 1.0 }; // signed scrub speed (drag direction)
-    std::atomic<int> scrubPreviewSerial { 0 }; // resets the scrub voice on each drag event
-    int seenScrubPreviewSerial = 0;
-    std::atomic<double> scrubFreezePlayhead { 0.0 };
-    std::atomic<double> scrubFreezeStopAtMs { 0.0 };
-    std::atomic<double> scrubFreezeTransitionStartMs { 0.0 };
-    std::atomic<double> scrubFreezeTransitionEndMs { 0.0 };
-    std::atomic<int> scrubPreviewRemaining { 0 };
-    std::atomic<int> scrubFreezeStartSerial { 0 };
-    int seenFreezeStartSerial = 0;
-    int scrubPreviewLen = 0;               // samples; set in constructor
+    // WP7: the one authoritative preview-route token. The ordinary scrub and
+    // freeze routes and the extraction A/B route can never render together.
+    std::atomic<std::uint64_t> audioPreviewRouteToken { makeAudioPreviewRouteToken (
+        AudioPreviewRoute::none, 0) };
+    // Route publication and host lifecycle cancellation share this lock.
+    // The epoch lets a publisher that was waiting when a lifecycle boundary
+    // began notice that its claim is stale and refuse to arm a route.
+    juce::CriticalSection audioPreviewRouteLock;
+    // Serialises overlapping host preparation/release boundaries. The epoch
+    // is odd while a boundary is active and even between boundaries.
+    juce::CriticalSection audioPreviewLifecycleLock;
+    std::atomic<std::uint64_t> audioPreviewLifecycleEpoch { 0 };
+    std::atomic<bool> audioPreviewLifecycleCancelling { false };
+    // A lifecycle cancellation may have to cross from a host thread to the
+    // message thread. This gate keeps a queued callback from touching the
+    // component after an off-thread destructor has begun.
+    struct AudioPreviewCallbackGate
+    {
+        std::mutex mutex;
+        std::atomic<bool> alive { true };
+        // Selftest-only observer: it lets the teardown regression wait until
+        // the destructor has closed the gate before it dispatches the queued
+        // callback. It lives inside the gate, so the production code carries
+        // one allocation, not two.
+        std::atomic<bool> closed { false };
+    };
+    std::shared_ptr<AudioPreviewCallbackGate> audioPreviewCallbackGate =
+        std::make_shared<AudioPreviewCallbackGate>();
+
+    // Queue work on the message thread without relying on Component's
+    // SafePointer. SafePointer invalidation is not reliable when a plugin
+    // host destroys the component on another thread: a queued callback could
+    // retain a non-null pointer to freed storage. The shared gate is closed
+    // before teardown; a callback either owns the gate while the component
+    // is whole or observes the closed gate and does nothing.
+    template <typename Callback>
+    void postToMessageThread (Callback&& callback)
+    {
+        auto* const messages = juce::MessageManager::getInstanceWithoutCreating();
+        if (messages == nullptr)
+            return;
+
+        const auto gate = audioPreviewCallbackGate;
+        auto* const component = this;
+        messages->callAsync ([gate, component,
+                              callback = std::forward<Callback> (callback)]() mutable
+        {
+            std::lock_guard<std::mutex> lock (gate->mutex);
+            if (gate->alive.load (std::memory_order_acquire))
+                callback (*component);
+        });
+    }
+    // The route and payload presence of the last published extraction
+    // snapshot, packed into one atomic word for the selftest. Bit 2 says
+    // that the snapshot carried isolated preview material.
+    std::atomic<std::uint64_t> publishedSampleExtractSnapshotState { 0 };
+    // Selftest-only route transition, applied after snapshot acquisition so
+    // the old-snapshot/new-route race is deterministic. The route and its
+    // generation offset are packed into one atomic word; all-bits-one means
+    // no override.
+    std::atomic<std::uint64_t> audioPreviewRouteTestOverride {
+        ~std::uint64_t { 0 } };
+    // Selftest-only: pause one ordinary route claim after it captures its
+    // lifecycle epoch so a host boundary can be placed deterministically
+    // between the capture and the route publication.
+    std::atomic<bool> audioPreviewRouteClaimPauseRequestedForTest { false };
+    std::atomic<bool> audioPreviewRouteClaimPausedFlagForTest { false };
+    std::atomic<bool> audioPreviewRouteClaimResumeForTest { false };
+    // Selftest-only: lets the callback exercise its null-snapshot path
+    // without touching the audio reader's liveSnapshot pointer.
+    std::atomic<bool> audioPreviewSkipSnapshotForTest { false };
+    // The token that the most recent audio block actually used. It is
+    // separate from the published token so a selftest can distinguish the
+    // route transition from the route that was live before the block.
+    std::atomic<std::uint64_t> audioPreviewRouteTokenSeenForTest { 0 };
+
+    // The ordinary scrub/freeze request is an immutable handover record.
+    // The plain source state and these scalar mirrors are written under the
+    // route lock; the audio thread reads the coherent record itself.
+    OrdinaryPreviewState ordinaryPreviewState;
+    std::atomic<std::uint64_t> ordinaryPreviewGeneration { 0 };
+    std::atomic<std::uint64_t> ordinaryPreviewScrubTransport { 0 };
+    std::atomic<std::uint64_t> ordinaryPreviewFreezeTransport { 0 };
+    std::atomic<std::uint64_t> ordinaryPreviewFreezePhase { 0 };
+    SnapshotHandover<OrdinaryPreviewSnapshot> ordinaryPreviewSnapshots;
+    OrdinaryPreviewSnapshot* liveOrdinaryPreviewSnapshot = nullptr; // audio thread
+    std::atomic<std::uint64_t> ordinaryPreviewCoherenceFailureCount { 0 };
+
+    // WP7: the extraction A/B preview's private transport. The message
+    // thread owns the route request and publishes it with the immutable
+    // material; the audio thread owns the playhead and remaining count after
+    // it has adopted a generation. The atomic route token arbitrates this
+    // route against the ordinary scrub and freeze routes.
+    SampleExtractPreviewState sampleExtractPreviewState;
+    // The message thread owns the state above. This atomic mirror lets a
+    // host-thread lifecycle request remember the exact extraction generation
+    // it must cancel without reading message-thread-only data.
+    std::atomic<std::uint64_t> sampleExtractPreviewGenerationPublished { 0 };
+
+    // A message-thread-owned copy of the last published extraction preview.
+    // The audio thread's `liveSnapshot` pointer is deliberately never read
+    // from the message thread: the reader may retire and free that snapshot
+    // concurrently. The selftest compares against this immutable copy.
+    struct PublishedSampleExtractPreview
+    {
+        SampleExtractPreviewState state;
+        std::shared_ptr<const upic::Page> page;
+        std::vector<upic::SampleSlot> slots;
+        std::vector<upic::Waveform> waves;
+        std::vector<upic::Envelope> envelopes;
+    };
+    PublishedSampleExtractPreview publishedSampleExtractPreview;
+    uint64_t seenSampleExtractPreviewGeneration = 0;  // audio thread
+    double sampleExtractPreviewPlayhead = 0.0;        // audio thread
+    int sampleExtractPreviewRemaining = 0;            // audio thread
+
+    // Audio-thread-only ordinary preview transport. The message thread
+    // publishes a new transport generation; the audio thread adopts it at a
+    // block boundary and updates only these private fields afterwards.
+    std::uint64_t seenScrubPreviewTransport = 0;
+    std::uint64_t seenFreezeTransport = 0;
+    std::uint64_t seenFreezePhase = 0;
+    std::uint64_t seenOrdinaryPreviewGeneration = 0;
+    std::uint64_t audioFreezeGeneration = 0;
+    double audioScrubPreviewPlayhead = 0.0;
+    int audioScrubPreviewRemaining = 0;
+    bool audioScrubPreviewActive = false;
+    double audioScrubRate = 1.0;
+    bool audioFreezeActive = false;
+    bool audioFreezeExpired = false;
+    double audioFreezeStopAtMs = 0.0;
+
+    std::atomic<int> scrubPreviewLen { 0 }; // samples; prepared on the host thread
     double lastScrubT = 0.0;
     double lastScrubMs = 0.0;
     int scrubCrossMs = 20;
@@ -981,6 +1829,8 @@ private:
     // The gains are smoothed per sample for the same reason: a step in a
     // gain (a slider move, host automation) is a click.
     juce::AudioBuffer<float> scoreBuf, freezeBuf;
+    // WP7: the extraction preview never borrows the score or freeze scratch.
+    juce::AudioBuffer<float> sampleExtractBuf;
     float scoreGain = 1.0f;   // the score's fade gain (audio thread)
     float scoreTail = 0.0f;   // the score's last sample (for the fade-out)
     float masterSmoothed = 0.8f;
@@ -1051,6 +1901,9 @@ private:
     // v1.31 (U4): the UPIC's wave page could be digitised from a
     // recording. This turns the selected slot into a wavetable.
     juce::TextButton waveFromSlotBtn{ "Slot -> Wave" };
+    // WP7: the cycle-aware extraction panel (the old Slot -> Wave above
+    // still digitises the whole take).
+    juce::TextButton sampleExtractBtn{ "Extract" };
     // F11 (2026-11-18): the toolbar's continuous amounts are knobs (a
     // rotary slider). The OSC port fields stay horizontal sliders - they
     // live in the settings overlay, not in the toolbar.
@@ -1202,6 +2055,70 @@ private:
     juce::ComboBox spaceDefBox[4];    // the page's four spaces
     juce::Label spaceDefLab[4];
     juce::Label spaceLab{ {}, "Space" };
+    // WP1: draw the table of the space selected above.
+    juce::TextButton spaceTableBtn{ "Table..." };
+
+    // WP2: the amplitude conversion tables (the bank the arc combo names).
+    juce::ComboBox ampTableBox;
+    juce::Label ampTableLab{ {}, "Amp" };
+    juce::TextButton ampTableBtn{ "Tables..." };
+    AmpTableEditor ampTableEd;
+    int selAmpTableId = -1;
+
+    // WP3: the arc groups (non-destructive, per page).
+    juce::TextButton groupBtn{ "Groups..." };
+
+    // WP5: the independent modulating arc.
+    juce::Label arcModLab{ {}, "Mod" }, arcModTgtLab{ {}, "Tgt" }, arcModDepthLab{ {}, "Depth" };
+    juce::ComboBox arcModBox, arcModTgtBox;
+    juce::Slider arcModSlider;
+    bool modLevelsEditing = false;
+
+    // WP4: the performance sequences.
+    juce::Label seqLab{ {}, "Seq" };
+
+    // --- WP6.4: the mixer UI (the channel model is WP6.1) ---
+    // NOTE: WP7 adds its library/extraction controls in its own marked
+    // block below; keep edits inside these markers.
+    juce::Label channelLab{ {}, "Ch" };
+    juce::ComboBox channelBox;
+    juce::TextButton channelBtn{ "Mix..." };
+    std::unique_ptr<ChannelPanel> channelPanel;
+    bool channelBoxReady = false;
+    bool channelBoxRefreshing = false;
+    // v1.36: true while refreshBoxes() repopulates the controls. A combo
+    // change caused by that refresh must not edit the model or begin an
+    // undo transaction - a stroke-end refresh would otherwise apply the
+    // previous toolbar selection to the arc that was just drawn.
+    bool refreshingControls = false;
+    double lastScoreRepaintPlayhead = -1.0;   // v1.36: idle paint gate
+    std::uint64_t scoreTimerRepaintRequestCount = 0; // idle-gate regression
+    juce::String lastStatusText;              // v1.36: status repaint gate
+    int timerHzNow = 30;                      // v1.36: idle rate
+    uint64_t lastStatusLayoutMs = 0;          // v1.36: relayout cooldown
+    juce::String lastTimeText;                // v1.36: clock label gate
+    // --- end WP6.4 ---
+
+
+    juce::ComboBox seqBox;
+
+    juce::TextButton seqRecBtn{ "Rec" }, seqPlayBtn{ "Play" },
+                     seqLoopBtn{ "Loop" }, seqEditBtn{ "View" };
+    SequencePanel seqPanel;
+    GroupPanel groupPanel;
+    int selGroupId = -1;
+    bool groupLevelsEditing = false;
+
+    // WP1: the in-app frequency-table editor (an overlay: Android has no
+    // closable dialog windows).
+    FreqTableEditor freqTableEd;
+    int freqTablePage = -1;
+    int freqTableSpace = -1;
+    // The invalid user-library files, kept per asset kind so refreshing one
+    // healthy library cannot hide a refusal reported by another. The global
+    // text is the visible summary of the union.
+    std::map<upic::UserAssetKind, juce::StringArray> userLibraryFailuresByKind;
+    juce::String lastUserLibraryFailureText;
 
     // v1.33: the page's ambitus - the interval its vertical axis covers
     // ("the vertical axis could correspond to any interval", Mache).
@@ -1311,6 +2228,10 @@ private:
     // F2/F3: the two bank managers. They own the placement of the editor
     // selectors (waveEditBox/envEditBox) and the bank commands.
     LibraryManager waveLib { "wave" }, envLib { "env" };
+    // WP7: the sample extraction panel is constructed only when it is first
+    // opened. WP6's mixer panel overflowed the stack when it was built and
+    // torn down in the selftest, so the lazy construction is deliberate.
+    std::unique_ptr<SampleExtractPanel> sampleExtractPanel;
     juce::TextButton wSine{ "Sine" }, wSaw{ "Saw" }, wSqr{ "Sqr" }, wTri{ "Tri" }, wNoise{ "Noise" }, wSmooth{ "Smooth" }, wNorm{ "Norm" };
     juce::TextButton eFlat{ "Flat" }, ePerc{ "Perc" }, eSwell{ "Swell" }, eGate{ "Gate" }, eStr{ "Strings" };
     juce::TextButton assignBtn{ "Assign to sel." }, delArcBtn{ "Del sel." }, muteArcBtn{ "Mute sel." };
@@ -1325,9 +2246,27 @@ private:
     void refreshScoreBinding();
     void updateStatus();
     void publishModelSnapshot();      // v1.18: message -> audio handover
+    // WP7: the A/B preview's isolated page and material. It is built on the
+    // message thread into the snapshot; the audio thread only reads it.
+    void addSampleExtractPreview (ModelSnapshot& snap);
+    // Starts (or restarts) the extraction preview's private transport.
+    void restartSampleExtractPreview();
+    // The dedicated audio-thread renderer for the extraction preview. It
+    // reads only the isolated snapshot material, never the score's slots.
+    void renderSampleExtractPreview (const ModelSnapshot& snap, AudioBlock& b, double previewGain);
     // v1.33.4 (M21): prepare the vocoder's working memory for the page, on
     // the message thread, before the audio thread can need it
     void prepareVocodersIfNeeded (int sampleMode, int liveMode);
+    // Applies one requested host preparation on the message thread and
+    // publishes its generation. It never reads the model from a host thread.
+    void applyAudioPreparation (std::uint64_t generation,
+                                int samplesPerBlockExpected,
+                                double sampleRate);
+    // Invalidates a pending preparation (a release, or a newer request).
+    void invalidateAudioPreparation();
+    // Reapplies the message thread's published vocoder requirements after a
+    // preparation changed the sample rate. The caller owns the engine gate.
+    void preparePublishedVocoderMemory();
     void seekPlayhead(double t);      // message: move the audio playhead
     void bumpPageEpoch();             // message: the audio adopts the page
     void requestEngineReset();        // message: drop voices on the next block
@@ -1350,6 +2289,9 @@ private:
     int waveUseCount (int id) const;
     int envelopeUseCount (int id) const;
     void refreshLibraryBoxes();       // the two manager rows (names + use counts)
+    // WP7: the user library's rows. The disk is read only for the requested
+    // kind when the source switch asks for it, not on every model refresh.
+    void refreshUserLibraryBoxes (upic::UserAssetKind kind);
     void afterLibraryChange();        // refresh the UI and publish the model
     void syncControlsToArc(int arcId); // load an arc into the toolbar
     void updateSampleView();
@@ -1391,6 +2333,44 @@ private:
     void applySpaceToSelection();     // v1.33: the arc's frequency space
     void pushSpaceDefs();             // v1.33: the page's four spaces
     void refreshSpaceBox();           // v1.33: the arc's space combo
+    void showFreqTableEditor (int space);   // WP1: the drawn conversion table
+    void closeFreqTableEditor();
+    bool freqTableDestinationIsValid() const;
+    void invalidateFreqTableDestination();
+    void showAmpTableEditor();              // WP2: the amplitude table bank
+    void closeAmpTableEditor();
+    void refreshAmpTableBox();
+    void applyAmpTableToSelection (int id);
+    int  ampTableUseCount (int id) const;
+    int  ampTableIndexOfId (int id) const;
+    void refreshAmpTableEditor();
+    void showGroupPanel();                  // WP3: the arc-group panel
+    void showSequencePanel();               // WP4: the performance sequences
+    void closeSequencePanel();
+    void refreshSequencePanel();
+    // --- WP6.4: the mixer ---
+    void refreshChannelBox();
+    void refreshChannelPanel();
+    void showChannelPanel();
+    void closeChannelPanel();
+    void setChannelOnSelection (int channelId);
+    int  channelIndexOfId (int id) const;
+    // --- end WP6.4 ---
+
+    int  sequenceIndexOfId (int id) const;
+    void startSequenceRecording();
+    void stopSequenceRecording();
+    void startSequencePlayback();
+    void stopSequencePlayback();
+    void sequenceRecordTick();
+    void toggleSequenceLoop();
+    void sequenceAppendRecorderPoint (double t, int page, double pos);
+    void closeGroupPanel();
+    void refreshGroupPanel();
+    void refreshModBox();                    // WP5
+    void setModOnSelection (int modId, int target, double depth);
+    bool modWouldCycle (int carrierId, int modId) const;
+    int  groupIndexOfId (int id) const;
     void pushAmbitus();               // v1.33: the page's ambitus
     void pushWarp();                 // v1.33: the page's acceleration
     void runGenerator(int kind);      // procedural arc generation (nUPIC-style)
@@ -1510,7 +2490,7 @@ private:
     // v1.31 (U3): the UPIC's pitch transformations (transpose, invert).
     void transformPage (int op);
     // v1.31 (U4): the digitised wave page (the slot becomes a wavetable).
-    void waveFromSelectedSlot();
+    bool waveFromSelectedSlot();
 
     // v1.11 VST3 plugin mode
     bool pluginMode_ = false;

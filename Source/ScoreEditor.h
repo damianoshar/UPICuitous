@@ -143,7 +143,8 @@ public:
     // v1.33: the Line tool's points must stay sorted after the quantisers
     // have moved them (the engine's segment search assumes it). The
     // staircase's corners share a time, so the order is non-decreasing.
-    void commitLineForTest (juce::Point<float> p0, juce::Point<float> p1);
+    bool commitLineForTest (juce::Point<float> p0, juce::Point<float> p1);
+    bool commitStrokeForTest (const std::vector<juce::Point<float>>& points);
 
     bool lastArcPointsSortedForTest() const;
 
@@ -525,7 +526,7 @@ private:
     bool pitchMagnet(int& m, std::vector<int>& R, double t, double f) const;
 
     // Next magnetically allowed pitch strictly above (dir>0) or below (dir<0)
-    // the current one β€” so arrow steps always land ON the sieve.
+    // the current one — so arrow steps always land ON the sieve.
     // v1.33: the steps stay inside the page's ambitus, like the drawing.
     double nextAllowedPitch(double f, int dir, double t) const;
 
@@ -567,9 +568,9 @@ private:
     // drawn position.
     bool pitchMagnetAt (double t, double f) const;
 
-    void commitStroke();
+    bool commitStroke();
 
-    void commitLine(juce::Point<float> p0, juce::Point<float> p1, float press = 1.0f);
+    bool commitLine(juce::Point<float> p0, juce::Point<float> p1, float press = 1.0f);
 
     void notify();
 
@@ -584,4 +585,3 @@ private:
     bool atZoneLimit() const;
 
 };
-

@@ -42,6 +42,12 @@ namespace upic
         // rejected.
         constexpr size_t kMaxPieceBytes = (kMaxTotalSampleBytes / 3u) * 2u;
 
+        // --- WP7: the user-level asset library ---
+        // A library asset is one JSON file. The cap is generous for a
+        // wavetable, an envelope or a recorded sequence, but it keeps a
+        // crafted file from being read in wholesale.
+        constexpr size_t kMaxUserAssetBytes = 4u * 1024u * 1024u;
+
         // --- the ids ---
         // The arcs, the sieve zones, the wavetables and the envelopes are
         // keyed by their id (the selection, the drag map, the arc list and
@@ -63,6 +69,21 @@ namespace upic
         constexpr int kMaxWaveforms = 200;
         constexpr int kMaxEnvelopes = 50;
         constexpr int kMaxPointsPerEnvelope = 1000;
+        // WP2: the amplitude conversion tables. The historical UPIC offered a
+        // handful; sixteen is generous and keeps the bank one screen tall.
+        constexpr int kMaxAmplitudeTables = 16;
+        // WP3: the page's arc groups (the four performance groups the
+        // historical page had, with room to organise).
+        constexpr int kMaxGroupsPerPage = 64;
+        // WP4: the performance sequences. The historical UPIC kept two;
+        // 20000 points is a 10-minute gesture at the 30 Hz recorder (a
+        // 12-minute page at the 6 ms historical resolution).
+        constexpr int kMaxSequences = 2;
+        constexpr int kMaxSequencePoints = 20000;
+        constexpr int kMaxSequenceSeconds = 720;
+        // WP6: the mixer channels (model only in 0.34; the engine/UI follow).
+        constexpr int kMaxChannels = 16;
+
         constexpr int kMaxSieveZones = 200;
         constexpr int kMaxSieveRemainders = 5000;
         // The degrees of one octave in a tuning (M4). A scale with more
@@ -73,6 +94,15 @@ namespace upic
         // degrees - a few kilobytes at most - so a megabyte is generous,
         // and the cap keeps a hostile file from being read in wholesale.
         constexpr size_t kMaxTuningBytes = 1024u * 1024u;
+
+        // --- WP1: the drawn frequency tables ---
+        // The New UPIC's conversion table held up to 16384 entries. A drawn
+        // table needs far fewer, but the cap is the historical one so an
+        // imported table never has to be truncated by surprise.
+        constexpr int kMaxTablePoints = 16384;
+        // The discrete table's staircase: 1..99 equal divisions per octave
+        // (the same range as an arc's discrete frequency space).
+        constexpr int kMaxStepDivisions = 99;
 
         // --- the per-sample limits ---
         // 60 seconds of material, counted at the material's OWN rate: a

@@ -85,6 +85,26 @@ namespace upic
         // of equal divisions per octave the pitch is moved through.
         int stepDivisions = 0;
 
+        // WP2: the amplitude conversion table this arc plays through. -1 is
+        // "the envelope as it is"; otherwise the envelope's output (0..1) is
+        // read as the input of the table, and the table's output is the
+        // level. The envelope keeps its shape: the table only maps it.
+        int amplitudeTableId = -1;
+
+        // WP5: an independent modulating arc on the same page. The modulator
+        // is a drawn arc like any other; its contour (pitch target) or its
+        // envelope (amplitude target) drives this arc. modAlign: 0 = the
+        // page's absolute time, 1 = the modulator starts with the carrier.
+        int    modulatorArcId = -1;
+        int    modTarget = 0;     // 0 = pitch, 1 = amplitude
+        double modArcDepth = 0.5; // 0..1
+        int    modAlign = 0;      // 0 = absolute, 1 = carrier start
+
+        // WP6: the mixer channel (0 = the implicit main channel).
+        int channelId = 0;
+
+
+
         //---------------- the frequency space (v1.33) ----------------
         // Which of the page's four spaces this arc is played in (0..3).
         // The UPIC assigned a table to an arc "the same way as one would
@@ -256,6 +276,12 @@ namespace upic
             o->setProperty("modDepth", modDepth);
             // v1.32: the discrete frequency space travels with the piece
             if (stepDivisions > 0) o->setProperty("sd", stepDivisions);
+            if (amplitudeTableId >= 0) o->setProperty ("ampTable", amplitudeTableId);
+            if (modulatorArcId >= 0) o->setProperty ("mod", modulatorArcId);
+            if (modTarget != 0) o->setProperty ("modTarget", modTarget);
+            if (std::abs (modArcDepth - 0.5) > 1e-9) o->setProperty ("modArcDepth", modArcDepth);
+            if (modAlign != 0) o->setProperty ("modAlign", modAlign);
+            if (channelId > 0) o->setProperty ("ch", channelId);
             // v1.33: the frequency space the arc is played in
             if (space != 0) o->setProperty("sp", space);
             // v1.33.4 (H7): the per-arc overrides change the sound, so they
@@ -300,6 +326,14 @@ namespace upic
             // v1.32: the discrete frequency space (absent in older pieces ->
             // the continuum)
             a.stepDivisions = juce::jlimit (0, 99, (int) v.getProperty ("sd", 0));
+            a.amplitudeTableId = juce::jlimit (-1, limits::kMaxItemId,
+                                            (int) v.getProperty ("ampTable", -1));
+            a.modulatorArcId = juce::jlimit (-1, limits::kMaxItemId,
+                                           (int) v.getProperty ("mod", -1));
+            a.modTarget = juce::jlimit (0, 1, (int) v.getProperty ("modTarget", 0));
+            a.modArcDepth = limits::clampFinite ((double) v.getProperty ("modArcDepth", 0.5), 0.0, 1.0);
+            a.modAlign = juce::jlimit (0, 1, (int) v.getProperty ("modAlign", 0));
+            a.channelId = juce::jlimit (0, limits::kMaxItemId, (int) v.getProperty ("ch", 0));
             // v1.33: the frequency space (absent in older pieces -> the
             // page's own range, which is the identity)
             a.space = juce::jlimit (0, 3, (int) v.getProperty ("sp", 0));

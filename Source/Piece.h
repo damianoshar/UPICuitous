@@ -22,6 +22,15 @@ namespace upic
     {
         std::vector<Waveform>   waveforms;
         std::vector<Envelope>   envelopes;
+        // WP2: the amplitude conversion tables (their own bank; the arcs
+        // name one with amplitudeTableId).
+        std::vector<AmplitudeTable> amplitudeTables;
+        // WP4: the performance sequences (piece-level: a sequence can move
+        // across pages).
+        std::vector<PerformanceSequence> sequences;
+        // WP6: the mixer channels (empty = the legacy stereo path).
+        std::vector<Channel> channels;
+        int nextChannelId = 1;
         std::vector<SampleSlot> sampleSlots;
         std::vector<Page>       pages;
         int  currentPage = 0;
@@ -94,6 +103,28 @@ namespace upic
         for (auto& p : m.pages) pa.add (p.toVar());
         o->setProperty("waveforms", wa);
         o->setProperty("envelopes", ea);
+        // WP2: omitted for a piece that never made a table, so old files and
+        // old hash comparisons are unchanged.
+        if (! m.sequences.empty())
+        {
+            juce::Array<juce::var> sa;
+            for (auto& s : m.sequences) sa.add (s.toVar());
+            o->setProperty ("sequences", sa);
+        }
+        if (! m.amplitudeTables.empty())
+        {
+            juce::Array<juce::var> ta;
+            for (auto& t : m.amplitudeTables) ta.add (t.toVar());
+            o->setProperty ("ampTables", ta);
+        }
+        // WP6: the channels (omitted when the piece has none).
+        if (! m.channels.empty())
+        {
+            juce::Array<juce::var> ca;
+            for (auto& c : m.channels) ca.add (c.toVar());
+            o->setProperty ("channels", ca);
+            o->setProperty ("nextChannelId", m.nextChannelId);
+        }
         o->setProperty("samples", sa);
         o->setProperty("pages", pa);
         return juce::var (o);

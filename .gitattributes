@@ -1,0 +1,4 @@
+# The legacy selftest fixture is hashed byte for byte by the release gate, so
+# git must not touch its line endings: the committed bytes are the
+# authoritative ones, on every platform and in every checkout.
+selftest/fixtures/v0.29-piece.upic.json -text

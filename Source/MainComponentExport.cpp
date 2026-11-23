@@ -18,6 +18,8 @@ MainComponent::ExportModel MainComponent::captureExportModel() const
         m.page  = curPage();
         m.waves = waveforms;
         m.envs  = envelopes;
+        m.ampTables = ampTables;
+        m.channels = channels;
         m.slots = sampleSlots;
     }
     m.sr = exportSampleRate();
@@ -37,7 +39,8 @@ bool MainComponent::exportPageToFile (const juce::File& target, const ExportMode
 {
     return writePageToWavFile (target, model.page, model.waves, model.envs, model.slots,
                                model.sr, model.masterGain, model.samplePitchMode,
-                               model.sampleGrainMs, model.liveGrainMs, progress);
+                               model.sampleGrainMs, model.liveGrainMs,
+                               &model.ampTables, &model.channels, -1, progress);
 }
 
 StemExport MainComponent::exportStemsToDir (const juce::File& dir, const ExportModel& model,
@@ -45,7 +48,7 @@ StemExport MainComponent::exportStemsToDir (const juce::File& dir, const ExportM
 {
     return renderStems (model.page, model.waves, model.envs, model.slots, dir, "stem",
                         model.sr, model.masterGain, model.samplePitchMode,
-                        model.sampleGrainMs, model.liveGrainMs, progress);
+                        model.sampleGrainMs, model.liveGrainMs, &model.ampTables, &model.channels, -1, progress);
 }
 
 void MainComponent::exportStems()

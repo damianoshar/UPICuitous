@@ -198,8 +198,13 @@ void MainComponent::handoffCapture()
     capFinalCount = capPos.load();
     capFinalReason = capStopReason.exchange(0);
     capReady = true;
-    juce::Component::SafePointer<MainComponent> sp(this);
-    juce::MessageManager::callAsync([sp]{ if (sp != nullptr) sp->finalizeCapture(); });
+    // UI must not be touched from the audio thread. The shared callback gate
+    // keeps the queued finalisation safe if the host destroys the component
+    // on another thread.
+    postToMessageThread ([] (MainComponent& component)
+    {
+        component.finalizeCapture();
+    });
 }
 
 void MainComponent::requestCaptureStop(int reason)
@@ -265,6 +270,11 @@ void MainComponent::finalizeCapture()
     const int slotIndex = juce::jlimit(0, (int) sampleSlots.size() - 1, selSlot);
     const int sid = sampleSlots[(size_t) slotIndex].id;
     auto slot = upic::slotFromCapture(sid, takeName(), take, capRate);
+
+    // WP7: the panel's captured take is now stale. Invalidate it before
+    // the replacement is published, so no preview or save can mix the old
+    // analysis with the new material.
+    invalidateSampleExtractSource();
 
     {
         // model is read by the audio thread -> mutate under the lock

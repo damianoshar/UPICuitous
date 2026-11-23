@@ -1601,7 +1601,8 @@ void upic::runLibraryModelChecks (upic::SelfTest& t)
                "library: the round-trip setup commands succeed");
 
         const auto saved = mc.pieceToVar();
-        MainComponent mc2 (true);
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
         const bool loaded = mc2.loadFromVar (saved);
         auto waveIndex2 = [&mc2] (int id)
         {
@@ -1633,5 +1634,1249 @@ void upic::runLibraryModelChecks (upic::SelfTest& t)
                && mc2.envelopeUseCountForTest (20) == 4
                && mc2.envelopeUseCountForTest (freshEnv) == 0,
                "library: the use counts are rebuilt after a load");
+    }
+}
+
+//==============================================================================
+// WP1: the drawn frequency tables (the New UPIC's editable conversion
+// tables). A space can be a drawn curve instead of a preset; the audio
+// thread reads a compiled LUT, and the piece format stays additive.
+void upic::runFreqTableChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+    auto log2Hz = [] (double hz) { return (float) std::log2 (hz); };
+
+    // WP1-a: a page that draws no table is unchanged and writes no key.
+    {
+        upic::Page pg;
+        bool allDefault = true;
+        for (auto& d : pg.spaceDefs) allDefault = allDefault && d.isDefault();
+        check (allDefault, "freq tables: a page's four spaces start as presets");
+        const auto v = pg.toVar();
+        check (! v.hasProperty ("spaceTables"),
+               "freq tables: a preset-only page writes no frequency tables");
+    }
+
+    // WP1-b: a drawn table maps the page's vertical axis.
+    {
+        upic::Page pg;   // the default ambitus: 20 Hz - 12 kHz
+        auto& d = pg.spaceDefs[1];
+        d.editable = true;
+        d.points = { { 0.0f, log2Hz (110.0) },
+                     { 0.5f, log2Hz (440.0) },
+                     { 1.0f, log2Hz (1760.0) } };
+
+        check (std::abs (pg.placeInSpace (pg.pitchLo, 1) - 110.0) < 1e-3
+            && std::abs (pg.placeInSpace (pg.pitchHi, 1) - 1760.0) < 1e-3,
+               "freq tables: the table maps the bottom and the top of the page",
+               juce::String (pg.placeInSpace (pg.pitchLo, 1), 2) + " - "
+               + juce::String (pg.placeInSpace (pg.pitchHi, 1), 2) + " Hz");
+
+        const double midPos = std::sqrt (pg.pitchLo * pg.pitchHi);
+        check (std::abs (pg.placeInSpace (midPos, 1) - 440.0) < 1e-3,
+               "freq tables: the middle of the page lands on the table's middle point",
+               juce::String (pg.placeInSpace (midPos, 1), 2) + " Hz");
+        check (pg.placeInSpace (midPos, 0) == midPos,
+               "freq tables: a space without a table is still the identity");
+
+        // WP1-c: the LUT the audio thread reads agrees with the curve.
+        upic::FreqLut lut = upic::buildFreqLut (d, pg.pitchLo, pg.pitchHi);
+        check (lut.valid, "freq tables: a drawn table compiles to a LUT");
+        upic::PageLutSet set;
+        set.lut[1] = &lut;
+        double worst = 0.0;
+        for (int i = 0; i < 65; ++i)
+        {
+            const float n = (float) i / 64.0f;
+            const double hz = upic::normYToFreqIn (n, pg.pitchLo, pg.pitchHi);
+            const double direct = pg.spaceMap (1).apply (hz);
+            const double fast = pg.spaceMap (1, &lut).apply (hz);
+            worst = juce::jmax (worst, std::abs (fast - direct) / juce::jmax (1.0, direct));
+        }
+        check (worst < 1e-3, "freq tables: the LUT matches the drawn curve",
+               juce::String (worst * 100.0, 4) + " % worst error");
+
+        // WP1-d: the table travels with the piece.
+        const auto back = upic::Page::fromVar (pg.toVar());
+        check (back.spaceDefs[1].editable && back.spaceDefs[1].points.size() == 3
+               && std::abs (std::exp2 (back.spaceDefs[1].points[1].log2Hz) - 440.0) < 1e-2,
+               "freq tables: the drawn table travels with the piece");
+        check (back.spaceDefs[2].isDefault(),
+               "freq tables: the untouched spaces stay presets");
+    }
+
+    // WP1-e: a stepped space lands on its grid; an inverted one mirrors.
+    {
+        upic::Page pg;
+        auto& d = pg.spaceDefs[2];
+        d.editable = true;
+        d.points = { { 0.0f, log2Hz (100.0) }, { 1.0f, log2Hz (3200.0) } };
+        d.stepped = true;
+        d.stepDivisions = 12;
+
+        upic::Arc a;
+        a.space = 2;
+        const double mid = std::sqrt (pg.pitchLo * pg.pitchHi) * 1.37; // off any grid point
+        a.points = { { 0.0, mid }, { 1.0, mid } };
+        const double stepped = UpicEngine::arcPitch (a, 0.5, pg.spaceMap (2));
+        const double steps = std::log2 (stepped / upic::kDefaultRefFreq) * 12.0;
+        check (std::abs (steps - std::round (steps)) < 1e-6,
+               "freq tables: a stepped space lands on its grid",
+               juce::String (steps, 4) + " steps");
+
+        d.stepped = false;
+        d.inverted = true;
+        check (std::abs (pg.placeInSpace (pg.pitchLo, 2) - 3200.0) < 1e-2
+            && std::abs (pg.placeInSpace (pg.pitchHi, 2) - 100.0) < 1e-2,
+               "freq tables: an inverted table mirrors the drawing",
+               juce::String (pg.placeInSpace (pg.pitchLo, 2), 1) + " - "
+               + juce::String (pg.placeInSpace (pg.pitchHi, 2), 1) + " Hz");
+    }
+
+    // WP1-f: a hostile table is capped at load, not trusted.
+    {
+        juce::Array<juce::var> pts;
+        for (int i = 0; i < upic::limits::kMaxTablePoints + 500; ++i)
+        {
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("x", (double) i / (double) (upic::limits::kMaxTablePoints + 500));
+            o->setProperty ("hz", 440.0);
+            pts.add (juce::var (o));
+        }
+        auto* tv = new juce::DynamicObject();
+        tv->setProperty ("space", 0);
+        tv->setProperty ("editable", true);
+        tv->setProperty ("points", pts);
+        juce::Array<juce::var> tables;
+        tables.add (juce::var (tv));
+        auto* pv = new juce::DynamicObject();
+        pv->setProperty ("duration", 10.0);
+        pv->setProperty ("spaceTables", tables);
+        const upic::Page loaded = upic::Page::fromVar (juce::var (pv));
+        check ((int) loaded.spaceDefs[0].points.size() == upic::limits::kMaxTablePoints,
+               "freq tables: an oversized table is truncated to the cap",
+               juce::String ((int) loaded.spaceDefs[0].points.size()) + " points");
+    }
+
+    // WP1-g: an old piece (no new keys) loads and renders bit for bit.
+    {
+        const juce::String oldJson = R"({"duration":4.0,"nextArcId":2,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"intensity":0.8,"points":[{"t":0.0,"f":220.0},{"t":4.0,"f":440.0}]}]})";
+        const juce::var v = juce::JSON::parse (oldJson);
+        const upic::Page loaded = upic::Page::fromVar (v);
+
+        upic::Page built;
+        built.durationSec = 4.0;
+        upic::Arc a;
+        a.id = 1;
+        a.intensity = 0.8f;
+        a.points = { { 0.0, 220.0 }, { 4.0, 440.0 } };
+        built.arcs.push_back (a);
+
+        const auto waves = upic::defaultWaveforms();
+        const auto envs = upic::defaultEnvelopes();
+        const std::vector<upic::SampleSlot> slots;
+        UpicEngine e1, e2;
+        e1.prepare (48000.0, 512);
+        e2.prepare (48000.0, 512);
+        std::vector<float> l1 (512, 0.0f), l2 (512, 0.0f);
+        e1.render (loaded, 0.0, waves, envs, slots, l1.data(), nullptr, 512, 0.8f);
+        e2.render (built,  0.0, waves, envs, slots, l2.data(), nullptr, 512, 0.8f);
+        bool same = true;
+        for (size_t i = 0; i < l1.size(); ++i)
+            if (l1[i] != l2[i]) { same = false; break; }
+        check (same, "freq tables: an old piece renders bit for bit");
+        check (! loaded.spaceDefs[0].editable && loaded.spaceDefs[0].isDefault(),
+               "freq tables: an old piece gets the preset spaces");
+    }
+
+    // WP1-h: the Table... button path - open, draw, undo.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        mc.openFreqTableForTest (2);
+        check (mc.freqTableOpenForTest(), "freq tables: the editor opens");
+
+        const std::vector<upic::TablePoint> pts = { { 0.0f, log2Hz (200.0) },
+                                                    { 0.5f, log2Hz (400.0) },
+                                                    { 1.0f, log2Hz (800.0) } };
+        mc.commitFreqTableCurveForTest (pts);
+        check (mc.spaceDefEditableForTest (2) && mc.spaceDefPointCountForTest (2) == 3,
+               "freq tables: the drawn curve reaches the page");
+        check (mc.canUndo(), "freq tables: the draw is one undo transaction");
+        mc.undo();
+        check (! mc.spaceDefEditableForTest (2) && mc.spaceDefPointCountForTest (2) == 0,
+               "freq tables: undo restores the preset space");
+
+        mc.openFreqTableForTest (1);
+        mc.commitFreqTableFlagsForTest();
+        check (mc.pieceToVar().hasProperty ("pages"),
+               "freq tables: the piece still serializes after a table edit");
+    }
+}
+
+//==============================================================================
+// WP2: the amplitude conversion tables. The envelope keeps its shape; the
+// table maps its output to gain. The bank is separate, additive in the piece
+// format, and the engine applies the table in every arc mode.
+void upic::runAmpTableChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // WP2-a: the default bank is one identity table.
+    {
+        const auto bank = upic::defaultAmplitudeTables();
+        check (bank.size() == 1, "amp tables: a new piece has one identity table");
+        const auto& pts = bank.front().points;
+        check (pts.size() == 2 && pts.front().y == 0.0f && pts.back().y == 1.0f,
+               "amp tables: the default table is the identity");
+    }
+
+    // WP2-b: the presets are the historical transfer curves.
+    {
+        auto makePreset = [] (int p)
+        {
+            upic::Envelope e (1, "Preset", juce::Colours::white);
+            upic::ampPresetPoints (p, e.points);
+            return e;
+        };
+        check (makePreset (upic::ampSquare).points[2].y == 0.25f,
+               "amp tables: square maps 0.5 to 0.25");
+        check (makePreset (upic::ampCompress).points[2].y > 0.6f,
+               "amp tables: compress lifts the middle");
+        check (makePreset (upic::ampExpand).points[2].y < 0.4f,
+               "amp tables: expand pushes the middle down");
+    }
+
+    // WP2-c: the engine applies the table in the oscillator and the PM paths.
+    {
+        upic::Page base;
+        base.durationSec = 1.0;
+        upic::Arc a;
+        a.id = 1;
+        a.waveformId = 0;
+        a.envelopeId = 0;
+        a.intensity = 1.0f;
+        a.points = { { 0.0, 440.0 }, { 1.0, 440.0 } };
+        base.arcs.push_back (a);
+
+        auto waves = upic::defaultWaveforms();
+        auto envs = upic::defaultEnvelopes();
+        envs[0].points = { { 0.0f, 0.5f }, { 1.0f, 0.5f } };
+        const std::vector<upic::SampleSlot> slots;
+
+        std::vector<upic::Envelope> tabs;
+        tabs.push_back (upic::makeAmplitudeTable (7, "Square", juce::Colours::white,
+                                                  upic::ampSquare));
+
+        auto pageFor = [&] (int mode, int tableId)
+        {
+            upic::Page p = base;
+            p.arcs[0].mode = mode;
+            p.arcs[0].amplitudeTableId = tableId;
+            p.arcs[0].pmIndex = 0.0;
+            return p;
+        };
+        auto rms = [&] (const upic::Page& p, const std::vector<upic::Envelope>* bank)
+        {
+            UpicEngine e;
+            e.prepare (48000.0, 512);
+            std::vector<float> l (512, 0.0f);
+            e.render (p, 0.0, waves, envs, slots, l.data(), nullptr, 512, 0.8f,
+                      1.0, false, nullptr, bank);
+            double sum = 0.0;
+            for (float v : l) sum += (double) v * v;
+            return std::sqrt (sum / 512.0);
+        };
+
+        const double noTable = rms (pageFor (0, -1), nullptr);
+        check (std::abs (noTable - rms (pageFor (0, -1), &tabs)) < 1e-12,
+               "amp tables: a table the arc does not name changes nothing");
+        const double withTable = rms (pageFor (0, 7), &tabs);
+        check (std::abs (withTable / noTable - 0.5) < 0.02,
+               "amp tables: square halves a half-level envelope",
+               juce::String (withTable / noTable, 4));
+        const double pmNoTable = rms (pageFor (3, -1), nullptr);
+        const double pmTable = rms (pageFor (3, 7), &tabs);
+        check (std::abs (pmTable / pmNoTable - 0.5) < 0.03,
+               "amp tables: the PM path plays through the table too",
+               juce::String (pmTable / pmNoTable, 4));
+    }
+
+    // WP2-d: assignment, the drawn curve, undo and the round trip.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String json = R"({"currentPage":0,"ampTables":[{"id":1,"name":"Table 1","colour":-1,"points":[{"x":0,"y":0},{"x":1,"y":1}]}],"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":440},{"t":2,"f":440}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)), "amp tables: the test piece loads");
+
+        mc.selectArcsForTest ({ 1 });
+        mc.ampTableAssignForTest (1);
+        check (mc.arcAmpTableIdForTest (1) == 1,
+               "amp tables: the assignment reaches the arc");
+
+        mc.openAmpTableEditorForTest();
+        check (mc.ampTableEditorOpenForTest(), "amp tables: the bank editor opens");
+
+        mc.ampTableDrawForTest ({ { 0.0f, 0.0f }, { 0.5f, 0.25f }, { 1.0f, 1.0f } });
+        check (std::abs (mc.ampTableValueForTest (0, 0.5f) - 0.25f) < 1e-5f,
+               "amp tables: the drawn curve reaches the bank",
+               juce::String (mc.ampTableValueForTest (0, 0.5f), 4));
+        check (mc.canUndo(), "amp tables: the draw is one undo step");
+        mc.undo();
+        check (std::abs (mc.ampTableValueForTest (0, 0.5f) - 0.5f) < 1e-5f,
+               "amp tables: undo restores the identity");
+
+        const int beforeDelete = mc.ampTableCountForTest();
+        mc.ampTableDeleteForTest();
+        check (mc.ampTableCountForTest() == beforeDelete,
+               "amp tables: a table in use cannot be deleted");
+
+        mc.ampTableDrawForTest ({ { 0.0f, 0.0f }, { 0.5f, 0.25f }, { 1.0f, 1.0f } });
+        const auto saved = mc.pieceToVar();
+        check (saved.hasProperty ("ampTables"), "amp tables: the bank travels with the piece");
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
+        check (mc2.loadFromVar (saved) && mc2.ampTableCountForTest() == 1,
+               "amp tables: the piece loads with its bank");
+        check (std::abs (mc2.ampTableValueForTest (0, 0.5f) - 0.25f) < 1e-5f
+               && mc2.arcAmpTableIdForTest (1) == 1,
+               "amp tables: the table and the arc's reference survive a round trip");
+
+        mc.ampTableNewForTest();
+        check (mc.ampTableCountForTest() == 2, "amp tables: a new table joins the bank");
+        mc.ampTableDuplicateForTest();
+        check (mc.ampTableCountForTest() == 3, "amp tables: a duplicate joins the bank");
+    }
+
+    // WP2-e: an old piece (no new keys) loads with no table and no reference.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String oldJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":220},{"t":2,"f":440}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (oldJson)), "amp tables: an old piece loads");
+        check (mc.ampTableCountForTest() == 0 && mc.arcAmpTableIdForTest (1) == -1,
+               "amp tables: an old piece has no tables and no references");
+    }
+}
+//==============================================================================
+// WP3: the arc groups. A group is a named set of arcs with shared,
+// non-destructive attributes. The model keeps the arcs untouched; the
+// snapshot resolves one override per arc, and the engine reads that.
+void upic::runGroupChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    auto arcWith = [] (int id, double freq)
+    {
+        upic::Arc a;
+        a.id = id;
+        a.waveformId = 0;
+        a.envelopeId = 0;
+        // quiet, so the output's soft clip stays in its linear region and a
+        // level ratio is measurable
+        a.intensity = 0.05f;
+        a.points = { { 0.0, freq }, { 1.0, freq } };
+        return a;
+    };
+
+    // WP3-a: the resolution truth table (solo, mute, gain, overrides).
+    // WP3-a: the resolution truth table (solo, mute, gain, overrides).
+    {
+        upic::Page pg;
+        pg.arcs = { arcWith (1, 220.0), arcWith (2, 330.0), arcWith (3, 440.0) };
+        upic::ArcGroup g1;
+        g1.id = 1; g1.name = "A"; g1.arcIds = { 1, 2 };
+        g1.gain = 0.5f; g1.transposeSemitones = 7.0;
+        g1.waveformId = 3; g1.envelopeId = 2;
+        pg.groups = { g1 };
+        auto ov = pg.resolveArcOverrides();
+        check (ov.size() == 3, "groups: one override per arc");
+        check (std::abs (ov[0].gain - 0.5f) < 1e-6f && std::abs (ov[1].gain - 0.5f) < 1e-6f
+               && std::abs (ov[2].gain - 1.0f) < 1e-6f,
+               "groups: the gain reaches the members only");
+        check (ov[0].transposeSemitones == 7.0 && ov[2].transposeSemitones == 0.0,
+               "groups: the transpose reaches the members only");
+        check (ov[0].waveformId == 3 && ov[0].envelopeId == 2 && ov[2].waveformId == -1,
+               "groups: the timbre overrides reach the members only");
+        check (! ov[0].muted && ! ov[2].muted, "groups: nothing is muted by default");
+
+        // solo silences the groups that are not solo
+        upic::ArcGroup g2;
+        g2.id = 2; g2.name = "B"; g2.arcIds = { 3 }; g2.solo = true;
+        pg.groups.push_back (g2);
+        ov = pg.resolveArcOverrides();
+        check (ov[0].muted && ov[1].muted && ! ov[2].muted,
+               "groups: a solo silences the other groups");
+
+        // a solo also silences arcs that have no group at all
+        {
+            upic::Page soloPg;
+            soloPg.arcs = { arcWith (1, 220.0), arcWith (2, 330.0), arcWith (3, 440.0) };
+            upic::ArcGroup soloG; soloG.id = 1; soloG.arcIds = { 2 }; soloG.solo = true;
+            upic::ArcGroup otherG; otherG.id = 2; otherG.arcIds = { 3 };
+            soloPg.groups = { soloG, otherG };
+            const auto sov = soloPg.resolveArcOverrides();
+            check (sov[0].muted && ! sov[1].muted && sov[2].muted,
+                   "groups: a solo silences ungrouped arcs too");
+        }
+        g2.solo = false;
+        g1.muted = true;
+        pg.groups[0] = g1;
+        pg.groups[1] = g2;
+        ov = pg.resolveArcOverrides();
+        check (ov[0].muted && ov[1].muted && ! ov[2].muted,
+               "groups: a group mute silences its members");
+
+        // one group per arc: an arc listed twice belongs to the first group
+        g2.arcIds.push_back (1);
+        pg.groups[1] = g2;
+        ov = pg.resolveArcOverrides();
+        check (std::abs (ov[0].gain - 0.5f) < 1e-6f,
+               "groups: an arc listed twice keeps its first group");
+
+        // the arcs' own data is untouched
+        check (pg.arcs[0].points.front().freq == 220.0 && pg.arcs[0].intensity == 0.05f,
+               "groups: the arcs' own data is never changed");
+    }
+
+    // WP3-b: the space map applies the group transpose after the mapping.
+    // WP3-b: the space map applies the group transpose after the mapping.
+    {
+        upic::Page pg;
+        pg.arcs = { arcWith (1, 440.0) };
+        upic::Page::SpaceMap m = pg.spaceMap (0);
+        m.transposeSemis = 7.0;
+        const double up = UpicEngine::arcPitch (pg.arcs[0], 0.5, m);
+        check (std::abs (up - 440.0 * std::pow (2.0, 7.0 / 12.0)) < 1e-6,
+               "groups: +7 st transposes the mapped pitch",
+               juce::String (up, 3) + " Hz");
+        upic::Page::SpaceMap m0 = pg.spaceMap (0);
+        check (m0.identity && m0.apply (440.0) == 440.0,
+               "groups: no transpose leaves the space map identity");
+        check (std::abs (UpicEngine::arcPitch (pg.arcs[0], 0.5, m0) - 440.0) < 1e-6,
+               "groups: no transpose leaves the pitch alone");
+        // WP3 fix: the transpose is the LAST pitch operation, after the
+        // space's temperament, so a tempered space is transposed whole.
+        {
+            upic::Page tp;
+            tp.arcs = { arcWith (1, 440.0) };
+            upic::Page::SpaceMap tm = tp.spaceMap (0);
+            tm.stepDivisions = 7;
+            tm.transposeSemis = 0.25;
+            const double got = UpicEngine::arcPitch (tp.arcs[0], 0.5, tm);
+            const double want = upic::applyTemperament (440.0, 7, upic::kDefaultRefFreq)
+                                * std::pow (2.0, 0.25 / 12.0);
+            check (std::abs (got - want) < 1e-9,
+                   "groups: the transpose follows the temperament",
+                   juce::String (got, 6) + " vs " + juce::String (want, 6));
+        }
+    }
+
+    // WP3-c: the engine plays the group's gain, mute and overrides.
+    // WP3-c: the engine plays the group's gain, mute and overrides.
+    {
+        upic::Page pg;
+        pg.arcs = { arcWith (1, 440.0) };
+
+        auto envs = upic::defaultEnvelopes();
+        // a flat half envelope for the override test (id 9)
+        upic::Envelope half (9, "Half", juce::Colours::white);
+        half.points = { { 0.0f, 0.5f }, { 1.0f, 0.5f } };
+        envs.push_back (half);
+
+        auto waves = upic::defaultWaveforms();
+        const std::vector<upic::SampleSlot> slots;
+        auto rms = [&] (bool withGroup)
+        {
+            upic::Page p = pg;
+            std::vector<upic::ArcRenderOverride> ov;
+            if (withGroup)
+            {
+                ov = p.resolveArcOverrides();
+                if (ov.empty()) ov.resize (p.arcs.size());
+            }
+            UpicEngine e;
+            e.prepare (48000.0, 512);
+            std::vector<float> l (512, 0.0f);
+            e.render (p, 0.0, waves, envs, slots, l.data(), nullptr, 512, 0.8f,
+                      1.0, false, nullptr, nullptr,
+                      withGroup && ! ov.empty() ? &ov : nullptr);
+            double sum = 0.0;
+            for (float v : l) sum += (double) v * v;
+            return std::sqrt (sum / 512.0);
+        };
+
+        const double base = rms (false);
+        check (base > 0.0, "groups: the plain arc sounds");
+
+        upic::ArcGroup g;
+        g.id = 1; g.name = "G"; g.arcIds = { 1 };
+        pg.groups = { g };
+        check (std::abs (rms (true) / base - 1.0) < 1e-9,
+               "groups: an empty group changes nothing");
+
+        pg.groups[0].gain = 0.5f;
+        check (std::abs (rms (true) / base - 0.5) < 1e-3,
+               "groups: the gain scales the level");
+        pg.groups[0].gain = 1.0f;
+
+        pg.groups[0].envelopeId = 9;
+        check (std::abs (rms (true) / base - 0.5) < 1e-3,
+               "groups: the envelope override reaches the sound");
+
+        pg.groups[0].envelopeId = -1;
+        pg.groups[0].muted = true;
+        check (rms (true) == 0.0, "groups: a muted group is silent");
+        pg.groups[0].muted = false;
+
+        // a wave override changes the timbre (the buffers differ)
+        auto renderTo = [&] ()
+        {
+            UpicEngine e;
+            e.prepare (48000.0, 512);
+            std::vector<float> l (512, 0.0f);
+            auto p = pg;
+            auto ov = p.resolveArcOverrides();
+            e.render (p, 0.0, waves, envs, slots, l.data(), nullptr, 512, 0.8f,
+                      1.0, false, nullptr, nullptr, &ov);
+            return l;
+        };
+        const auto l0 = renderTo();
+        pg.groups[0].waveformId = 2;   // square
+        const auto l1 = renderTo();
+        bool differs = false;
+        for (size_t i = 0; i < l0.size(); ++i)
+            if (l0[i] != l1[i]) { differs = true; break; }
+        check (differs, "groups: the wave override changes the timbre");
+    }
+
+    // WP3-d: the groups travel with the piece; hostile members are dropped.
+    // WP3-d: the groups travel with the piece; hostile members are dropped.
+    {
+        upic::Page pg;
+        pg.arcs = { arcWith (1, 220.0), arcWith (2, 330.0) };
+        const auto plain = pg.toVar();
+        check (! plain.hasProperty ("groups"),
+               "groups: a page without groups writes no key");
+
+        upic::ArcGroup g;
+        g.id = 1; g.name = "A"; g.arcIds = { 1, 999, 1 };
+        g.gain = 0.5f; g.transposeSemitones = 7.0; g.waveformId = 2;
+        pg.groups = { g };
+        const auto saved = pg.toVar();
+        check (saved.hasProperty ("groups"), "groups: the groups travel with the page");
+        const upic::Page back = upic::Page::fromVar (saved);
+        check (back.groups.size() == 1 && back.groups[0].arcIds.size() == 1
+               && back.groups[0].arcIds[0] == 1,
+               "groups: an absent arc is dropped and a duplicate is folded",
+               juce::String ((int) back.groups[0].arcIds.size()) + " member(s)");
+        check (std::abs (back.groups[0].gain - 0.5f) < 1e-6f
+               && back.groups[0].transposeSemitones == 7.0
+               && back.groups[0].waveformId == 2,
+               "groups: the attributes survive the round trip");
+    }
+
+    // WP3-e: the panel's commands through MainComponent.
+    // WP3-e: the panel's commands through MainComponent.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":440},{"t":2,"f":440}]},{"id":2,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":330},{"t":2,"f":330}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)), "groups: the test piece loads");
+
+        mc.openGroupPanelForTest();
+        check (mc.groupPanelOpenForTest(), "groups: the panel opens");
+
+        mc.groupNewForTest();
+        check (mc.groupCountForTest() == 1, "groups: New adds a group");
+        check (mc.selectedGroupIdForTest() == mc.groupIdAtForTest (0),
+               "groups: the new group is selected");
+
+        mc.selectArcsForTest ({ 1, 2 });
+        mc.groupAddSelForTest();
+        check (mc.groupMemberCountAtForTest (0) == 2,
+               "groups: the selection joins the group");
+        check (mc.arcGroupIdForTest (1) == mc.groupIdAtForTest (0),
+               "groups: membership is visible from the arc");
+
+        mc.groupRenameForTest ("Wood");
+        mc.groupGainForTest (0.5f);
+        check (std::abs (mc.groupGainAtForTest (0) - 0.5f) < 1e-6f,
+               "groups: the gain control reaches the model");
+        mc.undo();
+        check (std::abs (mc.groupGainAtForTest (0) - 1.0f) < 1e-6f,
+               "groups: a level edit is one undo step");
+
+        mc.groupTransposeForTest (7.0);
+        mc.groupMuteForTest (true);
+        mc.groupOverrideForTest (0, 2);
+        check (std::abs (mc.groupTransposeAtForTest (0) - 7.0) < 1e-9
+               && mc.groupMutedAtForTest (0)
+               && mc.groupOverrideAtForTest (0, 0) == 2,
+               "groups: the panel's controls reach the model");
+
+        mc.selectArcsForTest ({ 1 });
+        mc.groupRemoveSelForTest();
+        check (mc.groupMemberCountAtForTest (0) == 1,
+               "groups: Remove takes the selection out");
+        mc.groupSelectMembersForTest();
+        check (mc.selectedArcCountForTest() == 1,
+               "groups: Select selects the members");
+
+        // one group per arc: a second group takes the arc, the first keeps
+        // the arc that stayed with it
+        mc.groupNewForTest();
+        mc.selectArcsForTest ({ 1 });
+        mc.groupAddSelForTest();
+        check (mc.groupMemberCountAtForTest (0) == 1 && mc.groupMemberCountAtForTest (1) == 1
+               && mc.arcGroupIdForTest (1) == mc.groupIdAtForTest (1)
+               && mc.arcGroupIdForTest (2) == mc.groupIdAtForTest (0),
+               "groups: an arc belongs to one group at a time",
+               "g0=" + juce::String (mc.groupMemberCountAtForTest (0))
+                 + " g1=" + juce::String (mc.groupMemberCountAtForTest (1)));
+
+        // the piece round trip keeps the groups
+        const auto saved = mc.pieceToVar();
+        check (saved.hasProperty ("pages") && mc.groupCountForTest() == 2,
+               "groups: the piece still saves");
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
+        check (mc2.loadFromVar (saved) && mc2.groupCountForTest() == 2,
+               "groups: the groups survive a piece round trip");
+
+        // deleting a group leaves the arcs alone
+        const int arcsBefore = mc.arcCountForTest();
+        mc.groupDeleteForTest();
+        check (mc.groupCountForTest() == 1, "groups: Delete removes the group");
+        check (mc.arcCountForTest() == arcsBefore,
+               "groups: deleting a group leaves the arcs alone");
+    }
+
+    // WP3-f: an old piece has no groups.
+    // WP3-f: an old piece has no groups.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String oldJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":220},{"t":2,"f":440}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (oldJson)) && mc.groupCountForTest() == 0,
+               "groups: an old piece has no groups");
+    }
+}
+
+//==============================================================================
+// WP4: the performance sequences. The position function is pure (the audio
+// thread calls it with its own clock), the bank is piece-level and additive,
+// and the recorder/transport commands work through the panel's callbacks.
+void upic::runSequenceChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // WP4-a: the position function (forward, hold, reverse, page jump).
+    // WP4-a: the position function (forward, hold, reverse, page jump).
+    // WP4-a: the position function (forward, hold, reverse, page jump).
+    {
+        std::vector<upic::PerformancePoint> pts = {
+            { 0.0, 0, 0.0 }, { 1.0, 0, 5.0 }, { 2.0, 0, 5.0 },
+            { 2.5, 0, 3.0 }, { 3.0, 0, 0.0 }, { 3.5, 1, 0.0 },
+            { 4.0, 1, 4.0 }
+        };
+        upic::SequencePosition p;
+        check (upic::sequencePositionAt (pts, 0.5, p) && p.page == 0
+               && std::abs (p.pos - 2.5) < 1e-9 && std::abs (p.rate - 5.0) < 1e-9,
+               "sequences: a forward segment interpolates position and rate",
+               juce::String (p.pos, 3) + " @ " + juce::String (p.rate, 3));
+        check (upic::sequencePositionAt (pts, 1.5, p) && std::abs (p.pos - 5.0) < 1e-9
+               && std::abs (p.rate) < 1e-9,
+               "sequences: a hold keeps the position");
+        check (upic::sequencePositionAt (pts, 2.75, p) && std::abs (p.pos - 1.5) < 1e-9
+               && p.rate < 0.0,
+               "sequences: a reverse segment reports a negative rate");
+        check (upic::sequencePositionAt (pts, 3.4, p) && p.page == 0
+               && upic::sequencePositionAt (pts, 3.6, p) && p.page == 1,
+               "sequences: the page switches at the point's time");
+        check (upic::sequencePositionAt (pts, -5.0, p) && std::abs (p.pos) < 1e-9,
+               "sequences: before the start the position holds");
+        check (upic::sequencePositionAt (pts, 99.0, p) && std::abs (p.pos - 4.0) < 1e-9,
+               "sequences: after the end the position holds");
+        check (std::abs (upic::sequenceLoopTime (4.25, 4.0) - 0.25) < 1e-9
+               && std::abs (upic::sequenceLoopTime (-0.25, 4.0) - 3.75) < 1e-9,
+               "sequences: the loop wraps in both directions");
+    }
+
+    // WP4-b: the recorder bank through MainComponent.
+    // WP4-b: the recorder bank through MainComponent.
+    // WP4-b: the recorder bank through MainComponent.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[]},{"duration":3.0,"arcs":[]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)), "sequences: the two-page piece loads");
+        check (mc.seqCountForTest() == 0, "sequences: a new piece has no sequence");
+        check (! mc.pieceToVar().hasProperty ("sequences"),
+               "sequences: a piece without sequences writes no key");
+
+        mc.openSeqPanelForTest();
+        check (mc.seqPanelOpenForTest(), "sequences: the panel opens");
+
+        mc.seqRecordToggleForTest();
+        check (mc.seqRecordingForTest() && mc.seqCountForTest() == 1,
+               "sequences: Record starts a sequence");
+        check (mc.seqPointCountAtForTest (0) == 1,
+               "sequences: recording starts with the current position");
+
+        mc.seqAppendForTest (0.5, 0, 0.5);
+        mc.seqAppendForTest (1.0, 0, 1.0);
+        mc.seqAppendForTest (1.0, 0, 1.0);   // a duplicate in time is harmless
+        mc.seqAppendForTest (1.5, 1, 0.2);
+        mc.seqRecordToggleForTest();
+        check (! mc.seqRecordingForTest(), "sequences: Stop ends the recording");
+        check (mc.seqPointCountAtForTest (0) == 4,
+               "sequences: the recorded points are kept",
+               juce::String (mc.seqPointCountAtForTest (0)) + " points");
+        check (mc.seqPointTAtForTest (0, 1) <= mc.seqPointTAtForTest (0, 2)
+               && mc.seqPointPageAtForTest (0, 3) == 1,
+               "sequences: the points stay ordered and keep their pages");
+
+        check (mc.seqLoopAtForTest (0), "sequences: a new sequence loops");
+        mc.seqLoopToggleForTest();
+        check (! mc.seqLoopAtForTest (0), "sequences: the loop toggle reaches the model");
+
+        mc.seqPlayToggleForTest();
+        check (mc.seqPlayActiveForTest(), "sequences: Play arms the sequence transport");
+        check (mc.transportStateForTest() != MainComponent::TransportState::stopped,
+               "sequences: the transport starts with the sequence");
+        mc.seqPlayToggleForTest();
+        check (! mc.seqPlayActiveForTest(), "sequences: Stop ends the sequence transport");
+
+        // the piece round trip keeps the sequence
+        const auto saved = mc.pieceToVar();
+        check (saved.hasProperty ("sequences"), "sequences: the bank travels with the piece");
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
+        check (mc2.loadFromVar (saved) && mc2.seqCountForTest() == 1
+               && mc2.seqPointCountAtForTest (0) == 4,
+               "sequences: the points survive a piece round trip");
+
+        mc.seqClearForTest();
+        check (mc.seqPointCountAtForTest (0) == 0, "sequences: Clear erases the points");
+    }
+
+    // WP4-c2: the panel edits a recording (drag, Trim, Replace-tail) and the
+    // WP4-c2: the panel edits a recording (drag, Trim, Replace-tail) and the
+    // WP4-c2: the panel edits a recording (drag, Trim, Replace-tail) and the
+    // ordinary Stop releases the sequence source.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)), "sequences: the edit piece loads");
+        mc.openSeqPanelForTest();
+        mc.seqRecordToggleForTest();
+        mc.seqAppendForTest (0.5, 0, 0.5);
+        mc.seqAppendForTest (1.0, 0, 1.0);
+        mc.seqAppendForTest (1.5, 0, 1.5);
+        mc.seqRecordToggleForTest();
+        check (mc.seqPointCountAtForTest (0) == 4, "sequences: the take is recorded");
+
+        // the whole take is one undo step
+        mc.undo();
+        check (mc.seqPointCountAtForTest (0) == 0,
+               "sequences: the take is one undo transaction",
+               juce::String (mc.seqPointCountAtForTest (0)) + " points");
+        mc.redo();
+
+        // drag point 1 (t = 0.5) to 0.25
+        mc.seqDragPointForTest (1, 0.25, 0, 0.25);
+        check (std::abs (mc.seqPointTAtForTest (0, 1) - 0.25) < 1e-9,
+               "sequences: a dragged point reaches the model",
+               juce::String (mc.seqPointTAtForTest (0, 1), 3));
+        mc.undo();
+        check (std::abs (mc.seqPointTAtForTest (0, 1) - 0.5) < 1e-9,
+               "sequences: the drag is one undo step");
+
+        // Trim keeps the points up to the selected one
+        mc.seqSelectPointForTest (2);
+        mc.seqTrimForTest();
+        check (mc.seqPointCountAtForTest (0) == 3,
+               "sequences: Trim drops the points after the selection",
+               juce::String (mc.seqPointCountAtForTest (0)) + " points");
+        mc.undo();
+        check (mc.seqPointCountAtForTest (0) == 4, "sequences: Trim is one undo step");
+
+        // Replace re-records from the selected point, keeping what came before
+        mc.seqSelectPointForTest (2);   // t = 1.0
+        mc.seqReplaceForTest();
+        check (mc.seqRecordingForTest(), "sequences: Replace arms the recorder");
+        mc.seqAppendForTest (1.2, 0, 1.2);
+        mc.seqRecordToggleForTest();
+        check (mc.seqPointCountAtForTest (0) == 4
+               && std::abs (mc.seqPointTAtForTest (0, 3) - 1.2) < 1e-9,
+               "sequences: Replace keeps the head and re-records the tail",
+               juce::String (mc.seqPointCountAtForTest (0)) + " points: "
+               + juce::String (mc.seqPointTAtForTest (0, 0)) + ","
+               + juce::String (mc.seqPointTAtForTest (0, 1)) + ","
+               + juce::String (mc.seqPointTAtForTest (0, 2)) + ","
+               + juce::String (mc.seqPointTAtForTest (0, 3)));
+
+        // overwriting an existing take asks twice
+        const int before = mc.seqPointCountAtForTest (0);
+        mc.seqRecordToggleForTest();
+        check (! mc.seqRecordingForTest() && mc.seqPointCountAtForTest (0) == before,
+               "sequences: the first Record press only asks");
+        mc.seqRecordToggleForTest();
+        check (mc.seqRecordingForTest(), "sequences: the second press overwrites");
+        mc.seqAppendForTest (0.3, 0, 0.3);
+        mc.seqRecordToggleForTest();
+
+        // the ordinary transport Stop releases the sequence source
+        mc.seqPlayToggleForTest();
+        check (mc.seqPlayActiveForTest(), "sequences: sequence playback is armed");
+        mc.stopPlaybackForTest();
+        check (! mc.seqPlayActiveForTest(),
+               "sequences: the ordinary Stop returns to the internal transport");
+    }
+    // WP4-c: a hostile file is clamped to the pages and the limits.
+    // WP4-c: a hostile file is clamped to the pages and the limits.
+    // WP4-c: a hostile file is clamped to the pages and the limits.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[]}],"sequences":[{"id":1,"name":"Hostile","points":[{"t":1.0,"page":9,"pos":99.0},{"t":0.5,"page":0,"pos":0.5},{"t":0.5,"page":0,"pos":0.6}]},{"id":2,"name":"Second","points":[{"t":0,"page":0,"pos":0},{"t":1,"page":0,"pos":1}]},{"id":3,"name":"Third","points":[{"t":0,"page":0,"pos":0}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)), "sequences: the hostile piece loads");
+        check (mc.seqCountForTest() == 2, "sequences: the sequence bank is capped",
+               juce::String (mc.seqCountForTest()) + " sequences");
+        check (mc.seqPointPageAtForTest (0, 1) == 0
+               && mc.seqPointPosAtForTest (0, 1) <= 2.0,
+               "sequences: the pages and positions are clamped to the piece");
+        check (mc.seqPointTAtForTest (0, 0) <= mc.seqPointTAtForTest (0, 1),
+               "sequences: the points are sorted and deduplicated in time");
+    }
+
+    // WP4-d: an old piece has no sequences.
+    // WP4-d: an old piece has no sequences.
+    // WP4-d: an old piece has no sequences.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String oldJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (oldJson)) && mc.seqCountForTest() == 0,
+               "sequences: an old piece has no sequences");
+    }
+}
+
+//==============================================================================
+// WP5: the independent modulating arcs. A drawn arc on the same page bends a
+// carrier's pitch or its level; the relationship is resolved once per
+// snapshot, cycles are refused, and the arcs themselves are untouched.
+void upic::runModulationChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+    auto l2 = [] (double hz) { return std::log2 (hz); };
+
+    // the factor: +/- depth octaves between the contour's bounds
+    {
+        double n01 = -1.0;
+        const double top = upic::modulationFactor (880.0, l2 (220.0), l2 (880.0), 0.5, &n01);
+        check (std::abs (top - std::pow (2.0, 0.5)) < 1e-9 && std::abs (n01 - 1.0) < 1e-9,
+               "modulation: the contour's top is +depth octaves",
+               juce::String (top, 6));
+        const double mid = upic::modulationFactor (std::sqrt (220.0 * 880.0),
+                                                   l2 (220.0), l2 (880.0), 0.5);
+        check (std::abs (mid - 1.0) < 1e-9, "modulation: the middle is no bend");
+        const double low = upic::modulationFactor (220.0, l2 (220.0), l2 (880.0), 0.5, &n01);
+        check (std::abs (low - std::pow (2.0, -0.5)) < 1e-9 && std::abs (n01) < 1e-9,
+               "modulation: the contour's bottom is -depth octaves",
+               juce::String (low, 6));
+    }
+
+    // the resolver points at the modulator and refuses cycles
+    {
+        upic::Page pg;
+        upic::Arc car;
+        car.id = 1; car.waveformId = 0; car.envelopeId = 0; car.intensity = 0.05f;
+        car.points = { { 0.0, 440.0 }, { 2.0, 440.0 } };
+        upic::Arc m;
+        m.id = 2; m.waveformId = 0; m.envelopeId = 0; m.intensity = 0.05f;
+        m.muted = true;   // heard only through the carrier in this test
+        m.points = { { 0.0, 220.0 }, { 2.0, 880.0 } };
+        pg.arcs = { car, m };
+        pg.arcs[0].modulatorArcId = 2;
+        pg.arcs[0].modArcDepth = 0.5;
+        auto ov = pg.resolveArcOverrides();
+        check (ov[0].modIndex == 1 && ov[0].modTarget == 0
+               && std::abs (ov[0].modDepth - 0.5) < 1e-9
+               && std::abs (ov[0].modLoLog2 - l2 (220.0)) < 1e-9
+               && std::abs (ov[0].modHiLog2 - l2 (880.0)) < 1e-9,
+               "modulation: the resolver points at the modulator");
+        check (ov[1].modIndex == -1, "modulation: an arc with no modulator has none");
+
+        pg.arcs[0].modulatorArcId = 1;
+        check (pg.resolveArcOverrides()[0].modIndex == -1,
+               "modulation: self-modulation is refused");
+
+        pg.arcs[0].modulatorArcId = 2;
+        pg.arcs[1].modulatorArcId = 1;
+        const auto cyc = pg.resolveArcOverrides();
+        check (cyc[0].modIndex == -1 && cyc[1].modIndex == -1,
+               "modulation: a cycle is refused");
+    }
+
+    // the engine: the pitch target bends, the amplitude target trembles
+    {
+        upic::Page pg;
+        pg.durationSec = 2.0;
+        upic::Arc car;
+        car.id = 1; car.waveformId = 0; car.envelopeId = 0; car.intensity = 0.05f;
+        car.points = { { 0.0, 440.0 }, { 2.0, 440.0 } };
+        upic::Arc m;
+        m.id = 2; m.waveformId = 0; m.envelopeId = 0; m.intensity = 0.05f;
+        m.muted = true;   // heard only through the carrier in this test
+        m.points = { { 0.0, 220.0 }, { 2.0, 880.0 } };
+        pg.arcs = { car, m };
+
+        const auto waves = upic::defaultWaveforms();
+        const auto envs = upic::defaultEnvelopes();
+        const std::vector<upic::SampleSlot> slots;
+        auto rmsAt = [&] (const upic::Page& p, double t)
+        {
+            const auto ov = p.resolveArcOverrides();
+            UpicEngine e;
+            e.prepare (48000.0, 512);
+            std::vector<float> l (1024, 0.0f), r (1024, 0.0f);
+            e.render (p, t, waves, envs, slots, l.data(), r.data(), 1024, 0.8f,
+                      1.0, false, nullptr, nullptr, &ov);
+            double s = 0.0;
+            for (float v : l) s += (double) v * v;
+            return std::sqrt (s / 1024.0);
+        };
+
+        const double base = rmsAt (pg, 0.0);
+        pg.arcs[0].modulatorArcId = 2;
+        pg.arcs[0].modArcDepth = 0.5;
+        const double bent = rmsAt (pg, 0.0);
+        check (std::abs (bent - base) > 1e-6,
+               "modulation: the pitch target changes the render",
+               juce::String (base, 5) + " -> " + juce::String (bent, 5));
+
+        pg.arcs[0].modTarget = 1;
+        pg.arcs[0].modArcDepth = 1.0;
+        const double sil = rmsAt (pg, 0.0);      // the contour's bottom
+        const double loud = rmsAt (pg, 1.9);     // the contour's top
+        check (sil < base * 0.05 && loud > base * 0.5,
+               "modulation: the amplitude target trembles with the contour",
+               juce::String (sil, 5) + " vs " + juce::String (loud, 5));
+    }
+
+    // the keys travel; an old arc has no relationship
+    {
+        upic::Page pg;
+        upic::Arc a;
+        a.id = 1; a.points = { { 0.0, 220.0 }, { 1.0, 220.0 } };
+        pg.arcs = { a };
+        const auto plain = pg.toVar();
+        check (! plain.hasProperty ("mod"), "modulation: an arc without one writes no key");
+
+        pg.arcs[0].modulatorArcId = 7;
+        pg.arcs[0].modTarget = 1;
+        pg.arcs[0].modArcDepth = 0.25;
+        pg.arcs[0].modAlign = 1;
+        const auto back = upic::Page::fromVar (pg.toVar());
+        check (back.arcs[0].modulatorArcId == 7 && back.arcs[0].modTarget == 1
+               && std::abs (back.arcs[0].modArcDepth - 0.25) < 1e-9
+               && back.arcs[0].modAlign == 1,
+               "modulation: the relationship travels with the arc");
+    }
+
+    // load sanitisation and the UI command
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"mod":2,"modArcDepth":0.25,"points":[{"t":0,"f":440},{"t":2,"f":440}]},{"id":2,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":220},{"t":2,"f":880}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)), "modulation: the test piece loads");
+        check (mc.arcModulatorForTest (1) == 2 && std::abs (mc.arcModDepthForTest (1) - 0.25) < 1e-9,
+               "modulation: the relationship survives the load");
+
+        // the UI path: assign, undo, refuse a cycle
+        mc.selectArcsForTest ({ 1 });
+        mc.modApplyForTest (2, 0, 0.5);
+        check (mc.arcModulatorForTest (1) == 2 && mc.arcModTargetForTest (1) == 0
+               && std::abs (mc.arcModDepthForTest (1) - 0.5) < 1e-9,
+               "modulation: the panel assigns the modulator");
+        mc.undo();
+        check (mc.arcModulatorForTest (1) == 2,
+               "modulation: the assignment is one undo step (back to the loaded value)");
+
+        mc.selectArcsForTest ({ 2 });
+        mc.modApplyForTest (1, 0, 0.5);   // 1 -> 2 -> 1 would be a cycle
+        check (mc.arcModulatorForTest (2) == -1,
+               "modulation: the panel refuses a cycle");
+
+        mc.selectArcsForTest ({ 1 });
+        mc.modApplyForTest (1, 0, 0.5);   // self
+        check (mc.arcModulatorForTest (1) == 2,
+               "modulation: the panel refuses self-modulation");
+
+        const juce::String cycJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"mod":2,"points":[{"t":0,"f":440},{"t":2,"f":440}]},{"id":2,"waveformId":0,"envelopeId":0,"mod":1,"points":[{"t":0,"f":220},{"t":2,"f":880}]}]}]})";
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
+        check (mc2.loadFromVar (juce::JSON::parse (cycJson))
+               && mc2.arcModulatorForTest (1) == -1 && mc2.arcModulatorForTest (2) == -1,
+               "modulation: a cyclic file is repaired on load");
+
+        const juce::String missJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"mod":99,"points":[{"t":0,"f":440},{"t":2,"f":440}]}]}]})";
+        auto mc3Holder = std::make_unique<MainComponent> (true);
+        auto& mc3 = *mc3Holder;
+        check (mc3.loadFromVar (juce::JSON::parse (missJson))
+               && mc3.arcModulatorForTest (1) == -1,
+               "modulation: a missing modulator is dropped on load");
+    }
+}
+
+//==============================================================================
+// WP5 verification targets (review 2026-11-19): the modulation's meaning in
+// nonlinear/stepped spaces, the stability of the arc references, and the
+// absence of non-finite output at sharp contours and reverse playback.
+void upic::runModulationSemanticsChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // 1. the factor scales the DRAWN frequency, before the space map
+    {
+        upic::Page pg;
+        pg.spaceDefs[0].editable = true;
+        pg.spaceDefs[0].points = { { 0.0f, (float) std::log2 (110.0) },
+                                   { 1.0f, (float) std::log2 (1760.0) } };
+        upic::Page::SpaceMap m = pg.spaceMap (0);
+        upic::Arc a;
+        a.points = { { 0.0, 440.0 }, { 1.0, 440.0 } };
+
+        const double plain = UpicEngine::arcPitch (a, 0.5, m);
+        const double bent = UpicEngine::arcPitch (a, 0.5, m, 2.0);
+        // the factor is applied in the drawn domain: the table maps 880, it
+        // is not an octave added after the table
+        const double expected = std::exp2 (m.def->log2At (
+            (float) ((std::log2 (880.0) - std::log2 (pg.pitchLo))
+                     / (std::log2 (pg.pitchHi) - std::log2 (pg.pitchLo))),
+            std::log2 (pg.pitchLo), std::log2 (pg.pitchHi)));
+        check (std::abs (bent - expected) < 1e-6 && std::abs (bent - plain * 2.0) > 1e-6,
+               "modulation: the factor bends the drawn pitch inside the table",
+               juce::String (bent, 3) + " vs " + juce::String (expected, 3));
+
+        // and a stepped space quantises the result, not the bend
+        upic::Page sp;
+        upic::Arc q;
+        q.stepDivisions = 12;
+        q.points = { { 0.0, 440.0 }, { 1.0, 440.0 } };
+        const double stepped = UpicEngine::arcPitch (q, 0.5, sp.spaceMap (0), 1.5);
+        const double steps = std::log2 (stepped / upic::kDefaultRefFreq) * 12.0;
+        check (std::abs (steps - std::round (steps)) < 1e-6,
+               "modulation: a stepped carrier quantises the modulated pitch",
+               juce::String (steps, 4) + " steps");
+    }
+
+    // 2. the reference is the arc id; a deleted modulator is simply absent
+    {
+        upic::Page pg;
+        upic::Arc car; car.id = 1; car.points = { { 0.0, 440.0 }, { 1.0, 440.0 } };
+        upic::Arc mod; mod.id = 2; mod.points = { { 0.0, 220.0 }, { 1.0, 880.0 } };
+        pg.arcs = { car, mod };
+        pg.arcs[0].modulatorArcId = 2;
+        check (pg.resolveArcOverrides()[0].modIndex == 1,
+               "modulation: the relationship follows the arc id");
+
+        // reordering the arcs keeps the id-based reference
+        std::swap (pg.arcs[0], pg.arcs[1]);
+        pg.arcs[1].modulatorArcId = 2;   // the carrier is now at index 1
+        auto reordered = pg.resolveArcOverrides();
+        check (reordered[1].modIndex == 0 && reordered[0].modIndex == -1,
+               "modulation: reordering the page keeps the reference");
+
+        // deleting the modulator drops the relationship, never indexes out
+        pg.arcs.erase (pg.arcs.begin());
+        const auto gone = pg.resolveArcOverrides();
+        check (gone.size() == 1 && gone[0].modIndex == -1,
+               "modulation: a deleted modulator leaves the carrier alone");
+
+        // a duplicated carrier keeps its own relationship, a duplicate id is
+        // repaired on load (the loader''s uniquify runs before this)
+        upic::Page dup = pg;
+        dup.arcs.push_back (dup.arcs[0]);
+        const auto dupOv = dup.resolveArcOverrides();
+        check (dupOv.size() == 2 && dupOv[0].modIndex == -1 && dupOv[1].modIndex == -1,
+               "modulation: a duplicated carrier has no stale modulator");
+    }
+
+    // 3. sharp contours, reverse playback and extreme depths stay finite
+    {
+        upic::Page pg;
+        pg.durationSec = 2.0;
+        upic::Arc car; car.id = 1; car.waveformId = 0; car.envelopeId = 0;
+        car.intensity = 0.2f; car.points = { { 0.0, 440.0 }, { 2.0, 440.0 } };
+        upic::Arc mod; mod.id = 2; mod.waveformId = 0; mod.envelopeId = 0;
+        mod.muted = true;
+        // a sharp jump: 110 -> 1760 half way, twice
+        mod.points = { { 0.0, 110.0 }, { 0.99, 110.0 }, { 1.0, 1760.0 },
+                       { 1.01, 110.0 }, { 2.0, 1760.0 } };
+        pg.arcs = { car, mod };
+        pg.arcs[0].modulatorArcId = 2;
+        pg.arcs[0].modArcDepth = 1.0;
+
+        const auto waves = upic::defaultWaveforms();
+        const auto envs = upic::defaultEnvelopes();
+        const std::vector<upic::SampleSlot> slots;
+        auto finite = [&] (double rate)
+        {
+            const auto ov = pg.resolveArcOverrides();
+            UpicEngine e;
+            e.prepare (48000.0, 512);
+            std::vector<float> l (2048, 0.0f), r (2048, 0.0f);
+            e.render (pg, 0.98, waves, envs, slots, l.data(), r.data(), 2048, 0.8f,
+                      rate, false, nullptr, nullptr, &ov);
+            for (float v : l) if (! std::isfinite (v)) return false;
+            for (float v : r) if (! std::isfinite (v)) return false;
+            return true;
+        };
+        check (finite (1.0), "modulation: a sharp contour stays finite forward");
+        check (finite (-1.0), "modulation: a sharp contour stays finite in reverse");
+
+        pg.arcs[0].modTarget = 1;
+        check (finite (1.0), "modulation: the amplitude target stays finite");
+    }
+}
+//==============================================================================
+// WP6.1: the mixer channel MODEL (no engine routing yet). The channel bank,
+// the arc routing and the gain curve travel with the piece; a piece without
+// channels is unchanged.
+void upic::runChannelModelChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // the curve is a pure, allocation-free segment walk
+    {
+        upic::Channel c;
+        c.envelope = { { 0.0f, 0.5f }, { 0.5f, 1.0f }, { 1.0f, 0.0f } };
+        upic::SegmentCursor cur;
+        check (std::abs (c.envelopeAt (0.0f, cur) - 0.5f) < 1e-6f,
+               "channels: the curve starts at its first point");
+        upic::SegmentCursor cur2;
+        check (std::abs (c.envelopeAt (0.25f, cur2) - 0.75f) < 1e-6f,
+               "channels: the curve interpolates inside a segment",
+               juce::String (c.envelopeAt (0.25f, cur2), 3));
+        upic::SegmentCursor cur3;
+        check (std::abs (c.envelopeAt (1.0f, cur3) - 0.0f) < 1e-6f,
+               "channels: the curve ends at its last point");
+        upic::Channel flat;
+        upic::SegmentCursor cur4;
+        check (flat.envelopeAt (0.3f, cur4) == 1.0f,
+               "channels: an empty curve is unity");
+    }
+
+    // the bank travels with the piece
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String json = R"({"currentPage":0,"channels":[{"id":1,"name":"A","gain":0.5,"env":[{"x":0,"y":0},{"x":1,"y":1}]},{"id":2,"name":"B","mute":true}],"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"ch":2,"points":[{"t":0,"f":440},{"t":2,"f":440}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)), "channels: the test piece loads");
+        check (mc.channelCountForTest() == 2 && mc.channelIdAtForTest (0) == 1
+               && std::abs (mc.channelGainAtForTest (0) - 0.5f) < 1e-6f
+               && mc.channelEnvelopePointsAtForTest (0) == 2,
+               "channels: the bank and its curve survive the load");
+        check (mc.arcChannelForTest (1) == 2, "channels: the arc keeps its channel");
+
+        const auto saved = mc.pieceToVar();
+        check (saved.hasProperty ("channels"), "channels: the bank travels with the piece");
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
+        check (mc2.loadFromVar (saved) && mc2.channelCountForTest() == 2
+               && mc2.arcChannelForTest (1) == 2,
+               "channels: the bank survives a round trip");
+
+        check (! mc.pieceToVar().hasProperty ("channels") == false,
+               "channels: a piece with channels writes the key");
+    }
+
+    // WP6.4: the mixer panel's commands
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String json = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":440},{"t":2,"f":440}]},{"id":2,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":330},{"t":2,"f":330}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)), "channels: the mixer piece loads");
+        mc.openChannelPanelForTest();
+        check (mc.channelPanelOpenForTest(), "channels: the mixer opens");
+        mc.channelNewForTest();
+        check (mc.channelCountForTest() == 1, "channels: New adds a channel");
+        const int id = mc.channelIdAtForTest (0);
+        mc.channelRenameForTest ("Wood");
+        mc.channelGainForTest (0.6f);
+        mc.channelMuteForTest (true);
+        check (std::abs (mc.channelGainAtForTest (0) - 0.6f) < 1e-6f
+               && mc.channelMutedAtForTest (0),
+               "channels: the panel's gain and mute reach the model");
+        mc.channelMuteForTest (false);
+        mc.selectArcsForTest ({ 1, 2 });
+        mc.channelAssignForTest (id);
+        check (mc.arcChannelForTest (1) == id && mc.arcChannelForTest (2) == id,
+               "channels: the panel routes the selection");
+        mc.channelDeleteForTest();
+        check (mc.channelCountForTest() == 0 && mc.arcChannelForTest (1) == 0,
+               "channels: deleting the channel returns its arcs to Main");
+        mc.undo();
+        check (mc.channelCountForTest() == 1 && mc.arcChannelForTest (1) == id,
+               "channels: the delete is one undo step");
+        mc.closeChannelPanelForTest();
+        check (! mc.channelPanelOpenForTest(), "channels: the mixer closes");
+    }
+    // an old piece has no bank and no routing
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String oldJson = R"({"currentPage":0,"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"points":[{"t":0,"f":220},{"t":2,"f":440}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (oldJson))
+               && mc.channelCountForTest() == 0 && mc.arcChannelForTest (1) == 0,
+               "channels: an old piece has no channels");
+        check (! mc.pieceToVar().hasProperty ("channels"),
+               "channels: a piece without channels writes no key");
+    }
+
+    // hostile references are repaired deterministically
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String json = R"({"currentPage":0,"channels":[{"id":1,"name":"A"}],"pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"ch":99,"points":[{"t":0,"f":440},{"t":2,"f":440}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json))
+               && mc.arcChannelForTest (1) == 0,
+               "channels: a missing channel returns the arc to Main");
+
+        juce::String big = "{\"currentPage\":0,\"channels\":[";
+        for (int i = 1; i <= 40; ++i)
+            big += juce::String (i > 1 ? "," : "") + "{\"id\":" + juce::String (i) + ",\"name\":\"C" + juce::String (i) + "\"}";
+        big += "],\"pages\":[{\"duration\":1.0,\"arcs\":[]}]}";
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
+        check (mc2.loadFromVar (juce::JSON::parse (big))
+               && mc2.channelCountForTest() == upic::limits::kMaxChannels,
+               "channels: the bank is capped",
+               juce::String (mc2.channelCountForTest()) + " channels");
     }
 }
