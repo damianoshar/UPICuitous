@@ -32,6 +32,15 @@
 #include "JobRunner.h"
 #include "UpicButtonIcons.h"
 
+// The Guerrero engine is optional. CMake defines GUERRERO_INTEGRATION to 1
+// when it finds the companion source tree and to 0 when it does not; the
+// Visual Studio project defines neither, so the default is 0 here. Without
+// this the compiler would take the undefined name for 0 anyway, but it
+// would warn about it on every use.
+#ifndef GUERRERO_INTEGRATION
+ #define GUERRERO_INTEGRATION 0
+#endif
+
 //==============================================================================
 // WP7: the audio preview routes.
 //
@@ -2542,9 +2551,10 @@ public:
     bool setGuerreroRecipeForTest (int arcId, const upic::GuerreroRecipe& recipe);
 
     // Test hooks for page identity: add a copy of the current page (so arc ids
-    // overlap) and switch to it without going through the transport.
+    // overlap) and switch to it without going through the transport. The page
+    // switch itself is setCurrentPageForTest() above: it already exists for the
+    // WP7 frequency-table test, so it is not declared a second time here.
     int  addPageCopyForTest();
-    void setCurrentPageForTest (int page);
     // v1.33.4 (L15): the save with a file chooser, for the window's
     // unsaved-changes prompt: the app closes only when the piece really was
     // written (a cancelled chooser leaves the window open).

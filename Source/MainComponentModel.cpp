@@ -2457,6 +2457,26 @@ void MainComponent::markEditedGuerreroGeometry()
                 a.guerrero.geometryEdited = true;
         }
 }
+
+// True when the page the Guerrero dialog was opened on is still the same edit
+// context: the same page index, the same piece (the epoch), the same arc count
+// and the same duration. The captured context lives in the Guerrero-only part
+// of the header, so this definition is guarded with it.
+bool MainComponent::guerreroTargetUnchanged() const
+{
+    const juce::ScopedLock l (dataLock);
+    if (currentPage != guerreroTargetPage) return false;
+
+    // The epoch survives a piece replacement: loadFromVar() swaps the pages and
+    // bumps it, so a different piece at the same index, with the same arc count
+    // and duration, is still recognised as a different edit context. Playback
+    // advancement does not bump it, which is why the index check stays.
+    if (pageEpoch.load (std::memory_order_relaxed) != guerreroTargetEpoch) return false;
+
+    const auto& p = curPage();
+    return (int) p.arcs.size() == guerreroTargetArcCount
+        && p.durationSec == guerreroTargetDuration;
+}
 #endif
 
 void MainComponent::rebuildArcList()
@@ -2726,33 +2746,11 @@ bool MainComponent::setGuerreroRecipeForTest (int arcId, const upic::GuerreroRec
     return false;
 }
 
-bool MainComponent::guerreroTargetUnchanged() const
-{
-    const juce::ScopedLock l (dataLock);
-    if (currentPage != guerreroTargetPage) return false;
-
-    // The epoch survives a piece replacement: loadFromVar() swaps the pages and
-    // bumps it, so a different piece at the same index, with the same arc count
-    // and duration, is still recognised as a different edit context. Playback
-    // advancement does not bump it, which is why the index check stays.
-    if (pageEpoch.load (std::memory_order_relaxed) != guerreroTargetEpoch) return false;
-
-    const auto& p = curPage();
-    return (int) p.arcs.size() == guerreroTargetArcCount
-        && p.durationSec == guerreroTargetDuration;
-}
-
 int MainComponent::addPageCopyForTest()
 {
     const juce::ScopedLock l (dataLock);
     pages.insert (pages.begin() + currentPage + 1, curPage());
     currentPage++;
     return currentPage;
-}
-
-void MainComponent::setCurrentPageForTest (int page)
-{
-    const juce::ScopedLock l (dataLock);
-    currentPage = juce::jlimit (0, (int) pages.size() - 1, page);
 }
 

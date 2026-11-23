@@ -2687,10 +2687,10 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
         // --- the visible page follows the audio page -----------------------
         // The audio thread only stores a packed page request; the 30 Hz timer
         // applies it, so nothing updates currentPage until a timer tick runs.
-        // The probe above only proves the AUDIO moved; this pumps the message
-        // queue (which fires the timer) and proves the visible page caught up -
-        // the half the audio probe cannot see. The second page's duration is
-        // distinct (0.25 s) so the UI value identifies which page is active.
+        // The probe above only proves the AUDIO moved; this runs the 30 Hz
+        // timer (which applies the request) and proves the visible page caught
+        // up - the half the audio probe cannot see. The second page's duration
+        // is distinct (0.25 s) so the UI value identifies which page is active.
         {
             check (mc.loadFromVar (juce::JSON::parse (makePiece (0.25))),
                    "F1: async notification - the piece loads");
@@ -2707,7 +2707,11 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
             check (mc.isPlayingForTest(),
                    "F1: async notification - the transport crossed the page");
 
-            juce::MessageManager::getInstance()->runDispatchLoopUntil (200);
+            // The 30 Hz timer is what applies the request. The app is built
+            // with JUCE's modal-loop API disabled (JUCE 8 sets
+            // JUCE_MODAL_LOOPS_PERMITTED to 0), so the timer's body is invoked
+            // directly here - the same call the timer makes.
+            mc.timerCallback();
 
             check (std::abs (mc.pageDurationForTest() - 0.25) < 1e-9,
                    "F1: async notification - the visible page follows the audio",
