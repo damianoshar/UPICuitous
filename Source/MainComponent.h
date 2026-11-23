@@ -2568,7 +2568,7 @@ public:
     void updateMidiScrubForTest() { updateMidiScrub(); }
     bool midiScrubRunning() const { return scrubActive; }
     double playRateForTest() const { return playRate.load (std::memory_order_relaxed); }
-    // Piece (de)serialization β€” public so the selftest can round-trip them.
+    // Piece (de)serialization — public so the selftest can round-trip them.
     juce::var pieceToVar() const;
     // v1.33.4 (M28): the piece as a self-contained model, captured under the
     // lock - the worker thread builds the JSON (and the base64 of the

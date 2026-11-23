@@ -1,4 +1,4 @@
-﻿#include "ScoreEditor.h"
+#include "ScoreEditor.h"
 
 //==============================================================================
 // The ScoreEditor implementation. It used to live inside the class in the

@@ -1,4 +1,4 @@
-﻿#include "MainComponent.h"
+#include "MainComponent.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>

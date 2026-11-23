@@ -1,4 +1,4 @@
-﻿#if GUERRERO_INTEGRATION
+#if GUERRERO_INTEGRATION
 #include "GuerreroUpicAdapter.h"
 
 namespace upic
