@@ -9,10 +9,14 @@ microphone input (pitch-shifted in realtime).
 Ships as a **desktop app**, an **Android tablet app**, and a **VST3
 plugin** with the same UI and engine.
 
-**Source snapshot: UPICuitous v0.29.0 (2026-11-21).** For implemented 0.29
-transport/library/UI work, Guerrero generator/dialog integration, test
-coverage and unverified behavior, see
-[`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
+**Source snapshot: UPICuitous v0.35.0.** This branch carries the historical
+restoration waves (0.30-0.35: frequency and amplitude conversion tables,
+persistent arc groups, editable performance sequences, independent
+modulating arcs, multichannel routing and the per-user asset library with
+sample extraction) on top of the v0.29 transport and library work, plus the
+optional Guerrero generator/dialog integration. The developer documentation
+lives in the companion
+[UPICuitous-docs](https://github.com/damianoshar/UPICuitous-docs) repository.
 The optional Guerrero source is maintained separately; it is not the GENDYN
 synthesizer, which remains an independent project.
 
@@ -53,7 +57,7 @@ yellow edges to trim the material.*
 
 | Build | Where | State |
 |---|---|---|
-| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v0.29.0 |
+| JUCE C++ (desktop + Android + VST3) | `Source/`, `Plugin/`, `Builds/Android/` | The main build. v0.35.0 |
 | Python + tkinter + numpy | `python-upic/` | Prototype, shares `.upic.json`. `python python-upic/upicuitous.py` |
 | Single-page WebAudio | `web-upic/` | Prototype, shares `.upic.json`. Open `web-upic/index.html` |
 
@@ -67,10 +71,10 @@ yellow edges to trim the material.*
 .\Builds\VisualStudio2026\x64\Debug\App\UPICuitous.exe
 
 # VST3 (built by the script; the install asks for admin rights)
-.\scripts\install_plugin.ps1 -Version 0.29.0
+.\scripts\install_plugin.ps1 -Version 0.35.0
 ```
 
-`scripts/build.ps1 -Version 0.29.0` bumps the version everywhere it is
+`scripts/build.ps1 -Version 0.35.0` bumps the version everywhere it is
 written - the app, the plugin, the root CMake project, the Android manifest
 and the generated exporters - from one number in `UPICuitous.jucer`. Every
 build checks that the others still agree with it. `-SkipApp` or `-SkipPlugin`
@@ -81,7 +85,7 @@ First run of the standalone: press **Audio** and pick the output device.
 The microphone is opened on demand (Sample tab -> **Mon** / **Capture**, or
 **Play** with live arcs on the page).
 
-## Optional Guerrero composition workflow (v0.29.0)
+## Optional Guerrero composition workflow
 
 When CMake finds the companion Guerrero `Source/guerrero` tree (or
 `-DGUERRERO_SOURCE_DIR=/path/to/guerrero/Source` points to it), the host
@@ -104,24 +108,26 @@ seeds, not the complete historical Guerrero thread/rhythmic/mass system.
 The GENDYN project is **not connected** as a Guerrero playback backend.
 These UI behaviors have strong headless test coverage, but the dialog has
 **not** yet been checked visually for focus, scrolling or small screens.
-See the [implementation status](docs/IMPLEMENTATION_STATUS.md) for exact
-verification levels and outstanding issues.
+See the [developer documentation](https://github.com/damianoshar/UPICuitous-docs)
+for the wave notes, the verification levels and the outstanding issues.
 
-## v0.29 transport, libraries and score views
+## Transport, libraries and score views
 
-Version 0.29 adds transport-state/fade behaviors, wavetable/envelope library
+Version 0.29 added transport-state/fade behaviors, wavetable/envelope library
 reference replacement (including per-page rewrites and undo), toolbar/score
-view restyling and knob interaction. The headless suite exercises these
-model-level behaviors and a two-page tone/silence playback fixture in four
-Sequential/Loop combinations. The Sequential+Loop fixture samples the
-**intermediate silent page** (tone -> silence -> tone), so it proves page two was
-visited before wrapping, and it asserts both named toggles were found; forcing
-`snap.seqPages` to false fails that middle sample. The queued UI page update is
-also covered: the test pumps the message queue (`JUCE_MODAL_LOOPS_PERMITTED`)
-and asserts the visible page follows the audio page. The audio callback itself
-no longer calls `callAsync()` - page transitions and end-of-piece stops are
-published as atomics and applied by the 30 Hz timer - so it allocates nothing and
-takes no lock on that path.
+view restyling and knob interaction; the later waves added the conversion
+tables, arc groups, performance sequences, modulating arcs, multichannel
+routing and the per-user asset library with sample extraction (0.30-0.35).
+The headless suite exercises these model-level behaviors and a two-page
+tone/silence playback fixture in four Sequential/Loop combinations. The
+Sequential+Loop fixture samples the **intermediate silent page** (tone ->
+silence -> tone), so it proves page two was visited before wrapping, and it
+asserts both named toggles were found; forcing `snap.seqPages` to false fails
+that middle sample. The queued UI page update is also covered: the test runs
+the 30 Hz timer's body and asserts the visible page follows the audio page.
+The audio callback itself no longer calls `callAsync()` - page transitions and
+end-of-piece stops are published as atomics and applied by the 30 Hz timer - so
+it allocates nothing and takes no lock on that path.
 
 ## What it does
 
@@ -593,10 +599,11 @@ repository.
 
 ## Tests
 
-`UPICuitous.exe --selftest` has **1,213 total headless checks**
-reported passing in the latest Windows v0.29 run (including 187 Guerrero
-checks when that integration is enabled). That result is **developer-reported**,
-not independently rerun on this Linux reviewer environment. The suite covers
+`UPICuitous.exe --selftest` runs **1,508 headless checks** on this tree
+(1,470 from the 0.35.0 release branch plus the 38 the Guerrero branch
+adds), all reported passing in the latest Windows v0.35 Debug and Release
+runs. A further 187 Guerrero checks join the run when the companion engine
+source is present. The suite covers
 DSP, pitch math,
 all seven pitch modes, click guard, JSON round-trip, UI layout sweep,
 tab wiring, latency rules, the lock-free model snapshot, the sample

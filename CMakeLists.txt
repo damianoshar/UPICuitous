@@ -121,9 +121,10 @@ if (GUERRERO_AVAILABLE)
 endif()
 
 # JUCE_MODAL_LOOPS_PERMITTED gates MessageManager::runDispatchLoopUntil, which
-# the headless self-test uses to deliver queued message-thread work (the
-# asynchronous active-page notification after a page transition). Enabling it
-# only compiles that support in; nothing in the app calls a modal loop.
+# the headless self-test uses to deliver queued message-thread work (the WP7
+# check that drains a deferred preview cancellation). Enabling it only compiles
+# that support in; nothing in the app calls a modal loop. The Visual Studio
+# project leaves it at JUCE's default of 0, so both spellings are compiled.
 target_compile_definitions(UPICuitous PRIVATE
     JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_WEB_BROWSER=0
