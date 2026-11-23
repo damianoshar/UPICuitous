@@ -43,7 +43,7 @@ namespace upic
     void runModulationChecks (SelfTest& t);  // WP5: the modulating arcs
     void runModulationSemanticsChecks (SelfTest& t); // WP5 verification targets
     void runChannelModelChecks (SelfTest& t);
-    void runChannelUiChecks (SelfTest& t); // WP6.1: the channel model
+    void runChannelUiChecks (SelfTest& t); // WP6.4: the mixer panel
     void runChannelRoutingChecks (SelfTest& t); // WP6.3: the mixer
     void runUntrustedPieceChecks (SelfTest& t);
     void runModelMathChecks (SelfTest& t);

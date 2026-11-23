@@ -482,33 +482,6 @@ void MainComponent::buildFrequencyControls()
         const int i = seqBox.getSelectedId() - 1;
         if (i >= 0 && i < (int) sequences.size()) selSeqId = sequences[(size_t) i].id;
         refreshSequencePanel();
-    // --- WP6.4: the mixer UI ---
-    // NOTE FOR WP7: this block only adds the Ch combo / Mix button. WP7's
-    // library and extraction controls belong in their own marked block so a
-    // parallel merge keeps both toolbars intact.
-    addAndMakeVisible (channelLab);
-    addAndMakeVisible (channelBox);
-    addAndMakeVisible (channelBtn);
-    channelLab.setName ("channelLab");
-    channelBox.setName ("channelBox");
-    channelBtn.setName ("channelBtn");
-    channelLab.setJustificationType (juce::Justification::centredRight);
-    channelLab.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
-    channelBox.setTooltip ("The mixer channel the selected arcs play on");
-    channelBtn.setTooltip ("The mixer: channel levels, mute/solo and routing");
-    channelBtn.onClick = [this]{ showChannelPanel(); };
-    refreshChannelBox();
-    channelBox.onChange = [this]
-    {
-        if (! channelBoxReady || channelBoxRefreshing || refreshingControls) return;
-        const int item = channelBox.getSelectedId();
-        if (item <= 1) { setChannelOnSelection (0); return; }
-        const int idx2 = juce::jlimit (0, (int) channels.size() - 1, item - 2);
-        if (idx2 >= 0 && idx2 < (int) channels.size())
-            setChannelOnSelection (channels[(size_t) idx2].id);
-    };
-    channelBoxReady = true;
-    // --- end WP6.4 ---
     };
     seqRecBtn.onClick = [this]
     {

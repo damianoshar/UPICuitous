@@ -993,11 +993,6 @@ void MainComponent::resized()
                                 F(&channelBtn, 62) } });
     // --- end WP6.4 ---
 
-    // --- WP6.4: the mixer (WP7 adds its own card in its marked block) ---
-    groups.push_back ({ "ch", { FI(&channelLab, 26, &channelBox, 100),
-                                F(&channelBtn, 62) } });
-    // --- end WP6.4 ---
-
     // WP4: the performance sequences.
     groups.push_back ({ "seq", { FI(&seqLab, 30, &seqBox, 110),
                                   F(&seqRecBtn, 52), F(&seqPlayBtn, 54),
