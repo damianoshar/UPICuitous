@@ -2361,7 +2361,12 @@ void MainComponent::buildSampleControls()
     // changes the sound, so it travels with the piece.
     levelSlider.setName("levelSlider");
     levelSlider.setNormalisableRange (juce::NormalisableRange<double> (0.0, 2.0, 0.01, 0.2));
-    levelSlider.setValue (1.0);
+    // The slot's level is already 1.0 in the model, so this is a view-only
+    // initialisation. It must not notify: a notifying setValue defers the
+    // handler to a later message-thread turn, and that stale callback would
+    // then invalidate a sample-extraction preview armed after the widget was
+    // built (WP7: the extraction follows the material's identity).
+    levelSlider.setValue (1.0, juce::dontSendNotification);
     levelSlider.setTooltip ("The slot's level - how loud the material is "
                             "(1 = as it was loaded)");
     levelSlider.onValueChange = [this]{
