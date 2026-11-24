@@ -923,6 +923,10 @@ int MainComponent::liveLatencySamples() const
 void MainComponent::timerCallback()
 {
     ++timerTicks;
+    // M6: the audio thread's messages to the message thread. They arrive in
+    // the preallocated mailbox (no allocation on the audio thread) and are
+    // taken out here, on the message thread.
+    drainAudioMessages();
     if (seqRecording) sequenceRecordTick();   // WP4
     // Refresh the cached input count (device/add-remove happens here on the
     // message thread; the audio tap only reads the atomic). In plugin mode the

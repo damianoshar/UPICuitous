@@ -481,6 +481,168 @@ void upic::runThreadValueChecks (upic::SelfTest& t)
         }
     }
 
+    // 6a-8. M6: the audio thread must not allocate. The transport's stop
+    //     edge used to queue a std::function through
+    //     MessageManager::callAsync: a malloc on the audio thread at every
+    //     stop, every page change and every capture hand-off. The hand-off
+    //     now goes through a preallocated mailbox.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true); // plugin mode: no device
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+        mc.prepareToPlay (512, 44100.0);
+
+        const juce::String json =
+            "{\"pages\":[{\"duration\":4,\"nextArcId\":9,\"arcs\":["
+            "{\"id\":1,\"mode\":0,\"intensity\":1,"
+            "\"points\":[{\"t\":0,\"f\":220},{\"t\":3,\"f\":220}]}]}]}";
+        check (mc.loadFromVar (juce::JSON::parse (json)),
+               "M6 the transport piece loads");
+
+        mc.clickPlayForTest();
+
+        juce::AudioBuffer<float> out (2, 512);
+        juce::AudioSourceChannelInfo info (&out, 0, out.getNumSamples());
+
+        // warm up: the fade-in and the first prepared blocks
+        for (int i = 0; i < 12; ++i)
+        {
+            out.clear();
+            mc.getNextAudioBlock (info);
+        }
+        check (mc.transportStateForTest() == MainComponent::TransportState::playing,
+               "M6 the transport is playing before the stop",
+               juce::String ((int) mc.transportStateForTest()));
+
+        // the message thread asks for the stop - the fade starts
+        mc.stopPlaybackForTest();
+        check (mc.stopPendingForTest(),
+               "M6 the stop asks the audio thread to fade out");
+
+        // the audio thread completes the fade and hands the stop over to the
+        // message thread. The old path queued a std::function through
+        // callAsync right here: a malloc on the audio thread.
+        upic::allocCount = 0;
+        upic::allocCounting = true;
+        for (int i = 0; i < 16
+                       && mc.transportStateForTest() != MainComponent::TransportState::stopped;
+             ++i)
+        {
+            out.clear();
+            mc.getNextAudioBlock (info);
+        }
+        upic::allocCounting = false;
+        check (upic::allocCount == 0,
+               "M6 the transport stop edge does not allocate on the audio thread",
+               juce::String (upic::allocCount) + " allocation(s)");
+        check (mc.transportStateForTest() == MainComponent::TransportState::stopped,
+               "M6 the audio thread finished the stop fade");
+        check (mc.pendingAudioMessagesForTest() == 1,
+               "M6 the stop waits in the mailbox for the message thread",
+               juce::String (mc.pendingAudioMessagesForTest()) + " pending");
+    }
+
+    // 6a-9. M6: the mailbox really delivers. The audio thread moves to the
+    //     next page; the message thread only learns about it when it drains
+    //     the mailbox (the timer tick in the app).
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+        mc.prepareToPlay (512, 44100.0);
+
+        const juce::String twoPages =
+            "{\"pages\":["
+            "{\"duration\":0.05,\"nextArcId\":9,\"arcs\":[{\"id\":1,\"mode\":0,\"intensity\":1,"
+            "\"points\":[{\"t\":0,\"f\":220},{\"t\":0.05,\"f\":220}]}]},"
+            "{\"duration\":2,\"nextArcId\":9,\"arcs\":[{\"id\":2,\"mode\":0,\"intensity\":1,"
+            "\"points\":[{\"t\":0,\"f\":880},{\"t\":2,\"f\":880}]}]}]}";
+        check (mc.loadFromVar (juce::JSON::parse (twoPages)),
+               "M6 the two-page piece loads");
+
+        // the piece must not loop: the score has to walk into the next page
+        // (the loop is on by default, and a loop never reaches the next page)
+        std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+            [&findByName](juce::Component& c, const juce::String& n) -> juce::Component* {
+                if (c.getName() == n) return &c;
+                for (int i = 0; i < c.getNumChildComponents(); ++i)
+                    if (auto* r = findByName(*c.getChildComponent(i), n)) return r;
+                return nullptr;
+            };
+        auto* loopBtn = dynamic_cast<juce::ToggleButton*> (findByName (mc, "loopBtn"));
+        check (loopBtn != nullptr, "M6 the loop button is there");
+        if (loopBtn != nullptr)
+        {
+            loopBtn->setToggleState (false, juce::dontSendNotification);
+            if (loopBtn->onClick) loopBtn->onClick();
+        }
+        mc.timerCallback(); // publish the new loopPage to the audio snapshot
+
+        mc.clickPlayForTest();
+
+        juce::AudioBuffer<float> out (2, 512);
+        juce::AudioSourceChannelInfo info (&out, 0, out.getNumSamples());
+
+        // the page change happens on the audio thread: it must not allocate
+        upic::allocCount = 0;
+        upic::allocCounting = true;
+        for (int i = 0; i < 24 && mc.pendingAudioMessagesForTest() == 0; ++i)
+        {
+            out.clear();
+            mc.getNextAudioBlock (info);
+        }
+        upic::allocCounting = false;
+        check (upic::allocCount == 0,
+               "M6 the page change does not allocate on the audio thread",
+               juce::String (upic::allocCount) + " allocation(s)");
+        check (mc.pendingAudioMessagesForTest() == 1,
+               "M6 the page change waits in the mailbox",
+               juce::String (mc.pendingAudioMessagesForTest()) + " pending, playhead "
+                 + juce::String (mc.publishedPlayheadForTest(), 4)
+                 + ", state " + juce::String ((int) mc.transportStateForTest()));
+
+        // the message thread has not adopted the page yet
+        check (std::abs (mc.pageDurationForTest() - 0.05) < 1.0e-6,
+               "M6 the message thread has not adopted the page yet",
+               juce::String (mc.pageDurationForTest(), 3) + " s");
+
+        mc.drainAudioMessagesForTest();
+        check (mc.drainedAudioMessagesForTest() >= 1,
+               "M6 the mailbox delivered the message",
+               juce::String (mc.drainedAudioMessagesForTest()) + " drained");
+        check (mc.pendingAudioMessagesForTest() == 0,
+               "M6 the mailbox is empty after the drain",
+               juce::String (mc.pendingAudioMessagesForTest()) + " pending");
+        check (std::abs (mc.pageDurationForTest() - 2.0) < 1.0e-6,
+               "M6 the message thread adopted the audio thread's page",
+               juce::String (mc.pageDurationForTest(), 3) + " s");
+    }
+
+    // 6a-10. M6: the input tap's scratch is prepared on the message thread.
+    //     It used to be grown inside the audio callback (a malloc on the
+    //     audio thread the first time a host sent a block).
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+        mc.prepareToPlay (512, 44100.0);
+
+        juce::AudioBuffer<float> buf (2, 512);
+        for (int i = 0; i < 512; ++i)
+        {
+            buf.setSample (0, i, 0.5f);
+            buf.setSample (1, i, -0.5f);
+        }
+        juce::AudioSourceChannelInfo info (&buf, 0, buf.getNumSamples());
+
+        upic::allocCount = 0;
+        upic::allocCounting = true;
+        mc.getNextAudioBlock (info);
+        upic::allocCounting = false;
+        check (upic::allocCount == 0,
+               "M6 the input tap does not allocate on the audio thread",
+               juce::String (upic::allocCount) + " allocation(s)");
+    }
 }
 
 void upic::runLivePathChecks (upic::SelfTest& t)

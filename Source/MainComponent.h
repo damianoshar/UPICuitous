@@ -1110,6 +1110,20 @@ public:
     void clickStopForTest() { stopBtn.onClick(); }
     void injectOscMessageForTest (const juce::OSCMessage& m) { osc.handleMessageForTest (m); }
     void updateExternalScrubForTest (double nowMs) { updateExternalScrub (nowMs); }
+    // M6: the audio thread's mailbox. The selftest has no message loop, so
+    // the timer that drains the mailbox never ticks: the test drains it by
+    // hand, exactly as the timer does.
+    void drainAudioMessagesForTest() { drainAudioMessages(); }
+    // How many records are waiting in the mailbox (the producer's count
+    // minus the consumer's).
+    int pendingAudioMessagesForTest() const
+    {
+        const int w = audioMessageWrite.load (std::memory_order_acquire);
+        const int r = audioMessageRead.load (std::memory_order_acquire);
+        return (w >= r) ? (w - r) : (w + kAudioMessageSlots - r);
+    }
+    // The number of records the mailbox has delivered to the message thread.
+    int drainedAudioMessagesForTest() const { return audioMessagesDrained; }
 
     // v1.33.3: the toolbar cards, so the selftest can prove that every
     // toolbar control sits on a card (a wrapped group used to leave the
@@ -1700,9 +1714,18 @@ private:
     // retain a non-null pointer to freed storage. The shared gate is closed
     // before teardown; a callback either owns the gate while the component
     // is whole or observes the closed gate and does nothing.
+    //
+    // M6: this path ALLOCATES (callAsync allocates a message for every
+    // call), so it must never be used from the audio thread. The audio
+    // thread's own hand-off goes through the preallocated mailbox below.
+    // The three remaining callers run on the message thread or on the
+    // host's setup thread - never on the real-time audio thread - and the
+    // assertion catches a violation in the debug build.
     template <typename Callback>
     void postToMessageThread (Callback&& callback)
     {
+        jassert (! inAudioCallback);
+
         auto* const messages = juce::MessageManager::getInstanceWithoutCreating();
         if (messages == nullptr)
             return;
@@ -1717,6 +1740,115 @@ private:
                 callback (*component);
         });
     }
+
+    //==============================================================================
+    // M6: the audio thread's messages to the message thread.
+    //
+    // The old path queued a std::function through MessageManager::callAsync,
+    // which allocates a message on EVERY call: a malloc on the audio thread
+    // at every transport edge, page change and capture hand-off.
+    //
+    // This is a fixed ring of preallocated records. The audio thread writes
+    // one into the next free slot (no allocation, no lock) and the message
+    // thread takes the records out in its timer tick. One producer (the
+    // audio thread), one consumer (the message thread).
+    enum class AudioMessageKind : std::uint8_t
+    {
+        none,
+        stopPlayback,       // the transport reached the end of its fade
+        pageChanged,        // the score moved to another page
+        finalizeCapture     // a take ended and has to be written to its slot
+    };
+    struct AudioMessage
+    {
+        AudioMessageKind kind = AudioMessageKind::none;
+        int generation = 0;  // the page epoch (the guard against a late page)
+        int page = 0;
+    };
+    static constexpr int kAudioMessageSlots = 32;
+    AudioMessage audioMessages[kAudioMessageSlots] {};
+    std::atomic<int> audioMessageWrite { 0 };
+    std::atomic<int> audioMessageRead { 0 };
+    // How many records the message thread has taken out (the selftest's
+    // proof that the hand-off really arrived).
+    int audioMessagesDrained = 0;
+
+    // The audio thread's side: the record goes into the next free slot.
+    // No allocation, no lock - only the slot and the index move.
+    void postAudioMessage (AudioMessageKind kind,
+                           int generation = 0,
+                           int page = 0) noexcept
+    {
+        const int write = audioMessageWrite.load (std::memory_order_relaxed);
+        const int next = (write + 1) % kAudioMessageSlots;
+        if (next == audioMessageRead.load (std::memory_order_acquire))
+            return;   // the ring is full - it never is (the message thread drains it)
+
+        AudioMessage& slot = audioMessages[write];
+        slot.kind = kind;
+        slot.generation = generation;
+        slot.page = page;
+        audioMessageWrite.store (next, std::memory_order_release);
+    }
+
+    // The message thread's side: take the records out and act on them. This
+    // runs in the timer tick, so it holds no lock and the component is whole.
+    void drainAudioMessages()
+    {
+        for (;;)
+        {
+            const int read = audioMessageRead.load (std::memory_order_relaxed);
+            if (read == audioMessageWrite.load (std::memory_order_acquire))
+                return;
+
+            // The producer only writes a slot the consumer has released, so
+            // the record is complete here (the release/acquire pair on the
+            // indices is the hand-off).
+            const AudioMessage& slot = audioMessages[read];
+
+            switch (slot.kind)
+            {
+                case AudioMessageKind::stopPlayback:
+                    stopPlayback (true);
+                    break;
+
+                case AudioMessageKind::pageChanged:
+                    // the epoch guard drops a late notification if the user
+                    // picked another page meanwhile
+                    if (pageEpoch.load (std::memory_order_relaxed) == slot.generation)
+                    {
+                        currentPage = juce::jlimit (0, (int) pages.size() - 1, slot.page);
+                        refreshBoxes();
+                        refreshScoreBinding();
+                    }
+                    break;
+
+                case AudioMessageKind::finalizeCapture:
+                    finalizeCapture();
+                    break;
+
+                case AudioMessageKind::none:
+                    break;
+            }
+
+            // The slot is released only after it has been acted on, so the
+            // producer can never overwrite a record that is still in use.
+            audioMessageRead.store ((read + 1) % kAudioMessageSlots,
+                                    std::memory_order_release);
+            ++audioMessagesDrained;
+        }
+    }
+
+    // M6: the marker for the real-time audio thread. The debug build
+    // asserts that the allocating hand-off is never used there, and the
+    // selftest uses it to prove that the audio path allocates nothing.
+    static inline thread_local bool inAudioCallback = false;
+    struct AudioCallbackScope
+    {
+        AudioCallbackScope() noexcept { inAudioCallback = true; }
+        ~AudioCallbackScope() noexcept { inAudioCallback = false; }
+        JUCE_DECLARE_NON_COPYABLE (AudioCallbackScope)
+    };
     // The route and payload presence of the last published extraction
     // snapshot, packed into one atomic word for the selftest. Bit 2 says
     // that the snapshot carried isolated preview material.
@@ -1965,7 +2097,14 @@ private:
     int capMax = 0, capFinalCount = 0, capFinalReason = 0;
     double capRate = 44100.0;
     juce::AudioBuffer<float> capBuf;    // audio thread writes, message thread reads after handoff
-    juce::AudioBuffer<float> inScratch; // per-block input copy (read pre-clear)
+    // M6: the per-block input copy (read pre-clear). It is sized on the
+    // message thread (prepareAudioBuffers) for the largest block a host may
+    // send - the tap used to grow it inside the audio callback, which is a
+    // malloc on the audio thread.
+    juce::AudioBuffer<float> inScratch;
+    // How many samples of inScratch the last tap wrote (the selftest reads
+    // the peak of the LAST block, not of the whole prepared buffer).
+    std::atomic<int> inScratchUsed { 0 };
     static constexpr double kMaxCaptureSec = 30.0;
 
     // --- v1.5 live pitch-follow: input ring read by mode-2 (live input) arcs ---

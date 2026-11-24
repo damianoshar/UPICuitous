@@ -66,19 +66,30 @@ bool MainComponent::tapLiveInput(const juce::AudioSourceChannelInfo& info)
     }
 
     const int n = info.numSamples;
-    if (inScratch.getNumChannels() < 2 || inScratch.getNumSamples() < n)
-        inScratch.setSize(2, n, false, false, true);
+    // M6: the input scratch is sized on the message thread (prepareAudioBuffers)
+    // for the largest block a host may send. It is never grown here: a host
+    // that sends a bigger block gets its first samples only - a host that
+    // breaks the documented block limit must not make the audio thread
+    // allocate (the old code grew the buffer right here).
+    const int capacity = inScratch.getNumSamples();
+    if (inScratch.getNumChannels() < 2 || capacity < 1)
+    {
+        liveTapActive = false;
+        return monitoring.load();
+    }
+    const int tapN = juce::jmin (n, capacity);
     const float* in0 = buf->getReadPointer(0, info.startSample);
     const float* in1 = (nIn > 1 && buf->getNumChannels() > 1)
                            ? buf->getReadPointer(1, info.startSample) : in0;
-    inScratch.copyFrom(0, 0, in0, n);
-    inScratch.copyFrom(1, 0, in1, n);
+    inScratch.copyFrom(0, 0, in0, tapN);
+    inScratch.copyFrom(1, 0, in1, tapN);
+    inScratchUsed.store (tapN, std::memory_order_relaxed);
 
     // v1.5: feed the live ring (mode-2 arcs read it behind this write head)
     if (liveRingSize > 0)
     {
         int at = (int) (liveWritePos % (long long) liveRingSize);
-        int off = 0, rem = n;
+        int off = 0, rem = tapN;
         const float* s0 = inScratch.getReadPointer(0);
         const float* s1 = inScratch.getReadPointer(1);
         while (rem > 0)
@@ -124,7 +135,7 @@ bool MainComponent::tapLiveInput(const juce::AudioSourceChannelInfo& info)
             const float* s0 = inScratch.getReadPointer(0);
             const float* s1 = inScratch.getReadPointer(1);
             const int fadeN = juce::jmax(1, (int) std::lround(0.005 * sr));
-            for (int i = 0; i < n; ++i)
+            for (int i = 0; i < tapN; ++i)
             {
                 revCapHead = (revCapHead - 1 + D) % D;
                 float g = 1.0f;
@@ -154,14 +165,14 @@ bool MainComponent::tapLiveInput(const juce::AudioSourceChannelInfo& info)
                 }
             }
             // the playback head runs at 1x and stops at the segment's end
-            revPlayHead = juce::jmin(D, revPlayHead + n);
+            revPlayHead = juce::jmin(D, revPlayHead + tapN);
         }
     }
 
     if (capturing.load() && capMax > 0)
     {
         const int at = capPos.load();
-        const int w = juce::jmin(n, juce::jmax(0, capMax - at));
+        const int w = juce::jmin(tapN, juce::jmax(0, capMax - at));
         if (w > 0)
         {
             capBuf.copyFrom(0, at, inScratch, 0, 0, w);
@@ -186,7 +197,11 @@ float MainComponent::inputTapPeakForTest (int channel) const
         return 0.0f;
 
     float peak = 0.0f;
-    for (int i = 0; i < inScratch.getNumSamples(); ++i)
+    // only the samples of the LAST block count: the scratch is prepared for
+    // the largest block a host may send (M6), so the rest is stale.
+    const int count = juce::jmin (inScratch.getNumSamples(),
+                                  inScratchUsed.load (std::memory_order_relaxed));
+    for (int i = 0; i < count; ++i)
         peak = juce::jmax (peak, std::abs (inScratch.getSample (channel, i)));
     return peak;
 }
@@ -198,13 +213,11 @@ void MainComponent::handoffCapture()
     capFinalCount = capPos.load();
     capFinalReason = capStopReason.exchange(0);
     capReady = true;
-    // UI must not be touched from the audio thread. The shared callback gate
-    // keeps the queued finalisation safe if the host destroys the component
-    // on another thread.
-    postToMessageThread ([] (MainComponent& component)
-    {
-        component.finalizeCapture();
-    });
+    // UI must not be touched from the audio thread. The hand-off goes
+    // through the preallocated mailbox (M6: the old path queued a
+    // std::function through callAsync, which allocates a message on the
+    // audio thread).
+    postAudioMessage (AudioMessageKind::finalizeCapture);
 }
 
 void MainComponent::requestCaptureStop(int reason)

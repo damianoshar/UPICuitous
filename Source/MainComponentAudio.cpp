@@ -613,6 +613,10 @@ void MainComponent::prepareAudioBuffers (int samplesPerBlockExpected)
     scoreBuf.setSize (2, n, false, false, true);
     freezeBuf.setSize (2, n, false, false, true);
     sampleExtractBuf.setSize (2, n, false, false, true);
+    // M6: the input scratch too. The tap used to grow it inside the audio
+    // callback (a malloc on the audio thread).
+    inScratch.setSize (2, n, false, false, true);
+    inScratchUsed.store (0, std::memory_order_relaxed);
 }
 
 //==============================================================================
@@ -775,6 +779,11 @@ void MainComponent::applyAudioPreparation (std::uint64_t generation,
 
 void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 {
+    // M6: the marker for the real-time audio thread. The debug build
+    // asserts that the allocating hand-off (postToMessageThread) is never
+    // used here, and the selftest proves that this path allocates nothing.
+    const AudioCallbackScope audioScope;
+
     // Preparation may run on a host setup thread while this callback is
     // active. The callback never waits for it: if preparation owns the
     // engine gate, this block is silent and the next one continues from the
@@ -1163,7 +1172,12 @@ void MainComponent::mixMonitorInput (float* L, float* R, int n)
 {
     const float* s0 = inScratch.getReadPointer(0);
     const float* s1 = inScratch.getNumChannels() > 1 ? inScratch.getReadPointer(1) : s0;
-    for (int i = 0; i < n; ++i)
+    // M6: the scratch is prepared for the largest block a host may send and
+    // is never grown on the audio thread, so a host that breaks the block
+    // limit gets its first samples only - the tail stays silent instead of
+    // reading past the buffer.
+    const int count = juce::jmin (n, inScratch.getNumSamples());
+    for (int i = 0; i < count; ++i)
     {
         // v1.15: the monitor gain is smoothed per sample - a step in a
         // gain (a slider move, host automation) is a click
@@ -1502,13 +1516,11 @@ void MainComponent::applyTransportGain (float* SL, float* SR, int n, double sr,
                                                     std::memory_order_relaxed))
         {
             engine.reset();
-            // UI must not be touched from the audio thread. The shared
-            // callback gate makes the queued stop safe even if a host
-            // destroys the component on another thread.
-            postToMessageThread ([] (MainComponent& component)
-            {
-                component.stopPlayback (true);
-            });
+            // M6: the UI must not be touched from the audio thread. The
+            // message goes through the preallocated mailbox - the old path
+            // queued a std::function through callAsync, which allocates a
+            // message on the audio thread.
+            postAudioMessage (AudioMessageKind::stopPlayback);
         }
     }
 }
@@ -1548,22 +1560,15 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
     const auto publishPlayhead = [this]
     { playheadPublished.store(audioPlayhead, std::memory_order_relaxed); };
 
-    // UI must not be touched from the audio thread. The shared callback gate
-    // keeps the queued notification safe if the host destroys the component
-    // on another thread. The epoch guard drops a late notification if the
-    // user picked another page meanwhile.
+    // UI must not be touched from the audio thread. The notification goes
+    // through the preallocated mailbox (M6: the old path queued a
+    // std::function through callAsync, which allocates a message on the
+    // audio thread). The epoch guard drops a late notification if the user
+    // picked another page meanwhile.
     const auto notifyPage = [this](int next)
     {
         const int epoch = pageEpoch.load(std::memory_order_relaxed);
-        postToMessageThread ([next, epoch] (MainComponent& component)
-        {
-            if (component.pageEpoch.load(std::memory_order_relaxed) != epoch)
-                return;
-            component.currentPage = juce::jlimit (
-                0, (int) component.pages.size() - 1, next);
-            component.refreshBoxes();
-            component.refreshScoreBinding();
-        });
+        postAudioMessage (AudioMessageKind::pageChanged, epoch, next);
     };
 
     // Render in sub-chunks split at the page boundary so looping never
@@ -1695,10 +1700,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                               std::memory_order_relaxed);
                         playheadAtEnd.store(false, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
-                        postToMessageThread ([] (MainComponent& component)
-                        {
-                            component.stopPlayback (true);
-                        });
+                        // M6: the preallocated mailbox (no allocation here)
+                        postAudioMessage (AudioMessageKind::stopPlayback);
                         return;
                     }
                 }
@@ -1728,10 +1731,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                           std::memory_order_relaxed);
                     playheadAtEnd.store(false, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
-                    postToMessageThread ([] (MainComponent& component)
-                    {
-                        component.stopPlayback (true);
-                    });
+                    // M6: the preallocated mailbox (no allocation here)
+                    postAudioMessage (AudioMessageKind::stopPlayback);
                     return;
                 }
             }
@@ -1751,10 +1752,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                               std::memory_order_relaxed);
                         playheadAtEnd.store(true, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
-                        postToMessageThread ([] (MainComponent& component)
-                        {
-                            component.stopPlayback (true);
-                        });
+                        // M6: the preallocated mailbox (no allocation here)
+                        postAudioMessage (AudioMessageKind::stopPlayback);
                         return;
                     }
                 }
@@ -1773,10 +1772,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                           std::memory_order_relaxed);
                     playheadAtEnd.store(true, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
-                    postToMessageThread ([] (MainComponent& component)
-                    {
-                        component.stopPlayback (true);
-                    });
+                    // M6: the preallocated mailbox (no allocation here)
+                    postAudioMessage (AudioMessageKind::stopPlayback);
                     return;
                 }
             }
