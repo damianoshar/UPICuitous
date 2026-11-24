@@ -1108,6 +1108,110 @@ void upic::runChannelRoutingChecks (upic::SelfTest& t)
         check (found, "channels: a mixer channel gets its own stem");
         dir.deleteRecursively();
     }
+    // WP6.3 (audit H2): the LAST channel of the bank is audible. The mix
+    // buckets are the bank's channels PLUS the implicit Main bucket, so a
+    // bank of kMaxChannels needs kMaxChannels + 1 of them. Sizing them for
+    // the bank alone silently dropped the bank's last channel.
+    {
+        std::vector<upic::Channel> bank;
+        for (int i = 1; i <= upic::limits::kMaxChannels; ++i)
+        {
+            upic::Channel c;
+            c.id = i;
+            c.name = "C" + juce::String (i);
+            bank.push_back (c);
+        }
+        const int lastId = upic::limits::kMaxChannels;
+        const double base = render (makePage (lastId), nullptr);
+        const double last = render (makePage (lastId), &bank);
+        check (base > 0.0 && std::abs (last / base - 1.0) < 0.01,
+               "channels: the last channel of the bank is audible",
+               juce::String (last / base, 4));
+    }
+
+    // WP6.3 (audit H1): the LIVE path honours the mixer. The live render
+    // used to drop the channel bank, so mute, solo, gain and the gain curve
+    // were silent in the app and in the plugin while the WAV export (which
+    // passes the bank) honoured them.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+        mc.prepareToPlay (512, 44100.0);
+
+        const juce::String json =
+            "{\"channels\":[{\"id\":1,\"name\":\"A\"}],"
+            "\"pages\":[{\"duration\":4,\"nextArcId\":9,\"arcs\":["
+            "{\"id\":1,\"mode\":0,\"intensity\":1,\"ch\":1,"
+            "\"points\":[{\"t\":0,\"f\":220},{\"t\":3,\"f\":220}]}]}]}";
+        check (mc.loadFromVar (juce::JSON::parse (json)),
+               "live mixer: the piece with a channel loads");
+        check (mc.channelCountForTest () == 1 && mc.arcChannelForTest (1) == 1,
+               "live mixer: the bank and the arc's routing load",
+               juce::String (mc.channelCountForTest()) + " channels, arc on "
+                   + juce::String (mc.arcChannelForTest (1)));
+
+        bool clicked = false;
+        for (auto* c : mc.getChildren())
+            if (auto* b = dynamic_cast<juce::Button*> (c))
+                if (b->getButtonText() == "Play") { b->onClick(); clicked = true; break; }
+        check (clicked, "live mixer: found the Play button");
+
+        juce::AudioBuffer<float> out (2, 2048);
+        juce::AudioSourceChannelInfo info (&out, 0, out.getNumSamples());
+        auto peak = [&]
+        {
+            float p = 0.0f;
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < out.getNumSamples(); ++i)
+                    p = juce::jmax (p, std::abs (out.getSample (c, i)));
+            return p;
+        };
+        // A model change fades the OLD score out over the next block (a
+        // click-free handover), so the measurement has to start after that
+        // block - otherwise the fade, not the mixer, is what is measured.
+        auto renderSome = [&] (int warmup, int blocks)
+        {
+            for (int i = 0; i < warmup; ++i)
+            {
+                out.clear();
+                mc.getNextAudioBlock (info);
+            }
+            float p = 0.0f;
+            for (int block = 0; block < blocks; ++block)
+            {
+                out.clear();
+                mc.getNextAudioBlock (info);
+                p = juce::jmax (p, peak());
+            }
+            return p;
+        };
+
+        const float audible = renderSome (2, 2);
+        check (audible > 0.01f,
+               "live mixer: the channel's arc sounds in the live path",
+               juce::String (audible, 3) + " peak");
+
+        // the mixer's mute must silence the live output
+        mc.openChannelPanelForTest();
+        mc.channelSelectForTest (0);
+        mc.channelMuteForTest (true);
+        check (mc.channelMutedAtForTest (0),
+               "live mixer: the mixer's mute reaches the model");
+        const float muted = renderSome (2, 2);
+        check (muted < 0.001f,
+               "live mixer: a muted channel is silent in the live path",
+               juce::String (muted, 3) + " peak");
+
+        // ... and the undo restores it
+        mc.undo();
+        const float unmuted = renderSome (2, 2);
+        check (unmuted > 0.01f,
+               "live mixer: undo brings the channel back",
+               juce::String (unmuted, 3) + " peak");
+        mc.closeChannelPanelForTest();
+    }
+
     // the render allocates nothing on the audio path
     {
         const auto pg = makePage (1);

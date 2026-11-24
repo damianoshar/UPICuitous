@@ -41,8 +41,9 @@ void UpicEngine::prepare(double sampleRate_, int blockSize)
 
             // WP6.3: the channel buckets have the same rule. They are sized
             // here, on the message thread, so the render path never grows
-            // them (and never allocates) on the audio thread.
-            const size_t channelNeed = (size_t) 16 * (size_t) n;
+            // them (and never allocates) on the audio thread. The count is
+            // the bank's channels PLUS the implicit Main bucket.
+            const size_t channelNeed = (size_t) kChannelBuckets * (size_t) n;
             if (chanBuf.capacity() < channelNeed) chanBuf.reserve (channelNeed);
             if (chanBuf.size() < channelNeed) chanBuf.resize (channelNeed);
         }
@@ -224,7 +225,7 @@ int UpicEngine::effectiveMode(const upic::Arc& arc, int globalMode) const
 
 void UpicEngine::addToMix (int n, float v)
 {
-    if (chanRoutingActive && mixChannel >= 0 && mixChannel < 16)
+    if (chanRoutingActive && mixChannel >= 0 && mixChannel < kChannelBuckets)
         chanBuf[(size_t) mixChannel * (size_t) chanStride + (size_t) n] += v;
     else
         scratch[(size_t) n] += v;
@@ -246,7 +247,7 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
         mixChannel = 0;
         if (chanRoutingActive)
         {
-            const size_t need = (size_t) 16 * (size_t) numSamples;
+            const size_t need = (size_t) kChannelBuckets * (size_t) numSamples;
             if (chanBuf.size() < need) return;
             std::fill (chanBuf.begin(), chanBuf.begin() + (std::ptrdiff_t) need, 0.0f);
         }
@@ -621,14 +622,14 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
             // sampled at the page position, per sample.
             bool anySolo = false;
             for (auto& c : *channels) if (c.solo && ! c.muted) { anySolo = true; break; }
-            upic::SegmentCursor chCur[16];
+            upic::SegmentCursor chCur[kChannelBuckets];
             const double dur = juce::jmax (1.0e-6, page.durationSec);
             for (int n = 0; n < numSamples; ++n)
             {
                 float acc = anySolo ? 0.0f : chanBuf[(size_t) n];
                 const float chX = (float) juce::jlimit (0.0, 1.0,
                                       (playhead + (double) n * step) / dur);
-                for (int ci = 0; ci < (int) channels->size() && ci < 15; ++ci)
+                for (int ci = 0; ci < (int) channels->size() && ci < upic::limits::kMaxChannels; ++ci)
                 {
                     const upic::Channel& c = (*channels)[(size_t) ci];
                     float g = c.gain;

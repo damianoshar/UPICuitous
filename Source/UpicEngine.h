@@ -36,6 +36,13 @@ public:
     // audio thread never grows it.
     static constexpr int kMaxBlockSize = 8192;
 
+    // WP6.3: the number of mix buckets. Bucket 0 is "Main" (the implicit
+    // channel every arc without a channel assignment lands in); the piece's
+    // channel bank occupies buckets 1..kMaxChannels. So the bank needs
+    // kMaxChannels buckets PLUS the Main one - sizing the buffer for
+    // kMaxChannels alone silently dropped the last channel of the bank.
+    static constexpr int kChannelBuckets = upic::limits::kMaxChannels + 1;
+
     void prepare(double sampleRate_, int blockSize = 0);
 
 
