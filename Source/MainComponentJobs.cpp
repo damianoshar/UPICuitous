@@ -46,6 +46,11 @@ void MainComponent::beginEdit (const juce::String& label)
     if (pendingEdit != nullptr)
         endEdit();
 
+    // A new command owns the transaction from here, so an open gesture's
+    // flag cannot outlive it (the gain slider's flag would otherwise make
+    // the next gain change look like part of a drag).
+    channelGainEditing = false;
+
     pendingEdit = std::make_unique<upic::PieceModel> (capturePieceModel());
     pendingRevision = modelRevision.load (std::memory_order_relaxed);
     pendingLabel = label;
@@ -54,6 +59,9 @@ void MainComponent::beginEdit (const juce::String& label)
 void MainComponent::endEdit()
 {
     if (pendingEdit == nullptr) return;
+
+    // the gesture is over: the flag cannot outlive the transaction
+    channelGainEditing = false;
 
     // nothing moved? then the snapshot is not worth keeping (a click that
     // changed nothing is not an undo step).
@@ -96,6 +104,12 @@ juce::String MainComponent::redoLabel() const
 
 void MainComponent::undo()
 {
+    if (undoStack.empty()) return;
+
+    // An open gesture (a slider drag) owns a transaction. Closing it first
+    // keeps the undo stack honest: the gesture's step is closed and undone
+    // like any other.
+    endEdit();
     if (undoStack.empty()) return;
 
     // the state we are leaving goes onto the redo stack
@@ -142,6 +156,10 @@ void MainComponent::undo()
 
 void MainComponent::redo()
 {
+    if (redoStack.empty()) return;
+
+    // an open gesture transaction is closed first (see undo())
+    endEdit();
     if (redoStack.empty()) return;
 
     UndoEntry current;

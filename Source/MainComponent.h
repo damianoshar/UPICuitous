@@ -490,6 +490,8 @@ public:
     void channelMuteForTest (bool on) { if (channelPanel != nullptr) channelPanel->muteForTest (on); }
     void channelSoloForTest (bool on) { if (channelPanel != nullptr) channelPanel->soloForTest (on); }
     void channelGainForTest (float v) { if (channelPanel != nullptr) channelPanel->gainForTest (v); }
+    void channelGainDragStartForTest() { if (channelPanel != nullptr) channelPanel->gainDragStartForTest(); }
+    void channelGainDragEndForTest() { if (channelPanel != nullptr) channelPanel->gainDragEndForTest(); }
     void channelCurveForTest (const std::vector<upic::EnvPoint>& pts) { if (channelPanel != nullptr) channelPanel->curveForTest (pts); }
     void channelRenameForTest (const juce::String& n) { if (channelPanel != nullptr) channelPanel->renameForTest (n); }
     void channelAssignForTest (int id) { setChannelOnSelection (id); }
@@ -2087,6 +2089,10 @@ private:
     std::unique_ptr<ChannelPanel> channelPanel;
     bool channelBoxReady = false;
     bool channelBoxRefreshing = false;
+    // true while a channel-gain DRAG is open: the gesture owns one undo
+    // transaction, so the slider's per-tick notifications do not each push
+    // an undo step (and a whole model copy).
+    bool channelGainEditing = false;
     // v1.36: true while refreshBoxes() repopulates the controls. A combo
     // change caused by that refresh must not edit the model or begin an
     // undo transaction - a stroke-end refresh would otherwise apply the

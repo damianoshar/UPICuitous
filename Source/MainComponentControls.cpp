@@ -1645,12 +1645,46 @@ void MainComponent::showChannelPanel()
         { const juce::ScopedLock l (dataLock); channels[(size_t) i].muted = muted; channels[(size_t) i].solo = solo; }
         markModelChanged(); endEdit(); publishModelSnapshot(); refreshChannelPanel(); score.repaint();
     };
+    channelPanel->onGainBegin = [this] (int i)
+    {
+        if (i < 0 || i >= (int) channels.size()) return;
+        // The drag is ONE command: the transaction opens here and closes in
+        // onGainEnd, so a drag is one undo step (and one model copy) instead
+        // of one per mouse-move tick.
+        if (! channelGainEditing) { beginEdit ("Channel gain"); channelGainEditing = true; }
+    };
     channelPanel->onGain = [this] (int i, float gain)
     {
         if (i < 0 || i >= (int) channels.size()) return;
-        beginEdit ("Channel gain");
-        { const juce::ScopedLock l (dataLock); channels[(size_t) i].gain = juce::jlimit (0.0f, 2.0f, gain); }
-        markModelChanged(); endEdit(); publishModelSnapshot(); score.repaint();
+        // A value change outside a drag (the text box, the keyboard) is a
+        // command of its own.
+        const bool standalone = ! channelGainEditing;
+        if (standalone) beginEdit ("Channel gain");
+        bool changed = false;
+        {
+            const juce::ScopedLock l (dataLock);
+            const float g = juce::jlimit (0.0f, 2.0f, gain);
+            if (channels[(size_t) i].gain != g)
+            {
+                channels[(size_t) i].gain = g;
+                changed = true;
+            }
+        }
+        // The revision only moves when the value really moved, so a repeated
+        // notification (the slider's asynchronous tail) cannot leave an empty
+        // undo step behind.
+        if (changed) markModelChanged();
+        if (standalone) endEdit();
+        publishModelSnapshot();
+        score.repaint();
+    };
+    channelPanel->onGainEnd = [this] (int)
+    {
+        if (channelGainEditing)
+        {
+            channelGainEditing = false;
+            endEdit();
+        }
     };
     channelPanel->onCurve = [this] (int i, const std::vector<upic::EnvPoint>& pts)
     {
@@ -1658,7 +1692,12 @@ void MainComponent::showChannelPanel()
         beginEdit ("Channel gain curve");
         {
             const juce::ScopedLock l (dataLock);
+            // The curve is an envelope, so it obeys the piece format's point
+            // cap. A longer curve would be truncated by the loader - the
+            // curve would silently change when the piece was reloaded.
             channels[(size_t) i].envelope = pts;
+            if ((int) channels[(size_t) i].envelope.size() > upic::limits::kMaxPointsPerEnvelope)
+                channels[(size_t) i].envelope.resize ((size_t) upic::limits::kMaxPointsPerEnvelope);
         }
         markModelChanged();
         endEdit();

@@ -21,6 +21,10 @@ public:
     std::function<void (int index, const juce::String&)> onRename;
     std::function<void (int index, bool muted, bool solo)> onMuteSolo;
     std::function<void (int index, float gain)> onGain;
+    // A gain DRAG is one command: the gesture opens the undo transaction
+    // (onGainBegin) and closes it (onGainEnd), so a drag is one undo step
+    // instead of one per mouse-move tick.
+    std::function<void (int index)> onGainBegin, onGainEnd;
     std::function<void (int index, const std::vector<upic::EnvPoint>&)> onCurve;
     std::function<void()> onNew, onDelete, onClose;
 
@@ -71,6 +75,22 @@ public:
         {
             if (sel < 0 || sel >= (int) shown.size()) return;
             if (onGain) onGain (sel, (float) gainSl.getValue());
+        };
+        gainSl.onDragStart = [this]
+        {
+            if (sel < 0 || sel >= (int) shown.size()) return;
+            if (onGainBegin) onGainBegin (sel);
+        };
+        gainSl.onDragEnd = [this]
+        {
+            if (sel < 0 || sel >= (int) shown.size()) return;
+            // The slider's notification is asynchronous, so the last tick of a
+            // drag can arrive AFTER the drag ended. Committing the final
+            // value here - inside the drag's transaction - means that trailing
+            // notification finds the value already applied and cannot open a
+            // second undo transaction.
+            if (onGain) onGain (sel, (float) gainSl.getValue());
+            if (onGainEnd) onGainEnd (sel);
         };
         addAndMakeVisible (gainSl);
         gainLab.setFont (juce::Font (juce::FontOptions (11.0f)));
@@ -286,9 +306,7 @@ public:
         {
             dragging = true;
             dragPts = shown[(size_t) sel].envelope;
-            dragPts.push_back (pointAt (e.position));
-            std::sort (dragPts.begin(), dragPts.end(),
-                       [] (const upic::EnvPoint& a, const upic::EnvPoint& b) { return a.x < b.x; });
+            pushCurvePoint (pointAt (e.position));
             repaint();
         }
     }
@@ -296,9 +314,7 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override
     {
         if (! dragging || sel < 0 || sel >= (int) shown.size()) return;
-        dragPts.push_back (pointAt (e.position));
-        std::sort (dragPts.begin(), dragPts.end(),
-                   [] (const upic::EnvPoint& a, const upic::EnvPoint& b) { return a.x < b.x; });
+        pushCurvePoint (pointAt (e.position));
         repaint();
     }
 
@@ -324,11 +340,26 @@ public:
     void curveForTest (const std::vector<upic::EnvPoint>& pts)
     {
         if (sel < 0 || sel >= (int) shown.size()) return;
-        if (onCurve) onCurve (sel, pts);
-        shown[(size_t) sel].envelope = pts;
+        // the same cap the drawn curve obeys
+        std::vector<upic::EnvPoint> capped = pts;
+        if ((int) capped.size() > maxCurvePoints)
+            capped.resize ((size_t) maxCurvePoints);
+        if (onCurve) onCurve (sel, capped);
+        shown[(size_t) sel].envelope = capped;
         repaint();
     }
     void deleteForTest() { if (onDelete) onDelete(); }
+    void gainDragStartForTest()
+    {
+        if (sel < 0 || sel >= (int) shown.size()) return;
+        if (onGainBegin) onGainBegin (sel);
+    }
+    void gainDragEndForTest()
+    {
+        if (sel < 0 || sel >= (int) shown.size()) return;
+        if (onGain) onGain (sel, (float) gainSl.getValue());
+        if (onGainEnd) onGainEnd (sel);
+    }
     void selectForTest (int i)
     {
         if (i < 0 || i >= (int) shown.size()) return;
@@ -347,6 +378,9 @@ private:
     static constexpr int listW = 220;
     static constexpr int rowH = 22;
     static constexpr int presetH = 30;
+    // The piece format's cap for an envelope's points. The drawn channel
+    // curve is an envelope, so it obeys the same cap.
+    static constexpr int maxCurvePoints = upic::limits::kMaxPointsPerEnvelope;
 
     void commitRename()
     {
@@ -368,6 +402,25 @@ private:
         pt.x = juce::jlimit (0.0f, 1.0f, (p.x - plot.getX()) / juce::jmax (1.0f, plot.getWidth()));
         pt.y = juce::jlimit (0.0f, 1.0f, (plot.getBottom() - p.y) / juce::jmax (1.0f, plot.getHeight()));
         return pt;
+    }
+    // The curve's point count is capped (the piece format's limit - the
+    // loader truncates a longer curve, so a curve that grew past the cap
+    // would silently change when the piece was reloaded). The cap is kept by
+    // DECIMATING: every second point is dropped, so the curve keeps its shape
+    // instead of being cut off at the cap.
+    void pushCurvePoint (const upic::EnvPoint& pt)
+    {
+        if ((int) dragPts.size() >= maxCurvePoints)
+        {
+            std::vector<upic::EnvPoint> kept;
+            kept.reserve (dragPts.size() / 2 + 2);
+            for (size_t i = 0; i < dragPts.size(); i += 2)
+                kept.push_back (dragPts[i]);
+            dragPts.swap (kept);
+        }
+        dragPts.push_back (pt);
+        std::sort (dragPts.begin(), dragPts.end(),
+                   [] (const upic::EnvPoint& a, const upic::EnvPoint& b) { return a.x < b.x; });
     }
     float xFor (float x) const
     {

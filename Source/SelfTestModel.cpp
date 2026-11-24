@@ -2913,6 +2913,48 @@ void upic::runChannelUiChecks (upic::SelfTest& t)
     check (mc.channelEnvelopePointsAtForTest (0) == 2,
            "mixer ui: a drawn curve reaches the bank");
 
+    // WP6.4 (audit H3): a gain DRAG is one command - one undo step, not one
+    // per mouse-move tick.
+    {
+        const int depthBefore = mc.undoDepth();
+        mc.channelGainDragStartForTest();
+        for (int i = 1; i <= 10; ++i)
+            mc.channelGainForTest (0.05f * (float) i);
+        mc.channelGainDragEndForTest();
+        const int depthAfter = mc.undoDepth();
+        check (depthAfter == depthBefore + 1,
+               "mixer ui: a gain drag is ONE undo step",
+               juce::String (depthBefore) + " -> " + juce::String (depthAfter));
+        check (std::abs (mc.channelGainAtForTest (0) - 0.5f) < 1e-6f,
+               "mixer ui: the drag's last value is the model's",
+               juce::String (mc.channelGainAtForTest (0), 4));
+        mc.undo();
+        check (std::abs (mc.channelGainAtForTest (0) - 0.6f) < 1e-6f,
+               "mixer ui: one undo restores the gain from before the drag",
+               juce::String (mc.channelGainAtForTest (0), 4));
+    }
+
+    // WP6.4 (audit H4): the curve obeys the piece format's point cap, so a
+    // drawn curve cannot change when the piece is reloaded.
+    {
+        std::vector<upic::EnvPoint> many;
+        for (int i = 0; i < upic::limits::kMaxPointsPerEnvelope + 500; ++i)
+            many.push_back ({ (float) i / (float) (upic::limits::kMaxPointsPerEnvelope + 500),
+                              0.5f });
+        mc.channelCurveForTest (many);
+        check (mc.channelEnvelopePointsAtForTest (0) == upic::limits::kMaxPointsPerEnvelope,
+               "mixer ui: the curve is capped at the piece format's limit",
+               juce::String (mc.channelEnvelopePointsAtForTest (0)) + " points");
+        const auto saved = mc.pieceToVar();
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
+        const bool loaded = mc2.loadFromVar (saved);
+        const int points = mc2.channelEnvelopePointsAtForTest (0);
+        check (loaded && points == upic::limits::kMaxPointsPerEnvelope,
+               "mixer ui: the capped curve survives a round trip unchanged",
+               juce::String (points) + " points");
+    }
+
     mc.selectArcsForTest ({ 1, 2 });
     mc.channelAssignForTest (id);
     check (mc.arcChannelForTest (1) == id && mc.arcChannelForTest (2) == id,
