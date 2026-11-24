@@ -1006,11 +1006,14 @@ void MainComponent::refreshGroupPanel()
     const auto& page = curPage();
     std::vector<int> counts;
     for (auto& g : page.groups) counts.push_back ((int) g.arcIds.size());
-    std::vector<GroupPanel::BankItem> waves, envs, tabs;
+    std::vector<GroupPanel::BankItem> waves, envs, tabs, chans;
     for (auto& w : waveforms) waves.push_back ({ w.id, w.name });
     for (auto& e : envelopes) envs.push_back ({ e.id, e.name });
     for (auto& t : ampTables) tabs.push_back ({ t.id, t.name });
-    groupPanel.setBank (page.groups, counts, waves, envs, tabs,
+    // WP6.4: the mixer channels are a bank too - the group panel can route
+    // a group's arcs to one of them
+    for (auto& c : channels) chans.push_back ({ c.id, c.name });
+    groupPanel.setBank (page.groups, counts, waves, envs, tabs, chans,
                         juce::jmax (0, groupIndexOfId (selGroupId)));
 }
 
@@ -1140,13 +1143,18 @@ void MainComponent::showGroupPanel()
         if (kind == 0 && id >= 0 && ! upic::hasId (waveforms, id)) return;
         if (kind == 1 && id >= 0 && ! upic::hasId (envelopes, id)) return;
         if (kind == 2 && id >= 0 && ! upic::hasId (ampTables, id)) return;
+        // WP6.4: the mixer channel the group's arcs are routed to. The id
+        // has to be in the bank - a channel that was deleted leaves the
+        // group on "As arc" instead of pointing at nothing.
+        if (kind == 3 && id >= 0 && ! upic::hasId (channels, id)) return;
         beginEdit ("Group override");
         {
             const juce::ScopedLock l (dataLock);
             auto& g = curPage().groups[(size_t) i];
             if (kind == 0) g.waveformId = id;
             else if (kind == 1) g.envelopeId = id;
-            else g.amplitudeTableId = id;
+            else if (kind == 2) g.amplitudeTableId = id;
+            else g.channelId = id;
         }
         markModelChanged();
         endEdit();

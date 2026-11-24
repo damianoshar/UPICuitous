@@ -1258,6 +1258,59 @@ void upic::runChannelRoutingChecks (upic::SelfTest& t)
         oneDir.deleteRecursively();
         badDir.deleteRecursively();
     }
+
+    // WP6.4 (audit M7): a group's channel override routes the group's arcs.
+    // The override was in the model and in the engine, but no control could
+    // write it: the group panel had no channel combo at all.
+    {
+        upic::Page pg;
+        pg.durationSec = 0.2;
+        upic::Arc a;
+        a.id = 1;
+        a.waveformId = 0;
+        a.envelopeId = 0;
+        a.intensity = 0.05f;
+        a.channelId = 0;             // Main, its own routing
+        a.points = { { 0.0, 440.0 }, { 1.0, 440.0 } };
+        pg.arcs.push_back (a);
+        upic::ArcGroup g;
+        g.id = 1;
+        g.name = "G";
+        g.arcIds = { 1 };
+        g.channelId = 5;             // the group's channel
+        pg.groups.push_back (g);
+
+        std::vector<upic::Channel> bank;
+        upic::Channel c;
+        c.id = 5;
+        c.name = "C5";
+        bank.push_back (c);
+
+        const auto ov = pg.resolveArcOverrides();
+        check (ov.size() == 1 && ov[0].channelId == 5,
+               "M7 the group carries the channel override",
+               juce::String ((int) ov.size()) + " override(s)");
+
+        // the engine routes the arc into the group's channel, not into Main
+        auto rmsWithFilter = [&] (int bucket) -> double
+        {
+            UpicEngine e;
+            e.setChannelFilter (bucket);
+            e.prepare (48000.0, 512);
+            std::vector<float> l (512, 0.0f), r (512, 0.0f);
+            e.render (pg, 0.0, waves, envs, slots, l.data(), r.data(), 512, 0.8f,
+                      1.0, false, nullptr, nullptr, &ov, &bank);
+            double sum = 0.0;
+            for (float v : l) sum += (double) v * v;
+            return std::sqrt (sum / 512.0);
+        };
+        const double inChannel = rmsWithFilter (1);   // the bank's first channel
+        const double inMain = rmsWithFilter (0);      // Main
+        check (inChannel > 0.0 && inMain == 0.0,
+               "M7 the group's channel override routes its arcs",
+               juce::String (inChannel, 6) + " in the channel, "
+                 + juce::String (inMain, 6) + " in Main");
+    }
     // WP6.3 (audit H2): the LAST channel of the bank is audible. The mix
     // buckets are the bank's channels PLUS the implicit Main bucket, so a
     // bank of kMaxChannels needs kMaxChannels + 1 of them. Sizing them for

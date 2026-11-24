@@ -26,7 +26,7 @@ public:
     std::function<void (int index)> onLevelsBegin;
     std::function<void (int index, float gain, double transpose)> onLevels;
     std::function<void (int index)> onLevelsEnd;
-    // kind: 0 wave, 1 envelope, 2 amplitude table
+    // kind: 0 wave, 1 envelope, 2 amplitude table, 3 mixer channel
     std::function<void (int index, int kind, int id)> onOverride;
     std::function<void()> onNew, onDelete, onAddSelection, onRemoveSelection,
                           onSelectMembers, onClose;
@@ -101,9 +101,9 @@ public:
             addAndMakeVisible (l);
         }
 
-        for (int k = 0; k < 3; ++k)
+        for (int k = 0; k < 4; ++k)
         {
-            overrideBox[k].setName (k == 0 ? "grpWaveBox" : (k == 1 ? "grpEnvBox" : "grpAmpBox"));
+            overrideBox[k].setName (overrideBoxName (k));
             overrideBox[k].setTooltip ("The group's override; 'As arc' keeps the arc's own");
             overrideBox[k].onChange = [this, k]
             {
@@ -114,7 +114,7 @@ public:
             };
             addAndMakeVisible (overrideBox[k]);
         }
-        for (auto* l : { &waveLab, &envLab, &ampLab })
+        for (auto* l : { &waveLab, &envLab, &ampLab, &chLab })
         {
             l->setFont (juce::Font (juce::FontOptions (11.0f)));
             l->setJustificationType (juce::Justification::centredRight);
@@ -123,6 +123,7 @@ public:
         waveLab.setText ("Wave", juce::dontSendNotification);
         envLab.setText ("Env", juce::dontSendNotification);
         ampLab.setText ("Amp table", juce::dontSendNotification);
+        chLab.setText ("Ch", juce::dontSendNotification);
 
         setVisible (false);
     }
@@ -133,9 +134,10 @@ public:
                const std::vector<BankItem>& waves,
                const std::vector<BankItem>& envs,
                const std::vector<BankItem>& tables,
+               const std::vector<BankItem>& chans,
                int index)
     {
-        setBank (groups, memberCounts, waves, envs, tables, index);
+        setBank (groups, memberCounts, waves, envs, tables, chans, index);
         setVisible (true);
         toFront (true);
         grabKeyboardFocus();
@@ -147,6 +149,7 @@ public:
                   const std::vector<BankItem>& waves,
                   const std::vector<BankItem>& envs,
                   const std::vector<BankItem>& tables,
+                  const std::vector<BankItem>& chans,
                   int index)
     {
         shownGroups = groups;
@@ -174,6 +177,7 @@ public:
             fillOverride (0, waves, g.waveformId);
             fillOverride (1, envs, g.envelopeId);
             fillOverride (2, tables, g.amplitudeTableId);
+            fillOverride (3, chans, g.channelId);
         }
         repaint();
     }
@@ -314,12 +318,15 @@ public:
         transposeLab.setBounds (tr.removeFromLeft (70));
         transposeSl.setBounds (tr.removeFromLeft (juce::jmin (300, tr.getWidth())));
 
-        auto six = inner.removeFromTop (112).reduced (0, 4);
-        const int h = six.getHeight() / 3;
-        for (int k = 0; k < 3; ++k)
+        // the four overrides: the wave, the envelope, the amplitude table
+        // and the mixer channel the group's arcs are routed to
+        auto ovr = inner.removeFromTop (140).reduced (0, 4);
+        const int h = ovr.getHeight() / 4;
+        for (int k = 0; k < 4; ++k)
         {
-            auto row = six.removeFromTop (h);
-            auto* lab = (k == 0 ? &waveLab : (k == 1 ? &envLab : &ampLab));
+            auto row = ovr.removeFromTop (h);
+            auto* lab = (k == 0 ? &waveLab : (k == 1 ? &envLab
+                                  : (k == 2 ? &ampLab : &chLab)));
             lab->setBounds (row.removeFromLeft (70));
             overrideBox[k].setBounds (row.removeFromLeft (juce::jmin (260, row.getWidth())));
         }
@@ -339,7 +346,7 @@ public:
         {
             sel = i;
             if (onSelectIndex) onSelectIndex (sel);
-            setBank (shownGroups, counts, bankWaves, bankEnvs, bankTables, sel);
+            setBank (shownGroups, counts, bankWaves, bankEnvs, bankTables, bankChannels, sel);
         }
     }
 
@@ -390,7 +397,7 @@ public:
     }
     void setOverrideForTest (int kind, int id)
     {
-        if (kind < 0 || kind > 2) return;
+        if (kind < 0 || kind > 3) return;
         overrideBox[kind].setSelectedId (id < 0 ? 1 : id + 2, juce::sendNotificationSync);
     }
 
@@ -409,15 +416,42 @@ private:
         addAndMakeVisible (s);
     }
 
+    // The combo's item id is the bank's own id plus two (one is "As arc"),
+    // so the picked id is the item's REAL id - not its place in the list.
+    // The banks do not have to be numbered without holes: a bank whose ids
+    // are 0, 2, 5 (a deleted item leaves a hole) used to hand the app the
+    // list's index, and the app - which checks the id against the bank -
+    // refused the override.
     void fillOverride (int kind, const std::vector<BankItem>& items, int id)
     {
         auto& box = overrideBox[kind];
         box.clear (juce::dontSendNotification);
         box.addItem ("As arc", 1);
         for (int i = 0; i < (int) items.size(); ++i)
-            box.addItem (items[(size_t) i].name, i + 2);
-        (kind == 0 ? bankWaves : (kind == 1 ? bankEnvs : bankTables)) = items;
-        box.setSelectedId (id < 0 ? 1 : id + 2, juce::dontSendNotification);
+        {
+            const int itemId = items[(size_t) i].id;
+            if (itemId < 0) continue;   // an entry without an id cannot be picked
+            box.addItem (items[(size_t) i].name, itemId + 2);
+        }
+        bankOf (kind) = items;
+        const int wanted = id < 0 ? 1 : id + 2;
+        box.setSelectedId (wanted, juce::dontSendNotification);
+        // an id that is not in the bank (a dangling reference) falls back to
+        // "As arc" instead of leaving the combo empty
+        if (box.getSelectedId() != wanted)
+            box.setSelectedId (1, juce::dontSendNotification);
+    }
+
+    std::vector<BankItem>& bankOf (int kind)
+    {
+        return kind == 0 ? bankWaves : (kind == 1 ? bankEnvs
+                                  : (kind == 2 ? bankTables : bankChannels));
+    }
+
+    static const char* overrideBoxName (int kind)
+    {
+        return kind == 0 ? "grpWaveBox" : (kind == 1 ? "grpEnvBox"
+                                  : (kind == 2 ? "grpAmpBox" : "grpChBox"));
     }
 
     void commitRename()
@@ -442,7 +476,7 @@ private:
 
     std::vector<upic::ArcGroup> shownGroups;
     std::vector<int> counts;
-    std::vector<BankItem> bankWaves, bankEnvs, bankTables;
+    std::vector<BankItem> bankWaves, bankEnvs, bankTables, bankChannels;
     int sel = -1;
 
     juce::TextButton newBtn { "New" }, delBtn { "Del" }, addBtn { "Add sel." },
@@ -451,8 +485,8 @@ private:
     juce::TextButton muteBtn { "Mute" }, soloBtn { "Solo" };
     juce::TextEditor nameEd;
     juce::Slider gainSl, transposeSl;
-    juce::Label gainLab, transposeLab, waveLab, envLab, ampLab;
-    juce::ComboBox overrideBox[3];
+    juce::Label gainLab, transposeLab, waveLab, envLab, ampLab, chLab;
+    juce::ComboBox overrideBox[4];
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GroupPanel)
 };

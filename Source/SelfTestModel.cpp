@@ -2270,6 +2270,51 @@ void upic::runGroupChecks (upic::SelfTest& t)
         check (mc.loadFromVar (juce::JSON::parse (oldJson)) && mc.groupCountForTest() == 0,
                "groups: an old piece has no groups");
     }
+
+    // WP6.4 (audit M7): a group can be routed to a mixer channel. The
+    // override was in the model and in the engine, but no control could
+    // write it: the group panel had no channel combo at all.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        const juce::String json =
+            R"({"channels":[{"id":1,"name":"A"},{"id":7,"name":"B"}],)"
+            R"("pages":[{"duration":2.0,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,)"
+            R"("points":[{"t":0,"f":440},{"t":2,"f":440}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)),
+               "M7 the piece with two mixer channels loads");
+
+        mc.openGroupPanelForTest();
+        mc.groupNewForTest();
+        mc.selectArcsForTest ({ 1 });
+        mc.groupAddSelForTest();
+        check (mc.groupMemberCountAtForTest (0) == 1,
+               "M7 the arc joins the group");
+
+        // the panel's Ch combo writes the group's channel
+        mc.groupOverrideForTest (3, 7);
+        check (mc.groupOverrideAtForTest (0, 3) == 7,
+               "M7 the group's channel override reaches the model",
+               juce::String (mc.groupOverrideAtForTest (0, 3)));
+
+        // the override travels with the piece
+        const auto saved = mc.pieceToVar();
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
+        const bool loaded = mc2.loadFromVar (saved);
+        check (loaded && mc2.groupOverrideAtForTest (0, 3) == 7,
+               "M7 the group's channel override survives a piece round trip",
+               juce::String (mc2.groupOverrideAtForTest (0, 3)));
+
+        // deleting the channel takes the group's override with it: the
+        // group must not keep a reference to a channel that is not there
+        mc.openChannelPanelForTest();
+        mc.channelSelectForTest (1);          // the channel with the id 7
+        mc.channelDeleteForTest();
+        check (mc.groupOverrideAtForTest (0, 3) == -1,
+               "M7 deleting the channel clears the group's override",
+               juce::String (mc.groupOverrideAtForTest (0, 3)));
+    }
 }
 
 //==============================================================================

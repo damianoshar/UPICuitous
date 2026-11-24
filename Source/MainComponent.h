@@ -592,7 +592,8 @@ public:
     {
         if (i < 0 || i >= (int) curPage().groups.size()) return -2;
         const auto& g = curPage().groups[(size_t) i];
-        return kind == 0 ? g.waveformId : (kind == 1 ? g.envelopeId : g.amplitudeTableId);
+        return kind == 0 ? g.waveformId : (kind == 1 ? g.envelopeId
+                                  : (kind == 2 ? g.amplitudeTableId : g.channelId));
     }
     int arcSpaceForTest (int arcId) const
     {
