@@ -1361,7 +1361,7 @@ bool writeWavFile(const juce::File& target, const juce::AudioBuffer<float>& buf,
     return temp.overwriteTargetFileWithTemporary();
 }
 
-bool writePageToWavFile(const juce::File& target, const upic::Page& page, const std::vector<upic::Waveform>& waves, const std::vector<upic::Envelope>& envs, const std::vector<upic::SampleSlot>& slots, double sr, float masterGain, int samplePitchMode, int sampleGrainMs, int liveGrainMs, const std::vector<upic::Envelope>* ampTables, const std::vector<upic::Channel>* channels, int onlyChannel, const std::function<bool (int percent)>& progress)
+bool writePageToWavFile(const juce::File& target, const upic::Page& page, const std::vector<upic::Waveform>& waves, const std::vector<upic::Envelope>& envs, const std::vector<upic::SampleSlot>& slots, double sr, float masterGain, int samplePitchMode, int sampleGrainMs, int liveGrainMs, const std::vector<upic::Envelope>* ampTables, const std::vector<upic::Channel>* channels, int channelBucket, const std::function<bool (int percent)>& progress, bool mono)
 {
     if (target == juce::File() || sr <= 0.0 || page.durationSec <= 0.0) return false;
 
@@ -1372,7 +1372,7 @@ bool writePageToWavFile(const juce::File& target, const upic::Page& page, const 
     juce::WavAudioFormat fmt;
     auto w = fmt.createWriterFor (out, juce::AudioFormatWriterOptions{}
                                            .withSampleRate (sr)
-                                           .withNumChannels (2)
+                                           .withNumChannels (mono ? 1 : 2)
                                            .withBitsPerSample (16));
     if (w == nullptr) return false;
 
@@ -1385,11 +1385,21 @@ bool writePageToWavFile(const juce::File& target, const upic::Page& page, const 
     // audio than it has score
     const int frames = (int) std::ceil (page.audioDurationSec() * sr);
     int done = 0;
-    eng.setChannelFilter (onlyChannel);
+    eng.setChannelFilter (channelBucket);
+    // WP6.4: a mono file (a mixer channel is a mono bus). The mix is mono,
+    // so the left channel is the whole signal; the copy is made here, on the
+    // worker thread, block by block.
+    juce::AudioBuffer<float> monoBuf (mono ? 1 : 0,
+                                       mono ? juce::jmax (1, juce::jmin (frames, 8192)) : 0);
     const bool ok = eng.renderPageBlocks (page, waves, envs, slots, ampTables, channels, sr, masterGain, frames,
         [&] (const juce::AudioBuffer<float>& block, int n)
         {
-            if (! w->writeFromAudioSampleBuffer (block, 0, n)) return false;
+            if (mono)
+            {
+                monoBuf.copyFrom (0, 0, block, 0, 0, n);
+                if (! w->writeFromAudioSampleBuffer (monoBuf, 0, n)) return false;
+            }
+            else if (! w->writeFromAudioSampleBuffer (block, 0, n)) return false;
             done += n;
             if (progress)
             {
@@ -1408,8 +1418,14 @@ bool writePageToWavFile(const juce::File& target, const upic::Page& page, const 
 StemExport renderStems(const upic::Page& page, const std::vector<upic::Waveform>& waves, const std::vector<upic::Envelope>& envs, const std::vector<upic::SampleSlot>& slots, const juce::File& outDir, const juce::String& prefix, double sr, float masterGain, int samplePitchMode, int sampleGrainMs, int liveGrainMs, const std::vector<upic::Envelope>* ampTables, const std::vector<upic::Channel>* channels, int onlyChannel, const std::function<bool (int percent)>& progress)
 {
     StemExport result;
-    juce::ignoreUnused (onlyChannel);
     if (page.arcs.empty() || sr <= 0.0 || prefix.isEmpty()) return result;
+
+    // WP6.4 (audit M1): `onlyChannel` is honoured. It names ONE mixer
+    // channel by its id (0 = Main, > 0 = the channel's id); -1 (the default)
+    // exports everything: the per-voice stems AND one stem per mixer
+    // channel. The parameter used to be ignored, so a caller could never ask
+    // for a single channel.
+    const bool oneChannel = onlyChannel >= 0;
 
     // mirror of engine slot lookup: is there any material for this slot id?
     auto slotUsable = [&](int sid) {
@@ -1476,24 +1492,45 @@ StemExport renderStems(const upic::Page& page, const std::vector<upic::Waveform>
     if (liveArcs > 0)
         result.note = juce::String (liveArcs) + " live arc(s) were not exported (they need the microphone)";
 
+    // WP6.4: the mixer channels that get a stem. A muted channel has no
+    // stem (it is silent in the mix too), and a single-channel export only
+    // takes the channel that was asked for.
+    std::vector<int> stemChannels;
+    if (channels != nullptr && ! channels->empty())
+        for (int ci = 0; ci < (int) channels->size(); ++ci)
+        {
+            const auto& c = (*channels)[(size_t) ci];
+            if (c.muted) continue;
+            if (oneChannel && c.id != onlyChannel) continue;
+            stemChannels.push_back (ci);
+        }
+    // Main's own stem: the arcs that are on no channel at all.
+    const bool mainStem = oneChannel && onlyChannel == 0;
+    if (oneChannel && stemChannels.empty() && ! mainStem)
+    {
+        result.note = "there is no mixer channel " + juce::String (onlyChannel) + " to export";
+        return result;
+    }
+
     outDir.createDirectory();
 
     // v1.33.4 (M28): the progress runs over the voices, and the cancel stops
     // the render (the files that were already written stay).
-    int totalVoices = (int) (wIds.size() + sIds.size() + pmVoices.size());
-    if (channels != nullptr)
-        for (auto& c : *channels) if (! c.muted) ++totalVoices;
+    int totalVoices = oneChannel ? 0 : (int) (wIds.size() + sIds.size() + pmVoices.size());
+    totalVoices += (int) stemChannels.size() + (mainStem ? 1 : 0);
     int voicesDone = 0;
     bool cancelled = false;
 
-    auto renderOne = [&](const upic::Page& one, const juce::File& f, int onlyChannel = -1) {
+    auto renderOne = [&] (const upic::Page& one, const juce::File& f,
+                          int channelBucket, bool mono) {
         if (cancelled) return;
         ++result.attempted;
         // v1.33.4 (H8): the stem is rendered straight into the file, block
         // by block, and it is as long as the page's own time needs (a warped
         // page used to be cut off at the end)
         const bool ok = writePageToWavFile (f, one, waves, envs, slots, sr, masterGain,
-                                samplePitchMode, sampleGrainMs, liveGrainMs, ampTables, channels, onlyChannel,
+                                samplePitchMode, sampleGrainMs, liveGrainMs, ampTables, channels,
+                                channelBucket,
                                 [&] (int percent)
                                 {
                                     if (! progress) return true;
@@ -1508,48 +1545,56 @@ StemExport renderStems(const upic::Page& page, const std::vector<upic::Waveform>
                                         return false;
                                     }
                                     return true;
-                                });
+                                },
+                                mono);
         if (ok) result.written.push_back (f);
         else if (! cancelled) ++result.failed;
         ++voicesDone;
     };
 
-    for (int id : wIds)
+    // WP6.4: the per-voice stems only belong to the whole export: a single
+    // channel's export is that channel's stem.
+    if (! oneChannel)
     {
-        upic::Page one = page;
-        one.arcs.clear();
-        for (auto& a : page.arcs)
-            if (! a.muted && a.mode == 0 && a.waveformId == id) one.arcs.push_back(a);
-        renderOne(one, outDir.getChildFile(prefix + "_wave" + juce::String(id) + ".wav"));
-    }
-    for (int id : sIds)
-    {
-        upic::Page one = page;
-        one.arcs.clear();
-        for (auto& a : page.arcs)
-            if (! a.muted && a.mode == 1 && a.sampleId == id) one.arcs.push_back(a);
-        renderOne(one, outDir.getChildFile(prefix + "_sample" + juce::String(id) + ".wav"));
-    }
-    // v1.33.4 (M23): the PM voices get a stem each
-    for (size_t vi = 0; vi < pmVoices.size(); ++vi)
-    {
-        upic::Page one = page;
-        one.arcs.clear();
-        for (auto& a : page.arcs)
-            if (! a.muted && a.mode == 3 && samePmVoice (pmVoices[vi], a))
-                one.arcs.push_back(a);
-        renderOne(one, outDir.getChildFile(prefix + "_pm" + juce::String ((int) vi + 1) + ".wav"));
+        for (int id : wIds)
+        {
+            upic::Page one = page;
+            one.arcs.clear();
+            for (auto& a : page.arcs)
+                if (! a.muted && a.mode == 0 && a.waveformId == id) one.arcs.push_back(a);
+            renderOne(one, outDir.getChildFile(prefix + "_wave" + juce::String(id) + ".wav"), -1, false);
+        }
+        for (int id : sIds)
+        {
+            upic::Page one = page;
+            one.arcs.clear();
+            for (auto& a : page.arcs)
+                if (! a.muted && a.mode == 1 && a.sampleId == id) one.arcs.push_back(a);
+            renderOne(one, outDir.getChildFile(prefix + "_sample" + juce::String(id) + ".wav"), -1, false);
+        }
+        // v1.33.4 (M23): the PM voices get a stem each
+        for (size_t vi = 0; vi < pmVoices.size(); ++vi)
+        {
+            upic::Page one = page;
+            one.arcs.clear();
+            for (auto& a : page.arcs)
+                if (! a.muted && a.mode == 3 && samePmVoice (pmVoices[vi], a))
+                    one.arcs.push_back(a);
+            renderOne(one, outDir.getChildFile(prefix + "_pm" + juce::String ((int) vi + 1) + ".wav"), -1, false);
+        }
     }
     // WP6.4: one stem per mixer channel (Main is part of the mix, not a
     // channel stem). The channel gain, curve, mute and solo apply through
-    // the same mixer the session uses.
-    if (channels != nullptr && ! channels->empty())
-        for (int ci = 0; ci < (int) channels->size(); ++ci)
-        {
-            const auto& c = (*channels)[(size_t) ci];
-            if (c.muted) continue;
-            renderOne (page, outDir.getChildFile (prefix + "_ch" + juce::String (c.id) + ".wav"),
-                      ci + 1);
-        }
+    // the same mixer the session uses. A channel stem is MONO: the channel
+    // is a mono bus (the plan's "mono WAV per channel").
+    for (int ci : stemChannels)
+    {
+        const auto& c = (*channels)[(size_t) ci];
+        renderOne (page, outDir.getChildFile (prefix + "_ch" + juce::String (c.id) + ".wav"),
+                  ci + 1, true);
+    }
+    // Main's own stem: the arcs that are on no channel at all.
+    if (mainStem)
+        renderOne (page, outDir.getChildFile (prefix + "_main.wav"), 0, true);
     return result;
 }

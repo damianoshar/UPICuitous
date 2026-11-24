@@ -600,6 +600,15 @@ bool writeWavFile (const juce::File& target,
 // progress and be cancelled: `progress` is called with the percentage done
 // and returns false to stop the render (the file that was there before is
 // then left alone - the write goes to a temporary sibling).
+//
+// WP6.4: `channelBucket` is the mix bucket the render is limited to (1 =
+// the first mixer channel of the bank, ...); -1 renders the whole mix. It
+// is the ENGINE's bucket, not the channel's id - the piece names a channel
+// by its id, the engine counts its buckets.
+//
+// `mono` writes ONE channel instead of two. A mixer channel is a mono bus
+// (the plan's "mono WAV per channel"); the master render and the per-voice
+// stems stay stereo.
 bool writePageToWavFile (const juce::File& target,
                                 const upic::Page& page,
                                 const std::vector<upic::Waveform>& waves,
@@ -611,8 +620,9 @@ bool writePageToWavFile (const juce::File& target,
                                 int liveGrainMs = 0,
                                 const std::vector<upic::Envelope>* ampTables = nullptr,
                                 const std::vector<upic::Channel>* channels = nullptr,
-                                int onlyChannel = -1,
-                                const std::function<bool (int percent)>& progress = {});
+                                int channelBucket = -1,
+                                const std::function<bool (int percent)>& progress = {},
+                                bool mono = false);
 
 
 //==============================================================================
@@ -635,6 +645,13 @@ struct StemExport
 // failures (see StemExport). `samplePitchMode` mirrors
 // UpicEngine::setSamplePitchMode so stems match what the session hears, and
 // the grain sizes do the same (v1.33.4 / H8).
+//
+// WP6.4: the mixer channels get a stem each too (one MONO WAV per channel -
+// the channel is a mono bus). `onlyChannel` narrows the export to ONE
+// mixer channel: it names the channel by its id (0 = Main, > 0 = the
+// channel's id); -1 (the default) exports everything - the per-voice stems
+// AND one stem per mixer channel. The parameter used to be ignored, so a
+// caller could never ask for a single channel.
 //
 // v1.33.4 (M28): the export runs on a worker thread, so it can report its
 // progress and be cancelled: `progress` is called with the percentage done

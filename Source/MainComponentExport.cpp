@@ -57,7 +57,7 @@ void MainComponent::exportStems()
     // so the callback carries a safe pointer instead of a raw `this`.
     juce::Component::SafePointer<MainComponent> sp (this);
     auto fc = std::make_shared<juce::FileChooser>(
-        "Export stems (one WAV per voice) -- choose a folder",
+        "Export stems (one WAV per voice and per mixer channel) -- choose a folder",
         juce::File::getSpecialLocation(juce::File::userDocumentsDirectory), "");
     fc->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
         [sp, fc](const juce::FileChooser& c){

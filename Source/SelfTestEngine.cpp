@@ -1108,6 +1108,156 @@ void upic::runChannelRoutingChecks (upic::SelfTest& t)
         check (found, "channels: a mixer channel gets its own stem");
         dir.deleteRecursively();
     }
+
+    // WP6.4 (audit M1): the stems honour the mixer. `renderStems`'s
+    // `onlyChannel` was ignored, and the channel stems were written as
+    // stereo files of the WHOLE mix - the plan asks for one MONO WAV per
+    // mixer channel, and a caller could never narrow the export down to a
+    // single channel.
+    {
+        upic::Page pg;
+        pg.durationSec = 0.2;
+        upic::Arc a1;
+        a1.id = 1;
+        a1.waveformId = 0;
+        a1.envelopeId = 0;
+        a1.intensity = 0.05f;     // quiet, so the two channels differ
+        a1.channelId = 4;         // the ids are NOT the mix buckets
+        a1.points = { { 0.0, 440.0 }, { 1.0, 440.0 } };
+        upic::Arc a2 = a1;
+        a2.id = 2;
+        a2.waveformId = 1;        // a second voice, so there are two stems
+        a2.intensity = 0.5f;
+        a2.channelId = 7;
+        pg.arcs.push_back (a1);
+        pg.arcs.push_back (a2);
+
+        std::vector<upic::Channel> bank;
+        for (int id : { 4, 7 })
+        {
+            upic::Channel c;
+            c.id = id;
+            c.name = "C" + juce::String (id);
+            bank.push_back (c);
+        }
+
+        // the RMS the engine produces for one mix bucket (bucket = the
+        // bank's index + 1; the bucket 0 is Main)
+        auto filteredRms = [&] (int bucket) -> double
+        {
+            UpicEngine e;
+            e.setChannelFilter (bucket);
+            const int frames = (int) std::ceil (pg.audioDurationSec() * 48000.0);
+            double sum = 0.0;
+            juce::int64 count = 0;
+            e.renderPageBlocks (pg, waves, envs, slots, nullptr, &bank, 48000.0, 0.8f, frames,
+                [&] (const juce::AudioBuffer<float>& block, int n)
+                {
+                    for (int i = 0; i < n; ++i)
+                    {
+                        const double v = block.getSample (0, i);
+                        sum += v * v;
+                    }
+                    count += n;
+                    return true;
+                });
+            return count > 0 ? std::sqrt (sum / (double) count) : 0.0;
+        };
+
+        // the RMS of a written WAV file, and how many channels it has
+        auto fileRms = [&] (const juce::File& f, int& channelsOut) -> double
+        {
+            channelsOut = 0;
+            if (f == juce::File()) return 0.0;
+            std::unique_ptr<juce::FileInputStream> in (f.createInputStream());
+            if (in == nullptr) return 0.0;
+            juce::WavAudioFormat fmt;
+            std::unique_ptr<juce::AudioFormatReader> reader (fmt.createReaderFor (in.release(), true));
+            if (reader == nullptr) return 0.0;
+            channelsOut = (int) reader->numChannels;
+            juce::AudioBuffer<float> buf ((int) reader->numChannels,
+                                          (int) reader->lengthInSamples);
+            reader->read (&buf, 0, (int) reader->lengthInSamples, 0, true, true);
+            double sum = 0.0;
+            const int n = buf.getNumSamples();
+            for (int i = 0; i < n; ++i)
+            {
+                const double v = buf.getSample (0, i);
+                sum += v * v;
+            }
+            return n > 0 ? std::sqrt (sum / (double) n) : 0.0;
+        };
+
+        auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                       .getChildFile ("upic_m1_stems");
+        dir.deleteRecursively();
+        const auto res = renderStems (pg, waves, envs, slots, dir, "t", 48000.0, 0.8f,
+                                      0, 0, 0, nullptr, &bank);
+        check (res.written.size() == 4 && res.failed == 0,
+               "M1 the export writes a stem per voice and per mixer channel",
+               juce::String ((int) res.written.size()) + " written, "
+                 + juce::String (res.failed) + " failed");
+
+        juce::File ch4, ch7;
+        for (auto& f : res.written)
+        {
+            if (f.getFileName() == "t_ch4.wav") ch4 = f;
+            if (f.getFileName() == "t_ch7.wav") ch7 = f;
+        }
+        check (ch4 != juce::File() && ch7 != juce::File(),
+               "M1 the channel stems are named after the channel's id");
+
+        int chans4 = 0, chans7 = 0;
+        const double rms4 = fileRms (ch4, chans4);
+        const double rms7 = fileRms (ch7, chans7);
+        check (chans4 == 1 && chans7 == 1,
+               "M1 a channel stem is a mono WAV",
+               juce::String (chans4) + " and " + juce::String (chans7) + " channels");
+
+        const double expect4 = filteredRms (1);   // the bank's first channel
+        const double expect7 = filteredRms (2);   // the bank's second channel
+        const double tol4 = std::max (1e-4, expect4 * 0.01);
+        const double tol7 = std::max (1e-4, expect7 * 0.01);
+        check (expect4 > 0.0 && expect7 > 0.0 && rms4 > 0.0 && rms7 > 0.0
+               && std::abs (rms4 - expect4) <= tol4
+               && std::abs (rms7 - expect7) <= tol7,
+               "M1 a channel stem holds that channel's own signal",
+               juce::String (rms4, 5) + " vs " + juce::String (expect4, 5)
+                 + ", " + juce::String (rms7, 5) + " vs " + juce::String (expect7, 5));
+        check (std::abs (rms4 - rms7) > 0.01,
+               "M1 the channel stems are not the same mix",
+               juce::String (rms4, 5) + " vs " + juce::String (rms7, 5));
+
+        // a single channel can be asked for on its own
+        auto oneDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("upic_m1_stems_one");
+        oneDir.deleteRecursively();
+        const auto resOne = renderStems (pg, waves, envs, slots, oneDir, "t", 48000.0, 0.8f,
+                                         0, 0, 0, nullptr, &bank, 7);
+        check (resOne.written.size() == 1
+               && resOne.written[0].getFileName() == "t_ch7.wav",
+               "M1 the export can be narrowed to one mixer channel",
+               juce::String ((int) resOne.written.size()) + " file(s)");
+        int oneChans = 0;
+        const double oneRms = resOne.written.empty() ? 0.0
+                                                      : fileRms (resOne.written[0], oneChans);
+        check (oneChans == 1 && std::abs (oneRms - expect7) <= tol7,
+               "M1 the narrowed export holds the channel that was asked for",
+               juce::String (oneRms, 5) + " vs " + juce::String (expect7, 5));
+
+        // an unknown channel says so instead of writing nothing silently
+        auto badDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("upic_m1_stems_bad");
+        badDir.deleteRecursively();
+        const auto resBad = renderStems (pg, waves, envs, slots, badDir, "t", 48000.0, 0.8f,
+                                         0, 0, 0, nullptr, &bank, 99);
+        check (resBad.written.empty() && ! resBad.note.isEmpty(),
+               "M1 an unknown mixer channel is reported", resBad.note);
+
+        dir.deleteRecursively();
+        oneDir.deleteRecursively();
+        badDir.deleteRecursively();
+    }
     // WP6.3 (audit H2): the LAST channel of the bank is audible. The mix
     // buckets are the bank's channels PLUS the implicit Main bucket, so a
     // bank of kMaxChannels needs kMaxChannels + 1 of them. Sizing them for
