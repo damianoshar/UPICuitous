@@ -231,7 +231,7 @@ void UpicEngine::addToMix (int n, float v)
         scratch[(size_t) n] += v;
 }
 
-void UpicEngine::render(const upic::Page& page, double playhead, const std::vector<upic::Waveform>& waves, const std::vector<upic::Envelope>& envs, const std::vector<upic::SampleSlot>& slots, float* left, float* right, int numSamples, float masterGain, double rate, bool freeze, const upic::PageLutSet* luts, const std::vector<upic::Envelope>* ampTables, const std::vector<upic::ArcRenderOverride>* overrides, const std::vector<upic::Channel>* channels)
+void UpicEngine::render(const upic::Page& page, double playhead, const std::vector<upic::Waveform>& waves, const std::vector<upic::Envelope>& envs, const std::vector<upic::SampleSlot>& slots, float* left, float* right, int numSamples, float masterGain, double rate, bool freeze, const upic::PageLutSet* luts, const std::vector<upic::Envelope>* ampTables, const std::vector<upic::ArcRenderOverride>* overrides, const std::vector<upic::ChannelMix>* mix)
 {
         if (numSamples <= 0) return;
         if (! freeze && std::abs(rate) < 1e-6) return; // stopped transport: silence
@@ -241,8 +241,11 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
         if (scratch.size() < (size_t) numSamples) return;
         std::fill(scratch.begin(), scratch.begin() + numSamples, 0.0f);
 
-        // WP6.3: channel routing only when the piece has channels.
-        chanRoutingActive = (channels != nullptr && ! channels->empty());
+        // WP6.4: channel routing only when the piece has channels. The mix
+        // is the RESOLVED bank - the gains, the mute/solo flags and the
+        // gain curve already sampled into a 64-point LUT - so the audio
+        // thread never walks a point list.
+        chanRoutingActive = (mix != nullptr && ! mix->empty());
         chanStride = numSamples;
         mixChannel = 0;
         if (chanRoutingActive)
@@ -397,10 +400,14 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
             // WP6.3: the arc's channel (group override, then its own id).
             const int effCh = (ov != nullptr && ov->channelId >= 1) ? ov->channelId
                                                                     : arc.channelId;
+            // WP6.4: the arc names the channel by its id; the mix carries
+            // the engine's bucket for it. The bank's order can change and
+            // its ids do not have to be without holes, so the bucket comes
+            // from the mix and not from the list's index.
             mixChannel = 0;
             if (chanRoutingActive && effCh > 0)
-                for (int ci = 0; ci < (int) channels->size(); ++ci)
-                    if ((*channels)[(size_t) ci].id == effCh) { mixChannel = ci + 1; break; }
+                for (const auto& c : *mix)
+                    if (c.id == effCh) { mixChannel = c.bucket; break; }
             if (channelFilter >= 0 && chanRoutingActive && mixChannel != channelFilter)
                 continue;
 
@@ -617,27 +624,39 @@ void UpicEngine::render(const upic::Page& page, double playhead, const std::vect
         }
         else
         {
-            // WP6.3: bucket 0 is Main (unity, no curve); bank channel i is
-            // bucket i+1. Mute and solo resolve here; the gain curve is
-            // sampled at the page position, per sample.
+            // WP6.4: bucket 0 is Main (unity, no curve); the bank's channel
+            // i is bucket i+1 (the mix carries the bucket). Mute and solo
+            // resolve here, and the gain curve is sampled ONCE per block
+            // from the mix's 64-point LUT - the plan's block-quantised rule
+            // (the error is at most one block's worth of curve).
             bool anySolo = false;
-            for (auto& c : *channels) if (c.solo && ! c.muted) { anySolo = true; break; }
-            upic::SegmentCursor chCur[kChannelBuckets];
+            for (auto& c : *mix) if (c.solo && ! c.muted) { anySolo = true; break; }
             const double dur = juce::jmax (1.0e-6, page.durationSec);
+            const float chX = (float) juce::jlimit (0.0, 1.0, playhead / dur);
+            // the channels that take part in the mix: their bucket and
+            // their weight for this block (the gain, the mute/solo and the
+            // curve's value at the block's page position)
+            int mixBuckets[upic::limits::kMaxChannels];
+            float weights[upic::limits::kMaxChannels];
+            int mixCount = 0;
+            for (int ci = 0; ci < (int) mix->size() && ci < upic::limits::kMaxChannels; ++ci)
+            {
+                const upic::ChannelMix& c = (*mix)[(size_t) ci];
+                if (c.bucket <= 0 || c.bucket >= kChannelBuckets) continue;
+                float g = c.gain;
+                if (c.muted || (anySolo && ! c.solo)) g = 0.0f;
+                if (g > 0.0f)
+                    g *= c.curveAt (chX);
+                mixBuckets[mixCount] = c.bucket;
+                weights[mixCount] = g;
+                ++mixCount;
+            }
             for (int n = 0; n < numSamples; ++n)
             {
                 float acc = anySolo ? 0.0f : chanBuf[(size_t) n];
-                const float chX = (float) juce::jlimit (0.0, 1.0,
-                                      (playhead + (double) n * step) / dur);
-                for (int ci = 0; ci < (int) channels->size() && ci < upic::limits::kMaxChannels; ++ci)
-                {
-                    const upic::Channel& c = (*channels)[(size_t) ci];
-                    float g = c.gain;
-                    if (c.muted || (anySolo && ! c.solo)) g = 0.0f;
-                    if (g > 0.0f)
-                        g *= c.envelopeAt (chX, chCur[ci]);
-                    acc += chanBuf[(size_t) (ci + 1) * (size_t) chanStride + (size_t) n] * g;
-                }
+                for (int ci = 0; ci < mixCount; ++ci)
+                    acc += chanBuf[(size_t) mixBuckets[ci] * (size_t) chanStride + (size_t) n]
+                         * weights[ci];
                 const float out = (float) std::tanh(acc * 0.6) * masterGain * 0.9f;
                 left[n] += out;
                 if (right != nullptr) right[n] += out;
@@ -1391,7 +1410,13 @@ bool writePageToWavFile(const juce::File& target, const upic::Page& page, const 
     // worker thread, block by block.
     juce::AudioBuffer<float> monoBuf (mono ? 1 : 0,
                                        mono ? juce::jmax (1, juce::jmin (frames, 8192)) : 0);
-    const bool ok = eng.renderPageBlocks (page, waves, envs, slots, ampTables, channels, sr, masterGain, frames,
+    // WP6.4: the mix is resolved HERE, on the export's worker thread (not
+    // on the audio thread): the gain curve becomes a 64-point LUT and the
+    // engine samples it once per block.
+    const std::vector<upic::Channel> emptyBank;
+    const auto mix = upic::buildChannelMix (channels != nullptr ? *channels : emptyBank);
+    const bool ok = eng.renderPageBlocks (page, waves, envs, slots, ampTables,
+                                          mix.empty() ? nullptr : &mix, sr, masterGain, frames,
         [&] (const juce::AudioBuffer<float>& block, int n)
         {
             if (mono)

@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <array>
 #include <vector>
 #include "Envelope.h"
 #include "PieceLimits.h"
@@ -93,4 +94,75 @@ namespace upic
             return c;
         }
     };
+
+    //==============================================================================
+    // WP6.4: the resolved mixer.
+    //
+    // The plan's design: the mix is resolved on the MESSAGE thread - in the
+    // snapshot - so the audio thread only reads it: the solo flags, the
+    // gains and the gain curve, the curve as a 64-point LUT. The audio
+    // thread samples the LUT once per block (the plan's "block-quantised,
+    // <= 1 block" rule), so the per-sample path costs a multiply instead of
+    // a curve lookup.
+    //
+    // The mix is built from the channel bank, so the piece keeps naming a
+    // channel by its id while the engine works with buckets.
+    struct ChannelMix
+    {
+        // The plan's LUT resolution: 64 points over the page.
+        static constexpr int kLutPoints = 64;
+
+        int id = 0;        // the channel's id (the piece names a channel by its id)
+        int bucket = 0;    // the engine's mix bucket (0 = Main, 1..N = the bank's channels)
+        float gain = 1.0f; // 0..2
+        bool muted = false;
+        bool solo = false;
+        // The curve, sampled over the page (x = 0..1). A flat curve is all
+        // ones, so the lookup is a multiply by one.
+        std::array<float, kLutPoints> envLut {};
+
+        ChannelMix() { envLut.fill (1.0f); }
+
+        // The LUT lookup: linear between the points. The curve is sampled
+        // at block rate, so this runs once per block per channel.
+        float curveAt (float x) const
+        {
+            const float t = juce::jlimit (0.0f, 1.0f, x) * (float) (kLutPoints - 1);
+            const int i = (int) t;
+            if (i >= kLutPoints - 1) return envLut[(size_t) (kLutPoints - 1)];
+            const float f = t - (float) i;
+            return envLut[(size_t) i]
+                 + (envLut[(size_t) (i + 1)] - envLut[(size_t) i]) * f;
+        }
+    };
+
+    // The mix is resolved from the channel bank on the message thread (the
+    // snapshot publisher) or on the export's worker thread. It never runs
+    // on the audio thread: the LUT is built once, not per block.
+    inline std::vector<ChannelMix> buildChannelMix (const std::vector<Channel>& channels)
+    {
+        std::vector<ChannelMix> mix;
+        mix.reserve (channels.size());
+        for (size_t i = 0; i < channels.size(); ++i)
+        {
+            const Channel& c = channels[i];
+            ChannelMix m;
+            m.id = c.id;
+            m.bucket = (int) i + 1;
+            m.gain = c.gain;
+            m.muted = c.muted;
+            m.solo = c.solo;
+            // The curve: 64 points over the page. The cursor walks the
+            // channel's own point list (a cursor belongs to one list).
+            SegmentCursor cursor;
+            for (int k = 0; k < ChannelMix::kLutPoints; ++k)
+            {
+                const float x = (float) k / (float) (ChannelMix::kLutPoints - 1);
+                m.envLut[(size_t) k] = c.envelope.empty() ? 1.0f
+                                                           : c.envelopeAt (x, cursor);
+            }
+            mix.push_back (m);
+        }
+        return mix;
+    }
 }

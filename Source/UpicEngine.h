@@ -191,6 +191,12 @@ public:
     // WP1: `luts` carries the page's compiled frequency tables (from the
     // snapshot). It is optional: without it the drawn tables are evaluated
     // directly (correct, slower), which is what the UI and the tests use.
+    //
+    // WP6.4: `mix` is the RESOLVED mixer (the plan's `const ChannelMix*`):
+    // the channel bank with the solo flags, the gains and the gain curve
+    // already sampled into a 64-point LUT. It is built on the message
+    // thread (in the snapshot) or on the export's worker thread, never on
+    // the audio thread. An empty mix means the legacy stereo path.
     void render(const upic::Page& page, double playhead,
                 const std::vector<upic::Waveform>& waves,
                 const std::vector<upic::Envelope>& envs,
@@ -200,7 +206,7 @@ public:
                 const upic::PageLutSet* luts = nullptr,
                 const std::vector<upic::Envelope>* ampTables = nullptr,
                 const std::vector<upic::ArcRenderOverride>* overrides = nullptr,
-                const std::vector<upic::Channel>* channels = nullptr);
+                const std::vector<upic::ChannelMix>* mix = nullptr);
 
 
     // v1.33.4 (H8): the offline render, in blocks.
@@ -224,7 +230,7 @@ public:
                            const std::vector<upic::Envelope>& envs,
                            const std::vector<upic::SampleSlot>& slots,
                            const std::vector<upic::Envelope>* ampTables,
-                           const std::vector<upic::Channel>* channels,
+                           const std::vector<upic::ChannelMix>* mix,
                            double sr, float masterGain,
                            int totalFrames, BlockFn&& fn)
     {
@@ -280,7 +286,7 @@ public:
             render (page, scorePos, waves, envs, slots,
                     block.getWritePointer (0), block.getWritePointer (1),
                     n, masterGain, avgRate, false, &lutSet, ampTables,
-                    overrides.empty() ? nullptr : &overrides, channels);
+                    overrides.empty() ? nullptr : &overrides, mix);
             if (! fn (block, n)) { guardOffline = savedGuardOffline; return false; }
 
             scorePos = s1;

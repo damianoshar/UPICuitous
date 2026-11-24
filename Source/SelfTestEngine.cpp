@@ -1010,8 +1010,11 @@ void upic::runChannelRoutingChecks (upic::SelfTest& t)
         UpicEngine e;
         e.prepare (48000.0, 512);
         std::vector<float> l (1024, 0.0f), r (1024, 0.0f);
+        // WP6.4: the mix is resolved off the audio thread (the 64-point LUT)
+        const std::vector<upic::Channel> emptyBank;
+        const auto mix = upic::buildChannelMix (ch != nullptr ? *ch : emptyBank);
         e.render (pg, 0.0, waves, envs, slots, l.data(), r.data(), 1024, 0.8f,
-                  1.0, false, nullptr, nullptr, &ov, ch);
+                  1.0, false, nullptr, nullptr, &ov, mix.empty() ? nullptr : &mix);
         if (out != nullptr) *out = l;
         double sum = 0.0;
         for (float v : l) sum += (double) v * v;
@@ -1050,7 +1053,7 @@ void upic::runChannelRoutingChecks (upic::SelfTest& t)
                juce::String (half / base, 4));
     }
 
-    // the page-long gain curve is applied once, per sample
+    // the page-long gain curve is applied once, per block
     {
         const auto pg = makePage (1);
         std::vector<upic::Channel> bank;
@@ -1150,7 +1153,9 @@ void upic::runChannelRoutingChecks (upic::SelfTest& t)
             const int frames = (int) std::ceil (pg.audioDurationSec() * 48000.0);
             double sum = 0.0;
             juce::int64 count = 0;
-            e.renderPageBlocks (pg, waves, envs, slots, nullptr, &bank, 48000.0, 0.8f, frames,
+            // WP6.4: the engine renders from the resolved mix (the LUT)
+            const auto mix = upic::buildChannelMix (bank);
+            e.renderPageBlocks (pg, waves, envs, slots, nullptr, &mix, 48000.0, 0.8f, frames,
                 [&] (const juce::AudioBuffer<float>& block, int n)
                 {
                     for (int i = 0; i < n; ++i)
@@ -1298,8 +1303,10 @@ void upic::runChannelRoutingChecks (upic::SelfTest& t)
             e.setChannelFilter (bucket);
             e.prepare (48000.0, 512);
             std::vector<float> l (512, 0.0f), r (512, 0.0f);
+            // WP6.4: the engine renders from the resolved mix (the LUT)
+            const auto mix = upic::buildChannelMix (bank);
             e.render (pg, 0.0, waves, envs, slots, l.data(), r.data(), 512, 0.8f,
-                      1.0, false, nullptr, nullptr, &ov, &bank);
+                      1.0, false, nullptr, nullptr, &ov, &mix);
             double sum = 0.0;
             for (float v : l) sum += (double) v * v;
             return std::sqrt (sum / 512.0);
@@ -1429,15 +1436,149 @@ void upic::runChannelRoutingChecks (upic::SelfTest& t)
         UpicEngine e;
         e.prepare (48000.0, 512);
         std::vector<float> l (512, 0.0f), r (512, 0.0f);
+        // WP6.4: the engine renders from the resolved mix (the LUT), which
+        // is built off the audio thread
+        const auto mix = upic::buildChannelMix (bank);
         e.render (pg, 0.0, waves, envs, slots, l.data(), r.data(), 512, 0.8f,
-                  1.0, false, nullptr, nullptr, &ov, &bank); // warm the buffers
+                  1.0, false, nullptr, nullptr, &ov, &mix); // warm the buffers
 
         upic::allocCount = 0;
         upic::allocCounting = true;
         e.render (pg, 0.25, waves, envs, slots, l.data(), r.data(), 512, 0.8f,
-                  1.0, false, nullptr, nullptr, &ov, &bank);
+                  1.0, false, nullptr, nullptr, &ov, &mix);
         upic::allocCounting = false;
         check (upic::allocCount == 0, "channels: the mixer does not allocate per block",
                juce::String (upic::allocCount));
+    }
+
+    // WP6.4 (audit M2): the plan's RESOLVED mixer. The gain curve becomes a
+    // 64-point LUT and the engine samples it once per block (the plan's
+    // "block-quantised, <= 1 block" rule), so the curve's value at x = 0,
+    // 0.5 and 1 has to survive the LUT.
+    {
+        upic::Channel c;
+        c.id = 3;
+        c.name = "Curve";
+        c.envelope = { { 0.0f, 0.0f }, { 0.5f, 0.5f }, { 1.0f, 1.0f } };
+        std::vector<upic::Channel> bank;
+        bank.push_back (c);
+
+        const auto mix = upic::buildChannelMix (bank);
+        check (mix.size() == 1 && mix[0].id == 3 && mix[0].bucket == 1,
+               "M2 the mix carries the channel's id and the engine's bucket",
+               juce::String ((int) mix.size()) + " mix entry/entries");
+        check (std::abs (mix[0].envLut[0] - 0.0f) < 1.0e-6f
+               && std::abs (mix[0].envLut[upic::ChannelMix::kLutPoints - 1] - 1.0f) < 1.0e-6f,
+               "M2 the gain curve is sampled into the 64-point LUT",
+               juce::String (mix[0].envLut[0], 6) + " .. "
+                 + juce::String (mix[0].envLut[upic::ChannelMix::kLutPoints - 1], 6));
+        check (std::abs (mix[0].curveAt (0.0f) - 0.0f) < 1.0e-5f
+               && std::abs (mix[0].curveAt (0.5f) - 0.5f) < 1.0e-5f
+               && std::abs (mix[0].curveAt (1.0f) - 1.0f) < 1.0e-5f,
+               "M2 the LUT reads the curve at x = 0, 0.5 and 1",
+               juce::String (mix[0].curveAt (0.0f), 6) + ", "
+                 + juce::String (mix[0].curveAt (0.5f), 6) + ", "
+                 + juce::String (mix[0].curveAt (1.0f), 6));
+
+        // the rendered gain follows the curve's value at the block's page
+        // position (the block-quantised rule)
+        upic::Page pg;
+        pg.durationSec = 1.0;
+        upic::Arc a;
+        a.id = 1;
+        a.waveformId = 0;
+        a.envelopeId = 0;
+        a.intensity = 0.05f;
+        a.channelId = 3;
+        a.points = { { 0.0, 440.0 }, { 1.0, 440.0 } };
+        pg.arcs.push_back (a);
+
+        auto rmsAt = [&] (const std::vector<upic::Channel>* bankIn,
+                          double playhead) -> double
+        {
+            auto ov = pg.resolveArcOverrides();
+            UpicEngine e;
+            e.prepare (48000.0, 512);
+            std::vector<float> l (512, 0.0f), r (512, 0.0f);
+            const std::vector<upic::Channel> emptyBank;
+            const auto m = upic::buildChannelMix (bankIn != nullptr ? *bankIn : emptyBank);
+            e.render (pg, playhead, waves, envs, slots, l.data(), r.data(), 512, 0.8f,
+                      1.0, false, nullptr, nullptr, &ov, m.empty() ? nullptr : &m);
+            double sum = 0.0;
+            for (float v : l) sum += (double) v * v;
+            return std::sqrt (sum / 512.0);
+        };
+
+        const double plain = rmsAt (nullptr, 0.5);
+        const double curved = rmsAt (&bank, 0.5);
+        check (plain > 0.0 && std::abs (curved / plain - 0.5) < 0.02,
+               "M2 the channel's gain follows the curve at the block's position",
+               juce::String (curved / plain, 4));
+        check (rmsAt (&bank, 0.0) == 0.0,
+               "M2 the curve's value at x = 0 silences the channel",
+               juce::String (rmsAt (&bank, 0.0), 6));
+    }
+
+    // WP6.4 (audit M2): the SUM IDENTITY. The stereo mix is the weighted
+    // sum of the channels' contributions. The output stage's tanh is the
+    // only non-linearity in the path, so the check uses a signal small
+    // enough for the tanh to be linear to well within 1e-6.
+    {
+        upic::Page pg;
+        pg.durationSec = 1.0;
+        upic::Arc mainArc;
+        mainArc.id = 1;
+        mainArc.waveformId = 0;
+        mainArc.envelopeId = 0;
+        mainArc.intensity = 0.001f;
+        mainArc.channelId = 0;
+        mainArc.points = { { 0.0, 440.0 }, { 1.0, 440.0 } };
+        upic::Arc a4 = mainArc;
+        a4.id = 2;
+        a4.channelId = 4;
+        upic::Arc a7 = mainArc;
+        a7.id = 3;
+        a7.waveformId = 1;
+        a7.channelId = 7;
+        pg.arcs.push_back (mainArc);
+        pg.arcs.push_back (a4);
+        pg.arcs.push_back (a7);
+
+        std::vector<upic::Channel> bank;
+        for (int id : { 4, 7 })
+        {
+            upic::Channel c;
+            c.id = id;
+            c.name = "C" + juce::String (id);
+            c.gain = (id == 4) ? 0.5f : 0.25f;
+            bank.push_back (c);
+        }
+
+        auto renderAt = [&] (int bucket) -> std::vector<float>
+        {
+            UpicEngine e;
+            e.setChannelFilter (bucket);
+            e.prepare (48000.0, 512);
+            std::vector<float> l (512, 0.0f), r (512, 0.0f);
+            const auto mix = upic::buildChannelMix (bank);
+            const auto ov = pg.resolveArcOverrides();
+            e.render (pg, 0.0, waves, envs, slots, l.data(), r.data(), 512, 0.8f,
+                      1.0, false, nullptr, nullptr, &ov, &mix);
+            return l;
+        };
+        const auto mixed  = renderAt (-1);   // the whole mix
+        const auto inMain = renderAt (0);    // Main's bucket
+        const auto inCh4  = renderAt (1);    // the bank's first channel
+        const auto inCh7  = renderAt (2);    // the bank's second channel
+        double maxErr = 0.0;
+        for (size_t i = 0; i < mixed.size(); ++i)
+        {
+            const double expected = (double) inMain[i] + (double) inCh4[i]
+                                  + (double) inCh7[i];
+            maxErr = std::max (maxErr, std::abs ((double) mixed[i] - expected));
+        }
+        check (maxErr < 1.0e-6,
+               "M2 the stereo mix is the weighted sum of the channels",
+               juce::String (maxErr, 9));
     }
 }

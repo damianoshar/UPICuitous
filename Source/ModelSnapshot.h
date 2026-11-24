@@ -191,6 +191,11 @@ struct ModelSnapshot : SnapshotBase
     std::vector<upic::AmplitudeTable> amplitudeTables;  // WP2: the conversion bank
     std::vector<upic::PerformanceSequence> sequences;   // WP4
     std::vector<upic::Channel> channels;                 // WP6 (model only)
+    // WP6.4: the RESOLVED mixer - the channels with the gains, the
+    // mute/solo flags and the gain curve already sampled into a 64-point
+    // LUT. It is built on the message thread (here) and read by the audio
+    // thread, so the render path never walks a curve's point list.
+    std::vector<upic::ChannelMix> channelMix;
     std::vector<upic::Page>       pages;
     std::vector<upic::SampleSlot> slots;
     // WP7: the sample extraction panel's A/B preview. It is an isolated

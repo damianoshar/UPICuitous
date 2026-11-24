@@ -417,6 +417,10 @@ void MainComponent::publishModelSnapshot()
     snap->amplitudeTables = ampTables;
     snap->sequences = sequences;
     snap->channels = channels;
+    // WP6.4: the mixer is resolved HERE, on the message thread: the gains,
+    // the mute/solo flags and the gain curve become a 64-point LUT. The
+    // audio thread only reads it (and samples the LUT once per block).
+    snap->channelMix = upic::buildChannelMix (channels);
     snap->pages = pages;
     snap->slots = sampleSlots; // shared buffers: only the pointers are copied
     // WP7: the sample extraction panel's A/B preview is built here, on the
@@ -1258,7 +1262,7 @@ void MainComponent::renderScrubPreview (const ModelSnapshot& snap, AudioBlock& b
                         b.scoreL, (b.scoreR != nullptr ? b.scoreR : b.scoreL),
                         chunk, 1.0f, rate, false,
                         snap.lutsFor (p), &snap.amplitudeTables,
-                        snap.overridesFor (p), &snap.channels);
+                        snap.overridesFor (p), &snap.channelMix);
 
     const int fade = juce::jmin (chunk / 4, (int) (b.sr * 0.005));
     for (int i = 0; i < chunk; ++i)
@@ -1400,7 +1404,7 @@ void MainComponent::renderScrubFreeze (const ModelSnapshot& snap, AudioBlock& b,
     engine.render (pg, audioPlayhead, snap.waveforms, snap.envelopes, snap.slots,
                    b.freezeL, (b.freezeR != nullptr ? b.freezeR : b.freezeL),
                    b.numSamples, 1.0f, 0.0, true, snap.lutsFor (p), &snap.amplitudeTables,
-                   snap.overridesFor (p), &snap.channels);
+                   snap.overridesFor (p), &snap.channelMix);
 
     float gain = 1.0f;
     if (stopAt > 0.0)
@@ -1653,7 +1657,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                                SR != nullptr ? SR + offset : nullptr, chunk, 1.0f,
                                seqRate, false, snap.lutsFor (audioPage),
                                &snap.amplitudeTables, snap.overridesFor (audioPage),
-                               &snap.channels);
+                               &snap.channelMix);
                 offset += chunk;
                 const double nextT = t0 + (double) chunk / sr;
                 seqClock.store (seq->loop && len > 1.0e-6
@@ -1801,7 +1805,7 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
         engine.render(pg, audioPlayhead, snap.waveforms, snap.envelopes, snap.slots,
                       SL + offset, (SR != nullptr ? SR + offset : nullptr), chunk, 1.0f,
                       blockRate, false, snap.lutsFor (audioPage), &snap.amplitudeTables,
-                      snap.overridesFor (audioPage), &snap.channels);
+                      snap.overridesFor (audioPage), &snap.channelMix);
 
         if (! snap.loopPage && ((reverse && audioPage == 0) || (! reverse && audioPage + 1 >= (int) snap.pages.size())))
         {
