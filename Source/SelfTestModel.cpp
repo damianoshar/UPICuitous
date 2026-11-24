@@ -2969,4 +2969,51 @@ void upic::runChannelUiChecks (upic::SelfTest& t)
 
     mc.closeChannelPanelForTest();
     check (! mc.channelPanelOpenForTest(), "mixer ui: the panel closes");
+
+    // --- audit M4: the toolbar's combos follow the selected arc ----------
+    // The Ch / Mod / Amp combos were never refreshed when the selection
+    // changed, so they kept showing the PREVIOUS arc's values - the
+    // toolbar lied about the arc that was selected.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+        const juce::String json =
+            R"({"channels":[{"id":1,"name":"A"}],)"
+            R"("ampTables":[{"id":1,"name":"T1","points":[{"x":0,"y":0},{"x":1,"y":1}]},)"
+            R"({"id":2,"name":"T2","points":[{"x":0,"y":0},{"x":1,"y":1}]}],)"
+            R"("pages":[{"duration":2.0,"arcs":[)"
+            R"({"id":1,"waveformId":0,"envelopeId":0,"ch":1,"ampTable":1,"mod":2,)"
+            R"("modTarget":1,"modArcDepth":0.75,"points":[{"t":0,"f":440},{"t":2,"f":440}]},)"
+            R"({"id":2,"waveformId":0,"envelopeId":0,"ampTable":2,)"
+            R"("points":[{"t":0,"f":220},{"t":2,"f":220}]}]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)),
+               "M4 the piece with a channel, a table and a modulator loads");
+
+        mc.selectArcsAndSyncForTest ({ 1 });
+        check (mc.channelBoxSelectionForTest() == 2,
+               "M4 the channel combo follows the selected arc",
+               juce::String (mc.channelBoxSelectionForTest()));
+        check (mc.ampTableBoxSelectionForTest() == 2,
+               "M4 the amplitude table combo follows the selected arc",
+               juce::String (mc.ampTableBoxSelectionForTest()));
+        check (mc.arcModBoxSelectionForTest() == 3,
+               "M4 the modulator combo follows the selected arc",
+               juce::String (mc.arcModBoxSelectionForTest()));
+        check (mc.arcModTargetSelectionForTest() == 2,
+               "M4 the modulator's target follows the selected arc",
+               juce::String (mc.arcModTargetSelectionForTest()));
+
+        // the second arc has no channel, no modulator and the other table
+        mc.selectArcsAndSyncForTest ({ 2 });
+        check (mc.channelBoxSelectionForTest() == 1,
+               "M4 the channel combo follows the new selection",
+               juce::String (mc.channelBoxSelectionForTest()));
+        check (mc.ampTableBoxSelectionForTest() == 3,
+               "M4 the amplitude table combo follows the new selection",
+               juce::String (mc.ampTableBoxSelectionForTest()));
+        check (mc.arcModBoxSelectionForTest() == 1,
+               "M4 the modulator combo shows None for an arc without one",
+               juce::String (mc.arcModBoxSelectionForTest()));
+    }
 }

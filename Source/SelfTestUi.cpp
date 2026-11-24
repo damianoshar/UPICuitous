@@ -1599,6 +1599,56 @@ void upic::runInterfaceChecks (upic::SelfTest& t)
                      + juce::String (arcsBefore));
         }
     }
+
+    // --- audit M3: every toolbar card has a rank, and the status card is
+    //     the last one --------------------------------------------------
+    // The card order is a rank table. A card that is not in the table sorts
+    // AFTER the status line (an unknown name's rank is the table's length),
+    // so the cards WP2/WP4/WP5/WP6 added - without a rank - pushed the status
+    // card out of its place.
+    {
+        static const char* const expected[] = {
+            "transport", "seq", "pages", "file", "voice", "amp", "mod", "ch",
+            "sieve", "tools", "tempo", "accel", "levels", "material", "magnets",
+            "scrub", "drag", "pitch", "page", "clock", "status"
+        };
+
+        juce::String detail;
+        int previous = -1;
+        bool ok = true;
+        for (auto* name : expected)
+        {
+            const int idx = mc.toolbarCardIndexForGroupForTest (name);
+            if (idx < 0)
+            {
+                ok = false;
+                detail << name << " missing  ";
+                continue;
+            }
+            if (idx <= previous)
+            {
+                ok = false;
+                detail << name << " at " << idx << " (after " << previous << ")  ";
+            }
+            previous = idx;
+        }
+        check (ok, "M3 every toolbar card is in the rank table's order", detail);
+
+        // the status line is the flexible card that fills the last row: it
+        // has to be the last of the flow cards
+        int lastIdx = -1;
+        juce::String lastName;
+        for (auto* name : expected)
+        {
+            const int idx = mc.toolbarCardIndexForGroupForTest (name);
+            if (idx > lastIdx) { lastIdx = idx; lastName = name; }
+        }
+        check (lastName == "status",
+               "M3 the status card is the last one",
+               lastName + " at " + juce::String (lastIdx)
+                 + ", status at "
+                 + juce::String (mc.toolbarCardIndexForGroupForTest ("status")));
+    }
 }
 
 //==============================================================================

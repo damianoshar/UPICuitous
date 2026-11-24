@@ -1017,10 +1017,15 @@ void MainComponent::resized()
     // place - the groups above are built where their controls are easiest
     // to describe, and the material card depends on the active tab. The
     // status line stays last: it is the flexible card that fills a row.
+    //
+    // Every card needs a rank: a card without one sorted AFTER the status
+    // line (the rank of an unknown name is the table's length), so the
+    // status card stopped being the last one when WP2/WP4/WP5/WP6 added
+    // their cards.
     static const char* const cardOrder[] = {
-        "transport", "pages", "file", "voice", "sieve", "tools", "tempo",
-        "accel", "levels", "material", "magnets", "scrub", "drag", "pitch",
-        "page", "clock", "status"
+        "transport", "seq", "pages", "file", "voice", "amp", "mod", "ch",
+        "sieve", "tools", "tempo", "accel", "levels", "material", "magnets",
+        "scrub", "drag", "pitch", "page", "clock", "status"
     };
     auto cardRank = [] (const juce::String& name) -> int
     {

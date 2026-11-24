@@ -501,6 +501,12 @@ public:
         for (auto& a : curPage().arcs) if (a.id == arcId) return a.channelId;
         return -2;
     }
+    // The toolbar's combo boxes, so the selftest can check that they follow
+    // the selected arc.
+    int channelBoxSelectionForTest() const { return channelBox.getSelectedId(); }
+    int ampTableBoxSelectionForTest() const { return ampTableBox.getSelectedId(); }
+    int arcModBoxSelectionForTest() const { return arcModBox.getSelectedId(); }
+    int arcModTargetSelectionForTest() const { return arcModTgtBox.getSelectedId(); }
     int groupIdAtForTest (int i) const
     { return (i >= 0 && i < (int) curPage().groups.size()) ? curPage().groups[(size_t) i].id : -1; }
     int groupMemberCountAtForTest (int i) const
@@ -734,6 +740,13 @@ public:
     // checks. The material is installed exactly like a decoded file.
     bool sampleExtractPanelOpenForTest() const
     { return sampleExtractPanel != nullptr && sampleExtractPanel->isVisible(); }
+    // WP7: the overlay closes with Escape, like the other editors.
+    bool sampleExtractEscapeForTest()
+    {
+        if (sampleExtractPanel == nullptr) return false;
+        return sampleExtractPanel->keyPressed (
+            juce::KeyPress (juce::KeyPress::escapeKey));
+    }
     void openSampleExtractForTest() { openSampleExtractPanel(); }
     void closeSampleExtractForTest() { closeSampleExtractPanel(); }
     void sampleExtractDetectForTest()
@@ -1021,6 +1034,17 @@ public:
         return -1;
     }
     void selectArcsForTest (const std::vector<int>& ids) { score.setSelectedArcs (ids); }
+    // The same selection, but the toolbar's combos are brought in line with
+    // it - the selection callback the score editor fires when the user
+    // clicks an arc. The plain selectArcsForTest deliberately does NOT do
+    // that: the existing checks drive the model, not the toolbar.
+    void selectArcsAndSyncForTest (const std::vector<int>& ids)
+    {
+        score.setSelectedArcs (ids);
+        selectedArcId = score.getSelectedArc();
+        lastArcSelection = score.getSelectedArcs();
+        syncControlsToArc (selectedArcId);
+    }
     int selectedArcCountForTest() const { return (int) score.getSelectedArcs().size(); }
 
     // --- F5 (2026-11-17): the toolbar's disclosure sections --------------
@@ -1102,6 +1126,14 @@ public:
         for (auto& c : toolbarGroups)
             if (c.name == name) return c.area;
         return {};
+    }
+    // The card's place in the toolbar's card list, so the selftest can check
+    // the ORDER the cards are in (-1 when the card is not there).
+    int toolbarCardIndexForGroupForTest (const juce::String& name) const
+    {
+        for (int i = 0; i < (int) toolbarGroups.size(); ++i)
+            if (toolbarGroups[(size_t) i].name == name) return i;
+        return -1;
     }
     juce::Rectangle<int> toolbarBoundsForTest() const { return toolbarBounds; }
 

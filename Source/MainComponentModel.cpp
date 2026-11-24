@@ -1462,6 +1462,10 @@ void MainComponent::syncControlsToArc(int arcId)
         selectedArcId = -1;
         lastArcSelection.clear();
         arcListPanel.setSelectedArcs(currentPage, {});
+        // WP2/WP5/WP6: the toolbar's combos follow the selection. With no
+        // selection the modulator is "None" and the channel is "Main".
+        refreshModBox();
+        refreshChannelBox();
         return;
     }
 
@@ -1521,6 +1525,13 @@ void MainComponent::syncControlsToArc(int arcId)
     selectedArcId = score.getSelectedArc();
     lastArcSelection = score.getSelectedArcs();
     arcListPanel.setSelectedArcs(currentPage, lastArcSelection);
+
+    // WP2/WP5/WP6: the toolbar's combos follow the selected arc. Without
+    // this they kept showing the PREVIOUS arc's amplitude table, modulator
+    // and mixer channel - the toolbar lied about the arc that was selected.
+    refreshAmpTableBox();   // WP2
+    refreshModBox();        // WP5
+    refreshChannelBox();    // WP6.4
 }
 
 void MainComponent::updateSampleView()

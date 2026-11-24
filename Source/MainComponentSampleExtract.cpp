@@ -55,7 +55,10 @@ void MainComponent::openSampleExtractPanel()
     if (! sampleExtractPanel)
     {
         sampleExtractPanel = std::make_unique<SampleExtractPanel>();
-        addAndMakeVisible (*sampleExtractPanel);
+        // The panel is added hidden: the material is captured (and analysed)
+        // below, and that analysis is a message-thread autocorrelation - the
+        // window must not show a frozen panel while it runs.
+        addChildComponent (*sampleExtractPanel);
         sampleExtractPanel->setBounds (getLocalBounds());
 
         sampleExtractPanel->onDetect = [this]

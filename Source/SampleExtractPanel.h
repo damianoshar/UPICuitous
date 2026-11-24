@@ -76,7 +76,7 @@ public:
         previewBtn.onClick = [this] { if (onPreview) onPreview(); };
         toWaveBtn.onClick  = [this] { if (onToWave) onToWave(); };
         toEnvBtn.onClick   = [this] { if (onToEnv) onToEnv(); };
-        closeBtn.onClick   = [this] { if (onClose) onClose(); };
+        closeBtn.onClick   = [this] { close(); };
 
         modeBox.setName ("extractEnvelopeModeBox");
         modeBox.setTooltip ("The contour's measure: RMS energy or the absolute peak");
@@ -113,6 +113,28 @@ public:
         infoLab.setColour (juce::Label::textColourId, juce::Colour (0xffc9c9d4));
         infoLab.setJustificationType (juce::Justification::topLeft);
         addAndMakeVisible (infoLab);
+
+        // The overlay starts hidden, like the other editors. The host shows
+        // it when the panel is ready - the analysis that captures the
+        // material runs on the message thread, and a visible panel would
+        // freeze the window while it runs.
+        setVisible (false);
+    }
+
+    bool isOpen() const { return isVisible(); }
+
+    // The overlay's own close, like the other editors: hide first, then tell
+    // the host (the host cancels the preview route and drops the material).
+    void close()
+    {
+        setVisible (false);
+        if (onClose) onClose();
+    }
+
+    bool keyPressed (const juce::KeyPress& k) override
+    {
+        if (k.getKeyCode() == juce::KeyPress::escapeKey) { close(); return true; }
+        return false;
     }
 
     // The material to analyse. The panel captures the slot (the audio buffer

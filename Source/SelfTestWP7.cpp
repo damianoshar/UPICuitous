@@ -1283,6 +1283,31 @@ void upic::runWP7Checks (upic::SelfTest& t)
                        && ! invalid.saveSampleEnvelope(),
                        "wp7 panel: changing the sample level invalidates the captured source and refuses its saves");
             }
+
+            // --- audit M5: the overlay's own conventions --------------------
+            // The panel was built visible and had no close of its own: it
+            // appeared on the screen while the (message-thread) analysis ran,
+            // and Escape did nothing. It is now hidden at construction, and
+            // it closes with Escape like the other editors.
+            {
+                SampleExtractPanel bare;
+                check (! bare.isOpen(),
+                       "M5 the extraction panel is hidden when it is built");
+
+                auto escHolder = std::make_unique<MainComponent> (true);
+                auto& esc = *escHolder;
+                check (esc.setSampleSlotForTest (0, sine, sr),
+                       "M5 the material is installed");
+                esc.openSampleExtractForTest();
+                check (esc.sampleExtractPanelOpenForTest(),
+                       "M5 the panel opens");
+                check (esc.sampleExtractEscapeForTest(),
+                       "M5 the panel takes the Escape key");
+                check (! esc.sampleExtractPanelOpenForTest(),
+                       "M5 Escape closes the panel");
+                check (! esc.sampleExtractPreviewActiveForTest(),
+                       "M5 Escape also stops the preview");
+            }
         }
 
         //======================================================================
