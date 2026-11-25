@@ -411,6 +411,26 @@ if (-not $SkipApp) {
     $exe = Join-Path $root "Builds\VisualStudio2026\x64\Debug\App\UPICuitous.exe"
     if (-not (Test-Path $exe)) { Die "app exe not found: $exe" }
 
+    # The freshly linked binary must settle before it is run. MSBuild's
+    # workers can still be copying it (and the antivirus can still be
+    # scanning it) when the build returns, and a selftest that starts
+    # against a binary that is still being written can die with an access
+    # violation. The size and the timestamp are watched until they stop
+    # moving.
+    {
+        $lastSize = -1
+        $lastWrite = [datetime]::MinValue
+        $stable = 0
+        for ($i = 0; $i -lt 100 -and $stable -lt 3; $i++) {
+            $f = Get-Item $exe
+            if ($f.Length -eq $lastSize -and $f.LastWriteTime -eq $lastWrite) { $stable++ }
+            else { $stable = 0 }
+            $lastSize = $f.Length
+            $lastWrite = $f.LastWriteTime
+            Start-Sleep -Milliseconds 400
+        }
+    }
+
     Step "App selftest"
     $log = Join-Path $env:TEMP "upic_selftest.txt"
     Remove-Item $log -Force -ErrorAction SilentlyContinue

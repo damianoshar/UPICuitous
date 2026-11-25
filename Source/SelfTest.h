@@ -17,6 +17,12 @@ namespace upic
         juce::String log;
         int failures = 0;
 
+        // The log is written as the run goes (a run that dies leaves the
+        // checks it had reached behind), so the file stream is opened with
+        // the first check and closed with the last.
+        juce::File logFile;
+        std::unique_ptr<juce::FileOutputStream> logStream;
+
         // Records one check: "PASS" or "FAIL", with the detail (if any).
         void check (bool ok, const juce::String& name, const juce::String& detail = {});
     };

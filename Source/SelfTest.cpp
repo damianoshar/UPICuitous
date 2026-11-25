@@ -44,10 +44,32 @@ void operator delete[] (void* p, const std::nothrow_t&) noexcept { std::free (p)
 //==============================================================================
 void upic::SelfTest::check (bool ok, const juce::String& name, const juce::String& detail)
 {
-    log << (ok ? "PASS  " : "FAIL  ") << name;
-    if (detail.isNotEmpty()) log << "  [" << detail << "]";
-    log << "\n";
+    juce::String line = (ok ? juce::String ("PASS  ") : juce::String ("FAIL  ")) + name;
+    if (detail.isNotEmpty()) line << "  [" << detail << "]";
+    line << "\n";
+    log << line;
     if (! ok) ++failures;
+
+    // The log is written as the run goes, not only at the end. A run that
+    // dies in the middle (an access violation, a power cut) then leaves the
+    // checks it had reached behind, instead of an empty file that says
+    // nothing about where it died. The file is the one the gate reads, and
+    // the summary line is appended to it at the end.
+    if (logStream == nullptr)
+    {
+        logFile = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                    .getChildFile ("upic_selftest.txt");
+        logFile.deleteFile();
+        logStream = std::make_unique<juce::FileOutputStream> (logFile);
+        if (logStream != nullptr && ! logStream->openedOk())
+            logStream.reset();
+    }
+    if (logStream != nullptr)
+    {
+        const auto utf8 = line.toUTF8();
+        logStream->write (utf8.getAddress(), (size_t) utf8.sizeInBytes() - 1);
+        logStream->flush();
+    }
 }
 
 //==============================================================================
@@ -122,9 +144,22 @@ int upic::runSelfTest()
     upic::runTransportStateChecks (t);
     upic::runChooserChecks (t);
 
-    t.log << "\n" << (t.failures == 0 ? "ALL CHECKS PASSED" : juce::String(t.failures) + " CHECK(S) FAILED") << "\n";
-    juce::File::getSpecialLocation(juce::File::tempDirectory)
-        .getChildFile("upic_selftest.txt").replaceWithText(t.log);
+    const juce::String summary = "\n" + (t.failures == 0 ? juce::String ("ALL CHECKS PASSED")
+                                                            : juce::String (t.failures) + " CHECK(S) FAILED") + "\n";
+    t.log << summary;
+    if (t.logStream != nullptr)
+    {
+        const auto utf8 = summary.toUTF8();
+        t.logStream->write (utf8.getAddress(), (size_t) utf8.sizeInBytes() - 1);
+        t.logStream->flush();
+        t.logStream.reset();
+    }
+    else
+    {
+        // the stream could not be opened - the whole log is written at once
+        juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getChildFile("upic_selftest.txt").replaceWithText(t.log);
+    }
     DBG(t.log);
     return t.failures;
 }
