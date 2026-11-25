@@ -566,7 +566,7 @@ private:
         {
             const float y = plot.getBottom() - (float) p * laneH;
             g.setColour (juce::Colour (0xff2a2a36));
-            g.drawHorizontalLine ((int) y, (int) plot.getX(), (int) plot.getRight());
+            g.drawHorizontalLine ((int) y, plot.getX(), plot.getRight());
             g.setColour (juce::Colour (0xff7a7a88));
             g.drawText ("page " + juce::String (p + 1),
                         juce::Rectangle<float> (plot.getX() + 4.0f, y - 11.0f, 70.0f, 10.0f),
