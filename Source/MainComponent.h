@@ -24,6 +24,7 @@
 #include "AmpTableEditor.h"
 #include "GroupPanel.h"
 #include "SequencePanel.h"
+#include "PerformanceView.h"  // WP8
 #include "ChannelPanel.h"
 #include "SampleExtractPanel.h"  // WP7
 #include "UserLibrary.h"          // WP7
@@ -620,6 +621,30 @@ public:
     { return i >= 0 && i < (int) curPage().groups.size() ? curPage().groups[(size_t) i].gain : -1.0f; }
     double groupTransposeAtForTest (int i) const
     { return i >= 0 && i < (int) curPage().groups.size() ? curPage().groups[(size_t) i].transposeSemitones : 0.0; }
+    // --- WP8: the performance view ---
+    bool perfViewOpenForTest() const { return perfView.isVisible(); }
+    void openPerfViewForTest() { showPerformanceView(); }
+    void closePerfViewForTest() { closePerformanceView(); }
+    void perfSetPageForTest (int page) { perfView.setPageForTest (page); }
+    int perfSelectedPageForTest() const { return perfView.selectedPageForTest(); }
+    void perfSetScrubForTest (bool on) { perfView.setScrubForTest (on); }
+    void perfSetReverseForTest (bool on) { perfView.setReverseForTest (on); }
+    void perfSetLoopForTest (bool on) { perfView.setLoopForTest (on); }
+    void perfSetTempoForTest (double bpm) { perfView.setTempoForTest (bpm); }
+    void perfSetGroupMuteForTest (int i, bool on) { perfView.setGroupMuteForTest (i, on); }
+    void perfSetGroupSoloForTest (int i, bool on) { perfView.setGroupSoloForTest (i, on); }
+    void perfSetGroupGainForTest (int i, float v) { perfView.setGroupGainForTest (i, v); }
+    void perfSetGroupTransposeForTest (int i, double v) { perfView.setGroupTransposeForTest (i, v); }
+    void perfRecordForTest() { perfView.recordForTest(); }
+    void perfPlayForTest() { perfView.playForTest(); }
+    void perfLoopForTest() { perfView.loopForTest(); }
+    int perfTrajectoryPointsForTest() const { return perfView.trajectoryPointCount(); }
+    void perfAddTrajectoryPointForTest (int page, double pos, double t)
+    { perfView.addTrajectoryPoint (page, pos, t); }
+    bool scrubAuditionForTest() const { return scrubAudition; }
+    bool loopPageForTest() const { return loopPage; }
+    double pageTempoForTest() const { return curPage().tempoBpm; }
+    int currentPageForTest() const { return currentPage; }
     int arcModulatorForTest (int arcId) const
     {
         for (auto& a : curPage().arcs) if (a.id == arcId) return a.modulatorArcId;
@@ -2198,6 +2223,8 @@ private:
     juce::TextButton audioBtn{ "Audio" };
     juce::TextButton settingsBtn{ "Settings" };
     juce::ToggleButton loopBtn{ "Loop" }, seqBtn{ "Seq" }, revPlayBtn{ "Rev" }, pressBtn{ "Pressure" }, scrubBtn{ "Scrub" };
+    // WP8: the performance view (the screen a performer works from).
+    juce::TextButton perfBtn{ "Perf" };
     // scrub audition controls
     juce::Label scrubLenLab{ {}, "Scrub len" }, scrubCrossLab{ {}, "Crossfade" }, scrubTailLab{ {}, "Release tail" };
     juce::Label scrubGrainLab{ {}, "Hold grain" };
@@ -2357,6 +2384,9 @@ private:
                      seqLoopBtn{ "Loop" }, seqEditBtn{ "View" };
     SequencePanel seqPanel;
     GroupPanel groupPanel;
+    // WP8: the performance view - one screen for the things a performer
+    // needs. It is a view over the app's transport, not a second one.
+    PerformanceView perfView;
     int selGroupId = -1;
     bool groupLevelsEditing = false;
 
@@ -2599,6 +2629,18 @@ private:
     void showSequencePanel();               // WP4: the performance sequences
     void closeSequencePanel();
     void refreshSequencePanel();
+    // --- WP8: the performance view ---
+    void showPerformanceView();
+    void closePerformanceView();
+    void refreshPerformanceView();
+    void refreshPerformanceTransport();
+    bool seqLoopIsOn() const;
+    // The group's performance attributes. The group panel and the
+    // performance view both edit the groups, so the commands live here.
+    void editGroupMuteSolo (int index, bool muted, bool solo);
+    void editGroupLevelsBegin();
+    void editGroupLevels (int index, float gain, double transpose);
+    void editGroupLevelsEnd();
     // --- WP6.4: the mixer ---
     void refreshChannelBox();
     void refreshChannelPanel();

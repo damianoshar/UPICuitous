@@ -104,6 +104,7 @@ MainComponent::MainComponent(bool pluginMode)
     for (auto* slider : themedSliders)
         applyMasterVolumeSliderTheme (*slider);
     groupPanel.themeSliders();   // WP3
+    perfView.themeSliders();     // WP8
     // WP6.4: the mixer slider is themed when the panel is lazily built (see showChannelPanel).
     // Icon-only controls remain discoverable with mouse/pen hover. Preserve
     // any more specific tooltips that the individual controls already set.
@@ -746,6 +747,7 @@ void MainComponent::buildCombos()
         {
             publishModelSnapshot();
             refreshScoreBinding();
+            refreshPerformanceView();   // WP8: the performance view follows the page
         }
     };
 }
@@ -1123,6 +1125,16 @@ void MainComponent::timerCallback()
             ++scoreTimerRepaintRequestCount;
             score.repaint();
         }
+    }
+    // WP8: the performance view follows the app's transport. The view owns
+    // no clock of its own: the app pushes the state and the playhead's path
+    // into it, so there is still exactly one transport.
+    if (perfView.isVisible())
+    {
+        refreshPerformanceTransport();
+        if (transportActive())
+            perfView.addTrajectoryPoint (currentPage, displayPlayhead(),
+                                         juce::Time::getMillisecondCounterHiRes() * 0.001);
     }
 
     // v1.16: publish the latency the host has to compensate. The host can

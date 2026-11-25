@@ -84,6 +84,7 @@ int upic::runSelfTest()
     upic::runTransformChecks (t);
     upic::runWP8TransformChecks (t);
     upic::runWP8CommandChecks (t);
+    upic::runWP8PerformanceViewChecks (t);
     upic::runFreqTableChecks (t);
     upic::runAmpTableChecks (t);
     upic::runGroupChecks (t);

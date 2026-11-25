@@ -3404,3 +3404,129 @@ void upic::runWP8CommandChecks (upic::SelfTest& t)
     }
 }
 
+//==============================================================================
+// WP8: the performance view.
+//
+// The view is a window onto the app's transport: its switches run the app's
+// own commands, and the app pushes the state back into it. These checks
+// drive the view the way a performer would.
+void upic::runWP8PerformanceViewChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
+    mc.setSize (1280, 800);
+    const juce::String json =
+        R"({"pages":[)"
+        R"({"duration":10.0,"arcs":[{"id":1,"points":[{"t":1,"f":220},{"t":3,"f":440}]}],)"
+        R"("groups":[{"id":1,"name":"G1","arcs":[1]}]},)"
+        R"({"duration":20.0,"arcs":[{"id":2,"points":[{"t":2,"f":330},{"t":4,"f":660}]}]}]})";
+    check (mc.loadFromVar (juce::JSON::parse (json)),
+           "WP8 the performance view's fixture loads");
+
+    // --- the view opens on the current page ------------------------------
+    check (! mc.perfViewOpenForTest(),
+           "WP8 the performance view starts closed");
+    mc.openPerfViewForTest();
+    check (mc.perfViewOpenForTest(),
+           "WP8 the performance view opens");
+    check (mc.perfSelectedPageForTest() == mc.currentPageForTest(),
+           "WP8 the performance view shows the current page",
+           juce::String (mc.perfSelectedPageForTest()) + " vs "
+             + juce::String (mc.currentPageForTest()));
+
+    // --- the page selector ------------------------------------------------
+    mc.perfSetPageForTest (1);
+    check (mc.currentPageForTest() == 1,
+           "WP8 the performance view switches the page",
+           juce::String (mc.currentPageForTest()));
+    mc.perfSetPageForTest (0);
+    check (mc.currentPageForTest() == 0,
+           "WP8 the performance view switches back",
+           juce::String (mc.currentPageForTest()));
+
+    // --- the transport switches (the app's own commands) ------------------
+    const bool scrubBefore = mc.scrubAuditionForTest();
+    mc.perfSetScrubForTest (! scrubBefore);
+    check (mc.scrubAuditionForTest() == ! scrubBefore,
+           "WP8 the performance view's scrub switch is the app's scrub switch",
+           juce::String (mc.scrubAuditionForTest() ? "on" : "off"));
+    mc.perfSetReverseForTest (true);
+    check (mc.playRateForTest() < 0.0,
+           "WP8 the performance view's reverse switch is the app's reverse switch",
+           juce::String (mc.playRateForTest()));
+    mc.perfSetReverseForTest (false);
+    check (mc.playRateForTest() > 0.0,
+           "WP8 the performance view's reverse switch turns reverse off",
+           juce::String (mc.playRateForTest()));
+    const bool loopBefore = mc.loopPageForTest();
+    mc.perfSetLoopForTest (! loopBefore);
+    check (mc.loopPageForTest() == ! loopBefore,
+           "WP8 the performance view's loop switch is the app's loop switch",
+           juce::String (mc.loopPageForTest() ? "on" : "off"));
+    mc.perfSetTempoForTest (90.0);
+    check (std::abs (mc.pageTempoForTest() - 90.0) < 1e-6,
+           "WP8 the performance view's tempo is the page's tempo",
+           juce::String (mc.pageTempoForTest()));
+
+    // --- it is a view, not a second transport -----------------------------
+    check (! mc.isPlayingForTest(),
+           "WP8 the performance view does not run a transport of its own");
+
+    // --- the groups --------------------------------------------------------
+    const int depthBefore = mc.undoDepth();
+    mc.perfSetGroupMuteForTest (0, true);
+    check (mc.groupMutedAtForTest (0),
+           "WP8 the performance view mutes a group");
+    check (mc.undoDepth() == depthBefore + 1,
+           "WP8 the group's mute is one undo step",
+           juce::String (mc.undoDepth() - depthBefore));
+    mc.undo();
+    check (! mc.groupMutedAtForTest (0),
+           "WP8 the undo takes the group's mute back");
+
+    mc.perfSetGroupGainForTest (0, 0.5f);
+    check (std::abs (mc.groupGainAtForTest (0) - 0.5f) < 1.0e-5,
+           "WP8 the performance view sets a group's gain",
+           juce::String (mc.groupGainAtForTest (0)));
+    mc.perfSetGroupTransposeForTest (0, 7.0);
+    check (std::abs (mc.groupTransposeAtForTest (0) - 7.0) < 1.0e-5,
+           "WP8 the performance view sets a group's transpose",
+           juce::String (mc.groupTransposeAtForTest (0)));
+    mc.perfSetGroupSoloForTest (0, true);
+    check (mc.groupSoloAtForTest (0),
+           "WP8 the performance view solos a group");
+
+    // --- the sequence (the app's own recorder) -----------------------------
+    mc.perfRecordForTest();
+    check (mc.seqRecordingForTest(),
+           "WP8 the performance view's record switch starts the recorder");
+    mc.perfRecordForTest();
+    check (! mc.seqRecordingForTest(),
+           "WP8 the performance view's record switch stops the recorder");
+
+    // --- the live playhead trajectory --------------------------------------
+    mc.perfAddTrajectoryPointForTest (0, 1.0, 0.0);
+    mc.perfAddTrajectoryPointForTest (0, 2.0, 0.1);
+    check (mc.perfTrajectoryPointsForTest() == 2,
+           "WP8 the trajectory records the playhead's path",
+           juce::String (mc.perfTrajectoryPointsForTest()));
+    mc.perfAddTrajectoryPointForTest (0, 2.0, 0.2);
+    check (mc.perfTrajectoryPointsForTest() == 2,
+           "WP8 a hold is not a new trajectory point",
+           juce::String (mc.perfTrajectoryPointsForTest()));
+    mc.perfAddTrajectoryPointForTest (1, 5.0, 0.3);
+    check (mc.perfTrajectoryPointsForTest() == 3,
+           "WP8 the trajectory follows the playhead to another page",
+           juce::String (mc.perfTrajectoryPointsForTest()));
+
+    // --- the view closes ----------------------------------------------------
+    mc.closePerfViewForTest();
+    check (! mc.perfViewOpenForTest(),
+           "WP8 the performance view closes");
+}
+

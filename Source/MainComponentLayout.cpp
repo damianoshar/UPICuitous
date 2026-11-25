@@ -877,7 +877,7 @@ void MainComponent::resized()
     // reachable at every fold level.
     groups.push_back ({ "transport", { F(&loopBtn, 64),
                                         F(&seqBtn, 60), F(&revPlayBtn, 64), F(&pressBtn, 96),
-                                        F(&scrubBtn, 72) } });
+                                        F(&scrubBtn, 72), F(&perfBtn, 60) } });
 
     // the pages and the files
     // v1.34.2: the page selector's caption went; the group header already
@@ -2084,6 +2084,7 @@ void MainComponent::layoutOverlays (float s)
     ampTableEd.setBounds (getLocalBounds());
     groupPanel.setBounds (getLocalBounds());
     seqPanel.setBounds (getLocalBounds());
+    perfView.setBounds (getLocalBounds());   // WP8
     if (channelPanel != nullptr) channelPanel->setBounds (getLocalBounds()); // WP6.4
     // WP7: the sample extraction panel is lazy, so it has no bounds until
     // it has been built once.
