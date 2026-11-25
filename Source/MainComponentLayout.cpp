@@ -401,6 +401,12 @@ void MainComponent::buildScoreArea()
         publishModelSnapshot();
     };
     score.onUndo = [this]{ undo(); };
+    // Guerrero: the arc menu's regenerate command is a host operation, because
+    // it needs the provenance checks and the undo transaction.
+#if GUERRERO_INTEGRATION
+    score.onRegenerateGuerrero = [this](int arcId){ regenerateGuerreroArc (arcId); };
+    score.onEditGuerreroRecipe = [this](int arcId){ openGuerreroDialog (arcId); };
+#endif
     score.onRedo = [this]{ redo(); };
 }
 
@@ -2168,4 +2174,11 @@ void MainComponent::layoutOverlays (float s)
         btnRow.removeFromRight(8);
         clearConfirmBtn.setBounds(btnRow.removeFromRight(130).reduced(2));
     }
+
+#if GUERRERO_INTEGRATION
+    // The Guerrero parameter dialog tracks the window like the other overlays,
+    // so resizing while it is open cannot leave it at its previous bounds.
+    if (guerreroOverlay != nullptr)
+        guerreroOverlay->setBounds (getLocalBounds());
+#endif
 }

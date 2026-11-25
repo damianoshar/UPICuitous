@@ -55,9 +55,78 @@ file(GLOB_RECURSE UPIC_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/Source/*.h"
 )
 
+# --- Guerrero composition engine (optional integration) -----------------
+# The engine lives outside this tree in ../Source/guerrero. When it is present
+# its core and UPIC-adapter translation units are compiled into the app and its
+# include root is added, so Source/GuerreroUpicAdapter.* can
+# `#include "guerrero/upic/GuerreroUpicPlan.h"`.
+#
+# Missing the engine is not an error. The glob above always picks up
+# Source/GuerreroUpicAdapter.cpp, which includes the Guerrero headers, so when
+# the engine is absent that file is removed from the source list BEFORE
+# target_sources() is called. Removing it afterwards would have no effect.
+# The engine location is a CACHE variable so it can be pointed at any checkout:
+#
+#   cmake -S . -B build -DGUERRERO_SOURCE_DIR=/path/to/guerrero/Source
+#
+# When it is not given, the usual layouts are probed, because extracting the two
+# archives as siblings is the most likely arrangement and must not silently
+# produce a build without the integration.
+set(GUERRERO_SOURCE_DIR "" CACHE PATH
+    "Path to the Guerrero 'Source' directory (containing guerrero/upic/GuerreroUpicPlan.h)")
+
+if (NOT GUERRERO_SOURCE_DIR)
+    foreach(_guerrero_candidate
+        "${CMAKE_CURRENT_SOURCE_DIR}/../Source"                    # guerrero/Source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../guerrero/Source"           # sibling: ../guerrero/Source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../guerrero/Source"        # workspace/guerrero/Source
+        "${CMAKE_CURRENT_SOURCE_DIR}/Guerrero/Source"              # nested Guerrero/Source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../Guerrero/Source")          # sibling: ../Guerrero/Source
+        if (EXISTS "${_guerrero_candidate}/guerrero/upic/GuerreroUpicPlan.h")
+            set(GUERRERO_SOURCE_DIR "${_guerrero_candidate}")
+            break()
+        endif()
+    endforeach()
+endif()
+
+if (GUERRERO_SOURCE_DIR AND EXISTS "${GUERRERO_SOURCE_DIR}/guerrero/upic/GuerreroUpicPlan.h")
+    get_filename_component(GUERRERO_SOURCE_DIR "${GUERRERO_SOURCE_DIR}" ABSOLUTE)
+    message(STATUS "Guerrero: integrating engine from ${GUERRERO_SOURCE_DIR}")
+    target_include_directories(UPICuitous PRIVATE "${GUERRERO_SOURCE_DIR}")
+    target_compile_definitions(UPICuitous PRIVATE GUERRERO_INTEGRATION=1)
+    set(GUERRERO_AVAILABLE TRUE)
+else()
+    # A silently disabled integration is worse than a loud one: the app would
+    # build, but the generator would be missing with no explanation.
+    message(WARNING
+        "Guerrero: engine not found. Set -DGUERRERO_SOURCE_DIR=<path to guerrero/Source> "
+        "to enable the integration. UPICuitous will build WITHOUT it.")
+    list(REMOVE_ITEM UPIC_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/Source/GuerreroUpicAdapter.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Source/GuerreroUpicAdapter.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Source/SelfTestGuerrero.cpp"
+    )
+    target_compile_definitions(UPICuitous PRIVATE GUERRERO_INTEGRATION=0)
+    set(GUERRERO_AVAILABLE FALSE)
+endif()
+
 target_sources(UPICuitous PRIVATE ${UPIC_SOURCES})
 
+if (GUERRERO_AVAILABLE)
+    target_sources(UPICuitous PRIVATE
+        "${GUERRERO_SOURCE_DIR}/guerrero/core/Types.cpp"
+        "${GUERRERO_SOURCE_DIR}/guerrero/core/Curves.cpp"
+        "${GUERRERO_SOURCE_DIR}/guerrero/upic/GuerreroUpicPlan.cpp"
+    )
+endif()
+
+# JUCE_MODAL_LOOPS_PERMITTED gates MessageManager::runDispatchLoopUntil, which
+# the headless self-test uses to deliver queued message-thread work (the WP7
+# check that drains a deferred preview cancellation). Enabling it only compiles
+# that support in; nothing in the app calls a modal loop. The Visual Studio
+# project leaves it at JUCE's default of 0, so both spellings are compiled.
 target_compile_definitions(UPICuitous PRIVATE
+    JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0

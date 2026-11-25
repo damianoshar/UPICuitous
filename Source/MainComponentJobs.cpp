@@ -71,6 +71,14 @@ void MainComponent::endEdit()
         return;
     }
 
+    // Guerrero arcs: if the geometry no longer matches the fingerprint taken
+    // when it was generated, the user has edited it. Mark it baked inside this
+    // transaction, so the undo snapshot (taken in beginEdit while still
+    // unbaked) restores the unbaked state on undo.
+#if GUERRERO_INTEGRATION
+    markEditedGuerreroGeometry();
+#endif
+
     UndoEntry e;
     e.model = std::move (*pendingEdit);
     e.label = pendingLabel;

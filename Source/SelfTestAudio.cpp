@@ -2672,6 +2672,298 @@ void upic::runTransportStateChecks (upic::SelfTest& t)
         for (int b = 0; b < 4; ++b) render();
     }
 
+    // --- page-end behaviour under each transport mode ----------------------
+    // The Guerrero recipe dialog binds an edit to the page it was opened on, and
+    // its guard assumes playback can move the active page. Only the pure
+    // upic::seqNextPage() decision was tested; these cover the audio side of the
+    // whole path, and they configure the mode explicitly instead of inheriting
+    // whatever an earlier check left behind.
+    //
+    // The first page is a tone and the second is silent, so the output tells us
+    // which page is playing: silence means page 2, audio means page 1 (either
+    // repeated by the loop or wrapped back to by the sequence).
+    //
+    // The asynchronous message-thread notification that updates currentPage is
+    // covered by the sub-test at the end of this block, which pumps the message
+    // queue; the checks here describe the audio side only.
+    {
+        std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+            [&findByName] (juce::Component& c, const juce::String& n) -> juce::Component*
+            {
+                if (c.getName() == n) return &c;
+                for (int i = 0; i < c.getNumChildComponents(); ++i)
+                    if (auto* r = findByName (*c.getChildComponent (i), n)) return r;
+                return nullptr;
+            };
+
+        check (findByName (mc, "seqBtn") != nullptr && findByName (mc, "loopBtn") != nullptr,
+               "F1: the transport mode toggles are present");
+
+        // Sequential mode also travels in the piece; the toggles are set after
+        // the load so the fixture owns the state rather than the piece or a
+        // previous block.
+        auto setMode = [&] (bool seq, bool loop)
+        {
+            if (auto* s = dynamic_cast<juce::ToggleButton*> (findByName (mc, "seqBtn")))
+            {
+                s->setToggleState (seq, juce::dontSendNotification);
+                if (s->onClick) s->onClick();
+            }
+            if (auto* l = dynamic_cast<juce::ToggleButton*> (findByName (mc, "loopBtn")))
+            {
+                l->setToggleState (loop, juce::dontSendNotification);
+                if (l->onClick) l->onClick();
+            }
+        };
+
+        auto makePiece = [] (double page2Sec)
+        {
+            return juce::String ("{\"master\":1,\"pages\":["
+                                 "{\"duration\":0.1,\"nextArcId\":2,\"arcs\":["
+                                 "{\"id\":1,\"mode\":0,\"waveformId\":2,\"envelopeId\":0,\"intensity\":1,"
+                                 "\"points\":[{\"t\":0,\"f\":1},{\"t\":0.1,\"f\":1}]}]},"
+                                 "{\"duration\":")
+                 + juce::String (page2Sec, 3)
+                 + ",\"nextArcId\":1,\"arcs\":[]}]}";
+        };
+
+        auto runCase = [&] (bool seq, bool loop, double page2Sec, int blocks,
+                            bool expectSilent, const juce::String& name)
+        {
+            check (mc.loadFromVar (juce::JSON::parse (makePiece (page2Sec))),
+                   "F1: " + name + " - the piece loads");
+
+            setMode (seq, loop);
+            mc.timerCallback();   // publish seqPages and loopPage to the snapshot
+            render();             // absorb the load's model-change block
+
+            check (mc.pageCountForTest() == 2,
+                   "F1: " + name + " - both pages are present",
+                   juce::String (mc.pageCountForTest()));
+            check (std::abs (mc.pageDurationForTest() - 0.1) < 1e-9,
+                   "F1: " + name + " - starts on the 0.1 s tone page",
+                   juce::String (mc.pageDurationForTest(), 3));
+
+            mc.clickPlayForTest();
+
+            float early = 0.0f;
+            for (int b = 0; b < 3; ++b)
+                early = juce::jmax (early, render());
+            check (early > 0.001f,
+                   "F1: " + name + " - the tone page is audible",
+                   juce::String (early, 4));
+
+            // 0.1 s at 44.1 kHz in 512-frame blocks is ~9 blocks; run well past
+            // it and past any start fade on the destination page.
+            for (int b = 0; b < blocks; ++b)
+                render();
+
+            check (mc.isPlayingForTest(),
+                   "F1: " + name + " - the transport keeps running");
+
+            float late = 0.0f;
+            for (int b = 0; b < 4; ++b)
+                late = juce::jmax (late, render());
+
+            if (expectSilent)
+                check (late < 0.001f,
+                       "F1: " + name + " - the silent second page is playing",
+                       juce::String (late, 6));
+            else
+                check (late > 0.001f,
+                       "F1: " + name + " - the tone page is playing again",
+                       juce::String (late, 6));
+
+            mc.stopPlaybackForTest();
+            for (int b = 0; b < 4; ++b)
+                render();
+        };
+
+        // Plain next-page branch: no sequencing, no loop.
+        // Plain next-page branch: no sequencing, no loop.
+        runCase (false, false, 2.0, 30, true,  "seq off, loop off");
+
+        // Sequential branch, no wrap: the same destination, different path.
+        runCase (true,  false, 2.0, 30, true,  "seq on, loop off");
+
+        // Looping without sequencing: the first page simply repeats.
+        runCase (false, true,  2.0, 30, false, "seq off, loop on");
+
+        // --- sequential+loop must actually VISIT the silent page ------------
+        // The case above only proves the tone comes back; a broken seqPages that
+        // is always false would loop page 1 and pass it. With two 0.1 s pages
+        // the sequence must be tone -> SILENCE -> tone, while loop-alone is
+        // tone -> tone -> tone and never visits page 2.
+        //
+        // 512 frames at 44.1 kHz is ~11.6 ms per block, so page 1 is blocks 0-7,
+        // page 2 is blocks 9-16 and the wrapped page 1 is blocks 18-25. Blocks
+        // 4, 12 and 21 sit safely inside those windows, away from the seams.
+        auto runMidPageProbe = [&] (bool seq, float& atTone1, float& atMiddle, float& atTone2)
+        {
+            check (mc.loadFromVar (juce::JSON::parse (makePiece (0.1))),
+                   "F1: mid-page probe - the 0.1/0.1 piece loads");
+
+            setMode (seq, true);
+            mc.timerCallback();
+            render();
+
+            mc.clickPlayForTest();
+
+            for (int b = 0; b < 4; ++b)  render();
+            atTone1  = render();          // block 4  ~46-58 ms   page 1
+            for (int b = 5; b < 12; ++b) render();
+            atMiddle = render();          // block 12 ~139-151 ms page 2
+            for (int b = 13; b < 21; ++b) render();
+            atTone2  = render();          // block 21 ~244-255 ms page 1 again
+
+            mc.stopPlaybackForTest();
+            for (int b = 0; b < 4; ++b) render();
+        };
+
+        float seqTone1 = 0.0f, seqMiddle = 0.0f, seqTone2 = 0.0f;
+        runMidPageProbe (true, seqTone1, seqMiddle, seqTone2);
+
+        check (seqTone1 > 0.001f,
+               "F1: seq on, loop on - page 1 is audible first",
+               juce::String (seqTone1, 4));
+        check (seqMiddle < 0.001f,
+               "F1: seq on, loop on - page 2's silence is audible between repeats",
+               juce::String (seqMiddle, 6));
+        check (seqTone2 > 0.001f,
+               "F1: seq on, loop on - the wrap returns to page 1",
+               juce::String (seqTone2, 4));
+
+        float loopTone1 = 0.0f, loopMiddle = 0.0f, loopTone2 = 0.0f;
+        runMidPageProbe (false, loopTone1, loopMiddle, loopTone2);
+
+        check (loopTone1 > 0.001f,
+               "F1: seq off, loop on - page 1 is audible first",
+               juce::String (loopTone1, 4));
+        check (loopMiddle > 0.001f,
+               "F1: seq off, loop on - page 1 repeats and never goes silent",
+               juce::String (loopMiddle, 6));
+        check (loopTone2 > 0.001f,
+               "F1: seq off, loop on - page 1 is still playing later",
+               juce::String (loopTone2, 4));
+
+        // --- the visible page follows the audio page -----------------------
+        // The audio thread only stores a packed page request; the 30 Hz timer
+        // applies it, so nothing updates currentPage until a timer tick runs.
+        // The probe above only proves the AUDIO moved; this runs the 30 Hz
+        // timer (which applies the request) and proves the visible page caught
+        // up - the half the audio probe cannot see. The second page's duration
+        // is distinct (0.25 s) so the UI value identifies which page is active.
+        {
+            check (mc.loadFromVar (juce::JSON::parse (makePiece (0.25))),
+                   "F1: async notification - the piece loads");
+
+            setMode (false, false);
+            mc.timerCallback();
+            render();
+
+            mc.clickPlayForTest();
+
+            for (int b = 0; b < 30; ++b)
+                render();
+
+            check (mc.isPlayingForTest(),
+                   "F1: async notification - the transport crossed the page");
+
+            // The 30 Hz timer is what applies the request. The app is built
+            // with JUCE's modal-loop API disabled (JUCE 8 sets
+            // JUCE_MODAL_LOOPS_PERMITTED to 0), so the timer's body is invoked
+            // directly here - the same call the timer makes.
+            mc.timerCallback();
+
+            check (std::abs (mc.pageDurationForTest() - 0.25) < 1e-9,
+                   "F1: async notification - the visible page follows the audio",
+                   juce::String (mc.pageDurationForTest(), 3));
+
+            mc.stopPlaybackForTest();
+            for (int b = 0; b < 4; ++b)
+                render();
+        }
+
+        // --- a deferred stop must not cancel a new run ----------------------
+        // The audio thread raises a stop request at the end of the piece. If the
+        // user presses Play before the timer drains it, that request belongs to
+        // the previous run and must be dropped rather than stopping the new one.
+        {
+            check (mc.loadFromVar (juce::JSON::parse (makePiece (0.1))),
+                   "F1: deferred stop - the piece loads");
+
+            setMode (false, false);
+            mc.timerCallback();
+            render();
+
+            mc.clickPlayForTest();
+
+            int blocks = 0;
+            while (mc.transportStateForTest() != TS::stopped && blocks < 40)
+            {
+                render();
+                ++blocks;
+            }
+            check (mc.transportStateForTest() == TS::stopped,
+                   "F1: deferred stop - the piece reached its end");
+
+            // Play again BEFORE the timer has drained the pending stop.
+            mc.clickPlayForTest();
+            check (mc.transportStateForTest() == TS::starting,
+                   "F1: deferred stop - the new run starts",
+                   stateName (mc.transportStateForTest()));
+
+            mc.timerCallback();   // the previous run's stop request is drained here
+
+            check (mc.transportStateForTest() == TS::starting && mc.isPlayingForTest(),
+                   "F1: deferred stop - the old request does not stop the new run",
+                   stateName (mc.transportStateForTest()));
+
+            mc.stopPlaybackForTest();
+            for (int b = 0; b < 4; ++b)
+                render();
+        }
+
+        // --- a stop from an OLDER run cannot stop the current one ----------
+        // The real race - a request posted while the session changes - cannot be
+        // produced deterministically in one thread, so the ordering is injected:
+        // the same request that a previous run would have raised must be ignored,
+        // and one carrying the current run's id must be applied.
+        {
+            check (mc.loadFromVar (juce::JSON::parse (makePiece (0.1))),
+                   "F1: run binding - the piece loads");
+
+            setMode (false, false);
+            mc.timerCallback();
+            render();
+
+            mc.clickPlayForTest();   // an accepted run
+            render();                // the audio callback adopts it
+
+            const auto currentRun = mc.transportSessionForTest();
+            check (currentRun > 0,
+                   "F1: run binding - the run has an identity",
+                   juce::String (currentRun));
+
+            const auto olderRun = currentRun > 0 ? currentRun - 1u : 0u;
+            mc.postStopForRunForTest (olderRun);
+            mc.timerCallback();
+            check (mc.isPlayingForTest() && ! mc.stopPendingForTest(),
+                   "F1: run binding - a stop from an older run is ignored",
+                   stateName (mc.transportStateForTest()));
+
+            mc.postStopForRunForTest (currentRun);
+            mc.timerCallback();
+            check (mc.stopPendingForTest() || ! mc.isPlayingForTest(),
+                   "F1: run binding - a stop from the current run applies",
+                   stateName (mc.transportStateForTest()));
+
+            mc.stopPlaybackForTest();
+            for (int b = 0; b < 4; ++b)
+                render();
+        }
+    }
+
     // --- double-click Stop rewinds, but only a real double click ---------
     {
         check (mc.loadFromVar (juce::JSON::parse (squarePiece)),

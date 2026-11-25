@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "GuerreroImport.h"
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -30,6 +31,15 @@
 #include "OscScrubReceiver.h"
 #include "JobRunner.h"
 #include "UpicButtonIcons.h"
+
+// The Guerrero engine is optional. CMake defines GUERRERO_INTEGRATION to 1
+// when it finds the companion source tree and to 0 when it does not; the
+// Visual Studio project defines neither, so the default is 0 here. Without
+// this the compiler would take the undefined name for 0 anyway, but it
+// would warn about it on every use.
+#ifndef GUERRERO_INTEGRATION
+ #define GUERRERO_INTEGRATION 0
+#endif
 
 //==============================================================================
 // WP7: the audio preview routes.
@@ -1176,6 +1186,15 @@ public:
     std::uint64_t scoreTimerRepaintRequestCountForTest() const
     { return scoreTimerRepaintRequestCount; }
 
+    // Applies a page transition requested by the audio thread. Called from the
+    // 30 Hz timer, so the audio callback only ever does an atomic store.
+    void applyPendingAudioRequests();
+    // The handoff relies on 64-bit atomics being lock-free; every JUCE 8 target
+    // (Windows, macOS, arm64 Android) provides that. If a target ever does not,
+    // fail the build rather than silently taking a lock on the audio thread.
+    static_assert (std::atomic<uint64_t>::is_always_lock_free,
+                   "the audio handoff requires lock-free 64-bit atomics");
+
 private:
     // --- construction ---
     // v1.30 (5.3 refactor): the constructor used to be 1400 lines long. It
@@ -1961,8 +1980,32 @@ private:
     // The job that is running and the thread itself (one job at a time).
     upic::JobRunner jobs;
     std::atomic<int> pageEpoch { 0 };               // message -> audio
+
+    // audio -> message: packed (epoch << 32) | (page + 1); 0 = nothing pending.
+    // The audio thread must not allocate or lock, so the page change travels here
+    // instead of through MessageManager::callAsync().
+    std::atomic<uint64_t> pendingPageRequest { 0 };
+
+    // audio -> message: the piece ended and the transport must stop. Packed as
+    // (session + 1) << 32 | 1, where session identifies the transport run that
+    // asked. A deferred stop is applied only when the session still matches, so
+    // a request raised just before the user pressed Play cannot stop the new run.
+    std::atomic<uint64_t> pendingStopRequest { 0 };
+
+    // Incremented by every startPlayback(), so a deferred stop belongs to a run
+    // and never to "whatever is playing now".
+    std::atomic<uint32_t> transportSession { 0 };
+
+    // Raised by the audio thread at the end of a page chain or when a stop fade
+    // finishes. No allocation, no lock: the audio path only stores.
+    void requestStopFromAudio() noexcept;
     int seenPageEpoch = -1;                         // audio
     int audioPage = 0;                              // audio thread's page
+
+    // audio thread only: the transport run this callback is rendering. A stop
+    // request is tagged with it, so a restart cannot have its stop attributed to
+    // the new run even if the message thread advanced transportSession meanwhile.
+    uint32_t audioSession = 0;
     double audioPlayhead = 0.0;                     // audio thread's playhead
     std::atomic<double> seekTo { 0.0 };             // message -> audio
     std::atomic<int> seekSerial { 0 };
@@ -2560,6 +2603,9 @@ private:
     void pushAmbitus();               // v1.33: the page's ambitus
     void pushWarp();                 // v1.33: the page's acceleration
     void runGenerator(int kind);      // procedural arc generation (nUPIC-style)
+
+    // --- Guerrero integration -------------------------------------------
+    // Guerrero import is declared in the public section below.
     void exportStems();               // one WAV per voice into a folder
     void flash(const juce::String& m); // transient status message (4s)
     void startPlayback(), stopPlayback(bool fromAudio = false);
@@ -2580,6 +2626,121 @@ private:
     juce::String takeName();
 
 public:
+    // --- Guerrero integration -------------------------------------------
+    // Insert arcs produced by the Guerrero composition engine inside ONE undo
+    // transaction, following the runGenerator() mutation contract.
+    //
+    // upic::GuerreroImportArc is the single import contract (GuerreroImport.h),
+    // so this header depends on neither the Guerrero headers nor a second
+    // conversion representation.
+    //
+    // Everything the host owns is decided here: ids come from Page::nextArcId,
+    // material selection comes from the current draw voice, and the page arc cap
+    // and per-arc point cap are enforced before mutation. Arcs that cannot be
+    // inserted are skipped and counted; if nothing is inserted the piece is not
+    // marked dirty and no undo entry is created.
+    //
+    // Returns the number of arcs actually inserted.
+    // Each GuerreroImportArc carries its own optional provenance, so one
+    // generator run can describe several arcs independently.
+    int insertGuerreroArcs(const std::vector<upic::GuerreroImportArc>& arcs,
+                           const juce::String& label,
+                           std::vector<int>* insertedIds = nullptr);
+
+#if GUERRERO_INTEGRATION
+    // Generate a Guerrero envelope and a confined seed curve, convert the seed
+    // into an arc and insert it: the complete engine -> host pipeline behind
+    // one call. Uses the default recipe; the dialog path is openGuerreroDialog.
+    void runGuerreroGenerator();
+
+    // Open the Guerrero parameter dialog. `arcId == 0` creates a new arc from
+    // the default recipe; any other value loads that arc's stored recipe for
+    // editing. Refuses arcs that cannot be regenerated (legacy, malformed,
+    // unsupported version, or geometry edited by the user) and explains why.
+    void openGuerreroDialog (int arcId);
+
+    // Remove and destroy the parameter dialog if one is open. Safe to call
+    // when nothing is open.
+    //
+    // `generation` is the identity of the dialog requesting the close. A
+    // deferred close passes the generation it was created with, so a stale
+    // request cannot close a dialog that opened afterwards. Zero means "close
+    // whatever is current".
+    void closeGuerreroDialog (int generation = 0);
+
+    // Apply a recipe to the model.
+    //
+    // `arcId == 0` inserts a new arc. Otherwise the arc keeps its host id and
+    // all sound-material overrides; only its geometry and stored recipe are
+    // replaced, in a single undoable transaction. On failure `error` explains
+    // why and the model is untouched.
+    bool applyGuerreroRecipe (int arcId, const upic::GuerreroRecipe& recipe,
+                              juce::String& error);
+
+    // Mark any Guerrero arc whose geometry no longer matches the fingerprint
+    // recorded at generation time. Called from endEdit(), so every edit path
+    // is covered by one place rather than by instrumenting each tool.
+    void markEditedGuerreroGeometry();
+
+    // The active parameter dialog, when one is open. Typed as juce::Component
+    // so this header does not depend on the dialog's widget layout.
+    std::unique_ptr<juce::Component> guerreroOverlay;
+
+    // Page context captured when the dialog opened. Arc ids are page-local and
+    // the transport can advance the active page during playback, so an Apply
+    // must be bound to the page the dialog was opened on - otherwise the same
+    // id on another page would receive the edit.
+    int    guerreroTargetPage = -1;
+    int    guerreroTargetEpoch = -1;
+    int    guerreroTargetArcCount = -1;
+    double guerreroTargetDuration = -1.0;
+    bool guerreroTargetUnchanged() const;
+
+    // Identity of the dialog currently open (0 when none has ever been shown).
+    // Deferred closes compare against it so a late callback cannot destroy a
+    // dialog that replaced the one which scheduled it.
+    int guerreroOverlayGeneration = 0;
+
+    // Test hooks for the dialog lifecycle.
+    int guerreroOverlayGenerationForTest() const { return guerreroOverlayGeneration; }
+#endif
+
+    // Regenerate one Guerrero arc from its stored recipe, in place: the host id
+    // and all sound-material overrides are preserved, only the geometry is
+    // replaced. Refuses legacy records, malformed records, unsupported recipe
+    // versions and arcs whose geometry the user has edited.
+    //
+    // Returns false with a flash message explaining which check refused it.
+    bool regenerateGuerreroArc (int arcId);
+
+    // --- test hooks for the Guerrero self-test -------------------------
+    void transformPageForTest (int op) { transformPage (op); }
+    bool guerreroArcGeometryEditedForTest (int arcId) const;
+    uint64_t guerreroArcHashForTest (int arcId) const;
+
+    // Hash computed from the CURRENT points, unlike guerreroArcHashForTest() which
+    // returns the stored provenance hash. Needed to prove whether an apply really
+    // rewrote the geometry.
+    uint64_t guerreroArcLiveHashForTest (int arcId) const;
+    // Transport-run identity, and a way to inject a stop request for a chosen
+    // run. The second simulates the ordering a real race cannot be made to
+    // produce deterministically: a request from an OLDER run arriving after the
+    // session has already advanced.
+    uint32_t transportSessionForTest() const { return transportSession.load (std::memory_order_relaxed); }
+    void postStopForRunForTest (uint32_t run);
+    bool guerreroArcHasProvenanceForTest (int arcId) const;
+
+    // Test hook: replace an arc's stored recipe WITHOUT touching its geometry or
+    // fingerprint. Lets a test present a recipe whose regeneration would be
+    // impossible on the current page, which is how the apply ordering is
+    // verified (an unchanged recipe must return before any generation).
+    bool setGuerreroRecipeForTest (int arcId, const upic::GuerreroRecipe& recipe);
+
+    // Test hooks for page identity: add a copy of the current page (so arc ids
+    // overlap) and switch to it without going through the transport. The page
+    // switch itself is setCurrentPageForTest() above: it already exists for the
+    // WP7 frequency-table test, so it is not declared a second time here.
+    int  addPageCopyForTest();
     // v1.33.4 (L15): the save with a file chooser, for the window's
     // unsaved-changes prompt: the app closes only when the piece really was
     // written (a cancelled chooser leaves the window open).

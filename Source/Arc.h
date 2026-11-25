@@ -9,6 +9,8 @@
 #include "PieceLimits.h"
 #include "UpicConstants.h"
 #include "UpicMath.h"
+#include "GuerreroImport.h"
+#include "GuerreroProvenanceIO.h"
 
 namespace upic
 {
@@ -111,6 +113,87 @@ namespace upic
         // assign the waveform or envelope to it"; the space itself is the
         // page's, the name is the arc's.
         int space = 0;
+
+        //---------------- Guerrero provenance (optional) ----------------
+        // Present only when the arc came from the Guerrero engine; hand-drawn
+        // arcs leave it absent, so their serialized form is unchanged.
+        bool hasGuerrero = false;
+        GuerreroProvenance guerrero;
+
+
+        // FNV-1a over the geometry, computed on QUANTISED values. Used both when
+        // recording what was generated and when verifying, at load or before
+        // regeneration, that the points still match that record.
+        //
+        // The exact bit pattern cannot be used: the piece is stored as JSON
+        // numbers at 15 significant digits, so an untouched arc can come back
+        // with a different low bit and would be falsely flagged as edited.
+        // (At 127 BPM, 55 of 128 points change under a 15-digit round-trip.)
+        //
+        // 1e-6 is used as the quantum: one microsecond in time and one microHz in
+        // frequency, far below any musical meaning, and it keeps every value
+        // inside 15 significant digits for the ranges the host allows.
+        static uint64_t geometryFingerprint (const std::vector<ArcPoint>& pts)
+        {
+            uint64_t h = 1469598103934665603ULL;
+            auto mix = [&h] (uint64_t v)
+            {
+                for (int i = 0; i < 8; ++i)
+                {
+                    h ^= (v & 0xFFu);
+                    h *= 1099511628211ULL;
+                    v >>= 8;
+                }
+            };
+
+            auto quantise = [] (double v) -> uint64_t
+            {
+                const double scaled = v * 1000000.0;
+                const long long q = (long long) std::llround (scaled);
+                return (uint64_t) q;
+            };
+
+            for (const auto& p : pts)
+            {
+                mix (quantise (p.t));
+                mix (quantise ((double) p.freq));
+                mix (quantise ((double) p.i));
+            }
+            return h;
+        }
+        // Algorithm identifiers for the stored fingerprint.
+        //   1 = exact bits (records written before quantisation)
+        //   2 = quantised to 1e-6 (survives a 15-digit JSON round-trip)
+        static constexpr int kFingerprintExactBits = 1;
+        static constexpr int kFingerprintQuantised = 2;
+
+        // Legacy (v1) fingerprint: exact bits. Kept only so records written
+        // before quantisation can be verified rather than assumed edited.
+        static uint64_t geometryFingerprintLegacy (const std::vector<ArcPoint>& pts)
+        {
+            uint64_t h = 1469598103934665603ULL;
+            auto mix = [&h] (uint64_t v)
+            {
+                for (int i = 0; i < 8; ++i)
+                {
+                    h ^= (v & 0xFFu);
+                    h *= 1099511628211ULL;
+                    v >>= 8;
+                }
+            };
+            for (const auto& p : pts)
+            {
+                uint64_t tBits = 0, fBits = 0;
+                uint32_t iBits = 0;
+                std::memcpy (&tBits, &p.t,    sizeof (tBits));
+                std::memcpy (&fBits, &p.freq, sizeof (fBits));
+                std::memcpy (&iBits, &p.i,    sizeof (iBits));
+                mix (tBits);
+                mix (fBits);
+                mix ((uint64_t) iBits);
+            }
+            return h;
+        }
 
         double startTime() const { return points.empty() ? 0 : points.front().t; }
         double endTime()   const { return points.empty() ? 0 : points.back().t; }
@@ -288,6 +371,10 @@ namespace upic
             // travel with the piece (and with the host state)
             if (pitchMode >= 0) o->setProperty("pitchMode", pitchMode);
             if (reversed) o->setProperty("reversed", true);
+            if (reversed) o->setProperty("reversed", true);
+            // Guerrero provenance: written only when present, so hand-drawn
+            // arcs keep their existing on-disk shape.
+            if (hasGuerrero) o->setProperty("guerrero", guerreroio::toVar (guerrero));
             juce::Array<juce::var> arr;
             for (auto& p : points)
             {
@@ -341,6 +428,14 @@ namespace upic
             // follow the tab's setting, play forward)
             a.pitchMode = juce::jlimit (-1, 2, (int) v.getProperty ("pitchMode", -1));
             a.reversed = (bool) v.getProperty ("reversed", false);
+            a.reversed = (bool) v.getProperty ("reversed", false);
+            // Guerrero provenance (absent in every piece written before this
+            // feature, and in hand-drawn arcs).
+            if (v.hasProperty ("guerrero"))
+            {
+                a.hasGuerrero = true;
+                a.guerrero = guerreroio::fromVar (v.getProperty ("guerrero", juce::var()));
+            }
             if (auto* arr = v.getProperty("points", juce::var()).getArray())
                 for (auto& pv : *arr)
                 {
@@ -354,6 +449,38 @@ namespace upic
             // stable: a staircase's corners share a time, and their order is
             // the direction of the jump
             std::stable_sort(a.points.begin(), a.points.end(), [](auto& x, auto& y){ return x.t < y.t; });
+            // Load-time integrity check: if the file says "this geometry is
+            // what the recipe produced", verify it. A hand-edited JSON that
+            // changes the points but leaves the provenance alone is caught
+            // here, so regeneration cannot silently overwrite it.
+            //
+            // Records written before quantisation carry an exact-bits hash. They
+            // are verified with THAT algorithm and then upgraded, so an older
+            // untouched arc is not mistaken for an edited one.
+            if (a.hasGuerrero && a.guerrero.hasFingerprint)
+            {
+                const int algo = a.guerrero.fingerprintAlgorithm;
+                const bool exactBits = (algo == kFingerprintExactBits);
+
+                const uint64_t current = exactBits ? geometryFingerprintLegacy (a.points)
+                                                   : geometryFingerprint (a.points);
+                const bool sizeOk = ((int) a.points.size() == a.guerrero.pointCount);
+
+                if (current == a.guerrero.geometryHash && sizeOk)
+                {
+                    if (exactBits)
+                    {
+                        // Verified against the old algorithm: migrate forward.
+                        a.guerrero.geometryHash = geometryFingerprint (a.points);
+                        a.guerrero.fingerprintAlgorithm = kFingerprintQuantised;
+                    }
+                }
+                else
+                {
+                    a.guerrero.geometryEdited = true;
+                }
+            }
+
             return a;
         }
     };

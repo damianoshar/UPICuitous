@@ -118,6 +118,10 @@ int upic::runSelfTest()
     upic::runTransportChecks (t);
     upic::runTransportStateChecks (t);
     upic::runChooserChecks (t);
+#if GUERRERO_INTEGRATION
+    upic::runGuerreroChecks (t);   // Guerrero engine -> UPIC arc
+    upic::runGuerreroDialogChecks (t);   // the parameter dialog
+#endif
 
     t.log << "\n" << (t.failures == 0 ? "ALL CHECKS PASSED" : juce::String(t.failures) + " CHECK(S) FAILED") << "\n";
     juce::File::getSpecialLocation(juce::File::tempDirectory)

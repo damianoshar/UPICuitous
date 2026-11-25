@@ -920,8 +920,54 @@ int MainComponent::liveLatencySamples() const
     return maxDelayed;
 }
 
+// Applies a page change the audio thread requested. The audio callback only
+// stores a packed (epoch, page) value, so it allocates nothing and takes no
+// lock; the work happens here on the message thread.
+void MainComponent::applyPendingAudioRequests()
+{
+    // A stop at the end of the piece: the audio thread cannot call stopPlayback
+    // (it touches the model), so it leaves a request tagged with the transport
+    // run that raised it. If the user started a new run since, the request
+    // belongs to the old one and must not touch the new transport.
+    if (const auto stopReq = pendingStopRequest.load (std::memory_order_acquire))
+    {
+        auto expectedStop = stopReq;
+        if (pendingStopRequest.compare_exchange_strong (expectedStop, 0,
+                                                        std::memory_order_acq_rel,
+                                                        std::memory_order_relaxed))
+        {
+            const auto run = (uint32_t) (stopReq >> 32);
+            if (run == transportSession.load (std::memory_order_relaxed))
+                stopPlayback (true);
+        }
+    }
+
+    const auto req = pendingPageRequest.load (std::memory_order_acquire);
+    if (req == 0) return;
+
+    // Clear before applying. If a newer request replaced this one meanwhile, the
+    // clear fails and this stale page must not be applied: the newer request is
+    // applied on the next tick.
+    auto expected = req;
+    if (! pendingPageRequest.compare_exchange_strong (expected, 0,
+                                                     std::memory_order_acq_rel,
+                                                     std::memory_order_relaxed))
+        return;
+
+    const int epoch = (int) (uint32_t) (req >> 32);
+    const int next  = (int) (uint32_t) (req & 0xffffffffu) - 1;
+
+    // Drop it if the page structure changed since the audio thread decided.
+    if (pageEpoch.load (std::memory_order_relaxed) != epoch) return;
+
+    currentPage = juce::jlimit (0, (int) pages.size() - 1, next);
+    refreshBoxes();
+    refreshScoreBinding();
+}
+
 void MainComponent::timerCallback()
 {
+    applyPendingAudioRequests();   // page transition / stop requested by the audio thread
     ++timerTicks;
     // M6: the audio thread's messages to the message thread. They arrive in
     // the preallocated mailbox (no allocation on the audio thread) and are
