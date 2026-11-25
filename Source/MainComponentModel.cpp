@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "UserLibrary.h"
+#include "GraphicalCurve.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -444,14 +445,299 @@ int MainComponent::envelopeUseCount (int id) const
 
 void MainComponent::afterLibraryChange()
 {
+    refreshLibraryUi();
+    markModelChanged();
+    publishModelSnapshot();
+}
+
+void MainComponent::refreshLibraryUi()
+{
     refreshBoxes();
     pushVoice();
     updateWaveButtonColours();
     waveEd.repaint();
     envEd.repaint();
     score.repaint();
-    markModelChanged();
-    publishModelSnapshot();
+}
+
+//==============================================================================
+// WP9: the Convert As commands.
+//
+// A curve is a shape, and what a shape means depends on what it becomes.
+// These commands take a shape that already exists - a drawn arc, a
+// wavetable, an envelope - and make a NEW asset out of it.
+//
+// Nothing is reinterpreted in place: the wavetable that was drawn is still
+// the wavetable, and the arc that was drawn is still the arc. The old
+// object stays authoritative, and the new one is a separate thing in its
+// own bank (or, for the table, in the page's own frequency space).
+//
+// Every command is one undo transaction. A command that cannot run says
+// why in the status line and adds no undo step.
+void MainComponent::fillConvertMenu (juce::PopupMenu& m, int firstId)
+{
+    m.addItem (firstId + convertSelectionAsWaveform, "The selection as a wavetable");
+    m.addItem (firstId + convertSelectionAsEnvelope, "The selection as an envelope");
+    m.addItem (firstId + convertSelectionAsTable, "The selection as a frequency table");
+    m.addSeparator();
+    m.addItem (firstId + convertWaveAsEnvelope, "The wavetable as an envelope");
+    m.addItem (firstId + convertEnvAsWaveform, "The envelope as a wavetable");
+}
+
+bool MainComponent::convertAs (int op)
+{
+    // The selection is the editor's state, so it is read outside the lock.
+    const auto selected = score.getSelectedArcs();
+
+    convertedTableSpace = -1;
+    bool changed = false;
+    juce::String refusal;
+    juce::String made;
+
+    // One transaction for the whole command, so the undo stack gets one
+    // step for it (and a command that changes nothing gets none).
+    beginEdit ("Convert as");
+    {
+        const juce::ScopedLock l (dataLock);
+        auto& page = curPage();
+        const auto frame = page.frame();
+
+        // the selected arcs, as a shape on the page
+        auto selectedArcs = [&] ()
+        {
+            std::vector<const upic::Arc*> out;
+            for (const auto& a : page.arcs)
+                if (std::find (selected.begin(), selected.end(), a.id) != selected.end())
+                    out.push_back (&a);
+            return out;
+        };
+
+        if (op == convertSelectionAsWaveform || op == convertSelectionAsEnvelope
+             || op == convertSelectionAsTable)
+        {
+            const auto arcs = selectedArcs();
+            if (arcs.empty())
+            {
+                refusal = "Nothing to convert - select an arc first";
+            }
+            else
+            {
+                // The selection as ONE shape: the points of every selected
+                // arc, in the page's own normalised space (the horizontal
+                // axis is the time, the vertical axis is the pitch).
+                std::vector<upic::CurvePoint> pts;
+                for (const auto* a : arcs)
+                    for (const auto& p : a->points)
+                        pts.push_back ({ frame.normX (p.t), frame.normY (p.freq) });
+                const auto curve = upic::makeCurve (upic::GraphicalCurve::Domain::Normalised,
+                                                    std::move (pts));
+
+                if (op == convertSelectionAsWaveform)
+                {
+                    if ((int) waveforms.size() >= upic::limits::kMaxWaveforms)
+                    {
+                        refusal = "A piece holds at most " + juce::String (upic::limits::kMaxWaveforms)
+                                  + " wavetables (the limit) - delete one before adding another";
+                    }
+                    else
+                    {
+                        const int id = nextBankId (waveforms);
+                        if (id < 0 || id > upic::limits::kMaxItemId)
+                        {
+                            refusal = "The wavetable bank has no free id left";
+                        }
+                        else
+                        {
+                            // a NEW wavetable: the wavetable that was there
+                            // is untouched, and this one is the shape of the
+                            // selection, read as one cycle
+                            upic::Waveform w (id, uniqueBankName (waveforms, "From the selection"),
+                                              upic::paletteColour (id));
+                            w.samples = upic::curveToWaveform (curve, upic::kWaveSize);
+                            waveforms.push_back (w);
+                            selWave = id;
+                            changed = true;
+                            made = "The selection is now the wavetable " + w.name;
+                        }
+                    }
+                }
+                else if (op == convertSelectionAsEnvelope)
+                {
+                    if ((int) envelopes.size() >= upic::limits::kMaxEnvelopes)
+                    {
+                        refusal = "A piece holds at most " + juce::String (upic::limits::kMaxEnvelopes)
+                                  + " envelopes (the limit) - delete one before adding another";
+                    }
+                    else
+                    {
+                        const int id = nextBankId (envelopes);
+                        if (id < 0 || id > upic::limits::kMaxItemId)
+                        {
+                            refusal = "The envelope bank has no free id left";
+                        }
+                        else
+                        {
+                            // The envelope's axis is the unit axis (the
+                            // object's own life), so the shape is read over
+                            // the selection's extent and then at the
+                            // envelope's own resolution.
+                            const auto norm = curve.normalised();
+                            const int count = juce::jmin (upic::limits::kMaxPointsPerEnvelope,
+                                                          juce::jmax (2, (int) norm.size()));
+                            const auto resampled = upic::resampleCurve (norm, count);
+                            upic::Envelope e (id, uniqueBankName (envelopes, "From the selection"),
+                                              upic::paletteColour (id));
+                            e.points = upic::curveToEnvelope (resampled).points;
+                            envelopes.push_back (e);
+                            selEnv = id;
+                            changed = true;
+                            made = "The selection is now the envelope " + e.name;
+                        }
+                    }
+                }
+                else
+                {
+                    // The selection as a frequency table. The table is drawn
+                    // on the page's PITCH axis, so the drawing is read on
+                    // its side: the horizontal axis of the drawing becomes
+                    // the vertical axis of the page, and the height it has
+                    // there is the pitch that position sounds at.
+                    upic::CurveSpace space;
+                    space.loHz = page.pitchLo;
+                    space.hiHz = page.pitchHi;
+                    auto table = upic::curveToTable (curve, space);
+
+                    // one point per position: a table is a function of the
+                    // position, so a second point at the same place is
+                    // dropped (the later one wins)
+                    std::vector<upic::TablePoint> unique;
+                    unique.reserve (table.size());
+                    for (const auto& p : table)
+                    {
+                        if (! unique.empty() && unique.back().x == p.x) unique.back() = p;
+                        else unique.push_back (p);
+                    }
+                    if ((int) unique.size() > upic::limits::kMaxTablePoints)
+                        unique.resize ((size_t) upic::limits::kMaxTablePoints);
+
+                    if (unique.size() < 2)
+                    {
+                        refusal = "The selection is too short for a table";
+                    }
+                    else
+                    {
+                        // the space the first selected arc is played in
+                        int spaceIndex = 0;
+                        for (const auto* a : arcs) { spaceIndex = juce::jlimit (0, 3, a->space); break; }
+                        auto& def = page.spaceDefs[(size_t) spaceIndex];
+                        def.editable = true;
+                        def.points = std::move (unique);
+                        convertedTableSpace = spaceIndex;
+                        changed = true;
+                        made = "The selection is now the frequency table of space "
+                               + juce::String (spaceIndex + 1);
+                    }
+                }
+            }
+        }
+        else if (op == convertWaveAsEnvelope)
+        {
+            const upic::Waveform* src = nullptr;
+            for (const auto& w : waveforms) if (w.id == selWave) { src = &w; break; }
+            if (src == nullptr)
+            {
+                refusal = "There is no wavetable to convert";
+            }
+            else if ((int) envelopes.size() >= upic::limits::kMaxEnvelopes)
+            {
+                refusal = "A piece holds at most " + juce::String (upic::limits::kMaxEnvelopes)
+                          + " envelopes (the limit) - delete one before adding another";
+            }
+            else
+            {
+                const int id = nextBankId (envelopes);
+                if (id < 0 || id > upic::limits::kMaxItemId)
+                {
+                    refusal = "The envelope bank has no free id left";
+                }
+                else
+                {
+                    // the wave's shape over one cycle, read at the
+                    // envelope's resolution
+                    const auto curve = upic::waveformToCurve (src->samples);
+                    const int count = juce::jmin (upic::limits::kMaxPointsPerEnvelope,
+                                                  juce::jmax (2, (int) curve.size()));
+                    const auto resampled = upic::resampleCurve (curve.normalised(), count);
+                    upic::Envelope e (id, uniqueBankName (envelopes, src->name + " as envelope"),
+                                      upic::paletteColour (id));
+                    e.points = upic::curveToEnvelope (resampled).points;
+                    envelopes.push_back (e);
+                    selEnv = id;
+                    changed = true;
+                    made = "The wavetable is now the envelope " + e.name;
+                }
+            }
+        }
+        else if (op == convertEnvAsWaveform)
+        {
+            const upic::Envelope* src = nullptr;
+            for (const auto& e : envelopes) if (e.id == selEnv) { src = &e; break; }
+            if (src == nullptr)
+            {
+                refusal = "There is no envelope to convert";
+            }
+            else if ((int) waveforms.size() >= upic::limits::kMaxWaveforms)
+            {
+                refusal = "A piece holds at most " + juce::String (upic::limits::kMaxWaveforms)
+                          + " wavetables (the limit) - delete one before adding another";
+            }
+            else
+            {
+                const int id = nextBankId (waveforms);
+                if (id < 0 || id > upic::limits::kMaxItemId)
+                {
+                    refusal = "The wavetable bank has no free id left";
+                }
+                else
+                {
+                    // the envelope's gain over its life, read as one cycle
+                    const auto curve = upic::envelopeToCurve (*src);
+                    upic::Waveform w (id, uniqueBankName (waveforms, src->name + " as wavetable"),
+                                      upic::paletteColour (id));
+                    w.samples = upic::curveToWaveform (curve, upic::kWaveSize);
+                    waveforms.push_back (w);
+                    selWave = id;
+                    changed = true;
+                    made = "The envelope is now the wavetable " + w.name;
+                }
+            }
+        }
+        else
+        {
+            refusal = "That conversion does not exist";
+        }
+
+        if (changed)
+        {
+            // The model moved: the revision says so (that is what makes the
+            // transaction an undo step), and the audio thread sees the new
+            // asset at once.
+            markModelChanged();
+            publishModelSnapshot();
+        }
+    }
+
+    endEdit();
+
+    if (! changed)
+    {
+        flash (refusal.isNotEmpty() ? refusal : juce::String ("Nothing changed"));
+        return false;
+    }
+
+    refreshLibraryUi();
+    flash (made);
+    return true;
 }
 
 //==============================================================================

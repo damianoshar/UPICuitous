@@ -141,6 +141,16 @@ public:
     static constexpr int transformMenuItem = 60;
     static constexpr int transformMenuBase = 200;
 
+    // WP9: the Convert As commands. The app fills the menu (so the File menu
+    // and the canvas show the same items) and runs the command. The op is
+    // the item's number relative to the first id of the menu.
+    std::function<void (juce::PopupMenu& m, int firstId)> fillConvertMenu;
+    std::function<void (int op)> onConvertCommand;
+    // The arc menu's convert entry, and the first id of the convert menu it
+    // opens.
+    static constexpr int convertMenuItem = 61;
+    static constexpr int convertMenuBase = 300;
+
     // v1.33: the selftest drives the zone drag directly (a synthesised
     // mouse event needs a real MouseInputSource).
     juce::Rectangle<float> zoneRectForTest (int id) const;

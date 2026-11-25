@@ -1942,6 +1942,10 @@ void ScoreEditor::showArcMenu(int id)
         // the sub-menu, so the canvas and the File menu show the same items.
         if (fillTransformMenu && onTransformCommand)
             m.addItem(transformMenuItem, "Transform the drawing...");
+        // WP9: the Convert As commands - the drawn shape can become a
+        // wavetable, an envelope or a frequency table.
+        if (fillConvertMenu && onConvertCommand)
+            m.addItem(convertMenuItem, "Convert as...");
         juce::Component::SafePointer<ScoreEditor> sp(this);
         m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
                         [sp, id](int result)
@@ -1965,6 +1969,20 @@ void ScoreEditor::showArcMenu(int id)
                     {
                         if (sp2 == nullptr || r == 0) return;
                         if (r >= transformMenuBase) sp2->onTransformCommand(r - transformMenuBase);
+                    });
+                    break;
+                }
+                case convertMenuItem:
+                {
+                    if (! sp->fillConvertMenu || ! sp->onConvertCommand) break;
+                    juce::PopupMenu sub;
+                    sp->fillConvertMenu(sub, convertMenuBase);
+                    juce::Component::SafePointer<ScoreEditor> sp2(sp);
+                    sub.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(sp),
+                                      [sp2](int r)
+                    {
+                        if (sp2 == nullptr || r == 0) return;
+                        if (r >= convertMenuBase) sp2->onConvertCommand(r - convertMenuBase);
                     });
                     break;
                 }

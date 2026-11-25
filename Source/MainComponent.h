@@ -260,6 +260,35 @@ public:
     // did (or why it refused) in the status line.
     bool transformArcs (int op);
 
+    // --- WP9: the Convert As commands ---
+    //
+    // A curve is a shape, and what a shape means depends on what it
+    // becomes. These commands take a shape that already exists - a drawn
+    // arc, a wavetable, an envelope - and make a NEW asset out of it.
+    //
+    // Nothing is reinterpreted in place: the wavetable that was drawn is
+    // still the wavetable, and the arc that was drawn is still the arc.
+    // The old object stays authoritative.
+    //
+    // The items of the convert menu. The op is the item's number relative
+    // to the first id of the menu, so the File menu and the arc context
+    // menu share one set of items and one command.
+    enum ConvertOp : int
+    {
+        convertSelectionAsWaveform = 0,
+        convertSelectionAsEnvelope,
+        convertSelectionAsTable,
+        convertWaveAsEnvelope,
+        convertEnvAsWaveform
+    };
+
+    // Fills the convert menu; the caller hands the chosen item back to
+    // convertAs (with the first id subtracted).
+    void fillConvertMenu (juce::PopupMenu& m, int firstId);
+    // Runs one conversion. It is one undo transaction, and it says what it
+    // made (or why it refused) in the status line.
+    bool convertAs (int op);
+
     // --- F2/F3 (2026-11-17): the wavetable and envelope libraries ---
     //
     // Each command is one user action: the caller wraps it in beginEdit/
@@ -1131,6 +1160,26 @@ public:
     int transformScopeForTest() const { return (int) transformScope; }
     int transformGroupForTest() const { return transformGroupId; }
     bool transformArcsForTest (int op) { return transformArcs (op); }
+
+    // --- WP9: the test hooks for the Convert As commands ---
+    bool convertAsForTest (int op) { return convertAs (op); }
+    // The number of the space whose table was drawn last (or -1).
+    int convertedTableSpaceForTest() const { return convertedTableSpace; }
+    // The points of an envelope, so a check can compare them.
+    std::vector<upic::EnvPoint> envelopePointsForTest (int index) const
+    {
+        const juce::ScopedLock l (dataLock);
+        if (index < 0 || index >= (int) envelopes.size()) return {};
+        return envelopes[(size_t) index].points;
+    }
+    // The drawn table of a space (the x and the log2 Hz), so a check can
+    // compare it.
+    std::vector<upic::TablePoint> spaceTableForTest (int space) const
+    {
+        const juce::ScopedLock l (dataLock);
+        const auto& def = curPage().spaceDefs[(size_t) juce::jlimit (0, 3, space)];
+        return def.points;
+    }
     // The points of an arc (the times and the pitches, in pairs), so a check
     // can compare them exactly.
     std::vector<double> arcPointsForTest (int arcId) const
@@ -2515,6 +2564,10 @@ private:
     std::unique_ptr<SampleExtractPanel> sampleExtractPanel;
     juce::TextButton wSine{ "Sine" }, wSaw{ "Saw" }, wSqr{ "Sqr" }, wTri{ "Tri" }, wNoise{ "Noise" }, wSmooth{ "Smooth" }, wNorm{ "Norm" };
     juce::TextButton eFlat{ "Flat" }, ePerc{ "Perc" }, eSwell{ "Swell" }, eGate{ "Gate" }, eStr{ "Strings" };
+    // WP9: the Convert As commands, as buttons beside the editors they
+    // belong to - the wavetable can be saved as an envelope, and the
+    // envelope as a wavetable. The old asset stays what it was.
+    juce::TextButton waveAsEnvBtn{ "As env" }, envAsWaveBtn{ "As wave" };
     juce::TextButton assignBtn{ "Assign to sel." }, delArcBtn{ "Del sel." }, muteArcBtn{ "Mute sel." };
     // v1.34.4: the arc commands the canvas context menu had (Duplicate,
     // Select all) are buttons in the Voice section as well.
@@ -2574,6 +2627,10 @@ private:
     // kind when the source switch asks for it, not on every model refresh.
     void refreshUserLibraryBoxes (upic::UserAssetKind kind);
     void afterLibraryChange();        // refresh the UI and publish the model
+    // The UI half of afterLibraryChange: the boxes, the editors and the
+    // canvas follow the banks. A command that already published the model
+    // inside its own transaction uses this one.
+    void refreshLibraryUi();
     void syncControlsToArc(int arcId); // load an arc into the toolbar
     void updateSampleView();
     void updateRevButton();       // v1.19: the Reverse button follows the slot
@@ -2786,6 +2843,9 @@ private:
     // so the choice survives from one command to the next.
     TransformScope transformScope = TransformScope::selection;
     int transformGroupId = -1;
+    // WP9: the space whose frequency table the last conversion drew (-1 when
+    // it was not a table).
+    int convertedTableSpace = -1;
     // v1.31 (U4): the digitised wave page (the slot becomes a wavetable).
     bool waveFromSelectedSlot();
 

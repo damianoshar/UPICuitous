@@ -619,6 +619,12 @@ void MainComponent::buildLiveControls()
         juce::PopupMenu drawing;
         fillTransformMenu (drawing, 200);
         m.addSubMenu ("Transform the drawing...", drawing);
+        // WP9: the Convert As commands. A drawn shape can become a
+        // wavetable, an envelope or a frequency table - as a NEW asset; the
+        // old one stays what it was.
+        juce::PopupMenu convert;
+        fillConvertMenu (convert, 300);
+        m.addSubMenu ("Convert as...", convert);
         juce::Component::SafePointer<MainComponent> sp (this);
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&menuBtn),
             [sp] (int r) {
@@ -641,7 +647,9 @@ void MainComponent::buildLiveControls()
                     case 13: sp->applyTuning (upic::Tuning{}); break;  // M4
                     default:
                         // WP8: the transform menu's items are 200 and up.
-                        if (r >= 200) sp->transformArcs (r - 200);
+                        // WP9: the convert menu's items are 300 and up.
+                        if (r >= 300) sp->convertAs (r - 300);
+                        else if (r >= 200) sp->transformArcs (r - 200);
                         else sp->transformPage (r);
                         break;
                 }

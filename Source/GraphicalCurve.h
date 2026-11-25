@@ -190,18 +190,6 @@ namespace upic
         return makeCurve (GraphicalCurve::Domain::Normalised, std::move (pts));
     }
 
-    // The arc read over the PITCH axis: the x is the position on the page's
-    // pitch axis and the y is the position on its time axis. This is the
-    // shape a frequency table wants - the arc seen the other way round.
-    inline GraphicalCurve arcToPitchCurve (const Arc& a, const ArcFrame& frame)
-    {
-        std::vector<CurvePoint> pts;
-        pts.reserve (a.points.size());
-        for (const auto& p : a.points)
-            pts.push_back ({ frame.normY (p.freq), frame.normX (p.t) });
-        return makeCurve (GraphicalCurve::Domain::Normalised, std::move (pts));
-    }
-
     // The curve back to an arc, on the page it was drawn on. The times and
     // the pitches are clamped the way a transform clamps them: the time
     // stays on the page, the pitch stays in the model's range.
@@ -290,6 +278,13 @@ namespace upic
     // The frequency table: a curve drawn on the page's PITCH axis. The x is
     // the normalised position on that axis and the height is the pitch the
     // position sounds at, over the ambitus the table is drawn in.
+    //
+    // A curve that came from an arc carries the PAGE's positions: its x is
+    // the position in time and its height is the position on the pitch axis.
+    // Turning such a curve into a table reads the drawing on its side: the
+    // drawing's horizontal axis becomes the page's vertical axis, and the
+    // height it has there is the pitch that position sounds at. The table
+    // follows the drawing, which is what the drawn table always did.
     //--------------------------------------------------------------------------
     inline GraphicalCurve tableToCurve (const std::vector<TablePoint>& table, const CurveSpace& space)
     {
@@ -319,6 +314,43 @@ namespace upic
             const double log2Hz = space.logLo() + limits::clampFinite (p.y, 0.0, 1.0) * space.logSpan();
             tp.log2Hz = (float) log2Hz;
             out.push_back (tp);
+        }
+        return out;
+    }
+
+    //--------------------------------------------------------------------------
+    // The curve at another resolution: the same shape, read evenly over its
+    // own extent. This is how a shape meets a target that has a fixed
+    // number of points - a wavetable's samples, an envelope's points.
+    //
+    // The x axis keeps its meaning: the resampled curve still lives over
+    // the same span (the seconds, the log Hz), only the number of points
+    // changes.
+    //--------------------------------------------------------------------------
+    inline GraphicalCurve resampleCurve (const GraphicalCurve& c, int count)
+    {
+        GraphicalCurve out;
+        out.domain = c.domain;
+        const int n = juce::jmax (2, count);
+        if (c.points.size() <= 1)
+        {
+            out.points = c.points;
+            return out;
+        }
+        const double lo = c.xMin(), hi = c.xMax();
+        const double span = hi - lo;
+        if (span <= 1.0e-12)
+        {
+            // a curve with no width cannot be read evenly: it keeps its
+            // points, and the target sees a flat line
+            out.points = c.points;
+            return out;
+        }
+        out.points.reserve ((size_t) n);
+        for (int i = 0; i < n; ++i)
+        {
+            const double x = lo + span * (double) i / (double) (n - 1);
+            out.points.push_back ({ x, c.valueAt (x) });
         }
         return out;
     }

@@ -410,6 +410,13 @@ void MainComponent::buildScoreArea()
         fillTransformMenu (m, firstId);
     };
     score.onTransformCommand = [this](int op){ transformArcs (op); };
+    // WP9: the Convert As commands. The app fills the menu, so the File
+    // menu and the canvas show the same items, and it runs the command.
+    score.fillConvertMenu = [this](juce::PopupMenu& m, int firstId)
+    {
+        fillConvertMenu (m, firstId);
+    };
+    score.onConvertCommand = [this](int op){ convertAs (op); };
 }
 
 void MainComponent::buildEditors()
@@ -430,6 +437,13 @@ void MainComponent::buildEditors()
                      &eFlat, &ePerc, &eSwell, &eGate, &eStr })
         b->setTooltip ("Apply " + b->getButtonText() + " shape");
     addAndMakeVisible(eFlat); addAndMakeVisible(ePerc); addAndMakeVisible(eSwell); addAndMakeVisible(eGate); addAndMakeVisible(eStr);
+    // WP9: the Convert As buttons (the wavetable as an envelope, the
+    // envelope as a wavetable).
+    addAndMakeVisible(waveAsEnvBtn); addAndMakeVisible(envAsWaveBtn);
+    waveAsEnvBtn.setName ("waveAsEnvBtn");
+    envAsWaveBtn.setName ("envAsWaveBtn");
+    waveAsEnvBtn.setTooltip ("Make a new envelope from the wavetable (the wavetable stays)");
+    envAsWaveBtn.setTooltip ("Make a new wavetable from the envelope (the envelope stays)");
     addAndMakeVisible(assignBtn); addAndMakeVisible(delArcBtn); addAndMakeVisible(muteArcBtn);
     // v1.34.4: the arc commands the canvas context menu had (Duplicate,
     // Select all) are buttons in the Voice section as well.
@@ -519,6 +533,11 @@ void MainComponent::buildEditors()
     eSwell.onClick = [editEnv]{ editEnv([](upic::Envelope& e){ e.presetSwell(); }); };
     eGate.onClick = [editEnv]{ editEnv([](upic::Envelope& e){ e.presetGate(); }); };
     eStr.onClick = [editEnv]{ editEnv([](upic::Envelope& e){ e.presetStrings(); }); };
+
+    // WP9: the Convert As commands. They make a NEW asset; the one being
+    // edited stays what it was.
+    waveAsEnvBtn.onClick = [this]{ convertAs (convertWaveAsEnvelope); };
+    envAsWaveBtn.onClick = [this]{ convertAs (convertEnvAsWaveform); };
 
     assignBtn.onClick = [this]{
         {
@@ -1858,10 +1877,10 @@ void MainComponent::resized()
         else arcListBtn.setVisible (false);
     };
 
-    juce::Component* wbtns[7] = { &wSine, &wSaw, &wSqr, &wTri, &wNoise, &wSmooth, &wNorm };
-    const int wideal[] = { 30, 30, 30, 30, 44, 48, 34 };
-    juce::Component* ebtns[5] = { &eFlat, &ePerc, &eSwell, &eGate, &eStr };
-    const int eideal[] = { 40, 40, 44, 40, 34 };
+    juce::Component* wbtns[8] = { &wSine, &wSaw, &wSqr, &wTri, &wNoise, &wSmooth, &wNorm, &waveAsEnvBtn };
+    const int wideal[] = { 30, 30, 30, 30, 44, 48, 34, 56 };
+    juce::Component* ebtns[6] = { &eFlat, &ePerc, &eSwell, &eGate, &eStr, &envAsWaveBtn };
+    const int eideal[] = { 40, 40, 44, 40, 34, 56 };
 
     // --- F4: the focus view ---------------------------------------------
     if (focusedPanel != FocusPanel::none)
@@ -1914,13 +1933,13 @@ void MainComponent::resized()
             {
                 waveEd.setVisible (true); waveLib.setVisible (true);
                 for (auto* w : wbtns) w->setVisible (true);
-                placeEditor (b, waveEd, waveLib, wbtns, wideal, 7, &waveFocusBtn);
+                placeEditor (b, waveEd, waveLib, wbtns, wideal, 8, &waveFocusBtn);
             }
             else
             {
                 envEd.setVisible (true); envLib.setVisible (true);
                 for (auto* eb : ebtns) eb->setVisible (true);
-                placeEditor (b, envEd, envLib, ebtns, eideal, 5, &envFocusBtn);
+                placeEditor (b, envEd, envLib, ebtns, eideal, 6, &envFocusBtn);
             }
         }
 
@@ -1990,12 +2009,12 @@ void MainComponent::resized()
     waveEd.setVisible(showWaveEd);
     waveLib.setVisible(showWaveEd);
     for (auto* w : wbtns) w->setVisible(showWaveEd);
-    if (showWaveEd) placeEditor(waveCol, waveEd, waveLib, wbtns, wideal, 7, &waveFocusBtn);
+    if (showWaveEd) placeEditor(waveCol, waveEd, waveLib, wbtns, wideal, 8, &waveFocusBtn);
 
     envEd.setVisible(showEnvEd);
     envLib.setVisible(showEnvEd);
     for (auto* eb : ebtns) eb->setVisible(showEnvEd);
-    if (showEnvEd) placeEditor(envCol, envEd, envLib, ebtns, eideal, 5, &envFocusBtn);
+    if (showEnvEd) placeEditor(envCol, envEd, envLib, ebtns, eideal, 6, &envFocusBtn);
     // F4: leaving a focus view restores everything the focus hid.
     score.setVisible (true);
     voiceLab.setVisible (true);

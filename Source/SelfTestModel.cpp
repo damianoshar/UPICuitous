@@ -3754,5 +3754,222 @@ void upic::runWP9CurveChecks (upic::SelfTest& t)
         check (upic::curveToTable (empty, space).empty(),
                "WP9 an empty curve makes no table");
     }
+
+    // --- the resampler ------------------------------------------------------------
+    {
+        auto c = upic::makeCurve (upic::GraphicalCurve::Domain::Normalised,
+                                  { { 0.0, 0.0 }, { 1.0, 1.0 } });
+        const auto r = upic::resampleCurve (c, 5);
+        check (r.size() == 5 && std::abs (r.points[0].x - 0.0) < 1e-9
+               && std::abs (r.points[4].x - 1.0) < 1e-9
+               && std::abs (r.points[2].y - 0.5) < 1e-9,
+               "WP9 a curve can be read at another resolution",
+               juce::String (r.size()) + " points");
+        const auto one = upic::resampleCurve (c, 1);
+        check (one.size() == c.size(),
+               "WP9 a curve with no width keeps its points");
+    }
+}
+
+//==============================================================================
+// WP9: the Convert As commands.
+//
+// A shape becomes another kind of object - a wavetable, an envelope, a
+// frequency table - as a NEW object: the one that was there keeps its
+// meaning, and the new one is a separate thing in its own place.
+void upic::runWP9ConvertChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
+    mc.setSize (1280, 800);
+    const juce::String json =
+        R"({"pages":[{"duration":10.0,"arcs":[)"
+        R"({"id":1,"points":[{"t":1,"f":220},{"t":3,"f":440}]},)"
+        R"({"id":2,"points":[{"t":2,"f":330},{"t":4,"f":660}]}]}]})";
+    check (mc.loadFromVar (juce::JSON::parse (json)),
+           "WP9 the piece with two arcs loads");
+
+    mc.selectArcsAndSyncForTest ({ 1 });
+    const auto arcBefore = mc.arcPointsForTest (1);
+
+    // --- the selection as a wavetable -------------------------------------------
+    {
+        const int wavesBefore = mc.waveformCountForTest();
+        const int envsBefore = mc.envelopeCountForTest();
+        const int depthBefore = mc.undoDepth();
+
+        check (mc.convertAsForTest (MainComponent::convertSelectionAsWaveform),
+               "WP9 the selection becomes a wavetable");
+        check (mc.waveformCountForTest() == wavesBefore + 1,
+               "WP9 the conversion makes a NEW wavetable",
+               juce::String (mc.waveformCountForTest() - wavesBefore));
+        check (mc.envelopeCountForTest() == envsBefore,
+               "WP9 the conversion leaves the envelope bank alone");
+        check (mc.arcPointsForTest (1) == arcBefore,
+               "WP9 the arc stays the arc");
+
+        // the new wavetable's shape is the selection's shape (the arc rises)
+        const int id = mc.selectedWaveformIdForTest();
+        const float first = mc.waveformSampleForTest (id, 0);
+        const float last = mc.waveformSampleForTest (id, upic::kWaveSize - 1);
+        check (last > first,
+               "WP9 the new wavetable carries the selection's shape",
+               juce::String (first, 3) + " -> " + juce::String (last, 3));
+
+        check (mc.undoDepth() == depthBefore + 1,
+               "WP9 the conversion is one undo step",
+               juce::String (mc.undoDepth() - depthBefore));
+
+        mc.undo();
+        check (mc.waveformCountForTest() == wavesBefore,
+               "WP9 the undo takes the new wavetable away");
+        check (mc.undoDepth() == depthBefore,
+               "WP9 the undo takes the step back");
+    }
+
+    // --- the selection as an envelope --------------------------------------------
+    {
+        // the undo above took the selection with it (the selection is not
+        // part of the piece), so the arc is selected again
+        mc.selectArcsAndSyncForTest ({ 1 });
+        const int envsBefore = mc.envelopeCountForTest();
+        const int depthBefore = mc.undoDepth();
+
+        check (mc.convertAsForTest (MainComponent::convertSelectionAsEnvelope),
+               "WP9 the selection becomes an envelope");
+        check (mc.envelopeCountForTest() == envsBefore + 1,
+               "WP9 the conversion makes a NEW envelope",
+               juce::String (mc.envelopeCountForTest() - envsBefore));
+        check (mc.arcPointsForTest (1) == arcBefore,
+               "WP9 the arc stays the arc");
+
+        const auto pts = mc.envelopePointsForTest (mc.envelopeCountForTest() - 1);
+        check (pts.size() >= 2 && pts.front().x <= 1.0e-6f
+               && pts.back().x >= 1.0f - 1.0e-6f,
+               "WP9 the new envelope covers the unit axis",
+               juce::String (pts.size()) + " points");
+        check (pts.size() >= 2 && pts.back().y > pts.front().y,
+               "WP9 the new envelope carries the selection's shape",
+               juce::String (pts.front().y, 3) + " -> " + juce::String (pts.back().y, 3));
+        check ((int) pts.size() <= upic::limits::kMaxPointsPerEnvelope,
+               "WP9 the new envelope respects the point limit",
+               juce::String (pts.size()));
+
+        check (mc.undoDepth() == depthBefore + 1,
+               "WP9 the envelope conversion is one undo step",
+               juce::String (mc.undoDepth() - depthBefore));
+        mc.undo();
+        check (mc.envelopeCountForTest() == envsBefore,
+               "WP9 the undo takes the new envelope away");
+    }
+
+    // --- the selection as a frequency table ---------------------------------------
+    {
+        mc.selectArcsAndSyncForTest ({ 1 });
+        const int depthBefore = mc.undoDepth();
+        check (mc.convertAsForTest (MainComponent::convertSelectionAsTable),
+               "WP9 the selection becomes a frequency table");
+        check (mc.convertedTableSpaceForTest() == 0,
+               "WP9 the table went to the space the arc is played in",
+               juce::String (mc.convertedTableSpaceForTest()));
+        check (mc.spaceDefEditableForTest (0),
+               "WP9 the space's table is drawn now");
+
+        const auto table = mc.spaceTableForTest (0);
+        check (table.size() == 2,
+               "WP9 the table has the selection's points",
+               juce::String (table.size()));
+        const bool follows = table.size() == 2
+                          && std::abs (table[0].x - 0.1f) < 1.0e-4f
+                          && std::abs (table[1].x - 0.3f) < 1.0e-4f
+                          && std::abs ((double) table[0].log2Hz - std::log2 (220.0)) < 0.01
+                          && std::abs ((double) table[1].log2Hz - std::log2 (440.0)) < 0.01;
+        check (follows,
+               "WP9 the table follows the drawing",
+               juce::String (table.size()) + " points");
+        check (mc.arcPointsForTest (1) == arcBefore,
+               "WP9 the arc stays the arc");
+
+        check (mc.undoDepth() == depthBefore + 1,
+               "WP9 the table conversion is one undo step",
+               juce::String (mc.undoDepth() - depthBefore));
+        mc.undo();
+        check (! mc.spaceDefEditableForTest (0),
+               "WP9 the undo takes the drawn table away");
+    }
+
+    // --- the wavetable as an envelope ---------------------------------------------
+    {
+        mc.selectWaveformForTest (0);       // the sine wave
+        const float sampleBefore = mc.waveformSampleForTest (0, 10);
+        const int wavesBefore = mc.waveformCountForTest();
+        const int envsBefore = mc.envelopeCountForTest();
+
+        check (mc.convertAsForTest (MainComponent::convertWaveAsEnvelope),
+               "WP9 the wavetable becomes an envelope");
+        check (mc.envelopeCountForTest() == envsBefore + 1,
+               "WP9 the conversion makes a NEW envelope",
+               juce::String (mc.envelopeCountForTest() - envsBefore));
+        check (mc.waveformCountForTest() == wavesBefore,
+               "WP9 the conversion leaves the wavetable bank alone");
+        check (mc.waveformSampleForTest (0, 10) == sampleBefore,
+               "WP9 the wavetable stays the wavetable");
+    }
+
+    // --- the envelope as a wavetable ----------------------------------------------
+    {
+        mc.selectEnvelopeForTest (0);       // the flat envelope
+        const auto ptsBefore = mc.envelopePointsForTest (0);
+        const int wavesBefore = mc.waveformCountForTest();
+        const int envsBefore = mc.envelopeCountForTest();
+
+        check (mc.convertAsForTest (MainComponent::convertEnvAsWaveform),
+               "WP9 the envelope becomes a wavetable");
+        check (mc.waveformCountForTest() == wavesBefore + 1,
+               "WP9 the conversion makes a NEW wavetable",
+               juce::String (mc.waveformCountForTest() - wavesBefore));
+        check (mc.envelopeCountForTest() == envsBefore,
+               "WP9 the conversion leaves the envelope bank alone");
+
+        // the envelope's own points are untouched
+        const auto ptsAfter = mc.envelopePointsForTest (0);
+        bool same = ptsAfter.size() == ptsBefore.size();
+        for (size_t i = 0; same && i < ptsAfter.size(); ++i)
+            same = ptsAfter[i].x == ptsBefore[i].x && ptsAfter[i].y == ptsBefore[i].y;
+        check (same, "WP9 the envelope stays the envelope");
+    }
+
+    // --- a refusal ------------------------------------------------------------------
+    {
+        mc.selectArcsAndSyncForTest ({});
+        const int wavesBefore = mc.waveformCountForTest();
+        const int envsBefore = mc.envelopeCountForTest();
+        const int depthBefore = mc.undoDepth();
+
+        check (! mc.convertAsForTest (MainComponent::convertSelectionAsWaveform),
+               "WP9 the command refuses when nothing is selected");
+        check (mc.flashMessageForTest().contains ("select an arc"),
+               "WP9 the refusal says what to do",
+               mc.flashMessageForTest());
+        check (mc.waveformCountForTest() == wavesBefore
+               && mc.envelopeCountForTest() == envsBefore,
+               "WP9 a refused command changes nothing");
+        check (mc.undoDepth() == depthBefore,
+               "WP9 a refused command adds no undo step");
+    }
+
+    // --- the menu ---------------------------------------------------------------------
+    {
+        juce::PopupMenu m;
+        mc.fillConvertMenu (m, 300);
+        check (m.getNumItems() >= 5,
+               "WP9 the convert menu can be built",
+               juce::String (m.getNumItems()) + " items");
+    }
 }
 
