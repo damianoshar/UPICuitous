@@ -212,6 +212,12 @@ if (-not $Verify) {
 
     # 2. the releaseSigning config (inside signingConfigs, after juceSigning)
     if ($patched -notmatch 'releaseSigning') {
+        # NB: the block is inserted with the file's own line endings, and the
+        # pattern accepts both - a CRLF file used to be skipped silently, and
+        # the release build type then named a signing config that did not
+        # exist (the Android release build failed with "unknown property
+        # releaseSigning").
+        $nl = if ($patched.Contains("`r`n")) { "`r`n" } else { "`n" }
         $releaseConfig = @"
 
         if (keystorePropertiesFile.exists()) {
@@ -223,8 +229,9 @@ if (-not $Verify) {
             }
         }
 "@
+        $releaseConfig = $releaseConfig -replace "`r?`n", $nl
         $patched = [regex]::Replace($patched,
-            '(?s)(signingConfigs\s*\{.*?juceSigning\s*\{.*?\n        \}\n)',
+            '(?s)(signingConfigs\s*\{.*?juceSigning\s*\{.*?\r?\n        \}\r?\n)',
             '$1' + $releaseConfig, 1)
     }
 
@@ -390,6 +397,12 @@ if ($releaseBlock -notmatch 'releaseSigning') {
 }
 if ($releaseBlock -match 'signingConfigs\.juceSigning') {
     $problems += "the release build type falls back to the debug keystore - run this script without -Verify to make it fail closed"
+}
+# and the config it names has to exist: the release build type points at
+# releaseSigning, so a signingConfigs block without it is a build error
+$signingBlock = [regex]::Match($appText, '(?s)signingConfigs\s*\{(.*?)\n\s{4}\}').Groups[1].Value
+if ($releaseBlock -match 'releaseSigning' -and $signingBlock -notmatch 'releaseSigning\s*\{') {
+    $problems += "the release build type names releaseSigning, but the signingConfigs block does not define it (run this script without -Verify to fix it)"
 }
 
 # the generated CMakeLists carries the version too (JUCE_APP_VERSION and

@@ -7,6 +7,11 @@ android {
     compileSdk(35)
     ndkVersion = ndkVersionString
     namespace = "org.upicuitous"
+    def keystoreProperties = new Properties()
+    def keystorePropertiesFile = file("keystore.properties")
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+    }
     externalNativeBuild {
         cmake {
             path("CMakeLists.txt")
@@ -21,7 +26,15 @@ android {
             keyPassword("android")
             storeType("jks")
         }
-    }
+
+        if (keystorePropertiesFile.exists()) {
+            releaseSigning {
+                storeFile     file(keystoreProperties.getProperty("storeFile"))
+                storePassword keystoreProperties.getProperty("storePassword")
+                keyAlias      keystoreProperties.getProperty("keyAlias")
+                keyPassword   keystoreProperties.getProperty("keyPassword")
+            }
+        }    }
 
     defaultConfig {
         applicationId("org.upicuitous")
@@ -45,7 +58,17 @@ android {
              initWith(release)
              debuggable(false)
              jniDebuggable(false)
-             signingConfig = signingConfigs.juceSigning
+             // SECURITY (S-02): fail closed. The debug key is public, so a
+             // release APK must never be signed with it. If the release
+             // keystore is missing the build stops instead of shipping a
+             // debug-signed APK that a third party could impersonate.
+             if (!keystorePropertiesFile.exists()) {
+                 throw new GradleException(
+                     "keystore.properties is missing - refusing to build a release APK.\n" +
+                     "Copy keystore.properties.template to keystore.properties and fill it in, " +
+                     "or build the debug flavour instead (./gradlew.bat assembleDebug).")
+             }
+             signingConfig = signingConfigs.releaseSigning             
          }
     }
 
