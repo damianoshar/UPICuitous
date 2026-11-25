@@ -1949,6 +1949,10 @@ void ScoreEditor::showArcMenu(int id)
         m.addSeparator();
         m.addItem(4, "Delete");
         m.addItem(5, "Select all");
+        // WP8: the geometric transforms of the drawn curve. The app fills
+        // the sub-menu, so the canvas and the File menu show the same items.
+        if (fillTransformMenu && onTransformCommand)
+            m.addItem(transformMenuItem, "Transform the drawing...");
         juce::Component::SafePointer<ScoreEditor> sp(this);
         m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
                         [sp, id](int result)
@@ -1963,6 +1967,20 @@ void ScoreEditor::showArcMenu(int id)
                 case 7: if (sp->onEditGuerreroRecipe) sp->onEditGuerreroRecipe (id); break;
                 case 4: sp->setSelectedArc(id); sp->deleteSelected(); break;
                 case 5: sp->selectAll(); if (sp->onSelect) sp->onSelect(sp->getSelectedArc()); break;
+                case transformMenuItem:
+                {
+                    if (! sp->fillTransformMenu || ! sp->onTransformCommand) break;
+                    juce::PopupMenu sub;
+                    sp->fillTransformMenu(sub, transformMenuBase);
+                    juce::Component::SafePointer<ScoreEditor> sp2(sp);
+                    sub.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(sp),
+                                      [sp2](int r)
+                    {
+                        if (sp2 == nullptr || r == 0) return;
+                        if (r >= transformMenuBase) sp2->onTransformCommand(r - transformMenuBase);
+                    });
+                    break;
+                }
                 default: break;
             }
             sp->repaint();

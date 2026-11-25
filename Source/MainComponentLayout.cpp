@@ -408,6 +408,14 @@ void MainComponent::buildScoreArea()
     score.onEditGuerreroRecipe = [this](int arcId){ openGuerreroDialog (arcId); };
 #endif
     score.onRedo = [this]{ redo(); };
+    // WP8: the geometric transforms of the drawn curve. The app fills the
+    // menu, so the File menu and the canvas show the same items, and it
+    // runs the command.
+    score.fillTransformMenu = [this](juce::PopupMenu& m, int firstId)
+    {
+        fillTransformMenu (m, firstId);
+    };
+    score.onTransformCommand = [this](int op){ transformArcs (op); };
 }
 
 void MainComponent::buildEditors()
@@ -875,7 +883,7 @@ void MainComponent::resized()
     // reachable at every fold level.
     groups.push_back ({ "transport", { F(&loopBtn, 64),
                                         F(&seqBtn, 60), F(&revPlayBtn, 64), F(&pressBtn, 96),
-                                        F(&scrubBtn, 72) } });
+                                        F(&scrubBtn, 72), F(&perfBtn, 60) } });
 
     // the pages and the files
     // v1.34.2: the page selector's caption went; the group header already
@@ -2082,6 +2090,7 @@ void MainComponent::layoutOverlays (float s)
     ampTableEd.setBounds (getLocalBounds());
     groupPanel.setBounds (getLocalBounds());
     seqPanel.setBounds (getLocalBounds());
+    perfView.setBounds (getLocalBounds());   // WP8
     if (channelPanel != nullptr) channelPanel->setBounds (getLocalBounds()); // WP6.4
     // WP7: the sample extraction panel is lazy, so it has no bounds until
     // it has been built once.

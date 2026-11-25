@@ -3104,3 +3104,429 @@ void upic::runChannelUiChecks (upic::SelfTest& t)
                juce::String (mc.arcModBoxSelectionForTest()));
     }
 }
+
+//==============================================================================
+// WP8: the geometric transforms of the drawn curve.
+//
+// The transforms work in the page's own normalised space (the time across
+// the page and the pitch in octaves of the page's ambitus), so they do not
+// depend on the zoom. These checks are the model's own: they drive the
+// helpers in Arc.h directly.
+void upic::runWP8TransformChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // the frame: a 30 s page with the default ambitus
+    upic::ArcFrame frame { 30.0, upic::kDefaultPitchLo, upic::kDefaultPitchHi };
+
+    // the length of a curve in the normalised space
+    auto lengthIn = [&frame] (const upic::Arc& a)
+    {
+        double len = 0.0;
+        for (size_t i = 1; i < a.points.size(); ++i)
+        {
+            const double x0 = frame.normX (a.points[i-1].t), y0 = frame.normY (a.points[i-1].freq);
+            const double x1 = frame.normX (a.points[i].t),   y1 = frame.normY (a.points[i].freq);
+            len += std::sqrt ((x1-x0)*(x1-x0) + (y1-y0)*(y1-y0));
+        }
+        return len;
+    };
+
+    // WP8: a rotation keeps the length of the curve.
+    {
+        upic::Arc a;
+        a.id = 1;
+        a.points = { { 5.0, 220.0 }, { 10.0, 440.0 }, { 15.0, 880.0 } };
+        upic::ArcRefs arcs { &a };
+        const auto bounds = upic::arcBounds (arcs, frame);
+        const double before = lengthIn (a);
+        upic::transformRotate (arcs, frame, bounds.centreX(), bounds.centreY(),
+                               15.0 * juce::MathConstants<double>::pi / 180.0);
+        const double after = lengthIn (a);
+        check (std::abs (before - after) < 1e-9,
+               "WP8 the rotation keeps the length of the curve",
+               juce::String (before, 6) + " -> " + juce::String (after, 6));
+        check (std::abs (a.points[0].t - 5.0) > 1.0e-6
+               || std::abs (a.points[0].freq - 220.0) > 1.0e-6,
+               "WP8 the rotation really moved the curve");
+        bool sorted = true;
+        for (size_t i = 1; i < a.points.size(); ++i)
+            if (a.points[i].t < a.points[i-1].t) sorted = false;
+        check (sorted, "WP8 the rotation leaves the points sorted in time");
+    }
+
+    // WP8: the mirrors are their own inverse.
+    {
+        upic::Arc a;
+        a.id = 1;
+        a.points = { { 5.0, 220.0 }, { 10.0, 440.0 }, { 15.0, 880.0 } };
+        upic::ArcRefs arcs { &a };
+        const auto bounds = upic::arcBounds (arcs, frame);
+        const double t0 = a.points[0].t, t2 = a.points[2].t;
+
+        upic::transformMirrorTime (arcs, frame, bounds.centreX());
+        check (std::abs (a.points[0].t - (2.0 * bounds.centreX() * frame.duration - t2)) < 1e-6,
+               "WP8 the mirror in time swaps the ends of the curve",
+               juce::String (a.points[0].t, 4) + " / " + juce::String (a.points[2].t, 4));
+        upic::transformMirrorTime (arcs, frame, bounds.centreX());
+        check (std::abs (a.points[0].t - t0) < 1e-6 && std::abs (a.points[2].t - t2) < 1e-6,
+               "WP8 mirroring in time twice gives the curve back");
+    }
+
+    // WP8: the mirror in pitch turns the curve over about the centre. It is
+    // checked on a curve of its own, because the mirror in time above has
+    // already turned the points around.
+    {
+        upic::Arc a;
+        a.id = 1;
+        a.points = { { 5.0, 220.0 }, { 10.0, 440.0 }, { 15.0, 880.0 } };
+        upic::ArcRefs arcs { &a };
+        const auto bounds = upic::arcBounds (arcs, frame);
+        const double t0 = a.points[0].t, t2 = a.points[2].t;
+        const double f0 = a.points[0].freq, f2 = a.points[2].freq;
+
+        upic::transformMirrorPitch (arcs, frame, bounds.centreY());
+        check (std::abs (a.points[0].freq - f2) < 1e-6,
+               "WP8 the mirror in pitch turns the curve over",
+               juce::String (a.points[0].freq, 3) + " Hz");
+        check (std::abs (a.points[2].freq - f0) < 1e-6,
+               "WP8 the mirror in pitch swaps the low and the high",
+               juce::String (a.points[2].freq, 3) + " Hz");
+        check (std::abs (a.points[0].t - t0) < 1e-12 && std::abs (a.points[2].t - t2) < 1e-12,
+               "WP8 the mirror in pitch leaves the times alone");
+        upic::transformMirrorPitch (arcs, frame, bounds.centreY());
+        check (std::abs (a.points[0].freq - f0) < 1e-6 && std::abs (a.points[2].freq - f2) < 1e-6,
+               "WP8 mirroring in pitch twice gives the curve back");
+    }
+
+    // WP8: the alignment gives the arcs a shared edge. Each edge is checked
+    // on a pair of its own, so that one alignment cannot move the arcs that
+    // the next one measures.
+    {
+        upic::Arc a, b;
+        a.id = 1; a.points = { { 2.0, 220.0 }, { 4.0, 440.0 } };
+        b.id = 2; b.points = { { 6.0, 330.0 }, { 9.0, 660.0 } };
+        upic::ArcRefs arcs { &a, &b };
+
+        upic::transformAlign (arcs, frame, 0); // the starts
+        check (std::abs (a.startTime() - b.startTime()) < 1e-9,
+               "WP8 the alignment gives the arcs the same start",
+               juce::String (a.startTime(), 4) + " / " + juce::String (b.startTime(), 4));
+        check (std::abs (a.startTime() - 2.0) < 1e-9,
+               "WP8 the alignment takes the earliest start");
+        check (std::abs (b.startTime() - 2.0) < 1e-9,
+               "WP8 the alignment of the starts moves the later arc, not the earlier one");
+    }
+    {
+        upic::Arc a, b;
+        a.id = 1; a.points = { { 2.0, 220.0 }, { 4.0, 440.0 } };
+        b.id = 2; b.points = { { 6.0, 330.0 }, { 9.0, 660.0 } };
+        upic::ArcRefs arcs { &a, &b };
+
+        upic::transformAlign (arcs, frame, 1); // the ends
+        check (std::abs (a.endTime() - b.endTime()) < 1e-9,
+               "WP8 the alignment gives the arcs the same end",
+               juce::String (a.endTime(), 4) + " / " + juce::String (b.endTime(), 4));
+        check (std::abs (a.endTime() - 9.0) < 1e-9,
+               "WP8 the alignment takes the latest end");
+        check (std::abs (a.startTime() - 7.0) < 1e-9,
+               "WP8 the alignment of the ends moves the earlier arc, not the later one");
+    }
+    {
+        upic::Arc a, b;
+        a.id = 1; a.points = { { 2.0, 220.0 }, { 4.0, 440.0 } };
+        b.id = 2; b.points = { { 6.0, 330.0 }, { 9.0, 660.0 } };
+        upic::ArcRefs arcs { &a, &b };
+
+        upic::transformAlign (arcs, frame, 2); // the pitch
+        check (std::abs (upic::arcPitchCentre (a) - upic::arcPitchCentre (b)) < 1e-6,
+               "WP8 the alignment gives the arcs the same pitch centre",
+               juce::String (upic::arcPitchCentre (a), 3) + " / "
+               + juce::String (upic::arcPitchCentre (b), 3));
+        check (std::abs (a.startTime() - 2.0) < 1e-12 && std::abs (b.startTime() - 6.0) < 1e-12,
+               "WP8 the alignment of the pitch leaves the times alone");
+    }
+
+    // WP8: the scale works in the log-pitch domain - doubling the pitch
+    // scale doubles the distance between the pitches, in octaves.
+    {
+        upic::Arc a;
+        a.id = 1;
+        a.points = { { 10.0, 220.0 }, { 12.0, 880.0 } };
+        upic::ArcRefs arcs { &a };
+        const auto bounds = upic::arcBounds (arcs, frame);
+        upic::transformScale (arcs, frame, bounds.centreX(), bounds.centreY(), 1.0, 2.0);
+        const double ratio = a.points[1].freq / a.points[0].freq;
+        check (std::abs (ratio - 16.0) < 1e-3,
+               "WP8 the pitch scale doubles the distance in octaves",
+               juce::String (ratio, 4) + " (expect 16)");
+        upic::transformScale (arcs, frame, bounds.centreX(), bounds.centreY(), 2.0, 1.0);
+        check (std::abs ((a.points[1].t - a.points[0].t) - 4.0) < 1e-6,
+               "WP8 the time scale doubles the time span",
+               juce::String (a.points[1].t - a.points[0].t, 4) + " s");
+    }
+
+    // WP8: the repeat makes copies with their own ids.
+    {
+        upic::Arc a;
+        a.id = 7;
+        a.points = { { 2.0, 220.0 }, { 4.0, 440.0 } };
+        upic::ArcRefs arcs { &a };
+        const auto copies = upic::transformRepeat (arcs, frame, 4.0, 12.0, 2, 100);
+        check (copies.size() == 2, "WP8 the repeat makes the copies it was asked for",
+               juce::String (copies.size()));
+        if (copies.size() == 2)
+        {
+            check (copies[0].id == 100 && copies[1].id == 101,
+                   "WP8 the copies get their own ids",
+                   juce::String (copies[0].id) + " / " + juce::String (copies[1].id));
+            check (copies[0].id != a.id, "WP8 a copy does not reuse the original's id");
+            check (std::abs (copies[0].points[0].t - 6.0) < 1e-6,
+                   "WP8 the first copy is one step further along",
+                   juce::String (copies[0].points[0].t, 4) + " s");
+            check (std::abs (copies[1].points[0].t - 10.0) < 1e-6,
+                   "WP8 the second copy is two steps further along",
+                   juce::String (copies[1].points[0].t, 4) + " s");
+            check (std::abs (copies[0].points[0].freq - 440.0) < 1e-6,
+                   "WP8 the first copy is an octave higher",
+                   juce::String (copies[0].points[0].freq, 3) + " Hz");
+            check (std::abs (copies[1].points[0].freq - 880.0) < 1e-6,
+                   "WP8 the second copy is two octaves higher",
+                   juce::String (copies[1].points[0].freq, 3) + " Hz");
+            check (copies[0].waveformId == a.waveformId && copies[0].envelopeId == a.envelopeId,
+                   "WP8 a copy keeps the material of the original");
+        }
+        const auto again = upic::transformRepeat (arcs, frame, 4.0, 12.0, 2, 100);
+        check (again.size() == 2 && again[0].id == 100 && again[1].id == 101,
+               "WP8 the repeat is stable - the same input gives the same ids");
+    }
+
+    // WP8: a value that is not finite leaves the curve alone.
+    {
+        upic::Arc a;
+        a.id = 1;
+        a.points = { { 2.0, 220.0 }, { 4.0, 440.0 } };
+        upic::ArcRefs arcs { &a };
+        upic::transformRotate (arcs, frame, 0.5, 0.5,
+                               std::numeric_limits<double>::quiet_NaN());
+        check (std::abs (a.points[0].t - 2.0) < 1e-12
+               && std::abs (a.points[0].freq - 220.0) < 1e-12,
+               "WP8 a rotation with a broken angle changes nothing");
+    }
+}
+
+//==============================================================================
+// WP8: the app's commands for the geometric transforms.
+//
+// The model's half is in runWP8TransformChecks. These drive the app the way
+// the user does: a scope, a command, an undo.
+void upic::runWP8CommandChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
+    mc.setSize (1280, 800);
+    const juce::String json =
+        R"({"pages":[{"duration":10.0,"arcs":[)"
+        R"({"id":1,"points":[{"t":1,"f":220},{"t":3,"f":440}]},)"
+        R"({"id":2,"points":[{"t":2,"f":330},{"t":4,"f":660}]},)"
+        R"({"id":3,"points":[{"t":5,"f":220},{"t":6,"f":220}]}],)"
+        R"("groups":[{"id":1,"name":"G1","arcs":[1]},{"id":2,"name":"G2","arcs":[2,3]}]}]})";
+    check (mc.loadFromVar (juce::JSON::parse (json)),
+           "WP8 the piece with two groups loads");
+
+    const auto before1 = mc.arcPointsForTest (1);
+    const auto before2 = mc.arcPointsForTest (2);
+    const auto before3 = mc.arcPointsForTest (3);
+
+    // --- the scope is the group -----------------------------------------
+    mc.setTransformScopeForTest (1, 1);   // the group G1
+    const int depthBefore = mc.undoDepth();
+    check (mc.transformArcsForTest (MainComponent::transformRotateLeft),
+           "WP8 the transform command runs");
+    check (mc.arcPointsForTest (1) != before1,
+           "WP8 the group's arc is transformed");
+    check (mc.arcPointsForTest (2) == before2 && mc.arcPointsForTest (3) == before3,
+           "WP8 the transform respects the group's membership");
+
+    // --- one command, one undo step -------------------------------------
+    check (mc.undoDepth() == depthBefore + 1,
+           "WP8 the command is one undo step",
+           juce::String (mc.undoDepth() - depthBefore));
+
+    // --- the undo gives the points back exactly -------------------------
+    mc.undo();
+    check (mc.arcPointsForTest (1) == before1,
+           "WP8 the undo restores the exact points");
+    check (mc.undoDepth() == depthBefore,
+           "WP8 the undo takes the step back");
+
+    // --- nothing to transform --------------------------------------------
+    mc.setTransformScopeForTest (0, -1);   // the selection
+    mc.selectArcsForTest ({});
+    const int depthNow = mc.undoDepth();
+    check (! mc.transformArcsForTest (MainComponent::transformRotateLeft),
+           "WP8 the command refuses when nothing is selected");
+    check (mc.undoDepth() == depthNow,
+           "WP8 a refused command adds no undo step");
+    check (mc.arcPointsForTest (1) == before1,
+           "WP8 a refused command changes nothing");
+
+    // --- the repeat adds copies with their own ids -----------------------
+    mc.setTransformScopeForTest (1, 1);   // the group G1
+    const int arcsBefore = mc.arcCountForTest();
+    const int idBefore = mc.nextArcIdForTest();
+    check (mc.transformArcsForTest (MainComponent::transformRepeatUp),
+           "WP8 the repeat adds the copies");
+    check (mc.arcCountForTest() == arcsBefore + 2,
+           "WP8 the repeat adds two copies",
+           juce::String (mc.arcCountForTest() - arcsBefore));
+    check (mc.nextArcIdForTest() == idBefore + 2,
+           "WP8 the copies get their own ids",
+           juce::String (mc.nextArcIdForTest() - idBefore));
+
+    // --- the menu ---------------------------------------------------------
+    // The File menu and the arc context menu show the same items, so both
+    // are built by the same function.
+    {
+        juce::PopupMenu m;
+        mc.fillTransformMenu (m, 200);
+        check (m.getNumItems() > 0,
+               "WP8 the transform menu can be built",
+               juce::String (m.getNumItems()) + " items");
+    }
+}
+
+//==============================================================================
+// WP8: the performance view.
+//
+// The view is a window onto the app's transport: its switches run the app's
+// own commands, and the app pushes the state back into it. These checks
+// drive the view the way a performer would.
+void upic::runWP8PerformanceViewChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
+    mc.setSize (1280, 800);
+    const juce::String json =
+        R"({"pages":[)"
+        R"({"duration":10.0,"arcs":[{"id":1,"points":[{"t":1,"f":220},{"t":3,"f":440}]}],)"
+        R"("groups":[{"id":1,"name":"G1","arcs":[1]}]},)"
+        R"({"duration":20.0,"arcs":[{"id":2,"points":[{"t":2,"f":330},{"t":4,"f":660}]}]}]})";
+    check (mc.loadFromVar (juce::JSON::parse (json)),
+           "WP8 the performance view's fixture loads");
+
+    // --- the view opens on the current page ------------------------------
+    check (! mc.perfViewOpenForTest(),
+           "WP8 the performance view starts closed");
+    mc.openPerfViewForTest();
+    check (mc.perfViewOpenForTest(),
+           "WP8 the performance view opens");
+    check (mc.perfSelectedPageForTest() == mc.currentPageForTest(),
+           "WP8 the performance view shows the current page",
+           juce::String (mc.perfSelectedPageForTest()) + " vs "
+             + juce::String (mc.currentPageForTest()));
+
+    // --- the page selector ------------------------------------------------
+    mc.perfSetPageForTest (1);
+    check (mc.currentPageForTest() == 1,
+           "WP8 the performance view switches the page",
+           juce::String (mc.currentPageForTest()));
+    mc.perfSetPageForTest (0);
+    check (mc.currentPageForTest() == 0,
+           "WP8 the performance view switches back",
+           juce::String (mc.currentPageForTest()));
+
+    // --- the transport switches (the app's own commands) ------------------
+    const bool scrubBefore = mc.scrubAuditionForTest();
+    mc.perfSetScrubForTest (! scrubBefore);
+    check (mc.scrubAuditionForTest() == ! scrubBefore,
+           "WP8 the performance view's scrub switch is the app's scrub switch",
+           juce::String (mc.scrubAuditionForTest() ? "on" : "off"));
+    mc.perfSetReverseForTest (true);
+    check (mc.playRateForTest() < 0.0,
+           "WP8 the performance view's reverse switch is the app's reverse switch",
+           juce::String (mc.playRateForTest()));
+    mc.perfSetReverseForTest (false);
+    check (mc.playRateForTest() > 0.0,
+           "WP8 the performance view's reverse switch turns reverse off",
+           juce::String (mc.playRateForTest()));
+    const bool loopBefore = mc.loopPageForTest();
+    mc.perfSetLoopForTest (! loopBefore);
+    check (mc.loopPageForTest() == ! loopBefore,
+           "WP8 the performance view's loop switch is the app's loop switch",
+           juce::String (mc.loopPageForTest() ? "on" : "off"));
+    mc.perfSetTempoForTest (90.0);
+    check (std::abs (mc.pageTempoForTest() - 90.0) < 1e-6,
+           "WP8 the performance view's tempo is the page's tempo",
+           juce::String (mc.pageTempoForTest()));
+
+    // --- it is a view, not a second transport -----------------------------
+    check (! mc.isPlayingForTest(),
+           "WP8 the performance view does not run a transport of its own");
+
+    // --- the groups --------------------------------------------------------
+    const int depthBefore = mc.undoDepth();
+    mc.perfSetGroupMuteForTest (0, true);
+    check (mc.groupMutedAtForTest (0),
+           "WP8 the performance view mutes a group");
+    check (mc.undoDepth() == depthBefore + 1,
+           "WP8 the group's mute is one undo step",
+           juce::String (mc.undoDepth() - depthBefore));
+    mc.undo();
+    check (! mc.groupMutedAtForTest (0),
+           "WP8 the undo takes the group's mute back");
+
+    mc.perfSetGroupGainForTest (0, 0.5f);
+    check (std::abs (mc.groupGainAtForTest (0) - 0.5f) < 1.0e-5,
+           "WP8 the performance view sets a group's gain",
+           juce::String (mc.groupGainAtForTest (0)));
+    mc.perfSetGroupTransposeForTest (0, 7.0);
+    check (std::abs (mc.groupTransposeAtForTest (0) - 7.0) < 1.0e-5,
+           "WP8 the performance view sets a group's transpose",
+           juce::String (mc.groupTransposeAtForTest (0)));
+    mc.perfSetGroupSoloForTest (0, true);
+    check (mc.groupSoloAtForTest (0),
+           "WP8 the performance view solos a group");
+
+    // --- the sequence (the app's own recorder) -----------------------------
+    mc.perfRecordForTest();
+    check (mc.seqRecordingForTest(),
+           "WP8 the performance view's record switch starts the recorder");
+    mc.perfRecordForTest();
+    check (! mc.seqRecordingForTest(),
+           "WP8 the performance view's record switch stops the recorder");
+
+    // --- the live playhead trajectory --------------------------------------
+    mc.perfAddTrajectoryPointForTest (0, 1.0, 0.0);
+    mc.perfAddTrajectoryPointForTest (0, 2.0, 0.1);
+    check (mc.perfTrajectoryPointsForTest() == 2,
+           "WP8 the trajectory records the playhead's path",
+           juce::String (mc.perfTrajectoryPointsForTest()));
+    mc.perfAddTrajectoryPointForTest (0, 2.0, 0.2);
+    check (mc.perfTrajectoryPointsForTest() == 2,
+           "WP8 a hold is not a new trajectory point",
+           juce::String (mc.perfTrajectoryPointsForTest()));
+    mc.perfAddTrajectoryPointForTest (1, 5.0, 0.3);
+    check (mc.perfTrajectoryPointsForTest() == 3,
+           "WP8 the trajectory follows the playhead to another page",
+           juce::String (mc.perfTrajectoryPointsForTest()));
+
+    // --- the view closes ----------------------------------------------------
+    mc.closePerfViewForTest();
+    check (! mc.perfViewOpenForTest(),
+           "WP8 the performance view closes");
+}
+

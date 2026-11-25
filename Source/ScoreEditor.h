@@ -130,6 +130,17 @@ public:
     static constexpr int zoneMenuStickCurrent = 41;
     static constexpr int zoneMenuStickChoice  = 42;  // + index in stick choices
 
+    // WP8: the geometric transforms of the drawn curve. The app fills the
+    // menu (so the File menu and the canvas show the same items) and runs
+    // the command. The op is the item's number relative to the first id of
+    // the menu.
+    std::function<void (juce::PopupMenu& m, int firstId)> fillTransformMenu;
+    std::function<void (int op)> onTransformCommand;
+    // The arc menu's transform entry, and the first id of the transform
+    // menu it opens.
+    static constexpr int transformMenuItem = 60;
+    static constexpr int transformMenuBase = 200;
+
     // v1.33: the selftest drives the zone drag directly (a synthesised
     // mouse event needs a real MouseInputSource).
     juce::Rectangle<float> zoneRectForTest (int id) const;

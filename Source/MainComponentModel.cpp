@@ -223,6 +223,7 @@ void MainComponent::refreshBoxes()
     refreshAmpTableBox();   // WP2
     refreshGroupPanel();    // WP3
     refreshSequencePanel();  // WP4
+    refreshPerformanceView();  // WP8
     refreshModBox();         // WP5
     refreshChannelBox();     // WP6.4
 

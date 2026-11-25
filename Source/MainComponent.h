@@ -25,6 +25,7 @@
 #include "AmpTableEditor.h"
 #include "GroupPanel.h"
 #include "SequencePanel.h"
+#include "PerformanceView.h"  // WP8
 #include "ChannelPanel.h"
 #include "SampleExtractPanel.h"  // WP7
 #include "UserLibrary.h"          // WP7
@@ -226,6 +227,48 @@ public:
     int redoDepth() const { return (int) redoStack.size(); }
     void undo();
     void redo();
+
+    // --- WP8: the geometric transforms of the drawn curve ---
+    //
+    // The UPIC's page was a surface: a drawing could be turned, mirrored,
+    // aligned, stretched and repeated on it. The model's half of that lives
+    // in Source/Arc.h (the frame and the helpers); these are the commands.
+    //
+    // The scope is remembered by the app, so the choice survives from one
+    // command to the next: the selection, a group or the whole page.
+    enum class TransformScope : int { selection = 0, group = 1, page = 2 };
+
+    // The items of the transform menu. The op is the item's number relative
+    // to the first id of the menu, so the File menu and the arc context menu
+    // can share one set of items and one command.
+    enum TransformOp : int
+    {
+        transformRotateLeft = 0,
+        transformRotateRight,
+        transformMirrorTime,
+        transformMirrorPitch,
+        transformAlignStarts,
+        transformAlignEnds,
+        transformAlignPitch,
+        transformStretchTime,
+        transformCompressTime,
+        transformStretchPitch,
+        transformCompressPitch,
+        transformRepeatUp,
+        transformRepeatSame,
+        // the scope items follow the commands
+        transformScopeSelection,
+        transformScopePage,
+        transformScopeGroupBase   // the groups follow this one
+    };
+
+    // Fills the transform menu. The scope sub-menu comes first, then the
+    // commands. The caller shows the menu and hands the chosen item back to
+    // transformArcs (with the first id subtracted).
+    void fillTransformMenu (juce::PopupMenu& m, int firstId);
+    // Runs one transform. It is one undo transaction, and it says what it
+    // did (or why it refused) in the status line.
+    bool transformArcs (int op);
 
     // --- F2/F3 (2026-11-17): the wavetable and envelope libraries ---
     //
@@ -588,6 +631,30 @@ public:
     { return i >= 0 && i < (int) curPage().groups.size() ? curPage().groups[(size_t) i].gain : -1.0f; }
     double groupTransposeAtForTest (int i) const
     { return i >= 0 && i < (int) curPage().groups.size() ? curPage().groups[(size_t) i].transposeSemitones : 0.0; }
+    // --- WP8: the performance view ---
+    bool perfViewOpenForTest() const { return perfView.isVisible(); }
+    void openPerfViewForTest() { showPerformanceView(); }
+    void closePerfViewForTest() { closePerformanceView(); }
+    void perfSetPageForTest (int page) { perfView.setPageForTest (page); }
+    int perfSelectedPageForTest() const { return perfView.selectedPageForTest(); }
+    void perfSetScrubForTest (bool on) { perfView.setScrubForTest (on); }
+    void perfSetReverseForTest (bool on) { perfView.setReverseForTest (on); }
+    void perfSetLoopForTest (bool on) { perfView.setLoopForTest (on); }
+    void perfSetTempoForTest (double bpm) { perfView.setTempoForTest (bpm); }
+    void perfSetGroupMuteForTest (int i, bool on) { perfView.setGroupMuteForTest (i, on); }
+    void perfSetGroupSoloForTest (int i, bool on) { perfView.setGroupSoloForTest (i, on); }
+    void perfSetGroupGainForTest (int i, float v) { perfView.setGroupGainForTest (i, v); }
+    void perfSetGroupTransposeForTest (int i, double v) { perfView.setGroupTransposeForTest (i, v); }
+    void perfRecordForTest() { perfView.recordForTest(); }
+    void perfPlayForTest() { perfView.playForTest(); }
+    void perfLoopForTest() { perfView.loopForTest(); }
+    int perfTrajectoryPointsForTest() const { return perfView.trajectoryPointCount(); }
+    void perfAddTrajectoryPointForTest (int page, double pos, double t)
+    { perfView.addTrajectoryPoint (page, pos, t); }
+    bool scrubAuditionForTest() const { return scrubAudition; }
+    bool loopPageForTest() const { return loopPage; }
+    double pageTempoForTest() const { return curPage().tempoBpm; }
+    int currentPageForTest() const { return currentPage; }
     int arcModulatorForTest (int arcId) const
     {
         for (auto& a : curPage().arcs) if (a.id == arcId) return a.modulatorArcId;
@@ -1064,6 +1131,29 @@ public:
         syncControlsToArc (selectedArcId);
     }
     int selectedArcCountForTest() const { return (int) score.getSelectedArcs().size(); }
+
+    // --- WP8: the test hooks for the geometric transforms ---
+    void setTransformScopeForTest (int scope, int groupId)
+    {
+        transformScope = (TransformScope) scope;
+        transformGroupId = groupId;
+    }
+    int transformScopeForTest() const { return (int) transformScope; }
+    int transformGroupForTest() const { return transformGroupId; }
+    bool transformArcsForTest (int op) { return transformArcs (op); }
+    // The points of an arc (the times and the pitches, in pairs), so a check
+    // can compare them exactly.
+    std::vector<double> arcPointsForTest (int arcId) const
+    {
+        std::vector<double> out;
+        for (const auto& a : curPage().arcs)
+        {
+            if (a.id != arcId) continue;
+            for (const auto& p : a.points) { out.push_back (p.t); out.push_back (p.freq); }
+            break;
+        }
+        return out;
+    }
 
     // --- F5 (2026-11-17): the toolbar's disclosure sections --------------
     // Every group has a disclosure toggle captioned with the group's name
@@ -2186,6 +2276,8 @@ private:
     juce::TextButton audioBtn{ "Audio" };
     juce::TextButton settingsBtn{ "Settings" };
     juce::ToggleButton loopBtn{ "Loop" }, seqBtn{ "Seq" }, revPlayBtn{ "Rev" }, pressBtn{ "Pressure" }, scrubBtn{ "Scrub" };
+    // WP8: the performance view (the screen a performer works from).
+    juce::TextButton perfBtn{ "Perf" };
     // scrub audition controls
     juce::Label scrubLenLab{ {}, "Scrub len" }, scrubCrossLab{ {}, "Crossfade" }, scrubTailLab{ {}, "Release tail" };
     juce::Label scrubGrainLab{ {}, "Hold grain" };
@@ -2345,6 +2437,9 @@ private:
                      seqLoopBtn{ "Loop" }, seqEditBtn{ "View" };
     SequencePanel seqPanel;
     GroupPanel groupPanel;
+    // WP8: the performance view - one screen for the things a performer
+    // needs. It is a view over the app's transport, not a second one.
+    PerformanceView perfView;
     int selGroupId = -1;
     bool groupLevelsEditing = false;
 
@@ -2587,6 +2682,18 @@ private:
     void showSequencePanel();               // WP4: the performance sequences
     void closeSequencePanel();
     void refreshSequencePanel();
+    // --- WP8: the performance view ---
+    void showPerformanceView();
+    void closePerformanceView();
+    void refreshPerformanceView();
+    void refreshPerformanceTransport();
+    bool seqLoopIsOn() const;
+    // The group's performance attributes. The group panel and the
+    // performance view both edit the groups, so the commands live here.
+    void editGroupMuteSolo (int index, bool muted, bool solo);
+    void editGroupLevelsBegin();
+    void editGroupLevels (int index, float gain, double transpose);
+    void editGroupLevelsEnd();
     // --- WP6.4: the mixer ---
     void refreshChannelBox();
     void refreshChannelPanel();
@@ -2840,6 +2947,10 @@ private:
     void clearCurrentPage();
     // v1.31 (U3): the UPIC's pitch transformations (transpose, invert).
     void transformPage (int op);
+    // WP8: the scope the geometric transforms work on. The app remembers it,
+    // so the choice survives from one command to the next.
+    TransformScope transformScope = TransformScope::selection;
+    int transformGroupId = -1;
     // v1.31 (U4): the digitised wave page (the slot becomes a wavetable).
     bool waveFromSelectedSlot();
 

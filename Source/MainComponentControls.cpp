@@ -509,6 +509,15 @@ void MainComponent::buildFrequencyControls()
     addChildComponent (seqPanel);
     seqPanel.onClose = [this]{ closeSequencePanel(); };
 
+    // WP8: the performance view.
+    addAndMakeVisible (perfBtn);
+    perfBtn.setName ("perfBtn");
+    perfBtn.setTooltip ("The performance view: the page, the groups, the\n"
+                        "transport switches and the playhead's path");
+    perfBtn.onClick = [this]{ showPerformanceView(); };
+    addChildComponent (perfView);
+    perfView.onClose = [this]{ closePerformanceView(); };
+
     // WP7: the panel's own recorder and editing commands stay in the panel.
     // The shared manager is only the Piece/User bridge.
     seqPanel.library.onPublish = [this] { return libraryPublishSequence(); };
@@ -1105,49 +1114,19 @@ void MainComponent::showGroupPanel()
     };
     groupPanel.onMuteSolo = [this] (int i, bool muted, bool solo)
     {
-        if (i < 0 || i >= (int) curPage().groups.size()) return;
-        beginEdit ("Group mute/solo");
-        {
-            const juce::ScopedLock l (dataLock);
-            auto& g = curPage().groups[(size_t) i];
-            g.muted = muted;
-            g.solo = solo;
-        }
-        markModelChanged();
-        endEdit();
-        publishModelSnapshot();
-        refreshGroupPanel();
-        score.repaint();
-        flash (muted ? "Group muted" : (solo ? "Group soloed" : "Group unsilenced"));
+        editGroupMuteSolo (i, muted, solo);
     };
     groupPanel.onLevelsBegin = [this] (int)
     {
-        if (! groupLevelsEditing) { beginEdit ("Group levels"); groupLevelsEditing = true; }
+        editGroupLevelsBegin();
     };
     groupPanel.onLevels = [this] (int i, float gain, double transpose)
     {
-        if (i < 0 || i >= (int) curPage().groups.size()) return;
-        const bool standalone = ! groupLevelsEditing;
-        if (standalone) beginEdit ("Group levels");
-        {
-            const juce::ScopedLock l (dataLock);
-            auto& g = curPage().groups[(size_t) i];
-            g.gain = juce::jlimit (0.0f, 2.0f, gain);
-            g.transposeSemitones = juce::jlimit (-48.0, 48.0, transpose);
-        }
-        markModelChanged();
-        if (standalone) endEdit();
-        publishModelSnapshot();
-        score.repaint();
+        editGroupLevels (i, gain, transpose);
     };
     groupPanel.onLevelsEnd = [this] (int)
     {
-        if (groupLevelsEditing)
-        {
-            groupLevelsEditing = false;
-            endEdit();
-            refreshGroupPanel();
-        }
+        editGroupLevelsEnd();
     };
     groupPanel.onOverride = [this] (int i, int kind, int id)
     {
@@ -1253,6 +1232,161 @@ void MainComponent::closeGroupPanel()
     grabKeyboardFocus();
 }
 
+// WP8: the group's performance attributes. The group panel and the
+// performance view both edit the groups, so the commands live here and both
+// hosts call them - there is one implementation of each.
+void MainComponent::editGroupMuteSolo (int index, bool muted, bool solo)
+{
+    if (index < 0 || index >= (int) curPage().groups.size()) return;
+    beginEdit ("Group mute/solo");
+    {
+        const juce::ScopedLock l (dataLock);
+        auto& g = curPage().groups[(size_t) index];
+        g.muted = muted;
+        g.solo = solo;
+    }
+    markModelChanged();
+    endEdit();
+    publishModelSnapshot();
+    refreshGroupPanel();
+    score.repaint();
+    flash (muted ? "Group muted" : (solo ? "Group soloed" : "Group unsilenced"));
+}
+
+void MainComponent::editGroupLevelsBegin()
+{
+    if (! groupLevelsEditing) { beginEdit ("Group levels"); groupLevelsEditing = true; }
+}
+
+void MainComponent::editGroupLevels (int index, float gain, double transpose)
+{
+    if (index < 0 || index >= (int) curPage().groups.size()) return;
+    // A drag is one undo transaction: the gesture opens it and closes it.
+    const bool standalone = ! groupLevelsEditing;
+    if (standalone) beginEdit ("Group levels");
+    {
+        const juce::ScopedLock l (dataLock);
+        auto& g = curPage().groups[(size_t) index];
+        g.gain = juce::jlimit (0.0f, 2.0f, gain);
+        g.transposeSemitones = juce::jlimit (-48.0, 48.0, transpose);
+    }
+    markModelChanged();
+    if (standalone) endEdit();
+    publishModelSnapshot();
+    score.repaint();
+}
+
+void MainComponent::editGroupLevelsEnd()
+{
+    if (groupLevelsEditing)
+    {
+        groupLevelsEditing = false;
+        endEdit();
+        refreshGroupPanel();
+    }
+}
+
+//---------------- WP8: the performance view ----------------
+
+void MainComponent::showPerformanceView()
+{
+    // The view is a window onto the app's transport: every switch here
+    // calls the app's own command (the toolbar's switch runs the very same
+    // code), so there is one transport and one command per action.
+    perfView.onPageChanged = [this] (int page)
+    {
+        // the app's own page selector does the work
+        if (page >= 0 && page < (int) pages.size())
+            pageBox.setSelectedId (page + 1, juce::sendNotificationSync);
+    };
+    perfView.onScrubToggle = [this] (bool on)
+    {
+        scrubBtn.setToggleState (on, juce::sendNotificationSync);
+    };
+    perfView.onReverseToggle = [this] (bool on)
+    {
+        revPlayBtn.setToggleState (on, juce::sendNotificationSync);
+    };
+    perfView.onLoopToggle = [this] (bool on)
+    {
+        loopBtn.setToggleState (on, juce::sendNotificationSync);
+    };
+    perfView.onTempoChange = [this] (double bpm)
+    {
+        tempoSlider.setValue (bpm, juce::sendNotificationSync);
+    };
+    perfView.onGroupMuteSolo = [this] (int i, bool muted, bool solo)
+    {
+        editGroupMuteSolo (i, muted, solo);
+    };
+    perfView.onGroupLevelsBegin = [this] (int) { editGroupLevelsBegin(); };
+    perfView.onGroupLevels = [this] (int i, float gain, double transpose)
+    {
+        editGroupLevels (i, gain, transpose);
+    };
+    perfView.onGroupLevelsEnd = [this] (int) { editGroupLevelsEnd(); };
+    perfView.onSequenceRecord = [this]
+    {
+        if (seqRecording) stopSequenceRecording(); else startSequenceRecording();
+    };
+    perfView.onSequencePlay = [this]
+    {
+        if (seqPlayActive.load()) stopSequencePlayback(); else startSequencePlayback();
+    };
+    perfView.onSequenceLoop = [this] { toggleSequenceLoop(); };
+    perfView.onClose = [this] { closePerformanceView(); };
+
+    perfView.setBounds (getLocalBounds());
+    perfView.open();
+    refreshPerformanceView();
+}
+
+void MainComponent::closePerformanceView()
+{
+    perfView.setVisible (false);
+    grabKeyboardFocus();
+}
+
+void MainComponent::refreshPerformanceView()
+{
+    if (! perfView.isVisible()) return;
+
+    std::vector<juce::String> names;
+    std::vector<double> durations;
+    std::vector<PerformanceView::GroupRow> rows;
+    {
+        const juce::ScopedLock l (dataLock);
+        for (size_t i = 0; i < pages.size(); ++i)
+        {
+            names.push_back ("Page " + juce::String ((int) i + 1));
+            durations.push_back (pages[i].durationSec);
+        }
+        for (const auto& g : curPage().groups)
+        {
+            PerformanceView::GroupRow r;
+            r.name = g.name;
+            r.muted = g.muted;
+            r.solo = g.solo;
+            r.gain = g.gain;
+            r.transpose = g.transposeSemitones;
+            rows.push_back (r);
+        }
+    }
+    perfView.setPages (names, durations, currentPage);
+    perfView.setGroups (rows);
+    perfView.setSequenceLoop (seqLoopIsOn());
+    refreshPerformanceTransport();
+}
+
+void MainComponent::refreshPerformanceTransport()
+{
+    if (! perfView.isVisible()) return;
+    perfView.setTransportState (transportActive(), seqRecording, seqPlayActive.load(),
+                                loopPage, scrubAudition,
+                                playRate.load (std::memory_order_relaxed) < 0.0,
+                                curPage().tempoBpm, displayPlayhead());
+}
+
 //---------------- WP4: the performance sequences ----------------
 
 int MainComponent::sequenceIndexOfId (int id) const
@@ -1260,6 +1394,12 @@ int MainComponent::sequenceIndexOfId (int id) const
     for (int i = 0; i < (int) sequences.size(); ++i)
         if (sequences[(size_t) i].id == id) return i;
     return -1;
+}
+
+bool MainComponent::seqLoopIsOn() const
+{
+    const int idx = sequenceIndexOfId (selSeqId);
+    return idx >= 0 && sequences[(size_t) idx].loop;
 }
 
 void MainComponent::refreshSequencePanel()
