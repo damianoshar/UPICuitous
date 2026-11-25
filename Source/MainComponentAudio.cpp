@@ -518,6 +518,10 @@ void MainComponent::startPlayback()
     if (state == TransportState::starting || state == TransportState::playing)
         return;
 
+    // An accepted start opens a new run: a stop message still queued for the
+    // previous run is stale and is dropped by the run check in drain.
+    transportRun.fetch_add (1, std::memory_order_acq_rel);
+
     // WP7: the score and the preview routes are separate. Play ends both
     // the ordinary scrub/freeze request and the extraction preview; neither
     // may resume with stale transport state after Stop.
@@ -1520,7 +1524,8 @@ void MainComponent::applyTransportGain (float* SL, float* SR, int n, double sr,
             // message goes through the preallocated mailbox - the old path
             // queued a std::function through callAsync, which allocates a
             // message on the audio thread.
-            postAudioMessage (AudioMessageKind::stopPlayback);
+            postAudioMessage (AudioMessageKind::stopPlayback,
+                                          (int) transportRun.load (std::memory_order_relaxed));
         }
     }
 }
@@ -1701,7 +1706,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                         playheadAtEnd.store(false, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
                         // M6: the preallocated mailbox (no allocation here)
-                        postAudioMessage (AudioMessageKind::stopPlayback);
+                        postAudioMessage (AudioMessageKind::stopPlayback,
+                                          (int) transportRun.load (std::memory_order_relaxed));
                         return;
                     }
                 }
@@ -1732,7 +1738,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                     playheadAtEnd.store(false, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
                     // M6: the preallocated mailbox (no allocation here)
-                    postAudioMessage (AudioMessageKind::stopPlayback);
+                    postAudioMessage (AudioMessageKind::stopPlayback,
+                                          (int) transportRun.load (std::memory_order_relaxed));
                     return;
                 }
             }
@@ -1753,7 +1760,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                         playheadAtEnd.store(true, std::memory_order_relaxed);
                         engine.reset(); publishPlayhead();
                         // M6: the preallocated mailbox (no allocation here)
-                        postAudioMessage (AudioMessageKind::stopPlayback);
+                        postAudioMessage (AudioMessageKind::stopPlayback,
+                                          (int) transportRun.load (std::memory_order_relaxed));
                         return;
                     }
                 }
@@ -1773,7 +1781,8 @@ void MainComponent::renderScoreBlock(const ModelSnapshot& snap, float* SL, float
                     playheadAtEnd.store(true, std::memory_order_relaxed);
                     engine.reset(); publishPlayhead();
                     // M6: the preallocated mailbox (no allocation here)
-                    postAudioMessage (AudioMessageKind::stopPlayback);
+                    postAudioMessage (AudioMessageKind::stopPlayback,
+                                          (int) transportRun.load (std::memory_order_relaxed));
                     return;
                 }
             }

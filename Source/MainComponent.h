@@ -1835,7 +1835,13 @@ private:
             switch (slot.kind)
             {
                 case AudioMessageKind::stopPlayback:
-                    stopPlayback (true);
+                    // The request belongs to the transport run that raised it. If the user
+                    // has started a new run since, the message is stale: applying it
+                    // would stop playback that only just began. `generation` carries
+                    // the run id for this kind.
+                    if (slot.generation
+                        == transportRun.load (std::memory_order_relaxed))
+                        stopPlayback (true);
                     break;
 
                 case AudioMessageKind::pageChanged:
@@ -1980,6 +1986,10 @@ private:
     // The job that is running and the thread itself (one job at a time).
     upic::JobRunner jobs;
     std::atomic<int> pageEpoch { 0 };               // message -> audio
+
+    // audio <-> message: the transport run, so a queued stop from an earlier
+    // run cannot stop a run that began after it was posted.
+    std::atomic<std::uint32_t> transportRun { 0 };
 
     // audio -> message: packed (epoch << 32) | (page + 1); 0 = nothing pending.
     // The audio thread must not allocate or lock, so the page change travels here
@@ -2722,12 +2732,6 @@ public:
     // returns the stored provenance hash. Needed to prove whether an apply really
     // rewrote the geometry.
     uint64_t guerreroArcLiveHashForTest (int arcId) const;
-    // Transport-run identity, and a way to inject a stop request for a chosen
-    // run. The second simulates the ordering a real race cannot be made to
-    // produce deterministically: a request from an OLDER run arriving after the
-    // session has already advanced.
-    uint32_t transportSessionForTest() const { return transportSession.load (std::memory_order_relaxed); }
-    void postStopForRunForTest (uint32_t run);
     bool guerreroArcHasProvenanceForTest (int arcId) const;
 
     // Test hook: replace an arc's stored recipe WITHOUT touching its geometry or
