@@ -3015,6 +3015,48 @@ void upic::runChannelUiChecks (upic::SelfTest& t)
     mc.closeChannelPanelForTest();
     check (! mc.channelPanelOpenForTest(), "mixer ui: the panel closes");
 
+    // --- audit L3: the mixer list scrolls ---------------------------------
+    // The list was painted row by row with no scroll bar, so the channels
+    // below the fold could not be reached at all - they could not even be
+    // selected. A small window makes the list shorter than the bank.
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        // a short window: the list cannot show the whole bank
+        mc.setSize (900, 420);
+        juce::String json = R"({"currentPage":0,"channels":[)";
+        for (int i = 1; i <= upic::limits::kMaxChannels; ++i)
+            json += juce::String (i > 1 ? "," : "") + R"({"id":)" + juce::String (i)
+                 + R"(,"name":"C)" + juce::String (i) + R"("})";
+        json += R"(],"pages":[{"duration":2.0,"arcs":[]}]})";
+        check (mc.loadFromVar (juce::JSON::parse (json)),
+               "L3 the piece with a full mixer bank loads");
+        mc.openChannelPanelForTest();
+        check (mc.channelPanelOpenForTest(), "L3 the mixer opens");
+
+        const int rows = mc.channelListVisibleRowsForTest();
+        check (rows > 0 && rows < upic::limits::kMaxChannels,
+               "L3 the list is shorter than the bank in a small window",
+               juce::String (rows) + " of " + juce::String (upic::limits::kMaxChannels)
+                 + " rows");
+
+        // the last channel is reachable: scrolling brings it into sight
+        mc.channelListScrollForTest (upic::limits::kMaxChannels - 1);
+        check (mc.channelListScrollForTest() == upic::limits::kMaxChannels - rows,
+               "L3 the list scrolls to the last channel",
+               "scroll " + juce::String (mc.channelListScrollForTest()));
+        check (mc.channelListScrollForTest() + rows >= upic::limits::kMaxChannels,
+               "L3 the last channel is visible after the scroll",
+               "scroll " + juce::String (mc.channelListScrollForTest())
+                 + " + " + juce::String (rows) + " rows");
+
+        // the scroll is bounded: it cannot go past the end of the bank
+        mc.channelListScrollForTest (999);
+        check (mc.channelListScrollForTest() == upic::limits::kMaxChannels - rows,
+               "L3 the scroll stops at the end of the bank",
+               "scroll " + juce::String (mc.channelListScrollForTest()));
+    }
+
     // --- audit M4: the toolbar's combos follow the selected arc ----------
     // The Ch / Mod / Amp combos were never refreshed when the selection
     // changed, so they kept showing the PREVIOUS arc's values - the

@@ -37,7 +37,7 @@ endif()
 juce_add_gui_app(UPICuitous
     VERSION ${PROJECT_VERSION}
     COMPANY_NAME "UPICuitous"
-    # NB: no hyphens � this doubles as the Android applicationId namespace
+    # NB: no hyphens - this doubles as the Android applicationId namespace
     BUNDLE_ID "org.upicuitous"
     PRODUCT_NAME "UPICuitous"
     ICON_BIG ""

@@ -495,6 +495,13 @@ public:
     void channelCurveForTest (const std::vector<upic::EnvPoint>& pts) { if (channelPanel != nullptr) channelPanel->curveForTest (pts); }
     void channelRenameForTest (const juce::String& n) { if (channelPanel != nullptr) channelPanel->renameForTest (n); }
     void channelAssignForTest (int id) { setChannelOnSelection (id); }
+    // L3: the mixer list's scroll position (the first visible row).
+    int channelListScrollForTest() const
+    { return channelPanel != nullptr ? channelPanel->listScrollForTest() : 0; }
+    int channelListVisibleRowsForTest() const
+    { return channelPanel != nullptr ? channelPanel->visibleRowsForTest() : 0; }
+    void channelListScrollForTest (int row)
+    { if (channelPanel != nullptr) channelPanel->scrollListToForTest (row); }
     // --- end WP6.4 ---
     int arcChannelForTest (int arcId) const
     {

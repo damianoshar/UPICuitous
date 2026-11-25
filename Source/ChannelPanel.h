@@ -3,18 +3,16 @@
 #include "UpicModel.h"
 
 //==============================================================================
-// WP6.4: the mixer panel (minimal milestone: list, level, mute, solo,
-// rename, new/delete).
-//
-// NOTE FOR THE PARALLEL WP7 WORK: this file is owned by WP6. WP7 (asset
-// libraries / sample extraction) should add its own components in its own
-// headers and its host wiring in the WP7-marked blocks, not here.
+// WP6.4: the mixer panel. The channel list (with the name, the level, the
+// mute and the solo), the channel's gain curve across the page, the curve
+// presets and the new / delete / close commands.
 //
 // It is an in-app overlay for the same reason the other editors are: Android
 // has no closable dialog windows. Channel 0 is Main and is implicit, so a
 // piece that never opens this panel keeps the legacy audio path.
 //==============================================================================
-class ChannelPanel : public juce::Component
+class ChannelPanel : public juce::Component,
+                    private juce::ScrollBar::Listener
 {
 public:
     std::function<void (int index)> onSelectIndex;
@@ -110,6 +108,22 @@ public:
         riseBtn.onClick = [this]{ commitPreset (1); };
         fallBtn.onClick = [this]{ commitPreset (2); };
 
+        // L3: the channel list scrolls. The piece format allows 16 mixer
+        // channels and the list is shorter than that in a small window, so
+        // without a scroll bar the channels below the fold could not be
+        // reached at all - they could not even be selected.
+        listScrollBar.setName ("chScrollBar");
+        listScrollBar.setColour (juce::ScrollBar::backgroundColourId,
+                                 juce::Colour (0xff14141a));
+        listScrollBar.setColour (juce::ScrollBar::thumbColourId,
+                                 juce::Colour (0xff5a6a8a));
+        listScrollBar.setColour (juce::ScrollBar::trackColourId,
+                                 juce::Colour (0xff24242c));
+        listScrollBar.setSingleStepSize (1.0);
+        listScrollBar.setAutoHide (true);
+        listScrollBar.addListener (this);
+        addAndMakeVisible (listScrollBar);
+
         setVisible (false);
     }
 
@@ -142,6 +156,12 @@ public:
             soloBtn.setToggleState (c.solo, juce::dontSendNotification);
             gainSl.setValue (c.gain, juce::dontSendNotification);
         }
+        // L3: the list's scroll position follows the bank (a shorter bank
+        // cannot stay scrolled past its end) and the selected channel stays
+        // in sight.
+        listScroll = juce::jlimit (0, maxListScroll(), listScroll);
+        ensureSelectionVisible();
+        updateListScrollBar();
         repaint();
     }
 
@@ -158,12 +178,43 @@ public:
         return juce::Rectangle<int> (juce::jmin (760, r.getWidth()),
                                      juce::jmin (500, r.getHeight())).withCentre (r.getCentre());
     }
-    juce::Rectangle<int> listRect() const
+    // The channel column: the list, then the New / Delete row under it.
+    juce::Rectangle<int> listColumn() const
     {
         auto inner = cardRect().reduced (18, 12);
         inner.removeFromTop (titleH);
         inner.removeFromBottom (bottomH);
         return inner.removeFromLeft (listW);
+    }
+
+    // How many rows fit in the list (the paint starts the rows 2 px down).
+    int visibleRows() const
+    {
+        auto l = listColumn();
+        l.removeFromBottom (listButtonH + 4);
+        return juce::jmax (1, (l.getHeight() - 2) / rowH);
+    }
+
+    // L3: does the list need a scroll bar?
+    bool listOverflows() const { return (int) shown.size() > visibleRows(); }
+    int maxListScroll() const { return juce::jmax (0, (int) shown.size() - visibleRows()); }
+
+    // The rows' area. The scroll bar takes a slice off its right edge when
+    // the list overflows.
+    juce::Rectangle<int> listRect() const
+    {
+        auto l = listColumn();
+        l.removeFromBottom (listButtonH + 4);
+        if (listOverflows()) l.removeFromRight (scrollW);
+        return l;
+    }
+
+    // The scroll bar's own area (the right edge of the channel column).
+    juce::Rectangle<int> scrollBarRect() const
+    {
+        auto l = listColumn();
+        l.removeFromBottom (listButtonH + 4);
+        return l.removeFromRight (scrollW);
     }
 
     juce::Rectangle<float> plotRect() const
@@ -195,9 +246,11 @@ public:
         g.fillRect (list);
         g.setColour (juce::Colour (0xff34343f));
         g.drawRect (list, 1);
-        for (int i = 0; i < (int) shown.size(); ++i)
+        for (int i = listScroll; i < (int) shown.size(); ++i)
         {
-            auto row = juce::Rectangle<int> (list.getX() + 2, list.getY() + 2 + i * rowH,
+            // L3: the first visible row is the one the list is scrolled to.
+            auto row = juce::Rectangle<int> (list.getX() + 2,
+                                             list.getY() + 2 + (i - listScroll) * rowH,
                                              list.getWidth() - 4, rowH);
             if (! list.contains (row)) break;
             const auto& c = shown[(size_t) i];
@@ -259,19 +312,26 @@ public:
         auto inner = cardRect().reduced (18, 12);
         inner.removeFromTop (titleH);
         auto bottom = inner.removeFromBottom (bottomH).reduced (0, 4);
-        auto left = inner.removeFromLeft (listW);
-        left.removeFromTop ((int) shown.size() * rowH + 4);
-        auto lrow = left.removeFromTop (28);
+        inner.removeFromLeft (listW + 16); // the channel column and the gap
+
+        // L3: the New / Delete row sits at the BOTTOM of the channel column,
+        // so it stays where it is however many channels the bank has (it
+        // used to follow the last row and could leave the card).
+        auto lrow = listColumn().removeFromBottom (listButtonH);
         newBtn.setBounds (lrow.removeFromLeft (58));
         lrow.removeFromLeft (4);
         delBtn.setBounds (lrow.removeFromLeft (54));
+
+        // the scroll bar (it hides itself when the list fits)
+        listScroll = juce::jlimit (0, maxListScroll(), listScroll);
+        listScrollBar.setBounds (scrollBarRect());
+        updateListScrollBar();
 
         closeBtn.setBounds (bottom.removeFromRight (64));
         bottom.removeFromRight (8);
         renameBtn.setBounds (bottom.removeFromRight (66));
         nameEd.setBounds (bottom.removeFromLeft (juce::jmin (180, bottom.getWidth() - 80)));
 
-        inner.removeFromLeft (16);
         auto gainRow = inner.removeFromTop (28);
         gainLab.setBounds (gainRow.removeFromLeft (44));
         gainSl.setBounds (gainRow.removeFromLeft (juce::jmin (260, gainRow.getWidth())));
@@ -293,7 +353,11 @@ public:
         auto list = listRect();
         if (list.contains (e.getPosition()))
         {
-            const int i = (e.getPosition().y - list.getY() - 2) / rowH;
+            // L3: the row under the pointer is counted from the list's
+            // scroll position, so a scrolled list selects the row that is
+            // really there.
+            const int i = listScroll
+                        + (e.getPosition().y - list.getY() - 2) / rowH;
             if (i >= 0 && i < (int) shown.size())
             {
                 sel = i;
@@ -309,6 +373,19 @@ public:
             pushCurvePoint (pointAt (e.position));
             repaint();
         }
+    }
+
+    // L3: the wheel scrolls the list. JUCE reports a wheel notch as a
+    // fraction (about 0.23 on Windows), so the deltas are accumulated.
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& d) override
+    {
+        if (! listOverflows()) return;
+        if (! listRect().contains (e.getPosition())) return;
+        wheelDelta += d.deltaY * 4.5f;
+        const int steps = (int) wheelDelta;
+        if (steps == 0) return;
+        wheelDelta -= (float) steps;
+        scrollListTo (listScroll - steps);
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
@@ -365,8 +442,13 @@ public:
         if (i < 0 || i >= (int) shown.size()) return;
         sel = i;
         if (onSelectIndex) onSelectIndex (i);
+        ensureSelectionVisible();
         repaint();
     }
+    // L3: the selftest checks that the list really scrolls.
+    int listScrollForTest() const { return listScroll; }
+    int visibleRowsForTest() const { return visibleRows(); }
+    void scrollListToForTest (int row) { scrollListTo (row); }
     void muteForTest (bool on) { muteBtn.setToggleState (on, juce::sendNotificationSync); }
     void soloForTest (bool on) { soloBtn.setToggleState (on, juce::sendNotificationSync); }
     void gainForTest (float v) { gainSl.setValue (v, juce::sendNotificationSync); }
@@ -378,9 +460,54 @@ private:
     static constexpr int listW = 220;
     static constexpr int rowH = 22;
     static constexpr int presetH = 30;
+    // L3: the New / Delete row under the channel list, and the scroll bar's
+    // width.
+    static constexpr int listButtonH = 28;
+    static constexpr int scrollW = 12;
     // The piece format's cap for an envelope's points. The drawn channel
     // curve is an envelope, so it obeys the same cap.
     static constexpr int maxCurvePoints = upic::limits::kMaxPointsPerEnvelope;
+
+    // L3: the scroll bar and the list's scroll position (the first visible
+    // row).
+    juce::ScrollBar listScrollBar { true };
+    int listScroll = 0;
+    float wheelDelta = 0.0f;   // the wheel's not-yet-applied fraction
+
+    // L3: the scroll bar moved - the list follows it.
+    void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override
+    {
+        listScroll = juce::jlimit (0, maxListScroll(), (int) newRangeStart);
+        repaint();
+    }
+
+    // Move the list's scroll position (and the scroll bar with it).
+    void scrollListTo (int row)
+    {
+        const int target = juce::jlimit (0, maxListScroll(), row);
+        if (target == listScroll) return;
+        listScroll = target;
+        updateListScrollBar();
+        repaint();
+    }
+
+    // Keep the selected channel in sight.
+    void ensureSelectionVisible()
+    {
+        if (sel < 0) return;
+        if (sel < listScroll) scrollListTo (sel);
+        else if (sel >= listScroll + visibleRows()) scrollListTo (sel - visibleRows() + 1);
+    }
+
+    // The scroll bar's range follows the bank and the panel's height.
+    void updateListScrollBar()
+    {
+        listScrollBar.setRangeLimits (0.0, (double) shown.size());
+        listScrollBar.setCurrentRange ((double) listScroll,
+                                       (double) visibleRows(),
+                                       juce::dontSendNotification);
+        listScrollBar.setVisible (true);   // it hides itself when it fits
+    }
 
     void commitRename()
     {
