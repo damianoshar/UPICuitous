@@ -67,7 +67,13 @@ namespace upic
         constexpr int kMaxArcsPerPage = 2024;
         constexpr int kMaxPointsPerArc = 1000;
         constexpr int kMaxWaveforms = 200;
-        constexpr int kMaxEnvelopes = 50;
+        // WP10: the envelope bank grows from 50 to 128. The bank is a
+        // list, not a fixed table, so the cost of the growth is the
+        // lookup: the engine finds an envelope by a linear scan, and the
+        // selftest's sweep measures the deepest scan against the
+        // shallowest one before the lift is allowed (the benchmark next to
+        // the worst-case page).
+        constexpr int kMaxEnvelopes = 128;
         constexpr int kMaxPointsPerEnvelope = 1000;
         // WP2: the amplitude conversion tables. The historical UPIC offered a
         // handful; sixteen is generous and keeps the bank one screen tall.

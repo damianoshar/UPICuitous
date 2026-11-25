@@ -1491,7 +1491,7 @@ void upic::runLibraryModelChecks (upic::SelfTest& t)
         const bool newEnv = edit ("New envelope",
                                   [&mc]{ return mc.libraryNewEnvelope(); });
         check (! newEnv && mc.envelopeCountForTest() == upic::limits::kMaxEnvelopes
-               && mc.flashMessageForTest().contains ("50"),
+               && mc.flashMessageForTest().contains (juce::String (upic::limits::kMaxEnvelopes)),
                "library: New refuses at the envelope cap and explains",
                mc.flashMessageForTest());
         const bool dupEnv = edit ("Duplicate the envelope",
@@ -1513,7 +1513,7 @@ void upic::runLibraryModelChecks (upic::SelfTest& t)
         const bool uniqueEnv = edit ("Make the envelope unique",
                                      [&mc]{ return mc.libraryMakeEnvelopeUnique(); });
         check (! uniqueEnv && mc.envelopeCountForTest() == upic::limits::kMaxEnvelopes
-               && mc.flashMessageForTest().contains ("50"),
+               && mc.flashMessageForTest().contains (juce::String (upic::limits::kMaxEnvelopes)),
                "library: Make unique refuses at the envelope cap",
                mc.flashMessageForTest());
 
@@ -4175,6 +4175,178 @@ void upic::runWP9WorkspaceChecks (upic::SelfTest& t)
                mc4.flashMessageForTest());
         check (! mc4.workspaceOpenForTest(),
                "WP9 the refused workspace stays closed");
+    }
+}
+
+//==============================================================================
+// WP10 (part 1): the envelope bank grows from 50 to 128.
+//
+// The cap is only the first half of the lift. The bank has to survive the
+// piece format (a piece that carries 128 envelopes loads all of them, and
+// one that carries more is truncated with a message), the app's commands
+// have to refuse the 129th with a clear reason and without leaving an undo
+// step behind, and the worst-case bank - 128 envelopes of 1000 points each
+// - has to come back from the JSON round trip with every point intact.
+//
+// The realtime cost of the bigger bank is measured in the benchmark next to
+// the worst-case page (Source/SelfTestAudio.cpp): the engine finds an
+// envelope by a linear scan, so the deepest scan is measured against the
+// shallowest one.
+void upic::runWP10EnvelopeChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // --- the cap ------------------------------------------------------------
+    check (upic::limits::kMaxEnvelopes == 128,
+           "WP10 the envelope bank holds 128 envelopes",
+           juce::String (upic::limits::kMaxEnvelopes));
+
+    // A piece with a full bank: 128 envelopes and one page that uses the
+    // first one.
+    auto makePiece = [] (int envCount)
+    {
+        upic::PieceModel m;
+        for (int i = 0; i < envCount; ++i)
+        {
+            upic::Envelope e (i, "Env " + juce::String (i), upic::paletteColour (i));
+            e.presetFlat();
+            m.envelopes.push_back (e);
+        }
+        upic::Page pg;
+        pg.durationSec = 4.0;
+        pg.nextArcId = 2;
+        upic::Arc a;
+        a.id = 1; a.mode = 0; a.waveformId = 0; a.envelopeId = 0;
+        a.intensity = 0.8f;
+        a.points = { { 0.0, 220.0 }, { 2.0, 440.0 } };
+        pg.arcs.push_back (a);
+        m.pages.push_back (pg);
+        return m;
+    };
+
+    // --- a piece at the cap -------------------------------------------------
+    {
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+        check (mc.loadFromVar (upic::pieceToVar (makePiece (upic::limits::kMaxEnvelopes))),
+               "WP10 the piece with 128 envelopes loads");
+        check (mc.envelopeCountForTest() == upic::limits::kMaxEnvelopes,
+               "WP10 the whole bank is kept",
+               juce::String (mc.envelopeCountForTest()));
+        check (mc.libraryEnvelopeItemCountForTest() == upic::limits::kMaxEnvelopes,
+               "WP10 the library lists the whole bank",
+               juce::String (mc.libraryEnvelopeItemCountForTest()));
+        check (mc.envelopeIdForTest (upic::limits::kMaxEnvelopes - 1)
+                   == upic::limits::kMaxEnvelopes - 1
+               && mc.envelopeNameForTest (upic::limits::kMaxEnvelopes - 1)
+                   == "Env " + juce::String (upic::limits::kMaxEnvelopes - 1),
+               "WP10 the last envelope of the bank is the last one",
+               mc.envelopeNameForTest (upic::limits::kMaxEnvelopes - 1));
+
+        // --- the list and the layout ----------------------------------------
+        // The bank is shown in the envelope editor's selector, which is the
+        // library manager's own list (it carries the names and the use
+        // counts). The whole bank has to fit in it, and the row has to
+        // survive a window that is too small for it.
+        {
+            std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+                [&findByName](juce::Component& c, const juce::String& n) -> juce::Component* {
+                    if (c.getName() == n) return &c;
+                    for (int i = 0; i < c.getNumChildComponents(); ++i)
+                        if (auto* r = findByName (*c.getChildComponent (i), n)) return r;
+                    return nullptr;
+                };
+            auto* selector = dynamic_cast<juce::ComboBox*> (findByName (mc, "envEditBox"));
+            auto* row = findByName (mc, "envLib");
+            check (selector != nullptr && selector->getNumItems() == upic::limits::kMaxEnvelopes,
+                   "WP10 the envelope list holds the whole bank",
+                   selector != nullptr ? juce::String (selector->getNumItems())
+                                       : juce::String ("no list"));
+            mc.setSize (900, 600);
+            check (selector != nullptr && row != nullptr
+                   && selector->getWidth() > 0
+                   && row->getLocalBounds().contains (selector->getBounds()),
+                   "WP10 the envelope list still has a place in the layout",
+                   selector != nullptr ? selector->getBounds().toString() : juce::String ("no list"));
+        }
+
+        // --- the 129th is refused and says so -------------------------------
+        const int depth0 = mc.undoDepth();
+        mc.beginEdit ("New envelope");
+        const bool added = mc.libraryNewEnvelope();
+        mc.endEdit();
+        check (! added && mc.envelopeCountForTest() == upic::limits::kMaxEnvelopes,
+               "WP10 the 129th envelope is refused",
+               juce::String (mc.envelopeCountForTest()));
+        check (mc.flashMessageForTest().contains (juce::String (upic::limits::kMaxEnvelopes)),
+               "WP10 the refusal names the cap",
+               mc.flashMessageForTest());
+        check (mc.undoDepth() == depth0,
+               "WP10 a refused envelope leaves no undo step",
+               juce::String (mc.undoDepth()) + " vs " + juce::String (depth0));
+
+        // --- a piece over the cap is truncated and says so ------------------
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
+        mc2.setSize (1280, 800);
+        check (mc2.loadFromVar (upic::pieceToVar (makePiece (upic::limits::kMaxEnvelopes + 1))),
+               "WP10 the piece with 129 envelopes loads");
+        check (mc2.envelopeCountForTest() == upic::limits::kMaxEnvelopes,
+               "WP10 the 129th envelope is dropped",
+               juce::String (mc2.envelopeCountForTest()));
+        check (mc2.flashMessageForTest().contains ("1 envelope"),
+               "WP10 the dropped envelope is reported",
+               mc2.flashMessageForTest());
+    }
+
+    // --- the worst-case bank survives the round trip -----------------------
+    {
+        upic::PieceModel m;
+        for (int i = 0; i < upic::limits::kMaxEnvelopes; ++i)
+        {
+            upic::Envelope e (i, "Env " + juce::String (i), upic::paletteColour (i));
+            e.points.clear();
+            for (int k = 0; k < upic::limits::kMaxPointsPerEnvelope; ++k)
+                e.points.push_back ({ (float) k / (float) (upic::limits::kMaxPointsPerEnvelope - 1),
+                                      (float) (k % 64) / 64.0f });
+            m.envelopes.push_back (e);
+        }
+        upic::Page pg;
+        pg.durationSec = 4.0;
+        pg.nextArcId = 2;
+        upic::Arc a;
+        a.id = 1; a.mode = 0; a.waveformId = 0; a.envelopeId = 0;
+        a.intensity = 0.8f;
+        a.points = { { 0.0, 220.0 }, { 2.0, 440.0 } };
+        pg.arcs.push_back (a);
+        m.pages.push_back (pg);
+
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+        check (mc.loadFromVar (upic::pieceToVar (m)),
+               "WP10 the worst-case bank loads");
+        check (mc.envelopeCountForTest() == upic::limits::kMaxEnvelopes,
+               "WP10 the worst-case bank keeps every envelope",
+               juce::String (mc.envelopeCountForTest()));
+        const auto first = mc.envelopePointsForTest (0);
+        const auto last = mc.envelopePointsForTest (upic::limits::kMaxEnvelopes - 1);
+        check ((int) first.size() == upic::limits::kMaxPointsPerEnvelope
+               && (int) last.size() == upic::limits::kMaxPointsPerEnvelope,
+               "WP10 the worst-case bank keeps every point",
+               juce::String (first.size()) + " / " + juce::String (last.size()));
+        check (! first.empty() && ! last.empty()
+               && std::abs (first.front().x - 0.0f) < 1e-6f
+               && std::abs (first.back().x - 1.0f) < 1e-6f
+               && std::abs (last.front().x - 0.0f) < 1e-6f
+               && std::abs (last.back().x - 1.0f) < 1e-6f
+               && std::abs (first.back().y - (float) ((upic::limits::kMaxPointsPerEnvelope - 1) % 64) / 64.0f) < 1e-6f,
+               "WP10 the worst-case bank keeps the shape of its points",
+               juce::String (first.back().y, 4) + " / " + juce::String (last.back().y, 4));
     }
 }
 

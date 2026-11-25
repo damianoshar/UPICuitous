@@ -25,6 +25,15 @@ namespace upic
 
         // Records one check: "PASS" or "FAIL", with the detail (if any).
         void check (bool ok, const juce::String& name, const juce::String& detail = {});
+
+        // Records a line that is not a check: the numbers a benchmark
+        // measured. It goes into the log file like a check line, so the
+        // evidence a run gathered is still there after the run.
+        void note (const juce::String& text);
+
+    private:
+        // Opens the log file on the first line and writes one line to it.
+        void writeLine (const juce::String& line);
     };
 
     // The checks, by area. They run in the order the runner lists them (the
@@ -47,6 +56,7 @@ namespace upic
     void runWP9CurveChecks (SelfTest& t);   // WP9: the generalized curve
     void runWP9ConvertChecks (SelfTest& t); // WP9: the Convert As commands
     void runWP9WorkspaceChecks (SelfTest& t); // WP9: the multi-page workspace
+    void runWP10EnvelopeChecks (SelfTest& t); // WP10: the envelope bank at 128
     void runFreqTableChecks (SelfTest& t); // WP1: the drawn conversion tables
     void runAmpTableChecks (SelfTest& t);  // WP2: the amplitude conversion tables
     void runGroupChecks (SelfTest& t);     // WP3: the arc groups

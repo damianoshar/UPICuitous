@@ -1,4 +1,5 @@
 #include <JuceHeader.h>
+#include <algorithm>
 #include <limits>
 #include "MainComponent.h"
 #include "SelfTest.h"
@@ -1525,7 +1526,6 @@ void upic::runRealtimeChecks (upic::SelfTest& t)
 
 void upic::runTransportChecks (upic::SelfTest& t)
 {
-    auto& log = t.log;
     auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
     {
         t.check (ok, name, detail);
@@ -1759,12 +1759,14 @@ void upic::runTransportChecks (upic::SelfTest& t)
                 const double allowedAbsolute = 20.0;
             #endif
 
-            log << "BENCH  " << arcs << " simultaneous arcs x " << pts << " points: "
-                << juce::String (usPerBlock / 1000.0, 2) << " ms/block ("
-                << juce::String (usPerBlock / budgetUs * 100.0, 0) << "% of the "
-                << juce::String (budgetUs / 1000.0, 2) << " ms budget), "
-                << refArcs << " arcs: " << juce::String (usRefBlock / 1000.0, 2)
-                << " ms/block, ratio " << juce::String (ratio, 2) << "x\n";
+            t.note ("BENCH  " + juce::String (arcs) + " simultaneous arcs x "
+                    + juce::String (pts) + " points: "
+                    + juce::String (usPerBlock / 1000.0, 2) + " ms/block ("
+                    + juce::String (usPerBlock / budgetUs * 100.0, 0) + "% of the "
+                    + juce::String (budgetUs / 1000.0, 2) + " ms budget), "
+                    + juce::String (refArcs) + " arcs: "
+                    + juce::String (usRefBlock / 1000.0, 2)
+                    + " ms/block, ratio " + juce::String (ratio, 2) + "x");
             check (ratio < allowedRatio,
                    "the worst-case page costs no more per arc than a tenth of the page",
                    juce::String (ratio, 2) + "x (allowed "
@@ -1774,6 +1776,111 @@ void upic::runTransportChecks (upic::SelfTest& t)
                    juce::String (usPerBlock / budgetUs, 2) + "x (allowed "
                    + juce::String (allowedAbsolute, 0) + "x)");
         }
+    }
+
+    // WP10 (part 1): the envelope bank grows to 128 envelopes, and the
+    // engine looks an envelope up by a linear scan. The sweep measures what
+    // the deepest lookup costs: the same worst-case page, with every arc on
+    // the LAST envelope of a 128-envelope bank, against the same page with
+    // every arc on the FIRST one.
+    //
+    // The check is calibrated the same way as the benchmark above: the two
+    // pages are measured in the same process, so the machine's speed is the
+    // same for both and cancels out of the ratio. A scan of 128 envelopes
+    // per arc per block is a small part of the render, so the ratio must
+    // stay close to 1: the allowance (1.25x) catches a lookup that has
+    // become a real cost, and it does not turn the gate red for a machine
+    // that is busy.
+    {
+        const int sr = 48000, blk = 512;
+        const int arcs = upic::limits::kMaxArcsPerPage;
+        const int pts = 20;
+        auto waves = upic::defaultWaveforms();
+
+        // the bank: 128 envelopes, the first and the last named apart
+        std::vector<upic::Envelope> envs;
+        envs.reserve ((size_t) upic::limits::kMaxEnvelopes);
+        for (int i = 0; i < upic::limits::kMaxEnvelopes; ++i)
+        {
+            upic::Envelope e (i, "Env " + juce::String (i), upic::paletteColour (i));
+            e.presetFlat();
+            envs.push_back (e);
+        }
+        const int firstId = envs.front().id;
+        const int lastId  = envs.back().id;
+
+        auto makePage = [&] (int envId)
+        {
+            upic::Page pg;
+            pg.durationSec = 10.0;
+            for (int i = 0; i < arcs; ++i)
+            {
+                upic::Arc a;
+                a.id = i + 1;
+                a.envelopeId = envId;
+                a.intensity = 0.8f;
+                for (int k = 0; k < pts; ++k)
+                    a.points.push_back ({ (double) k / (double) pts * pg.durationSec,
+                                          100.0 * std::pow (2.0, (double) (k % 40) / 12.0) });
+                pg.arcs.push_back (a);
+            }
+            return pg;
+        };
+
+        const auto pgFirst = makePage (firstId);
+        const auto pgLast  = makePage (lastId);
+        std::vector<upic::SampleSlot> noSlots;
+        juce::AudioBuffer<float> buf (2, blk);
+
+        // One batch: four blocks of one page. The engine is built once and
+        // kept, so the batch measures the steady state and not the first
+        // block's setup.
+        UpicEngine eng; eng.prepare (sr, blk);
+        const int blocks = 4;
+        auto measureBatch = [&] (const upic::Page& page)
+        {
+            const auto t0 = juce::Time::getHighResolutionTicks();
+            for (int b = 0; b < blocks; ++b)
+                eng.render (page, (double) b * blk / sr, waves, envs, noSlots,
+                            buf.getWritePointer (0), buf.getWritePointer (1), blk, 0.8f, 1.0, false);
+            const double secs = (double) (juce::Time::getHighResolutionTicks() - t0)
+                                 / (double) juce::Time::getHighResolutionTicksPerSecond();
+            return secs * 1e6 / blocks;
+        };
+
+        // Five rounds, and each round measures the two pages one after the
+        // other, so the machine's speed is the same for both. The check is
+        // the MEDIAN of the per-round ratios: a round in which the machine
+        // was busy for a moment (the selftest usually runs right after a
+        // build, with the compiler's workers and the antivirus still
+        // working) moves one round and not the median, and a page that
+        // happened to be measured while the machine was fast cannot pull
+        // the median down either.
+        const int rounds = 5;
+        std::vector<double> ratios;
+        double usFirstBest = std::numeric_limits<double>::max();
+        double usLastBest  = std::numeric_limits<double>::max();
+        for (int round = 0; round < rounds; ++round)
+        {
+            const double usFirst = measureBatch (pgFirst);
+            const double usLast  = measureBatch (pgLast);
+            usFirstBest = juce::jmin (usFirstBest, usFirst);
+            usLastBest  = juce::jmin (usLastBest, usLast);
+            ratios.push_back (usLast / juce::jmax (1.0, usFirst));
+        }
+        std::sort (ratios.begin(), ratios.end());
+        const double ratio = ratios[(size_t) (rounds / 2)];
+        const double allowedRatio = 1.25;
+
+        t.note ("BENCH  " + juce::String (arcs) + " arcs on the last of "
+                + juce::String (envs.size()) + " envelopes: "
+                + juce::String (usLastBest / 1000.0, 2) + " ms/block, on the first: "
+                + juce::String (usFirstBest / 1000.0, 2) + " ms/block, median ratio "
+                + juce::String (ratio, 3) + "x");
+        check (ratio < allowedRatio,
+               "the deepest envelope lookup costs no more than the shallowest",
+               juce::String (ratio, 3) + "x (allowed "
+               + juce::String (allowedRatio, 2) + "x)");
     }
 
     // v1.33.4 (U6-B): the overload guard. The engine measures every block;

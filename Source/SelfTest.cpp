@@ -42,14 +42,8 @@ void operator delete (void* p, const std::nothrow_t&) noexcept { std::free (p); 
 void operator delete[] (void* p, const std::nothrow_t&) noexcept { std::free (p); }
 
 //==============================================================================
-void upic::SelfTest::check (bool ok, const juce::String& name, const juce::String& detail)
+void upic::SelfTest::writeLine (const juce::String& line)
 {
-    juce::String line = (ok ? juce::String ("PASS  ") : juce::String ("FAIL  ")) + name;
-    if (detail.isNotEmpty()) line << "  [" << detail << "]";
-    line << "\n";
-    log << line;
-    if (! ok) ++failures;
-
     // The log is written as the run goes, not only at the end. A run that
     // dies in the middle (an access violation, a power cut) then leaves the
     // checks it had reached behind, instead of an empty file that says
@@ -70,6 +64,24 @@ void upic::SelfTest::check (bool ok, const juce::String& name, const juce::Strin
         logStream->write (utf8.getAddress(), (size_t) utf8.sizeInBytes() - 1);
         logStream->flush();
     }
+}
+
+void upic::SelfTest::check (bool ok, const juce::String& name, const juce::String& detail)
+{
+    juce::String line = (ok ? juce::String ("PASS  ") : juce::String ("FAIL  ")) + name;
+    if (detail.isNotEmpty()) line << "  [" << detail << "]";
+    line << "\n";
+    log << line;
+    if (! ok) ++failures;
+
+    writeLine (line);
+}
+
+void upic::SelfTest::note (const juce::String& text)
+{
+    juce::String line = text + "\n";
+    log << line;
+    writeLine (line);
 }
 
 //==============================================================================
@@ -110,6 +122,7 @@ int upic::runSelfTest()
     upic::runWP9CurveChecks (t);
     upic::runWP9ConvertChecks (t);
     upic::runWP9WorkspaceChecks (t);
+    upic::runWP10EnvelopeChecks (t);
     upic::runFreqTableChecks (t);
     upic::runAmpTableChecks (t);
     upic::runGroupChecks (t);
