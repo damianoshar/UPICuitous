@@ -177,10 +177,20 @@ public:
 
         // ghost of other waves faint
         // main wave
-        juce::Path p; bool first = true;
-        for (int i = 0; i < upic::kWaveSize; ++i)
+        // WP10: the wave's own samples are drawn - a wave that holds 4096
+        // samples is drawn over its 4096 samples, not over the default
+        // 1024.
+        const int n = (int) w->samples.size();
+        if (n <= 0)
         {
-            float x = plot.getX() + (float)i / upic::kWaveSize * plot.getWidth();
+            g.setColour(juce::Colours::grey);
+            g.drawSingleLineText("no waveform", (int) plot.getX() + 8, (int) plot.getCentreY());
+            return;
+        }
+        juce::Path p; bool first = true;
+        for (int i = 0; i < n; ++i)
+        {
+            float x = plot.getX() + (float)i / n * plot.getWidth();
             float y = plot.getCentreY() - w->samples[(size_t)i] * plot.getHeight() * 0.48f;
             if (first) { p.startNewSubPath(x, y); first = false; } else p.lineTo(x, y);
         }
@@ -331,16 +341,20 @@ private:
         auto plot = plotRect();
         if (!plot.contains(pos)) return;
         const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
+        // WP10: the brush works on the wave's own samples, so a wave that
+        // holds 4096 samples is painted at its own resolution.
+        const int n = (int) w->samples.size();
+        if (n <= 0) return;
         // brush: set samples around x with cosine falloff, y from mouse
-        float fx = (pos.x - plot.getX()) / plot.getWidth() * upic::kWaveSize;
+        float fx = (pos.x - plot.getX()) / plot.getWidth() * n;
         float v = -(pos.y - plot.getCentreY()) / (plot.getHeight() * 0.48f);
         v = juce::jlimit(-1.0f, 1.0f, v);
         int c = (int) fx;
-        int rad = juce::jmax(1, upic::kWaveSize / 128);
+        int rad = juce::jmax(1, n / 128);
         for (int d = -rad; d <= rad; ++d)
         {
             float fall = 0.5f * (1.0f + std::cos(juce::MathConstants<float>::pi * d / (rad + 1)));
-            int idx = (c + d + upic::kWaveSize * 4) % upic::kWaveSize;
+            int idx = (c + d + n * 4) % n;
             w->samples[(size_t)idx] = w->samples[(size_t)idx] * (1.0f - fall) + v * fall;
         }
         // keep loop-continuous: blend edges slightly? (skip — user controls)

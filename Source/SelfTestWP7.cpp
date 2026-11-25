@@ -571,7 +571,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                                                      "Short", juce::Colours::white,
                                                      payload, error)
                        && error.containsIgnoreCase ("samples"),
-                       "wp7 refusals: a wavetable without 1024 samples is refused", error);
+                       "wp7 refusals: a wavetable outside the sample range is refused", error);
             }
 
             // The wavetable range is exactly -1..1. A tiny overshoot is

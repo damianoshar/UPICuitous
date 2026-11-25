@@ -58,6 +58,7 @@ namespace upic
     void runWP9WorkspaceChecks (SelfTest& t); // WP9: the multi-page workspace
     void runWP10EnvelopeChecks (SelfTest& t); // WP10: the envelope bank at 128
     void runWP10ArcChecks (SelfTest& t);       // WP10: the page at 4000 arcs
+    void runWP10WaveChecks (SelfTest& t);      // WP10: the wavetable at 4096 samples
     void runFreqTableChecks (SelfTest& t); // WP1: the drawn conversion tables
     void runAmpTableChecks (SelfTest& t);  // WP2: the amplitude conversion tables
     void runGroupChecks (SelfTest& t);     // WP3: the arc groups

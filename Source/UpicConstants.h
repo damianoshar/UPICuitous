@@ -12,7 +12,15 @@ namespace upic
     // first cycle.
     constexpr float kPcmScale = 32767.0f;
 
+    // The wavetable's size. The generators make a wave of 1024 samples and
+    // the default bank is 1024 samples long - that stays, so the product's
+    // own sound does not move.
+    //
+    // WP10: a wave may hold up to 4096 samples. The length is the wave's
+    // own (the piece carries it, the editor draws it, the engine reads it),
+    // so a finer table is possible without making every wave finer.
     constexpr int kWaveSize = 1024;
+    constexpr int kMaxWaveSize = 4096;
     // v1.33: the range the 1990s UPIC reached - "the frequency range of the
     // 1990s UPIC was extended to infrasonics, starting at 0.01 Hz" and the
     // frequency table could span "as large a range as 0.01-22,050 Hz"

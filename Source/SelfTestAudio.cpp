@@ -1884,6 +1884,99 @@ void upic::runTransportChecks (upic::SelfTest& t)
                + juce::String (allowedRatio, 2) + "x)");
     }
 
+    // WP10 (part 3): a wavetable may hold up to 4096 samples, so the
+    // oscillator may read four times as many samples per cycle. The sweep
+    // measures what that costs: the same page, with every arc on a
+    // 4096-sample sine, against the same page on the default 1024-sample
+    // one.
+    //
+    // The check is calibrated the same way as the two above: one process,
+    // paired rounds, the median of the per-round ratios. A table read is a
+    // few instructions per sample and does not depend on the length, so the
+    // ratio stays close to 1; the allowance catches a read that has become
+    // a scan (or a copy) of the table instead of a lookup.
+    {
+        const int sr = 48000, blk = 512;
+        const int arcs = 1000;
+        const int pts = 20;
+        const auto envs = upic::defaultEnvelopes();
+
+        auto makeWave = [] (int n)
+        {
+            upic::Waveform w (0, "Wave " + juce::String (n), juce::Colours::white);
+            w.samples.assign ((size_t) n, 0.0f);
+            for (int i = 0; i < n; ++i)
+                w.samples[(size_t) i] = (float) std::sin (2.0 * juce::MathConstants<double>::pi
+                                                          * i / (double) n);
+            return w;
+        };
+        const std::vector<upic::Waveform> wavesShort { makeWave (upic::kWaveSize) };
+        const std::vector<upic::Waveform> wavesLong  { makeWave (upic::kMaxWaveSize) };
+
+        upic::Page pg;
+        pg.durationSec = 10.0;
+        for (int i = 0; i < arcs; ++i)
+        {
+            upic::Arc a;
+            a.id = i + 1;
+            a.mode = 0; a.waveformId = 0; a.envelopeId = 0;
+            a.intensity = 0.8f;
+            for (int k = 0; k < pts; ++k)
+                a.points.push_back ({ (double) k / (double) pts * pg.durationSec,
+                                      100.0 * std::pow (2.0, (double) (k % 40) / 12.0) });
+            pg.arcs.push_back (a);
+        }
+
+        const std::vector<upic::SampleSlot> noSlots;
+        juce::AudioBuffer<float> buf (2, blk);
+
+        // One batch: four blocks of the page. The engine is built once and
+        // kept, so the batch measures the steady state and not the first
+        // block's setup.
+        UpicEngine eng; eng.prepare (sr, blk);
+        const int blocks = 4;
+        auto measureBatch = [&] (const std::vector<upic::Waveform>& waves)
+        {
+            const auto t0 = juce::Time::getHighResolutionTicks();
+            for (int b = 0; b < blocks; ++b)
+                eng.render (pg, (double) b * blk / sr, waves, envs, noSlots,
+                            buf.getWritePointer (0), buf.getWritePointer (1), blk, 0.8f, 1.0, false);
+            const double secs = (double) (juce::Time::getHighResolutionTicks() - t0)
+                                 / (double) juce::Time::getHighResolutionTicksPerSecond();
+            return secs * 1e6 / blocks;
+        };
+
+        // Five rounds, each measuring the two tables one after the other,
+        // and the check is the median of the per-round ratios (see the
+        // envelope sweep above).
+        const int rounds = 5;
+        std::vector<double> ratios;
+        double usShortBest = std::numeric_limits<double>::max();
+        double usLongBest  = std::numeric_limits<double>::max();
+        for (int round = 0; round < rounds; ++round)
+        {
+            const double usShort = measureBatch (wavesShort);
+            const double usLong  = measureBatch (wavesLong);
+            usShortBest = juce::jmin (usShortBest, usShort);
+            usLongBest  = juce::jmin (usLongBest, usLong);
+            ratios.push_back (usLong / juce::jmax (1.0, usShort));
+        }
+        std::sort (ratios.begin(), ratios.end());
+        const double ratio = ratios[(size_t) (rounds / 2)];
+        const double allowedRatio = 1.25;
+
+        t.note ("BENCH  " + juce::String (arcs) + " arcs on a "
+                + juce::String (upic::kMaxWaveSize) + "-sample wavetable: "
+                + juce::String (usLongBest / 1000.0, 2) + " ms/block, on the "
+                + juce::String (upic::kWaveSize) + "-sample one: "
+                + juce::String (usShortBest / 1000.0, 2) + " ms/block, median ratio "
+                + juce::String (ratio, 3) + "x");
+        check (ratio < allowedRatio,
+               "the wide wavetable costs no more per block than the default one",
+               juce::String (ratio, 3) + "x (allowed "
+               + juce::String (allowedRatio, 2) + "x)");
+    }
+
     // v1.33.4 (U6-B): the overload guard. The engine measures every block;
     // when the load stays over the budget it fades out the quietest sounding
     // arcs - over 5 ms, inside the block, so nothing clicks - and skips them

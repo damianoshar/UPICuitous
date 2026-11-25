@@ -14,19 +14,24 @@ namespace upic
     {
         int id = 0;
         juce::String name = "Sine";
-        std::vector<float> samples; // size kWaveSize, -1..1
+        std::vector<float> samples; // kWaveSize samples by default, up to kMaxWaveSize, -1..1
         juce::Colour colour = juce::Colours::cyan;
 
         Waveform() : samples((size_t) kWaveSize, 0.0f) {}
         Waveform(int i, const juce::String& n, juce::Colour c) : id(i), name(n), samples((size_t) kWaveSize, 0.0f), colour(c) {}
 
-        void makeSine()      { for (int i = 0; i < kWaveSize; ++i) samples[(size_t)i] = (float) std::sin(2.0 * juce::MathConstants<double>::pi * i / kWaveSize); }
-        void makeSaw()       { for (int i = 0; i < kWaveSize; ++i) samples[(size_t)i] = 2.0f * i / kWaveSize - 1.0f; }
-        void makeSquare()    { for (int i = 0; i < kWaveSize; ++i) samples[(size_t)i] = (i < kWaveSize/2) ? 1.0f : -1.0f; }
-        void makeTriangle()  { for (int i = 0; i < kWaveSize; ++i) { float p = (float)i / kWaveSize; samples[(size_t)i] = p < 0.25f ? p*4.0f : (p < 0.75f ? 2.0f - p*4.0f : p*4.0f - 4.0f); } }
-        void makeNoise(unsigned seed = 22222) { juce::Random r((int)seed + id*101); for (auto& s : samples) s = r.nextFloat() * 2.0f - 1.0f; }
+        // WP10: a generator makes a wave of the default size. A wave that
+        // was imported with 4096 samples goes back to 1024 when a preset is
+        // applied - the preset IS 1024 samples, so leaving the rest of the
+        // old table behind would be a half-replaced wave.
+        void makeSine()      { samples.assign((size_t) kWaveSize, 0.0f); for (int i = 0; i < kWaveSize; ++i) samples[(size_t)i] = (float) std::sin(2.0 * juce::MathConstants<double>::pi * i / kWaveSize); }
+        void makeSaw()       { samples.assign((size_t) kWaveSize, 0.0f); for (int i = 0; i < kWaveSize; ++i) samples[(size_t)i] = 2.0f * i / kWaveSize - 1.0f; }
+        void makeSquare()    { samples.assign((size_t) kWaveSize, 0.0f); for (int i = 0; i < kWaveSize; ++i) samples[(size_t)i] = (i < kWaveSize/2) ? 1.0f : -1.0f; }
+        void makeTriangle()  { samples.assign((size_t) kWaveSize, 0.0f); for (int i = 0; i < kWaveSize; ++i) { float p = (float)i / kWaveSize; samples[(size_t)i] = p < 0.25f ? p*4.0f : (p < 0.75f ? 2.0f - p*4.0f : p*4.0f - 4.0f); } }
+        void makeNoise(unsigned seed = 22222) { samples.assign((size_t) kWaveSize, 0.0f); juce::Random r((int)seed + id*101); for (auto& s : samples) s = r.nextFloat() * 2.0f - 1.0f; }
         void makeRandomSmooth(unsigned seed = 12345)
         {
+            samples.assign((size_t) kWaveSize, 0.0f);
             juce::Random r((int)seed + id*77);
             constexpr int kParts = 12;
             float v[kParts+1]; for (int i=0;i<=kParts;++i) v[i]=r.nextFloat()*2-1;
@@ -39,19 +44,29 @@ namespace upic
         }
         void smooth(int passes = 1)
         {
+            // WP10: the pass wraps over the wave's own length, so a
+            // 4096-sample table is smoothed as one table.
+            const int n = (int) samples.size();
+            if (n <= 1) return;
             for (int p = 0; p < passes; ++p)
             {
                 std::vector<float> c = samples;
-                for (int i = 0; i < kWaveSize; ++i)
-                    samples[(size_t)i] = (c[(size_t)((i-1+kWaveSize)%kWaveSize)] + c[(size_t)i]*2.0f + c[(size_t)((i+1)%kWaveSize)]) * 0.25f;
+                for (int i = 0; i < n; ++i)
+                    samples[(size_t)i] = (c[(size_t)((i-1+n)%n)] + c[(size_t)i]*2.0f + c[(size_t)((i+1)%n)]) * 0.25f;
             }
         }
         float valueAt(double phase01) const // phase 0..1, linear interp, loop
         {
+            // WP10: the table is the wave's own samples, not the default
+            // size. A wave that holds 4096 samples is read over its 4096
+            // samples - the phase still runs 0..1 over the whole table.
+            const int n = (int) samples.size();
+            if (n <= 0) return 0.0f;
+            if (n == 1) return samples[0];
             double p = phase01 - std::floor(phase01);
-            double idx = p * kWaveSize;
-            int i0 = (int) idx % kWaveSize;
-            int i1 = (i0 + 1) % kWaveSize;
+            double idx = p * n;
+            int i0 = (int) idx % n;
+            int i1 = (i0 + 1) % n;
             float f = (float)(idx - std::floor(idx));
             return samples[(size_t)i0] * (1.0f - f) + samples[(size_t)i1] * f;
         }
@@ -63,7 +78,7 @@ namespace upic
             o->setProperty("name", name);
             o->setProperty("colour", (int) colour.getARGB());
             juce::Array<juce::var> arr;
-            arr.ensureStorageAllocated(kWaveSize);
+            arr.ensureStorageAllocated((int) samples.size());
             for (auto s : samples) arr.add((double) s);
             o->setProperty("samples", arr);
             return juce::var(o);
@@ -74,10 +89,20 @@ namespace upic
             w.id = (int) v.getProperty("id", fallbackId);
             w.name = v.getProperty("name", "Wave").toString();
             w.colour = juce::Colour((juce::uint32)(int) v.getProperty("colour", (int)0xff5ac8fa));
-            w.samples.assign((size_t)kWaveSize, 0.0f);
             if (auto* arr = v.getProperty("samples", juce::var()).getArray())
-                for (int i = 0; i < juce::jmin(kWaveSize, arr->size()); ++i)
-                    w.samples[(size_t)i] = (float)(double)(*arr)[i];
+            {
+                // WP10: the length is the wave's own. The piece carries the
+                // samples, so the table keeps the length it was written
+                // with - up to the cap. A piece with no samples keeps the
+                // default size.
+                const int n = juce::jmin (kMaxWaveSize, (int) arr->size());
+                if (n > 0)
+                {
+                    w.samples.assign ((size_t) n, 0.0f);
+                    for (int i = 0; i < n; ++i)
+                        w.samples[(size_t)i] = (float)(double)(*arr)[i];
+                }
+            }
             return w;
         }
     };

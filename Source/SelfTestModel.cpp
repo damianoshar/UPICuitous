@@ -4473,3 +4473,200 @@ void upic::runWP10ArcChecks (upic::SelfTest& t)
     }
 }
 
+//==============================================================================
+// WP10 (part 3): a wavetable may hold up to 4096 samples.
+//
+// The default bank and the generators stay at 1024 samples, so the
+// product's own sound does not move - the golden render locks that. What
+// the lift adds is a ceiling: a wave's own sample count is its length. The
+// piece carries it, the editor draws and paints at it, and the engine reads
+// it through valueAt(), which is the only place the oscillator touches the
+// table.
+void upic::runWP10WaveChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // --- the two sizes ------------------------------------------------------
+    check (upic::kWaveSize == 1024 && upic::kMaxWaveSize == 4096,
+           "WP10 a wavetable holds up to 4096 samples, 1024 by default",
+           juce::String (upic::kWaveSize) + " / " + juce::String (upic::kMaxWaveSize));
+
+    // A ramp over the whole cap: a read at the default size lands on a
+    // quarter of the table, so the two lengths are told apart by the value.
+    auto makeRamp = [] (int id, int n)
+    {
+        upic::Waveform w (id, "Ramp " + juce::String (n), juce::Colours::white);
+        w.samples.assign ((size_t) n, 0.0f);
+        for (int i = 0; i < n; ++i)
+            w.samples[(size_t) i] = (float) i / (float) (n - 1);
+        return w;
+    };
+
+    // --- the default bank keeps its size ------------------------------------
+    {
+        const auto waves = upic::defaultWaveforms();
+        bool allDefault = ! waves.empty();
+        for (const auto& w : waves)
+            allDefault = allDefault && (int) w.samples.size() == upic::kWaveSize;
+        check (allDefault, "WP10 the default bank is still 1024 samples long",
+               juce::String ((int) waves.size()) + " waves");
+    }
+
+    // --- a wave is read over its own samples --------------------------------
+    {
+        const auto w = makeRamp (0, upic::kMaxWaveSize);
+        check (std::abs (w.valueAt (0.5) - (float) 2048 / 4095.0f) < 2.0e-3f,
+               "WP10 a 4096-sample wave is read over its own samples",
+               juce::String (w.valueAt (0.5), 4));
+        check (std::abs (w.valueAt (0.75) - (float) 3072 / 4095.0f) < 2.0e-3f
+               && std::abs (w.valueAt (0.0)) < 1.0e-6f
+               && std::abs (w.valueAt (1.0)) < 2.0e-3f,
+               "WP10 the phase runs over the whole 4096-sample table",
+               juce::String (w.valueAt (0.75), 4));
+    }
+
+    // --- the piece carries the length ---------------------------------------
+    {
+        upic::PieceModel m;
+        m.waveforms = upic::defaultWaveforms();
+        m.waveforms.push_back (makeRamp (6, upic::kMaxWaveSize));
+        m.envelopes = upic::defaultEnvelopes();
+        upic::Page pg;
+        pg.durationSec = 4.0;
+        pg.nextArcId = 2;
+        upic::Arc a;
+        a.id = 1; a.mode = 0; a.waveformId = 6; a.envelopeId = 0; a.intensity = 0.8f;
+        a.points = { { 0.0, 220.0 }, { 4.0, 440.0 } };
+        pg.arcs.push_back (a);
+        m.pages.push_back (pg);
+
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+        check (mc.loadFromVar (upic::pieceToVar (m)),
+               "WP10 the piece with a 4096-sample wave loads");
+        check (mc.waveformCountForTest() == 7
+               && mc.waveformSampleForTest (6, 0) == 0.0f
+               && std::abs (mc.waveformSampleForTest (6, 2048) - 2048.0f / 4095.0f) < 2.0e-3f
+               && std::abs (mc.waveformSampleForTest (6, upic::kMaxWaveSize - 1) - 1.0f) < 1.0e-6f,
+               "WP10 the piece keeps every sample of the 4096-sample wave",
+               juce::String (mc.waveformSampleForTest (6, upic::kMaxWaveSize - 1), 4));
+
+        const auto fresh = upic::defaultWaveforms();
+        check ((int) fresh.size() >= 1
+               && std::abs (mc.waveformSampleForTest (0, upic::kWaveSize - 1)
+                            - fresh[0].samples[(size_t) upic::kWaveSize - 1]) < 1.0e-6f,
+               "WP10 the default waves keep their own samples");
+    }
+
+    // --- the engine reads past the default table ---------------------------
+    {
+        // all zeros but one spike at sample 3072: a read over 1024 samples
+        // would never reach it, and the page would be silent
+        upic::Waveform spike (0, "Spike", juce::Colours::white);
+        spike.samples.assign ((size_t) upic::kMaxWaveSize, 0.0f);
+        spike.samples[3072] = 1.0f;
+        upic::Page pg;
+        pg.durationSec = 2.0;
+        pg.nextArcId = 2;
+        upic::Arc a;
+        a.id = 1; a.mode = 0; a.waveformId = 0; a.envelopeId = 0; a.intensity = 1.0f;
+        a.points = { { 0.0, 220.0 }, { 2.0, 220.0 } };
+        pg.arcs.push_back (a);
+        const std::vector<upic::Waveform> waves { spike };
+        const auto envs = upic::defaultEnvelopes();
+        const std::vector<upic::SampleSlot> noSlots;
+        const int sr = 48000, blk = 512;
+        UpicEngine eng; eng.prepare (sr, blk);
+        juce::AudioBuffer<float> buf (2, blk);
+        float peak = 0.0f;
+        for (int b = 0; b < 40; ++b)
+        {
+            buf.clear();
+            eng.render (pg, (double) b * blk / sr, waves, envs, noSlots,
+                        buf.getWritePointer (0), buf.getWritePointer (1), blk, 0.8f, 1.0, false);
+            peak = juce::jmax (peak, buf.getMagnitude (0, blk));
+        }
+        check (peak > 0.01f,
+               "WP10 the engine reads the wave past its 1024th sample",
+               juce::String (peak, 4));
+    }
+
+    // --- a table over the cap is cut when it is read ------------------------
+    {
+        auto payload = makeRamp (0, upic::kMaxWaveSize).toVar();
+        if (auto* obj = payload.getDynamicObject())
+            if (auto* arr = obj->getProperty ("samples").getArray())
+                arr->add (0.5);
+        const auto clamped = upic::Waveform::fromVar (payload, 0);
+        check ((int) clamped.samples.size() == upic::kMaxWaveSize,
+               "WP10 a wavetable over the cap is cut when it is read",
+               juce::String (clamped.samples.size()));
+
+        auto* empty = new juce::DynamicObject();
+        const auto fallback = upic::Waveform::fromVar (juce::var (empty), 3);
+        check ((int) fallback.samples.size() == upic::kWaveSize && fallback.id == 3,
+               "WP10 a wavetable without samples keeps the default size",
+               juce::String ((int) fallback.samples.size()));
+    }
+
+    // --- the user library takes the whole range ----------------------------
+    {
+        const auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("upic_wp10_wave_selftest");
+        root.deleteRecursively();
+        root.createDirectory();
+        const bool hadRoot = upic::UserLibrary::rootIsOverriddenForTest();
+        const auto previousRoot = upic::UserLibrary::rootFolder();
+        upic::UserLibrary::setRootForTest (root);
+
+        auto payloadWith = [] (int n)
+        {
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("id", 1);
+            o->setProperty ("name", "Table");
+            juce::Array<juce::var> arr;
+            arr.ensureStorageAllocated (n);
+            for (int i = 0; i < n; ++i)
+                arr.add (std::sin (2.0 * juce::MathConstants<double>::pi * i / (double) n));
+            o->setProperty ("samples", arr);
+            return juce::var (o);
+        };
+
+        juce::String error;
+        check (upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1, "Long",
+                                           juce::Colours::white,
+                                           payloadWith (upic::kMaxWaveSize), error),
+               "WP10 the library accepts a 4096-sample wavetable", error);
+        error.clear();
+        check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1, "Too Long",
+                                             juce::Colours::white,
+                                             payloadWith (upic::kMaxWaveSize + 1), error)
+               && error.contains ("4096"),
+               "WP10 the library refuses a 4097-sample wavetable", error);
+        error.clear();
+        check (upic::UserLibrary::publish (upic::UserAssetKind::Wave, 2, "Short",
+                                           juce::Colours::white, payloadWith (2), error),
+               "WP10 the library accepts a two-sample wavetable", error);
+        error.clear();
+        check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, 3, "One",
+                                             juce::Colours::white, payloadWith (1), error)
+               && error.contains ("samples"),
+               "WP10 the library refuses a one-sample wavetable", error);
+        const int stored = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave)
+                              .findChildFiles (juce::File::findFiles, false, "*.json").size();
+        check (stored == 2,
+               "WP10 the library holds the two accepted wavetables",
+               juce::String (stored));
+
+        if (hadRoot)
+            upic::UserLibrary::setRootForTest (previousRoot);
+        else
+            upic::UserLibrary::clearRootForTest();
+        root.deleteRecursively();
+    }
+}
+

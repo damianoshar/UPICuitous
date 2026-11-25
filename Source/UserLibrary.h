@@ -614,11 +614,15 @@ namespace upic
 
         static bool wavePayloadIsValid (const juce::var& payload, juce::String& error)
         {
+            // WP10: a wavetable may hold up to 4096 samples, so the library
+            // takes a table of any length the piece format allows - the
+            // length is the wave's own.
             auto* samples = payload.getProperty ("samples", juce::var()).getArray();
-            if (samples == nullptr || samples->size() != kWaveSize)
+            if (samples == nullptr || samples->size() < 2
+                || samples->size() > kMaxWaveSize)
             {
-                error = "The wavetable does not hold exactly "
-                      + juce::String (kWaveSize) + " samples";
+                error = "The wavetable's sample count is outside the valid range (2 to "
+                      + juce::String (kMaxWaveSize) + " samples)";
                 return false;
             }
             for (const auto& v : *samples)
