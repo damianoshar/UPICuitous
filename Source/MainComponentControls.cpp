@@ -2106,6 +2106,7 @@ void MainComponent::buildArcListPanel()
         {
             refreshBoxes();
             refreshScoreBinding();
+            updateWorkspaceMarker();   // WP9: the workspace marks the playing page
         }
 
         std::vector<int> ids;
@@ -2150,6 +2151,7 @@ void MainComponent::buildArcListPanel()
         }
         refreshBoxes();
         refreshScoreBinding();
+        updateWorkspaceMarker();   // WP9: the workspace marks the playing page
     };
 }
 

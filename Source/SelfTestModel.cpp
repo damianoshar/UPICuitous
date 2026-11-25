@@ -3973,3 +3973,208 @@ void upic::runWP9ConvertChecks (upic::SelfTest& t)
     }
 }
 
+//==============================================================================
+// WP9: the multi-page workspace.
+//
+// Two canvases, two pages, one transport: the canvases edit their own pages
+// without talking over each other, and the layout travels with the piece.
+void upic::runWP9WorkspaceChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    const juce::String twoPages =
+        R"({"pages":[)"
+        R"({"duration":10.0,"arcs":[{"id":1,"points":[{"t":1,"f":220},{"t":3,"f":440}]}]},)"
+        R"({"duration":10.0,"arcs":[{"id":1,"points":[{"t":2,"f":330},{"t":4,"f":660}]}]}]})";
+
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
+    mc.setSize (1280, 800);
+    check (mc.loadFromVar (juce::JSON::parse (twoPages)),
+           "WP9 the piece with two pages loads");
+    check (mc.pageCountForTest() == 2,
+           "WP9 the piece has two pages",
+           juce::String (mc.pageCountForTest()));
+
+    // --- the workspace opens ----------------------------------------------------
+    const int pageBefore = mc.currentPageForTest();
+    check (mc.setWorkspaceOpen (true),
+           "WP9 the workspace opens");
+    check (mc.workspaceOpenForTest(),
+           "WP9 the workspace is open");
+    check (mc.workspaceCanvasCountForTest() == 2,
+           "WP9 the workspace shows the two pages",
+           juce::String (mc.workspaceCanvasCountForTest()));
+    check (mc.workspacePageForCanvasForTest (0) == 0
+           && mc.workspacePageForCanvasForTest (1) == 1,
+           "WP9 every canvas shows its own page",
+           juce::String (mc.workspacePageForCanvasForTest (0)) + ", "
+           + juce::String (mc.workspacePageForCanvasForTest (1)));
+    check (mc.workspaceCanvasForTest (0) != mc.workspaceCanvasForTest (1),
+           "WP9 the canvases are different canvases");
+
+    // --- the audio page stays single ---------------------------------------------
+    check (mc.currentPageForTest() == pageBefore,
+           "WP9 the workspace does not change the playing page",
+           juce::String (mc.currentPageForTest()));
+    check (mc.pageCountForTest() == 2,
+           "WP9 the workspace adds no page");
+
+    // --- the canvases edit their own pages -----------------------------------------
+    {
+        const int p0 = mc.pageArcCountForTest (0);
+        const int p1 = mc.pageArcCountForTest (1);
+        auto* second = mc.workspaceCanvasForTest (1);
+        bool drew = false;
+        if (second != nullptr)
+        {
+            // the gesture is a transaction, like a real drag
+            second->onEditStart ("Draw");
+            drew = second->commitStrokeForTest ({ { 100.0f, 100.0f },
+                                                  { 200.0f, 150.0f } });
+            second->onEditEnd();
+        }
+        check (drew, "WP9 the second canvas draws");
+        check (mc.pageArcCountForTest (1) == p1 + 1,
+               "WP9 the stroke lands on the second canvas's page",
+               juce::String (mc.pageArcCountForTest (1) - p1));
+        check (mc.pageArcCountForTest (0) == p0,
+               "WP9 the other page is untouched",
+               juce::String (mc.pageArcCountForTest (0) - p0));
+    }
+
+    // --- the app's own canvas edits its own page ---------------------------------
+    {
+        const int p0 = mc.pageArcCountForTest (0);
+        const int p1 = mc.pageArcCountForTest (1);
+        auto* first = mc.workspaceCanvasForTest (0);
+        bool drew = false;
+        if (first != nullptr)
+        {
+            first->onEditStart ("Draw");
+            drew = first->commitStrokeForTest ({ { 120.0f, 120.0f },
+                                                 { 220.0f, 170.0f } });
+            first->onEditEnd();
+        }
+        check (drew, "WP9 the app's canvas draws");
+        check (mc.pageArcCountForTest (0) == p0 + 1,
+               "WP9 the stroke lands on the app's page",
+               juce::String (mc.pageArcCountForTest (0) - p0));
+        check (mc.pageArcCountForTest (1) == p1,
+               "WP9 the other page is still untouched",
+               juce::String (mc.pageArcCountForTest (1) - p1));
+    }
+
+    // --- the stroke is one undo step ------------------------------------------------
+    {
+        const int before = mc.pageArcCountForTest (1);
+        const int depth = mc.undoDepth();
+        auto* second = mc.workspaceCanvasForTest (1);
+        bool drew = false;
+        if (second != nullptr)
+        {
+            second->onEditStart ("Draw");
+            drew = second->commitStrokeForTest ({ { 140.0f, 130.0f },
+                                                  { 240.0f, 180.0f } });
+            second->onEditEnd();
+        }
+        check (drew, "WP9 the second canvas draws again");
+        check (mc.undoDepth() == depth + 1,
+               "WP9 the stroke is one undo step",
+               juce::String (mc.undoDepth() - depth));
+        mc.undo();
+        check (mc.pageArcCountForTest (1) == before,
+               "WP9 the undo takes the stroke back",
+               juce::String (mc.pageArcCountForTest (1) - before));
+        check (mc.workspaceOpenForTest(),
+               "WP9 the workspace survives the undo");
+    }
+
+    // --- the canvases zoom on their own ----------------------------------------------
+    {
+        const double z0 = mc.workspaceCanvasForTest (0)->getTimeZoom();
+        const double z1 = mc.workspaceCanvasForTest (1)->getTimeZoom();
+        mc.workspaceCanvasForTest (1)->zoomBy (2.0);
+        check (std::abs (mc.workspaceCanvasForTest (1)->getTimeZoom() - z1 * 2.0) < 1e-6,
+               "WP9 a canvas zooms on its own",
+               juce::String (mc.workspaceCanvasForTest (1)->getTimeZoom(), 3));
+        check (std::abs (mc.workspaceCanvasForTest (0)->getTimeZoom() - z0) < 1e-9,
+               "WP9 the other canvas keeps its zoom",
+               juce::String (mc.workspaceCanvasForTest (0)->getTimeZoom(), 3));
+    }
+
+    // --- the playing page is marked ----------------------------------------------------
+    check (mc.workspaceActiveCanvasForTest() == 0,
+           "WP9 the playing page is marked",
+           juce::String (mc.workspaceActiveCanvasForTest()));
+    check (mc.workspaceActivePageForTest() == mc.currentPageForTest(),
+           "WP9 the marked page is the page the transport plays",
+           juce::String (mc.workspaceActivePageForTest()));
+
+    // --- the layout travels with the piece ------------------------------------------------
+    {
+        mc.setWorkspaceSplitForTest (0.6);
+        const auto var = mc.pieceToVar();
+        const auto w = var.getProperty ("workspace", juce::var());
+        check (w.isObject(),
+               "WP9 the piece carries the workspace");
+        auto* arr = w.getProperty ("pages", juce::var()).getArray();
+        check (arr != nullptr && arr->size() == 2,
+               "WP9 the piece carries the pages",
+               arr != nullptr ? juce::String (arr->size()) : juce::String ("none"));
+        check (std::abs ((double) w.getProperty ("split", 0.0) - 0.6) < 1e-6,
+               "WP9 the piece carries the split",
+               juce::String ((double) w.getProperty ("split", 0.0), 3));
+
+        // and it comes back
+        auto mc2Holder = std::make_unique<MainComponent> (true);
+        auto& mc2 = *mc2Holder;
+        mc2.setSize (1280, 800);
+        check (mc2.loadFromVar (var), "WP9 the piece with a workspace loads");
+        check (mc2.workspaceOpenForTest(),
+               "WP9 the workspace comes back");
+        check (mc2.workspaceCanvasCountForTest() == 2
+               && mc2.workspacePageForCanvasForTest (0) == 0
+               && mc2.workspacePageForCanvasForTest (1) == 1,
+               "WP9 the pages come back",
+               juce::String (mc2.workspacePageForCanvasForTest (0)) + ", "
+               + juce::String (mc2.workspacePageForCanvasForTest (1)));
+        check (std::abs (mc2.workspaceSplitForTest() - 0.6) < 1e-6,
+               "WP9 the split comes back",
+               juce::String (mc2.workspaceSplitForTest(), 3));
+    }
+
+    // --- a piece without a workspace has none ----------------------------------------------
+    {
+        auto mc3Holder = std::make_unique<MainComponent> (true);
+        auto& mc3 = *mc3Holder;
+        mc3.setSize (1280, 800);
+        check (mc3.loadFromVar (juce::JSON::parse (twoPages)),
+               "WP9 the plain piece loads");
+        check (! mc3.workspaceOpenForTest(),
+               "WP9 a plain piece has no workspace");
+        const auto v = mc3.pieceToVar();
+        check (! v.getProperty ("workspace", juce::var()).isObject(),
+               "WP9 a plain piece writes no workspace key");
+    }
+
+    // --- one page cannot have a workspace ---------------------------------------------------
+    {
+        auto mc4Holder = std::make_unique<MainComponent> (true);
+        auto& mc4 = *mc4Holder;
+        mc4.setSize (1280, 800);
+        check (mc4.loadFromVar (juce::JSON::parse (R"({"pages":[{"duration":10.0,"arcs":[]}]})")),
+               "WP9 the one-page piece loads");
+        check (! mc4.setWorkspaceOpen (true),
+               "WP9 a one-page piece cannot have a workspace");
+        check (mc4.flashMessageForTest().contains ("two pages"),
+               "WP9 the refusal says what is missing",
+               mc4.flashMessageForTest());
+        check (! mc4.workspaceOpenForTest(),
+               "WP9 the refused workspace stays closed");
+    }
+}
+

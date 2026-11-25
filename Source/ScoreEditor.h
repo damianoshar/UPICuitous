@@ -279,6 +279,12 @@ public:
     void setFineDrawing (bool on);
     bool getFineDrawing() const { return fineDrawing; }
 
+    // WP9: the workspace's mark. The workspace is not above the canvases
+    // (it only arranges them), so the canvas that shows the page the
+    // transport plays paints the mark itself.
+    void setWorkspaceMarked (bool marked, const juce::String& caption = {});
+    bool isWorkspaceMarked() const { return workspaceMarked; }
+
     // The numeric edit of the selection: it moves the selected arcs the
     // same way a drag does (a time shift and a frequency ratio), so the
     // undo transaction and the model revision see it.
@@ -412,6 +418,10 @@ private:
     double timeZoom = 1.0, timeOffset = 0.0;
     double freqZoom = 1.0, freqOffset = 0.0; // pitch view window in norm space
     bool fineDrawing = false;   // F6: the stroke is not simplified
+    // WP9: the workspace's mark on the canvas that shows the page the
+    // transport plays.
+    bool workspaceMarked = false;
+    juce::String workspaceCaption;
 
     bool drawing = false, movingArc = false;
     bool selectingMarquee = false, marqueeAdditive = false;

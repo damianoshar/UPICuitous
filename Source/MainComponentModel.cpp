@@ -308,6 +308,10 @@ void MainComponent::refreshScoreBinding()
     envEd.setOnEditEnd([this]{ endEdit(); });
     updateSampleView();
     score.repaint(); waveEd.repaint(); envEd.repaint();
+    // WP9: the workspace's canvases are bound to their pages too, and the
+    // pages can move (a page is added, duplicated or deleted), so their
+    // pointers are made again here.
+    if (workspaceOpen) bindWorkspacePages();
 }
 
 bool MainComponent::prepareWaveEdit()

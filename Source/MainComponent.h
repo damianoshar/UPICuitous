@@ -25,6 +25,7 @@
 #include "GroupPanel.h"
 #include "SequencePanel.h"
 #include "PerformanceView.h"  // WP8
+#include "PageWorkspace.h"    // WP9
 #include "ChannelPanel.h"
 #include "SampleExtractPanel.h"  // WP7
 #include "UserLibrary.h"          // WP7
@@ -1192,6 +1193,31 @@ public:
             break;
         }
         return out;
+    }
+
+    // --- WP9: the multi-page workspace ---
+    // Opens or closes the workspace. The workspace needs two pages to show
+    // (each canvas shows a different one), so a piece with one page cannot
+    // have one - the command says so and changes nothing.
+    // The pages (and the split) can be given: that is how a piece's own
+    // layout comes back.
+    bool setWorkspaceOpen (bool on, const std::vector<int>& pageList = {},
+                           double split = 0.5);
+    bool workspaceOpenForTest() const { return workspaceOpen; }
+    int workspaceCanvasCountForTest() const { return workspace.canvasCount(); }
+    int workspacePageForCanvasForTest (int i) const { return workspace.pageForCanvas (i); }
+    double workspaceSplitForTest() const { return workspace.getSplit(); }
+    void setWorkspaceSplitForTest (double f) { workspace.setSplit (f); }
+    int workspaceActiveCanvasForTest() const { return workspace.activeCanvas(); }
+    int workspaceActivePageForTest() const { return workspace.getActivePage(); }
+    // A canvas of the workspace (0 is the app's own canvas).
+    ScoreEditor* workspaceCanvasForTest (int i) const { return workspace.canvas (i); }
+    // The number of the arcs on a page (the workspace's canvases edit their
+    // own pages, so a check can look at one without the other).
+    int pageArcCountForTest (int page) const
+    {
+        if (page < 0 || page >= (int) pages.size()) return -1;
+        return (int) pages[(size_t) page].arcs.size();
     }
 
     // --- F5 (2026-11-17): the toolbar's disclosure sections --------------
@@ -2553,6 +2579,17 @@ private:
 
     // --- UI: editors ---
     ScoreEditor score;
+    // WP9: the multi-page workspace. The canvases belong to the app (the
+    // first one is the app's own canvas); the workspace arranges them and
+    // marks the page the transport is playing.
+    PageWorkspace workspace;
+    std::vector<std::unique_ptr<ScoreEditor>> workspaceScores;
+    bool workspaceOpen = false;
+    // The pages the workspace shows (the page index of each canvas).
+    std::vector<int> workspacePages;
+    juce::TextButton workspaceBtn{ "Workspace" };
+    // The divider between the first canvas and the rest (the split).
+    WorkspaceSplitter workspaceSplitter;
     WaveformEditor waveEd;
     EnvelopeEditor envEd;
     // F2/F3: the two bank managers. They own the placement of the editor
@@ -2631,6 +2668,16 @@ private:
     // canvas follow the banks. A command that already published the model
     // inside its own transaction uses this one.
     void refreshLibraryUi();
+    // WP9: the workspace's own work. The canvases are built when the
+    // workspace opens, bound to their pages when the pages change, and
+    // wired to the app's transport (there is only one).
+    void buildWorkspaceCanvases();
+    void bindWorkspacePages();
+    void wireWorkspaceCanvas (ScoreEditor& ed);
+    void updateWorkspaceMarker();
+    // The scrub preview, shared by the app's canvas and the workspace's
+    // canvases: there is one transport, so there is one preview.
+    void handleScrubPreview (double t);
     void syncControlsToArc(int arcId); // load an arc into the toolbar
     void updateSampleView();
     void updateRevButton();       // v1.19: the Reverse button follows the slot

@@ -59,6 +59,14 @@ upic::PieceModel MainComponent::capturePieceModel() const
     m.masterGain = masterGain.load();
     m.samplePitchMode = engine.getSamplePitchMode();
     m.livePitchMode = engine.getLivePitchMode();
+    // WP9: the workspace layout travels with the piece (the pages the
+    // canvases show and the split). An ordinary piece has none, and then
+    // the key is not written at all.
+    if (workspaceOpen)
+    {
+        m.workspacePages = workspacePages;
+        m.workspaceSplit = workspace.getSplit();
+    }
     return m;
 }
 
@@ -396,12 +404,35 @@ bool MainComponent::loadFromVar(const juce::var& v)
                     + (fixedRefs == 1 ? " arc pointed at material that was not there"
                                       : " arcs pointed at material that was not there");
 
+    // WP9: the workspace layout comes back with the piece. The pages are
+    // checked against the pages that actually loaded (a piece can name a
+    // page that is not there).
+    std::vector<int> workspacePageList;
+    double workspaceSplit = 0.5;
+    const auto w = v.getProperty ("workspace", juce::var());
+    if (w.isObject())
+    {
+        if (auto* arr = w.getProperty ("pages", juce::var()).getArray())
+            for (const auto& p : *arr)
+            {
+                const int index = (int) p;
+                if (index >= 0 && index < (int) newPages.size())
+                    workspacePageList.push_back (index);
+            }
+        workspaceSplit = juce::jlimit (0.2, 0.8,
+                                       (double) w.getProperty ("split", 0.5));
+    }
+
     // --- the piece is good: swap it in ---
     // An ordinary scrub/freeze request belongs to the piece that is about
     // to be replaced. End it before the swap so the next model snapshot
     // cannot be rendered through the old request. Undo and redo restore
     // through this same loader, so they are covered too.
     cancelOrdinaryPreviewRoutes();
+    // WP9: the workspace's canvases point at the pages that are about to be
+    // replaced, so the workspace is closed before the swap (and opened again
+    // with the layout the piece carries, below).
+    if (workspaceOpen) setWorkspaceOpen (false);
     {
         juce::ScopedLock l(dataLock);
         stopPlayback();
@@ -435,6 +466,10 @@ bool MainComponent::loadFromVar(const juce::var& v)
         juce::ScopedLock l(dataLock);
         // clamp ids
         currentPage = juce::jlimit(0, (int)pages.size() - 1, (int) v.getProperty("currentPage", 0));
+        // WP9: the workspace's first canvas is the live page, so the page
+        // the piece was playing takes the first place in the workspace
+        // (the list rotates when it does not). The piece's own current
+        // page wins - it is the page the musician left the piece on.
     // SECURITY (S-03): the master gain is clamped to the slider's range, so a
     // piece cannot push the mix into clipping or silence.
     masterGain.store(upic::limits::clampGain((float)(double) v.getProperty("master", 0.8)));
@@ -552,6 +587,9 @@ bool MainComponent::loadFromVar(const juce::var& v)
     // has been released. A refresh can repopulate controls whose callbacks
     // read the model, so it must never run inside that lock.
     refreshBoxes(); refreshScoreBinding();
+    // WP9: the workspace opens with the layout the piece carried.
+    if (workspacePageList.size() >= 2)
+        setWorkspaceOpen (true, workspacePageList, workspaceSplit);
     // v1.18: the next audio block must already render the loaded piece (the
     // timer alone would be up to 33 ms late - and a host may not run it).
     publishModelSnapshot();

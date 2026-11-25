@@ -55,6 +55,11 @@ namespace upic
         // the drawing snaps to, and it travels with the piece so the piece
         // is edited the way it was drawn.
         Tuning tuning;
+        // WP9: the workspace layout - the pages the workspace's canvases
+        // show and the split of the canvas area. Empty = the single canvas
+        // (the ordinary view).
+        std::vector<int> workspacePages;
+        double workspaceSplit = 0.5;
     };
 
     // The piece as a var. The samples become base64 here, and that is the
@@ -127,6 +132,17 @@ namespace upic
         }
         o->setProperty("samples", sa);
         o->setProperty("pages", pa);
+        // WP9: the workspace layout (omitted when there is none, so an old
+        // piece is written exactly as it was).
+        if (m.workspacePages.size() >= 2)
+        {
+            auto* w = new juce::DynamicObject();
+            juce::Array<juce::var> wpa;
+            for (int p : m.workspacePages) wpa.add (p);
+            w->setProperty ("pages", wpa);
+            w->setProperty ("split", m.workspaceSplit);
+            o->setProperty ("workspace", juce::var (w));
+        }
         return juce::var (o);
     }
 

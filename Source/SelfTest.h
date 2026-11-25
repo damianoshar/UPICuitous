@@ -46,6 +46,7 @@ namespace upic
     void runWP8PerformanceViewChecks (SelfTest& t); // WP8: the performance view
     void runWP9CurveChecks (SelfTest& t);   // WP9: the generalized curve
     void runWP9ConvertChecks (SelfTest& t); // WP9: the Convert As commands
+    void runWP9WorkspaceChecks (SelfTest& t); // WP9: the multi-page workspace
     void runFreqTableChecks (SelfTest& t); // WP1: the drawn conversion tables
     void runAmpTableChecks (SelfTest& t);  // WP2: the amplitude conversion tables
     void runGroupChecks (SelfTest& t);     // WP3: the arc groups

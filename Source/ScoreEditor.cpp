@@ -23,6 +23,14 @@ void ScoreEditor::bind(upic::Page* p, std::vector<upic::Waveform>* w, double* pl
         repaint();
     }
 
+void ScoreEditor::setWorkspaceMarked (bool marked, const juce::String& caption)
+{
+    if (workspaceMarked == marked && workspaceCaption == caption) return;
+    workspaceMarked = marked;
+    workspaceCaption = caption;
+    repaint();
+}
+
 void ScoreEditor::setPlayheadSource(std::function<double()> getter, std::function<void(double)> seek)
 { playheadGetter = std::move(getter); onSeek = std::move(seek); }
 
@@ -1044,6 +1052,21 @@ void ScoreEditor::paint(juce::Graphics& g)
         // border + hint
         g.setColour(juce::Colour(0xff34343f));
         g.drawRect(r, 1);
+        // WP9: the workspace's mark - this canvas shows the page the
+        // transport plays. The canvas paints it, because the workspace
+        // only arranges the canvases (it is not above them).
+        if (workspaceMarked)
+        {
+            g.setColour(juce::Colour(0xff30d158));
+            g.drawRect(r, 2);
+            if (workspaceCaption.isNotEmpty())
+            {
+                g.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
+                g.drawText(workspaceCaption, (int) r.getX() + 6, (int) r.getY() + 2,
+                           juce::jmin((int) r.getWidth() - 12, 170), 16,
+                           juce::Justification::centredLeft, false);
+            }
+        }
         juce::String hint = (layer == 2)
             ? juce::String("LIVE tab: arcs multiply the mic input pitch (1x = input, 2x = octave up), pitch mode in Audio  |  Del: delete  |  Tool=") + toolName()
             : (layer == 1)

@@ -320,6 +320,25 @@ void MainComponent::buildViewToggles()
     envTog.onClick   = [this]{ showEnvEd  = envTog.getToggleState();  resized(); };
     hintsTog.onClick = [this]{ showHints  = hintsTog.getToggleState();
                                score.setShowHints(showHints); resized(); };
+
+    // WP9: the workspace toggle. It opens the multi-page workspace: two to
+    // four pages side by side, each on its own canvas, all of them on the
+    // app's one transport.
+    workspaceBtn.setClickingTogglesState (true);
+    workspaceBtn.setToggleState (false, juce::dontSendNotification);
+    workspaceBtn.setTooltip ("Show the pages side by side (the workspace)");
+    addAndMakeVisible (workspaceBtn);
+    workspaceBtn.onClick = [this]{ setWorkspaceOpen (workspaceBtn.getToggleState()); };
+
+    // WP9: the divider between the first canvas and the rest. It moves the
+    // split, and the split travels with the piece.
+    addAndMakeVisible (workspaceSplitter);
+    workspaceSplitter.setVisible (false);
+    workspaceSplitter.onSplit = [this](double f){
+        workspace.setSplit (f);
+        markModelChanged();   // the layout is part of the piece
+        resized();
+    };
 }
 
 void MainComponent::buildAudioOverlay()
@@ -756,6 +775,7 @@ void MainComponent::buildCombos()
             publishModelSnapshot();
             refreshScoreBinding();
             refreshPerformanceView();   // WP8: the performance view follows the page
+            updateWorkspaceMarker();    // WP9: the workspace marks the playing page
         }
     };
 }

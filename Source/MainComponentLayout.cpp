@@ -310,56 +310,7 @@ void MainComponent::buildScoreArea()
                         ? playheadPublished.load(std::memory_order_relaxed)
                         : playheadSec; },
         [this](double t){ seekPlayhead(t); });
-    score.onScrubPreview = [this](double t){
-        const double nowMs = juce::Time::getMillisecondCounterHiRes();
-        double rate = 1.0;
-        if (lastScrubMs > 0.0 && std::abs(t - lastScrubT) > 1e-9)
-        {
-            const double dt = t - lastScrubT;
-            const double dms = nowMs - lastScrubMs;
-            if (dms > 1.0)
-                rate = juce::jlimit(-8.0, 8.0, dt / (dms / 1000.0));
-        }
-        if (std::abs(rate) < 0.25)
-            rate = (t >= lastScrubT) ? 1.0 : -1.0;
-        lastScrubT = t;
-        lastScrubMs = nowMs;
-        if (!transportActive() && scrubAudition)
-            claimScrubPreviewRoute (t, rate);
-        // reflect scrub position in the material view
-        double frac = -1.0;
-        if (drawMatMode == 1)
-        {
-            const juce::ScopedLock sl(dataLock);
-            for (auto& a : curPage().arcs)
-            {
-                if (a.mode != 1) continue;
-                if (t < a.startTime() || t > a.endTime()) continue;
-                int si = -1;
-                for (size_t i = 0; i < sampleSlots.size(); ++i)
-                    if (sampleSlots[i].id == a.sampleId && sampleSlots[i].loaded()) { si = (int) i; break; }
-                if (si < 0) break;
-                const auto& slot = sampleSlots[(size_t) si];
-                double sd = slot.durationSec();
-                if (sd <= 0.0) break;
-                // M5: the material's Ref is the slot's (the material's base
-                // pitch) - the same one the engine uses, so the marker in
-                // the material view sits where the sound is.
-                double ref = juce::jmax(1.0, slot.refFreq > 0.0 ? slot.refFreq : a.refFreq);
-                const int tabMode = samplePitchBox.getSelectedId() - 1;
-                bool arcMapped = (a.pitchMode >= 0) ? (a.pitchMode == 1 || a.pitchMode == 2)
-                                                    : (tabMode == 1 || tabMode == 2);
-                double arcDur = juce::jmax(1.0e-6, a.endTime() - a.startTime());
-                double progress = juce::jlimit(0.0, 1.0, (t - a.startTime()) / arcDur);
-                double pos = arcMapped ? progress * sd
-                                       : UpicEngine::scrubMaterialPos(a, t, ref, sd,
-                                                 curPage().spaceMap (a.space));
-                frac = std::fmod(pos, sd) / sd;
-                break;
-            }
-        }
-        waveEd.setPlayhead(frac);
-    };
+    score.onScrubPreview = [this](double t){ handleScrubPreview (t); };
     score.onScrubFreezeStart = [this](double t){
         if (scrubAudition)
             claimScrubFreezeRoute (t);
@@ -1872,6 +1823,10 @@ void MainComponent::resized()
         hintsTog.setBounds(tabs.removeFromRight((int) std::lround(56.0f * s)).reduced(1));
         envTog.setBounds(tabs.removeFromRight((int) std::lround(46.0f * s)).reduced(1));
         waveTog.setBounds(tabs.removeFromRight((int) std::lround(52.0f * s)).reduced(1));
+        // WP9: the workspace toggle sits with the other view toggles
+        if (tabs.getWidth() >= (int) std::lround (72.0f * s))
+            workspaceBtn.setBounds (tabs.removeFromRight ((int) std::lround (72.0f * s)).reduced (1));
+        else workspaceBtn.setBounds ({});
         // v1.21: the arc list toggle sits with the other view toggles
         if (tabs.getWidth() >= (int) std::lround (52.0f * s)) arcListBtn.setBounds (tabs.removeFromRight ((int) std::lround (52.0f * s)).reduced (1));
         else arcListBtn.setVisible (false);
@@ -2062,6 +2017,7 @@ void MainComponent::resized()
     // its own canvas layer - Osc | Sample | Live - with the v1.7 view
     // toggles at the right end of the same strip
     placeTabStrip (b.removeFromTop ((int) std::lround (26.0f * s)));
+    workspaceBtn.setVisible (! anyFocus && workspaceBtn.getWidth() > 0);   // WP9
 
     // v1.21: the arc list takes the right side of the canvas
     if (showArcList)
@@ -2083,7 +2039,40 @@ void MainComponent::resized()
     {
         arcListPanel.setVisible (false);
     }
-    score.setBounds(b);
+
+    // WP9: the workspace takes the canvas area when it is open: its
+    // canvases stand side by side, and the app's own canvas is the first
+    // of them. The focus view is one canvas, so the workspace waits there.
+    if (workspaceOpen && ! anyFocus)
+    {
+        workspace.setBounds (b);
+        const auto origin = workspace.getPosition();
+        for (int i = 0; i < workspace.canvasCount(); ++i)
+        {
+            if (auto* c = workspace.canvas (i))
+            {
+                const auto r = workspace.boundsForCanvas (i);
+                c->setBounds (r.translated (origin.x, origin.y));
+                c->setVisible (true);
+            }
+        }
+        // the divider stands where the split is
+        const int dividerX = b.getX()
+                           + juce::roundToInt ((double) b.getWidth() * workspace.getSplit())
+                           - 3;
+        workspaceSplitter.setArea (b);
+        workspaceSplitter.setBounds (dividerX, b.getY(), 6, b.getHeight());
+        workspaceSplitter.setVisible (true);
+        workspace.repaint();
+    }
+    else
+    {
+        workspace.setBounds ({});
+        workspaceSplitter.setVisible (false);
+        for (auto& c : workspaceScores)
+            if (c != nullptr) c->setVisible (false);
+        score.setBounds(b);
+    }
 
 
     // v1.30 (5.3 refactor): the overlay cards have their own method.
@@ -2095,6 +2084,293 @@ void MainComponent::resized()
     // old cards stayed behind until the window was resized. Repaint the whole
     // component after every layout pass.
     repaint();
+}
+
+//==============================================================================
+// WP9: the scrub preview.
+//
+// The canvas that is being scrubbed moves the app's ONE transport, so the
+// material view shows where the sound is. The app's own canvas and the
+// workspace's canvases share this one path - there is no second transport.
+void MainComponent::handleScrubPreview (double t)
+{
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+    double rate = 1.0;
+    if (lastScrubMs > 0.0 && std::abs(t - lastScrubT) > 1e-9)
+    {
+        const double dt = t - lastScrubT;
+        const double dms = nowMs - lastScrubMs;
+        if (dms > 1.0)
+            rate = juce::jlimit(-8.0, 8.0, dt / (dms / 1000.0));
+    }
+    if (std::abs(rate) < 0.25)
+        rate = (t >= lastScrubT) ? 1.0 : -1.0;
+    lastScrubT = t;
+    lastScrubMs = nowMs;
+    if (!transportActive() && scrubAudition)
+        claimScrubPreviewRoute (t, rate);
+    // reflect scrub position in the material view
+    double frac = -1.0;
+    if (drawMatMode == 1)
+    {
+        const juce::ScopedLock sl(dataLock);
+        for (auto& a : curPage().arcs)
+        {
+            if (a.mode != 1) continue;
+            if (t < a.startTime() || t > a.endTime()) continue;
+            int si = -1;
+            for (size_t i = 0; i < sampleSlots.size(); ++i)
+                if (sampleSlots[i].id == a.sampleId && sampleSlots[i].loaded()) { si = (int) i; break; }
+            if (si < 0) break;
+            const auto& slot = sampleSlots[(size_t) si];
+            double sd = slot.durationSec();
+            if (sd <= 0.0) break;
+            // M5: the material's Ref is the slot's (the material's base
+            // pitch) - the same one the engine uses, so the marker in
+            // the material view sits where the sound is.
+            double ref = juce::jmax(1.0, slot.refFreq > 0.0 ? slot.refFreq : a.refFreq);
+            const int tabMode = samplePitchBox.getSelectedId() - 1;
+            bool arcMapped = (a.pitchMode >= 0) ? (a.pitchMode == 1 || a.pitchMode == 2)
+                                                : (tabMode == 1 || tabMode == 2);
+            double arcDur = juce::jmax(1.0e-6, a.endTime() - a.startTime());
+            double progress = juce::jlimit(0.0, 1.0, (t - a.startTime()) / arcDur);
+            double pos = arcMapped ? progress * sd
+                                   : UpicEngine::scrubMaterialPos(a, t, ref, sd,
+                                             curPage().spaceMap (a.space));
+            frac = std::fmod(pos, sd) / sd;
+            break;
+        }
+    }
+    waveEd.setPlayhead(frac);
+}
+
+//==============================================================================
+// WP9: the multi-page workspace.
+//
+// The workspace shows 2..4 pages side by side, each on its own canvas, all
+// of them following the app's ONE transport - there is no second transport
+// and no second clock. The page the transport plays is marked, so the
+// musician knows where the sound comes from.
+bool MainComponent::setWorkspaceOpen (bool on, const std::vector<int>& pageList, double split)
+{
+    if (on == workspaceOpen) return workspaceOpen;
+
+    if (on)
+    {
+        // a workspace needs two pages to show: every canvas shows a
+        // different one
+        const int pageCount = (int) pages.size();
+        if (pageCount < PageWorkspace::kMinCanvases)
+        {
+            flash ("A workspace needs at least two pages - add a page first");
+            workspaceBtn.setToggleState (false, juce::dontSendNotification);
+            return false;
+        }
+
+        // the pages: the ones that were given (a piece's own layout), or
+        // the current page and the next ones
+        workspacePages.clear();
+        const bool given = (int) pageList.size() >= PageWorkspace::kMinCanvases
+                        && (int) pageList.size() <= PageWorkspace::kMaxCanvases;
+        if (given)
+        {
+            for (int p : pageList)
+                if (p >= 0 && p < pageCount) workspacePages.push_back (p);
+        }
+        else
+        {
+            const int count = juce::jmin (PageWorkspace::kMaxCanvases, pageCount);
+            for (int i = 0; i < count; ++i)
+                workspacePages.push_back ((currentPage + i) % pageCount);
+        }
+        if ((int) workspacePages.size() < PageWorkspace::kMinCanvases)
+        {
+            flash ("A workspace needs at least two pages - add a page first");
+            workspaceBtn.setToggleState (false, juce::dontSendNotification);
+            return false;
+        }
+
+        workspace.setSplit (split);
+        buildWorkspaceCanvases();
+        bindWorkspacePages();
+    }
+    else
+    {
+        // the workspace is closed: no canvas carries the mark
+        workspace.clearMarks();
+        for (auto& c : workspaceScores)
+            if (c != nullptr) c->setVisible (false);
+    }
+
+    workspaceOpen = on;
+    workspaceBtn.setToggleState (on, juce::dontSendNotification);
+    updateWorkspaceMarker();
+    resized();
+    return workspaceOpen;
+}
+
+void MainComponent::buildWorkspaceCanvases()
+{
+    const int count = (int) workspacePages.size();
+
+    // the app's own canvas is the first one; the workspace adds the others
+    while ((int) workspaceScores.size() < count - 1)
+    {
+        auto ed = std::make_unique<ScoreEditor>();
+        wireWorkspaceCanvas (*ed);
+        addAndMakeVisible (ed.get());
+        ed->setVisible (false);
+        workspaceScores.push_back (std::move (ed));
+    }
+    while ((int) workspaceScores.size() > count - 1)
+    {
+        auto& c = workspaceScores.back();
+        removeChildComponent (c.get());
+        workspaceScores.pop_back();
+    }
+
+    std::vector<ScoreEditor*> all;
+    all.push_back (&score);
+    for (auto& c : workspaceScores)
+        all.push_back (c.get());
+    workspace.setCanvases (all);
+
+    // the divider stands above the canvases (it is a thin strip on their
+    // border)
+    workspaceSplitter.toFront (false);
+
+    // the canvases start like the app's own canvas: the same tool, the
+    // same voice, the same magnet and the same material layer
+    for (auto& c : workspaceScores)
+    {
+        if (c == nullptr) continue;
+        ScoreEditor& ed = *c;
+        ed.setTool (score.getTool());
+        ed.setLayer (score.getLayer());
+        ed.setShowHints (showHints);
+        ed.setRecordPressure (recordPressure);
+        ed.setSieve (sieveOn, sieveM, sieveR);
+        ed.setStickiness (stickiness);
+        ed.setTimeGrid (timeGrid);
+        ed.setTuning (tuning);
+        ed.setFineDrawing (score.getFineDrawing());
+        ed.sampleDurations = score.sampleDurations;
+    }
+}
+
+void MainComponent::bindWorkspacePages()
+{
+    // every canvas is bound to its own page. The pages vector can move
+    // (a page is added, duplicated or deleted), so the pointers are made
+    // again whenever the model says so.
+    std::vector<ScoreEditor*> all;
+    all.push_back (&score);
+    for (auto& c : workspaceScores)
+        all.push_back (c.get());
+    workspace.setCanvases (all);
+
+    for (int i = 0; i < workspace.canvasCount(); ++i)
+    {
+        auto* ed = workspace.canvas (i);
+        if (ed == nullptr) continue;
+        // the page each canvas shows is the app's own list - the list is
+        // what the piece carries
+        const int page = (i < (int) workspacePages.size()) ? workspacePages[(size_t) i] : -1;
+        if (page < 0 || page >= (int) pages.size()) continue;
+        workspace.setPageForCanvas (i, page);
+        // The app's own canvas is the workspace's first canvas: it shows
+        // the current page (the page the transport plays), and
+        // refreshScoreBinding binds it - binding it again here would
+        // clear its selection.
+        if (i == 0) continue;
+        ed->bind (&pages[(size_t) page], &waveforms, &playheadSec, [this]{
+            markModelChanged(); updateStatus(); refreshBoxes(); });
+    }
+    workspace.updateMarks();
+}
+
+void MainComponent::wireWorkspaceCanvas (ScoreEditor& ed)
+{
+    // every editor mutates the same model the timer copies into the audio
+    // snapshot, so they all share the message-thread model lock
+    ed.setModelLock (&dataLock);
+    // the transport is the app's: the workspace's canvases follow the same
+    // playhead, and a scrub on one of them moves the same playhead
+    ed.setPlayheadSource (
+        [this]{ return transportActive()
+                        ? playheadPublished.load(std::memory_order_relaxed)
+                        : playheadSec; },
+        [this](double t){ seekPlayhead(t); });
+    ed.onScrubPreview = [this](double t){ handleScrubPreview (t); };
+    ed.onScrubFreezeStart = [this](double t){
+        if (scrubAudition)
+            claimScrubFreezeRoute (t);
+    };
+    ed.onScrubFreezeStop = [this](){
+        updateScrubFreezeStop (juce::Time::getMillisecondCounterHiRes()
+                               + (double) scrubTailMs.load (std::memory_order_relaxed));
+    };
+    ed.onScrubFreezeCancel = [this](){
+        cancelScrubFreezeRoute();
+        waveEd.setPlayhead(-1.0);
+    };
+    ed.onScrubDragRelease = [this](double /*t*/){
+        // intentionally no-op: releasing a drag does not start playback
+    };
+    // the undo transaction (one gesture, one step)
+    ed.onEditStart = [this](const juce::String& what){ beginEdit (what); };
+    ed.onEditEnd = [this]{
+        endEdit();
+        publishModelSnapshot();
+    };
+    ed.onModelEdited = [this]{ markModelChanged(); };
+    ed.onNotice = [this](const juce::String& m){ flash (m); };
+    ed.onUndo = [this]{ undo(); };
+    ed.onRedo = [this]{ redo(); };
+    // the canvas keeps its own selection: it does not drive the app's
+    // controls, so two canvases cannot talk over each other
+    ed.onSelect = [] (int){};
+    ed.onArcEditingChanged = [this](bool editing)
+    {
+        arcEditing.store (editing, std::memory_order_relaxed);
+    };
+}
+
+void MainComponent::updateWorkspaceMarker()
+{
+    if (! workspaceOpen) return;
+
+    // The app's own canvas is the workspace's first canvas and it always
+    // shows the current page - the page the transport plays. So when the
+    // current page changes, the list rotates: the new page takes the
+    // first place and the others follow. Every canvas keeps a different
+    // page that way.
+    bool changed = false;
+    const auto at = std::find (workspacePages.begin(), workspacePages.end(), currentPage);
+    if (at != workspacePages.end())
+    {
+        if (at != workspacePages.begin())
+        {
+            const int p = *at;
+            workspacePages.erase (at);
+            workspacePages.insert (workspacePages.begin(), p);
+            changed = true;
+        }
+    }
+    else if (! workspacePages.empty())
+    {
+        // a page that is not in the workspace takes the first place
+        workspacePages.insert (workspacePages.begin(), currentPage);
+        if ((int) workspacePages.size() > PageWorkspace::kMaxCanvases)
+            workspacePages.pop_back();
+        changed = true;
+    }
+    if (changed) bindWorkspacePages();
+
+    // the page the transport plays is the one that is marked
+    workspace.setActivePage (currentPage);
+    workspace.updateMarks();
+    workspace.repaint();
 }
 
 void MainComponent::layoutOverlays (float s)

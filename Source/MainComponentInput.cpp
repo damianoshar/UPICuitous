@@ -339,6 +339,9 @@ void MainComponent::setMaterial(int m)
 {
     drawMatMode = juce::jlimit(0, 3, m);
     score.setLayer(drawMatMode);
+    // WP9: the workspace's canvases show the same material layer.
+    for (auto& c : workspaceScores)
+        if (c != nullptr) c->setLayer (drawMatMode);
     syncMaterialTabs();
     matHintLab.setText (drawMatMode == 0 ? "Osc: draw arcs on the wavetable\n"
                                           "Wave = carrier, Env = amplitude"
