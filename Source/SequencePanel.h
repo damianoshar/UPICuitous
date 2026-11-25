@@ -308,7 +308,7 @@ public:
         if (onPointsEdited) onPointsEdited (dragPoints);
     }
     void replaceForTest() { if (onReplace) onReplace(); }
-    int selectedPointForTest() const { return selectedPoint; }
+    int selectedPointIndex() const { return selectedPoint; }
     std::vector<upic::PerformancePoint> dragPointsForTest() const { return dragPoints; }
 
 private:

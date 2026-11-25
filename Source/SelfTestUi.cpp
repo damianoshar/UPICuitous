@@ -1420,7 +1420,7 @@ void upic::runInterfaceChecks (upic::SelfTest& t)
         // collapsed: the group's controls go, the labelled toggle stays
         if (fold != nullptr) fold->onClick();
         const int rowsCollapsed = mc.toolbarRowCountForTest();
-        check (mc.groupLevelForTest ("levels") == MainComponent::GroupLevel::collapsed,
+        check (mc.groupLevelFor ("levels") == MainComponent::GroupLevel::collapsed,
                "F5 the disclosure toggle collapses the group");
         check (inten != nullptr && ! inten->isVisible()
                && dur != nullptr && ! dur->isVisible()
@@ -1432,7 +1432,7 @@ void upic::runInterfaceChecks (upic::SelfTest& t)
 
         // and the same toggle brings the group back
         if (fold != nullptr) fold->onClick();
-        check (mc.groupLevelForTest ("levels") == MainComponent::GroupLevel::expanded
+        check (mc.groupLevelFor ("levels") == MainComponent::GroupLevel::expanded
                && inten != nullptr && inten->isVisible()
                && dur != nullptr && dur->isVisible()
                && fold != nullptr && fold->isVisible(),
@@ -1446,7 +1446,7 @@ void upic::runInterfaceChecks (upic::SelfTest& t)
         check (restore != nullptr && restore->isVisible(),
                "F5 Restore is in the permanent strip");
         if (restore != nullptr) restore->onClick();
-        check (mc.groupLevelForTest ("levels") == MainComponent::GroupLevel::expanded
+        check (mc.groupLevelFor ("levels") == MainComponent::GroupLevel::expanded
                && inten != nullptr && inten->isVisible()
                && dur != nullptr && dur->isVisible()
                && fold != nullptr && fold->isVisible(),
@@ -1494,7 +1494,7 @@ void upic::runInterfaceChecks (upic::SelfTest& t)
 
         mc.setSize (1280, 800);
         mc.restoreAllGroups();
-        check (mc.groupLevelForTest ("levels") == MainComponent::GroupLevel::expanded,
+        check (mc.groupLevelFor ("levels") == MainComponent::GroupLevel::expanded,
                "F5 Restore after a narrow layout brings the groups back");
     }
 
@@ -1505,11 +1505,11 @@ void upic::runInterfaceChecks (upic::SelfTest& t)
         mc.setGroupLevel ("page", MainComponent::GroupLevel::collapsed);
         const auto v = mc.sessionSettingsToVar();
         mc.restoreAllGroups();
-        check (mc.groupLevelForTest ("scrub") == MainComponent::GroupLevel::expanded,
+        check (mc.groupLevelFor ("scrub") == MainComponent::GroupLevel::expanded,
                "F5 Restore clears the disclosure state before the round trip");
         mc.sessionSettingsFromVar (v);
-        check (mc.groupLevelForTest ("scrub") == MainComponent::GroupLevel::collapsed
-               && mc.groupLevelForTest ("page") == MainComponent::GroupLevel::collapsed,
+        check (mc.groupLevelFor ("scrub") == MainComponent::GroupLevel::collapsed
+               && mc.groupLevelFor ("page") == MainComponent::GroupLevel::collapsed,
                "F5 the disclosure state survives a session-settings round trip");
         check (v.hasProperty ("showWaveEd") && v.hasProperty ("showHints"),
                "F5 the session settings carry the view toggles too");
@@ -1517,8 +1517,8 @@ void upic::runInterfaceChecks (upic::SelfTest& t)
         // the old three-level fold (hidden = 2) is read as "collapsed"
         juce::var old = juce::JSON::parse ("{\"groups\":{\"scrub\":2,\"levels\":1}}");
         mc.sessionSettingsFromVar (old);
-        check (mc.groupLevelForTest ("scrub") == MainComponent::GroupLevel::collapsed
-               && mc.groupLevelForTest ("levels") == MainComponent::GroupLevel::collapsed,
+        check (mc.groupLevelFor ("scrub") == MainComponent::GroupLevel::collapsed
+               && mc.groupLevelFor ("levels") == MainComponent::GroupLevel::collapsed,
                "F5 the old fold levels load as collapsed");
         mc.restoreAllGroups();
     }

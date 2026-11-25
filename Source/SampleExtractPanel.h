@@ -311,6 +311,17 @@ public:
     int materialFrames() const { return regionFrames; }
     double materialRate() const { return sampleRate; }
     bool hasMaterial() const { return source.loaded() && regionFrames > 0; }
+    // The A/B preview's state and its results. The panel's own commands and
+    // the host's preview route inspect these, so they are production
+    // accessors - not test hooks.
+    bool isPreviewOn() const { return previewOn; }
+    bool isPreviewExtracted() const { return previewExtracted; }
+    bool hasCycle() const { return cycleInfo.ok; }
+    bool hasPreviewWave() const
+    {
+        return cycleInfo.ok
+            && previewWave.samples.size() == (size_t) upic::kWaveSize;
+    }
     const upic::SampleSlot& sourceSlot() const { return source; }
     int sourceSlotId() const { return source.id; }
     juce::String sourceName() const { return source.name; }
@@ -336,16 +347,9 @@ public:
     }
 
     //=== the selftest hooks =================================================
-    void detectForTest()  { analyse(); }
-    void alignForTest()   { alignCycle(); }
     void previewForTest() { if (onPreview) onPreview(); }
-    bool previewOnForTest() const { return previewOn; }
-    bool previewExtractedForTest() const { return previewExtracted; }
     bool previewRequestedExtractedForTest() const { return previewRequestedExtracted; }
-    bool hasPreviewWaveForTest() const { return hasPreviewWave(); }
     const upic::Waveform& previewWaveformForTest() const { return previewWave; }
-    bool hasCycleForTest() const { return cycleInfo.ok; }
-    bool hasMaterialForTest() const { return hasMaterial(); }
     int cycleLengthForTest() const { return cycleInfo.lengthSamples; }
     int cycleStartForTest() const { return cycleInfo.startSample; }
     int materialFramesForTest() const { return regionFrames; }
@@ -468,12 +472,6 @@ private:
         const int c = juce::jlimit (0, source.data->getNumChannels() - 1,
                                     analysisChannel);
         return source.data->getReadPointer (c) + regionStart;
-    }
-
-    bool hasPreviewWave() const
-    {
-        return cycleInfo.ok
-            && previewWave.samples.size() == (size_t) upic::kWaveSize;
     }
 
     // Forgets the cycle, its converted wavetable and the effective

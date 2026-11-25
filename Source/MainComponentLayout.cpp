@@ -162,7 +162,7 @@ void MainComponent::refreshPointFields()
     viewBar.setPointFields (has, t, f);
 }
 
-MainComponent::GroupLevel MainComponent::groupLevelForTest (const juce::String& group) const
+MainComponent::GroupLevel MainComponent::groupLevelFor (const juce::String& group) const
 {
     const auto it = groupLevels.find (group);
     return it != groupLevels.end() ? it->second : GroupLevel::expanded;
@@ -191,7 +191,7 @@ juce::ToggleButton* MainComponent::ensureGroupToggle (const juce::String& group)
     b->setTooltip ("Show or hide the " + groupCaption (group).toLowerCase() + " controls");
     b->onClick = [this, group]
     {
-        const auto cur = groupLevelForTest (group);
+        const auto cur = groupLevelFor (group);
         setGroupLevel (group, cur == GroupLevel::expanded ? GroupLevel::collapsed
                                                           : GroupLevel::expanded);
     };
@@ -1072,7 +1072,7 @@ void MainComponent::resized()
     std::vector<FlowGroup> shownGroups;
     for (auto& grp : groups)
     {
-        const auto level = anyFocus ? GroupLevel::collapsed : groupLevelForTest (grp.name);
+        const auto level = anyFocus ? GroupLevel::collapsed : groupLevelFor (grp.name);
 
         auto* fold = ensureGroupToggle (grp.name);
         fold->setVisible (true);

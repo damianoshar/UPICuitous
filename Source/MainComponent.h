@@ -763,13 +763,13 @@ public:
         // Use the panel's command callback, not the analysis method alone:
         // the real Detect button also refreshes the published preview route.
         if (sampleExtractPanel->onDetect) sampleExtractPanel->onDetect();
-        else sampleExtractPanel->detectForTest();
+        else sampleExtractPanel->analyse();
     }
     void sampleExtractAlignForTest()
     {
         if (sampleExtractPanel == nullptr) return;
         if (sampleExtractPanel->onAlign) sampleExtractPanel->onAlign();
-        else sampleExtractPanel->alignForTest();
+        else sampleExtractPanel->alignCycle();
     }
     void sampleExtractPreviewForTest() { previewSampleExtract(); }
     void cancelSampleExtractPreviewGenerationForTest (std::uint64_t generation)
@@ -779,7 +779,7 @@ public:
     // extraction route with it.
     void cancelOrdinaryPreviewRoutesForTest() { cancelOrdinaryPreviewRoutes(); }
     bool sampleExtractPreviewUsesCycleForTest() const
-    { return sampleExtractPanel != nullptr && sampleExtractPanel->previewExtractedForTest(); }
+    { return sampleExtractPanel != nullptr && sampleExtractPanel->isPreviewExtracted(); }
     bool sampleExtractPreviewActiveForTest() const
     { return sampleExtractPreviewState.route != SampleExtractRoute::none; }
     SampleExtractRoute sampleExtractPreviewRouteForTest() const
@@ -803,7 +803,7 @@ public:
     {
         if (sampleExtractPanel == nullptr) return;
         sampleExtractPanel->setSourceChannelForTest (channel);
-        if (sampleExtractPanel->previewOnForTest())
+        if (sampleExtractPanel->isPreviewOn())
             restartSampleExtractPreview();
     }
     bool sampleExtractPreviewRequestedExtractedForTest() const
@@ -1064,7 +1064,7 @@ public:
     // visible whatever the groups do.
     enum class GroupLevel : int { expanded = 0, collapsed = 1 };
     void setGroupLevel (const juce::String& group, GroupLevel level);
-    GroupLevel groupLevelForTest (const juce::String& group) const;
+    GroupLevel groupLevelFor (const juce::String& group) const;
     void restoreAllGroups();
     // The caption of a group's disclosure toggle.
     static juce::String groupCaption (const juce::String& group);

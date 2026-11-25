@@ -63,8 +63,8 @@ void MainComponent::openSampleExtractPanel()
 
         sampleExtractPanel->onDetect = [this]
         {
-            sampleExtractPanel->detectForTest();
-            if (sampleExtractPanel->previewOnForTest())
+            sampleExtractPanel->analyse();
+            if (sampleExtractPanel->isPreviewOn())
             {
                 // Detect refreshes the current A/B side; it never toggles it.
                 // The restart publishes the new analysis and a new transport
@@ -74,8 +74,8 @@ void MainComponent::openSampleExtractPanel()
         };
         sampleExtractPanel->onAlign = [this]
         {
-            sampleExtractPanel->alignForTest();
-            if (sampleExtractPanel->previewOnForTest())
+            sampleExtractPanel->alignCycle();
+            if (sampleExtractPanel->isPreviewOn())
             {
                 // Align refreshes the current A/B side; it never toggles it.
                 restartSampleExtractPreview();
@@ -86,7 +86,7 @@ void MainComponent::openSampleExtractPanel()
             // The panel has already re-analysed the chosen mono channel.
             // Republish the current A/B side so the original preview, the
             // extracted cycle and the saved asset all name that channel.
-            if (sampleExtractPanel->previewOnForTest())
+            if (sampleExtractPanel->isPreviewOn())
                 restartSampleExtractPreview();
         };
         sampleExtractPanel->onPreview = [this] { previewSampleExtract(); };
@@ -105,7 +105,7 @@ void MainComponent::openSampleExtractPanel()
     }
 
     sampleExtractPanel->setMaterial (&material);
-    const bool canPreview = sampleExtractPanel->hasMaterialForTest();
+    const bool canPreview = sampleExtractPanel->hasMaterial();
     // Opening the panel never arms a preview that would start later by
     // itself. While the transport is running the A/B route stays idle.
     const bool autoPreview = canPreview && ! transportActive();
@@ -200,8 +200,8 @@ void MainComponent::invalidateSampleExtractSource()
 //==============================================================================
 void MainComponent::restartSampleExtractPreview()
 {
-    if (! sampleExtractPanel || ! sampleExtractPanel->previewOnForTest()
-        || ! sampleExtractPanel->hasMaterialForTest() || transportActive())
+    if (! sampleExtractPanel || ! sampleExtractPanel->isPreviewOn()
+        || ! sampleExtractPanel->hasMaterial() || transportActive())
     {
         cancelSampleExtractPreview();
         return;
@@ -218,7 +218,7 @@ void MainComponent::restartSampleExtractPreview()
     clearOrdinaryPreviewRoutes();
 
     advanceSampleExtractPreviewGeneration();
-    sampleExtractPreviewState.route = sampleExtractPanel->previewExtractedForTest()
+    sampleExtractPreviewState.route = sampleExtractPanel->isPreviewExtracted()
         ? SampleExtractRoute::extracted : SampleExtractRoute::original;
     sampleExtractPreviewState.durationFrames = juce::jmax (256,
         (int) (audioSampleRate() * 2.0));
@@ -232,7 +232,7 @@ void MainComponent::restartSampleExtractPreview()
 //==============================================================================
 void MainComponent::previewSampleExtract()
 {
-    if (! sampleExtractPanel || ! sampleExtractPanel->hasMaterialForTest())
+    if (! sampleExtractPanel || ! sampleExtractPanel->hasMaterial())
     {
         flash ("There is no material to preview");
         return;
@@ -244,8 +244,8 @@ void MainComponent::previewSampleExtract()
         return;
     }
 
-    const bool extracted = ! sampleExtractPanel->previewExtractedForTest();
-    if (extracted && ! sampleExtractPanel->hasCycleForTest())
+    const bool extracted = ! sampleExtractPanel->isPreviewExtracted();
+    if (extracted && ! sampleExtractPanel->hasCycle())
     {
         flash ("No repeating loop was found - there is no cycle to preview");
         return;
@@ -261,8 +261,8 @@ void MainComponent::previewSampleExtract()
 //==============================================================================
 bool MainComponent::saveSampleCycleToWave()
 {
-    if (! sampleExtractPanel || ! sampleExtractPanel->hasCycleForTest()
-        || ! sampleExtractPanel->hasPreviewWaveForTest())
+    if (! sampleExtractPanel || ! sampleExtractPanel->hasCycle()
+        || ! sampleExtractPanel->hasPreviewWave())
     {
         flash ("No repeating loop was found - there is no cycle to save");
         return false;
@@ -380,7 +380,7 @@ void MainComponent::addSampleExtractPreview (ModelSnapshot& snap)
 
     const auto route = sampleExtractPreviewState.route;
     if (route == SampleExtractRoute::none || ! sampleExtractPanel
-        || ! sampleExtractPanel->isVisible() || ! sampleExtractPanel->previewOnForTest())
+        || ! sampleExtractPanel->isVisible() || ! sampleExtractPanel->isPreviewOn())
         return;
 
     // The panel's captured cycle is the one and only source of the pitch of
@@ -403,7 +403,7 @@ void MainComponent::addSampleExtractPreview (ModelSnapshot& snap)
     arc.envelopeId = 0;         // the isolated flat envelope below
     arc.points = { { 0.0, ref }, { 4.0, ref } };
 
-    if (route == SampleExtractRoute::extracted && sampleExtractPanel->hasPreviewWaveForTest())
+    if (route == SampleExtractRoute::extracted && sampleExtractPanel->hasPreviewWave())
     {
 
         // Preview the exact converted wavetable "To wave" saves. It lives

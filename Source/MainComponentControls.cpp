@@ -1319,7 +1319,7 @@ void MainComponent::showSequencePanel()
     seqPanel.onTrim = [this]
     {
         const int i = sequenceIndexOfId (selSeqId);
-        const int j = seqPanel.selectedPointForTest();
+        const int j = seqPanel.selectedPointIndex();
         if (i < 0 || j < 0 || j >= (int) sequences[(size_t) i].points.size() || seqRecording)
             return;
         const double cut = sequences[(size_t) i].points[(size_t) j].t;
@@ -1341,7 +1341,7 @@ void MainComponent::showSequencePanel()
     seqPanel.onReplace = [this]
     {
         const int i = sequenceIndexOfId (selSeqId);
-        const int j = seqPanel.selectedPointForTest();
+        const int j = seqPanel.selectedPointIndex();
         if (i < 0 || j < 0 || j >= (int) sequences[(size_t) i].points.size() || seqRecording)
             return;
         seqReplaceFromT = sequences[(size_t) i].points[(size_t) j].t;
