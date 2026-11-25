@@ -311,14 +311,23 @@ namespace upic
         int maxLength = n - 1;
         if (targetLength > 0)
         {
-            const juce::int64 target = (juce::int64) targetLength;
-            const juce::int64 lo = juce::jmax<juce::int64> (16, target * 3 / 4);
-            const juce::int64 hi = juce::jmin<juce::int64> ((juce::int64) n - 1,
+            // The bounds are worked out in 64-bit maths, so even INT_MAX
+            // cannot overflow them. They deliberately do NOT use juce::jmax,
+            // juce::jmin or juce::jlimit with a 64-bit integer: JUCE's
+            // jmax/jmin carry SIMD overloads, so naming a 64-bit integer
+            // makes the compiler instantiate dsp::SIMDRegister<long long>,
+            // and JUCE's NEON operations only provide SIMDNativeOps<int64_t>
+            // - which is 'long' on 64-bit ARM, not 'long long'. That is a
+            // compile error on Android (and it compiled on Windows only
+            // because MSVC's int64_t happens to be 'long long').
+            const std::int64_t target = (std::int64_t) targetLength;
+            const std::int64_t lo = std::max<std::int64_t> (16, target * 3 / 4);
+            const std::int64_t hi = std::min<std::int64_t> ((std::int64_t) n - 1,
                                                             target * 5 / 4);
-            minLength = (int) juce::jlimit<juce::int64> (1,
-                (juce::int64) std::numeric_limits<int>::max(), lo);
-            maxLength = (int) juce::jlimit<juce::int64> (1,
-                (juce::int64) std::numeric_limits<int>::max(), hi);
+            minLength = (int) std::clamp<std::int64_t> (lo, 1,
+                (std::int64_t) std::numeric_limits<int>::max());
+            maxLength = (int) std::clamp<std::int64_t> (hi, 1,
+                (std::int64_t) std::numeric_limits<int>::max());
         }
         return findBestCycle (buffer.getReadPointer (0), n, sampleRate,
                               minLength, maxLength);
