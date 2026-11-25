@@ -3104,3 +3104,216 @@ void upic::runChannelUiChecks (upic::SelfTest& t)
                juce::String (mc.arcModBoxSelectionForTest()));
     }
 }
+
+//==============================================================================
+// WP8: the geometric transforms of the drawn curve.
+//
+// The transforms work in the page's own normalised space (the time across
+// the page and the pitch in octaves of the page's ambitus), so they do not
+// depend on the zoom. These checks are the model's own: they drive the
+// helpers in Arc.h directly.
+void upic::runWP8TransformChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // the frame: a 30 s page with the default ambitus
+    upic::ArcFrame frame { 30.0, upic::kDefaultPitchLo, upic::kDefaultPitchHi };
+
+    // the length of a curve in the normalised space
+    auto lengthIn = [&frame] (const upic::Arc& a)
+    {
+        double len = 0.0;
+        for (size_t i = 1; i < a.points.size(); ++i)
+        {
+            const double x0 = frame.normX (a.points[i-1].t), y0 = frame.normY (a.points[i-1].freq);
+            const double x1 = frame.normX (a.points[i].t),   y1 = frame.normY (a.points[i].freq);
+            len += std::sqrt ((x1-x0)*(x1-x0) + (y1-y0)*(y1-y0));
+        }
+        return len;
+    };
+
+    // WP8: a rotation keeps the length of the curve.
+    {
+        upic::Arc a;
+        a.id = 1;
+        a.points = { { 5.0, 220.0 }, { 10.0, 440.0 }, { 15.0, 880.0 } };
+        upic::ArcRefs arcs { &a };
+        const auto bounds = upic::arcBounds (arcs, frame);
+        const double before = lengthIn (a);
+        upic::transformRotate (arcs, frame, bounds.centreX(), bounds.centreY(),
+                               15.0 * juce::MathConstants<double>::pi / 180.0);
+        const double after = lengthIn (a);
+        check (std::abs (before - after) < 1e-9,
+               "WP8 the rotation keeps the length of the curve",
+               juce::String (before, 6) + " -> " + juce::String (after, 6));
+        check (std::abs (a.points[0].t - 5.0) > 1.0e-6
+               || std::abs (a.points[0].freq - 220.0) > 1.0e-6,
+               "WP8 the rotation really moved the curve");
+        bool sorted = true;
+        for (size_t i = 1; i < a.points.size(); ++i)
+            if (a.points[i].t < a.points[i-1].t) sorted = false;
+        check (sorted, "WP8 the rotation leaves the points sorted in time");
+    }
+
+    // WP8: the mirrors are their own inverse.
+    {
+        upic::Arc a;
+        a.id = 1;
+        a.points = { { 5.0, 220.0 }, { 10.0, 440.0 }, { 15.0, 880.0 } };
+        upic::ArcRefs arcs { &a };
+        const auto bounds = upic::arcBounds (arcs, frame);
+        const double t0 = a.points[0].t, t2 = a.points[2].t;
+
+        upic::transformMirrorTime (arcs, frame, bounds.centreX());
+        check (std::abs (a.points[0].t - (2.0 * bounds.centreX() * frame.duration - t2)) < 1e-6,
+               "WP8 the mirror in time swaps the ends of the curve",
+               juce::String (a.points[0].t, 4) + " / " + juce::String (a.points[2].t, 4));
+        upic::transformMirrorTime (arcs, frame, bounds.centreX());
+        check (std::abs (a.points[0].t - t0) < 1e-6 && std::abs (a.points[2].t - t2) < 1e-6,
+               "WP8 mirroring in time twice gives the curve back");
+    }
+
+    // WP8: the mirror in pitch turns the curve over about the centre. It is
+    // checked on a curve of its own, because the mirror in time above has
+    // already turned the points around.
+    {
+        upic::Arc a;
+        a.id = 1;
+        a.points = { { 5.0, 220.0 }, { 10.0, 440.0 }, { 15.0, 880.0 } };
+        upic::ArcRefs arcs { &a };
+        const auto bounds = upic::arcBounds (arcs, frame);
+        const double t0 = a.points[0].t, t2 = a.points[2].t;
+        const double f0 = a.points[0].freq, f2 = a.points[2].freq;
+
+        upic::transformMirrorPitch (arcs, frame, bounds.centreY());
+        check (std::abs (a.points[0].freq - f2) < 1e-6,
+               "WP8 the mirror in pitch turns the curve over",
+               juce::String (a.points[0].freq, 3) + " Hz");
+        check (std::abs (a.points[2].freq - f0) < 1e-6,
+               "WP8 the mirror in pitch swaps the low and the high",
+               juce::String (a.points[2].freq, 3) + " Hz");
+        check (std::abs (a.points[0].t - t0) < 1e-12 && std::abs (a.points[2].t - t2) < 1e-12,
+               "WP8 the mirror in pitch leaves the times alone");
+        upic::transformMirrorPitch (arcs, frame, bounds.centreY());
+        check (std::abs (a.points[0].freq - f0) < 1e-6 && std::abs (a.points[2].freq - f2) < 1e-6,
+               "WP8 mirroring in pitch twice gives the curve back");
+    }
+
+    // WP8: the alignment gives the arcs a shared edge. Each edge is checked
+    // on a pair of its own, so that one alignment cannot move the arcs that
+    // the next one measures.
+    {
+        upic::Arc a, b;
+        a.id = 1; a.points = { { 2.0, 220.0 }, { 4.0, 440.0 } };
+        b.id = 2; b.points = { { 6.0, 330.0 }, { 9.0, 660.0 } };
+        upic::ArcRefs arcs { &a, &b };
+
+        upic::transformAlign (arcs, frame, 0); // the starts
+        check (std::abs (a.startTime() - b.startTime()) < 1e-9,
+               "WP8 the alignment gives the arcs the same start",
+               juce::String (a.startTime(), 4) + " / " + juce::String (b.startTime(), 4));
+        check (std::abs (a.startTime() - 2.0) < 1e-9,
+               "WP8 the alignment takes the earliest start");
+        check (std::abs (b.startTime() - 2.0) < 1e-9,
+               "WP8 the alignment of the starts moves the later arc, not the earlier one");
+    }
+    {
+        upic::Arc a, b;
+        a.id = 1; a.points = { { 2.0, 220.0 }, { 4.0, 440.0 } };
+        b.id = 2; b.points = { { 6.0, 330.0 }, { 9.0, 660.0 } };
+        upic::ArcRefs arcs { &a, &b };
+
+        upic::transformAlign (arcs, frame, 1); // the ends
+        check (std::abs (a.endTime() - b.endTime()) < 1e-9,
+               "WP8 the alignment gives the arcs the same end",
+               juce::String (a.endTime(), 4) + " / " + juce::String (b.endTime(), 4));
+        check (std::abs (a.endTime() - 9.0) < 1e-9,
+               "WP8 the alignment takes the latest end");
+        check (std::abs (a.startTime() - 7.0) < 1e-9,
+               "WP8 the alignment of the ends moves the earlier arc, not the later one");
+    }
+    {
+        upic::Arc a, b;
+        a.id = 1; a.points = { { 2.0, 220.0 }, { 4.0, 440.0 } };
+        b.id = 2; b.points = { { 6.0, 330.0 }, { 9.0, 660.0 } };
+        upic::ArcRefs arcs { &a, &b };
+
+        upic::transformAlign (arcs, frame, 2); // the pitch
+        check (std::abs (upic::arcPitchCentre (a) - upic::arcPitchCentre (b)) < 1e-6,
+               "WP8 the alignment gives the arcs the same pitch centre",
+               juce::String (upic::arcPitchCentre (a), 3) + " / "
+               + juce::String (upic::arcPitchCentre (b), 3));
+        check (std::abs (a.startTime() - 2.0) < 1e-12 && std::abs (b.startTime() - 6.0) < 1e-12,
+               "WP8 the alignment of the pitch leaves the times alone");
+    }
+
+    // WP8: the scale works in the log-pitch domain - doubling the pitch
+    // scale doubles the distance between the pitches, in octaves.
+    {
+        upic::Arc a;
+        a.id = 1;
+        a.points = { { 10.0, 220.0 }, { 12.0, 880.0 } };
+        upic::ArcRefs arcs { &a };
+        const auto bounds = upic::arcBounds (arcs, frame);
+        upic::transformScale (arcs, frame, bounds.centreX(), bounds.centreY(), 1.0, 2.0);
+        const double ratio = a.points[1].freq / a.points[0].freq;
+        check (std::abs (ratio - 16.0) < 1e-3,
+               "WP8 the pitch scale doubles the distance in octaves",
+               juce::String (ratio, 4) + " (expect 16)");
+        upic::transformScale (arcs, frame, bounds.centreX(), bounds.centreY(), 2.0, 1.0);
+        check (std::abs ((a.points[1].t - a.points[0].t) - 4.0) < 1e-6,
+               "WP8 the time scale doubles the time span",
+               juce::String (a.points[1].t - a.points[0].t, 4) + " s");
+    }
+
+    // WP8: the repeat makes copies with their own ids.
+    {
+        upic::Arc a;
+        a.id = 7;
+        a.points = { { 2.0, 220.0 }, { 4.0, 440.0 } };
+        upic::ArcRefs arcs { &a };
+        const auto copies = upic::transformRepeat (arcs, frame, 4.0, 12.0, 2, 100);
+        check (copies.size() == 2, "WP8 the repeat makes the copies it was asked for",
+               juce::String (copies.size()));
+        if (copies.size() == 2)
+        {
+            check (copies[0].id == 100 && copies[1].id == 101,
+                   "WP8 the copies get their own ids",
+                   juce::String (copies[0].id) + " / " + juce::String (copies[1].id));
+            check (copies[0].id != a.id, "WP8 a copy does not reuse the original's id");
+            check (std::abs (copies[0].points[0].t - 6.0) < 1e-6,
+                   "WP8 the first copy is one step further along",
+                   juce::String (copies[0].points[0].t, 4) + " s");
+            check (std::abs (copies[1].points[0].t - 10.0) < 1e-6,
+                   "WP8 the second copy is two steps further along",
+                   juce::String (copies[1].points[0].t, 4) + " s");
+            check (std::abs (copies[0].points[0].freq - 440.0) < 1e-6,
+                   "WP8 the first copy is an octave higher",
+                   juce::String (copies[0].points[0].freq, 3) + " Hz");
+            check (std::abs (copies[1].points[0].freq - 880.0) < 1e-6,
+                   "WP8 the second copy is two octaves higher",
+                   juce::String (copies[1].points[0].freq, 3) + " Hz");
+            check (copies[0].waveformId == a.waveformId && copies[0].envelopeId == a.envelopeId,
+                   "WP8 a copy keeps the material of the original");
+        }
+        const auto again = upic::transformRepeat (arcs, frame, 4.0, 12.0, 2, 100);
+        check (again.size() == 2 && again[0].id == 100 && again[1].id == 101,
+               "WP8 the repeat is stable - the same input gives the same ids");
+    }
+
+    // WP8: a value that is not finite leaves the curve alone.
+    {
+        upic::Arc a;
+        a.id = 1;
+        a.points = { { 2.0, 220.0 }, { 4.0, 440.0 } };
+        upic::ArcRefs arcs { &a };
+        upic::transformRotate (arcs, frame, 0.5, 0.5,
+                               std::numeric_limits<double>::quiet_NaN());
+        check (std::abs (a.points[0].t - 2.0) < 1e-12
+               && std::abs (a.points[0].freq - 220.0) < 1e-12,
+               "WP8 a rotation with a broken angle changes nothing");
+    }
+}

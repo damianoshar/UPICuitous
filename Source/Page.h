@@ -64,6 +64,10 @@ namespace upic
         // one starts fast and slows down.
         double warp = 0.0;
 
+        // WP8: the page's own frame for the geometric transforms - the
+        // normalised space the drawn curve is turned, mirrored and scaled in.
+        ArcFrame frame() const { return ArcFrame { durationSec, pitchLo, pitchHi }; }
+
         // The rate at which the page's time runs at this point of the page.
         // The integral over the page is the duration, so the page still
         // lasts as long - the time is redistributed inside it.

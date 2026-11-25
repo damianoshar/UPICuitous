@@ -35,6 +35,7 @@ namespace upic
     void runCursorPathChecks (SelfTest& t);
     void runLivePathChecks (SelfTest& t);
     void runTransformChecks (SelfTest& t);
+    void runWP8TransformChecks (SelfTest& t); // WP8: the geometric transforms
     void runFreqTableChecks (SelfTest& t); // WP1: the drawn conversion tables
     void runAmpTableChecks (SelfTest& t);  // WP2: the amplitude conversion tables
     void runGroupChecks (SelfTest& t);     // WP3: the arc groups
