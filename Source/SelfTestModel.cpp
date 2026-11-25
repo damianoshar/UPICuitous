@@ -2,6 +2,7 @@
 #include "MainComponent.h"
 #include "SelfTest.h"
 #include "AllocCounter.h"
+#include "GraphicalCurve.h"
 
 //==============================================================================
 // The model: the pitch transformations, the frequency spaces, the staircase,
@@ -3528,5 +3529,230 @@ void upic::runWP8PerformanceViewChecks (upic::SelfTest& t)
     mc.closePerfViewForTest();
     check (! mc.perfViewOpenForTest(),
            "WP8 the performance view closes");
+}
+
+//==============================================================================
+// WP9: the generalized curve.
+//
+// The curve is the SHAPE, separated from what it means: the x axis says
+// what a position is (a position, a time, a pitch) and the y is always a
+// height. These checks drive the converters in GraphicalCurve.h directly.
+void upic::runWP9CurveChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // the frame: a 30 s page with the default ambitus
+    upic::ArcFrame frame { 30.0, upic::kDefaultPitchLo, upic::kDefaultPitchHi };
+    upic::CurveSpace space;
+    space.seconds = 30.0;
+    space.loHz = upic::kDefaultPitchLo;
+    space.hiHz = upic::kDefaultPitchHi;
+
+    // --- the curve itself ---------------------------------------------------
+    {
+        // the points are sorted, and a point that is not finite is dropped
+        auto c = upic::makeCurve (upic::GraphicalCurve::Domain::Normalised,
+                                  { { 0.5, 0.25 }, { 0.1, 0.75 },
+                                    { std::nan ("") , 0.5 }, { 0.9, std::nan ("") } });
+        check (c.size() == 2,
+               "WP9 a curve drops the points that are not finite",
+               juce::String (c.size()));
+        check (c.points.size() == 2 && c.points[0].x == 0.1 && c.points[1].x == 0.5,
+               "WP9 a curve's points are sorted by x");
+        check (c.domainName() == "normalised",
+               "WP9 a curve says what its x axis means",
+               c.domainName());
+    }
+
+    // --- the height between and outside the points ---------------------------
+    {
+        auto c = upic::makeCurve (upic::GraphicalCurve::Domain::Normalised,
+                                  { { 0.0, 0.0 }, { 1.0, 1.0 } });
+        check (std::abs (c.valueAt (0.5) - 0.5) < 1e-9,
+               "WP9 the height between two points is linear",
+               juce::String (c.valueAt (0.5), 4));
+        check (std::abs (c.valueAt (-1.0) - 0.0) < 1e-9
+               && std::abs (c.valueAt (2.0) - 1.0) < 1e-9,
+               "WP9 outside a curve the edge heights are held");
+        check (std::abs (c.normalised().valueAt (0.25) - 0.25) < 1e-9,
+               "WP9 the normalised curve keeps the shape");
+    }
+
+    // --- the arc: the shape on the page --------------------------------------
+    {
+        upic::Arc a;
+        a.id = 1;
+        a.points = { { 0.0, 100.0 }, { 15.0, 400.0 }, { 30.0, 1600.0 } };
+        const auto c = upic::arcToCurve (a, frame);
+        check (c.size() == 3,
+               "WP9 an arc becomes a curve with a point per arc point",
+               juce::String (c.size()));
+        check (std::abs (c.points[0].x - 0.0) < 1e-9
+               && std::abs (c.points[1].x - 0.5) < 1e-9,
+               "WP9 the arc's curve carries the page's time axis",
+               juce::String (c.points[1].x, 4));
+        check (std::abs (c.points[0].y - frame.normY (100.0)) < 1e-9
+               && std::abs (c.points[2].y - frame.normY (1600.0)) < 1e-9,
+               "WP9 the arc's curve carries the page's pitch axis");
+
+        // the round trip: the arc comes back
+        const auto back = upic::curveToArc (c, frame);
+        bool same = back.points.size() == a.points.size();
+        for (size_t i = 0; same && i < back.points.size(); ++i)
+            same = std::abs (back.points[i].t - a.points[i].t) < 1e-6
+                && std::abs (back.points[i].freq - a.points[i].freq) < 1e-6 * a.points[i].freq;
+        check (same,
+               "WP9 the arc comes back from the curve",
+               juce::String (back.points.size()) + " points");
+    }
+
+    // --- the arc's curve is clamped on the way back ---------------------------
+    {
+        auto c = upic::makeCurve (upic::GraphicalCurve::Domain::Normalised,
+                                  { { -0.5, -1.0 }, { 1.5, 2.0 } });
+        const auto back = upic::curveToArc (c, frame);
+        check (back.points.size() == 2
+               && back.points[0].t >= 0.0 && back.points[1].t <= frame.duration + 1e-9,
+               "WP9 a curve turned back into an arc stays on the page",
+               juce::String (back.points[0].t, 3) + " .. " + juce::String (back.points[1].t, 3));
+        check (back.points[0].freq >= upic::kMinFreq
+               && back.points[1].freq <= upic::kMaxFreq,
+               "WP9 a curve turned back into an arc stays in the model's range",
+               juce::String (back.points[0].freq, 3) + " .. " + juce::String (back.points[1].freq, 3));
+    }
+
+    // --- the wavetable --------------------------------------------------------
+    {
+        // a sine wave of 64 samples
+        std::vector<float> wave (64);
+        for (size_t i = 0; i < wave.size(); ++i)
+            wave[i] = (float) std::sin (2.0 * juce::MathConstants<double>::pi * (double) i / 64.0);
+
+        const auto c = upic::waveformToCurve (wave);
+        check (c.size() == 64,
+               "WP9 a wavetable becomes a curve with a point per sample",
+               juce::String (c.size()));
+        check (std::abs (c.valueAt (0.0) - 0.5) < 1e-6,
+               "WP9 the wavetable's curve starts at the wave's middle",
+               juce::String (c.valueAt (0.0), 4));
+        check (std::abs (c.valueAt (16.0 / 63.0) - 1.0) < 1e-6,
+               "WP9 the wavetable's curve reaches the wave's top",
+               juce::String (c.valueAt (16.0 / 63.0), 4));
+
+        // the round trip: the samples come back
+        const auto back = upic::curveToWaveform (c, 64);
+        double worst = 0.0;
+        for (size_t i = 0; i < wave.size() && i < back.size(); ++i)
+            worst = juce::jmax (worst, (double) std::abs (back[i] - wave[i]));
+        check (back.size() == 64 && worst < 1.0e-4,
+               "WP9 the samples come back from the curve",
+               juce::String (worst, 6));
+        check (upic::curveToWaveform (c, 32).size() == 32,
+               "WP9 the curve is resampled to the wave's size");
+    }
+
+    // --- a flat wave stays flat ----------------------------------------------
+    {
+        std::vector<float> flat (16, -1.0f);
+        const auto c = upic::waveformToCurve (flat);
+        const auto back = upic::curveToWaveform (c, 16);
+        bool same = true;
+        for (auto s : back) if (std::abs (s + 1.0f) > 1.0e-5f) same = false;
+        check (same, "WP9 a flat wave comes back flat");
+    }
+
+    // --- the envelope ----------------------------------------------------------
+    {
+        upic::Envelope e;
+        e.points = { { 0.0f, 0.0f }, { 0.5f, 1.0f }, { 1.0f, 0.25f } };
+        const auto c = upic::envelopeToCurve (e);
+        check (c.size() == 3,
+               "WP9 an envelope becomes a curve with a point per envelope point",
+               juce::String (c.size()));
+        check (std::abs (c.points[1].x - 0.5) < 1e-9 && std::abs (c.points[1].y - 1.0) < 1e-9,
+               "WP9 the envelope's curve carries the envelope's points");
+
+        const auto back = upic::curveToEnvelope (c);
+        bool same = back.points.size() == e.points.size();
+        for (size_t i = 0; same && i < back.points.size(); ++i)
+            same = std::abs (back.points[i].x - e.points[i].x) < 1e-6f
+                && std::abs (back.points[i].y - e.points[i].y) < 1e-6f;
+        check (same,
+               "WP9 the envelope comes back from the curve",
+               juce::String (back.points.size()) + " points");
+    }
+
+    // --- the frequency table ----------------------------------------------------
+    {
+        upic::CurveSpace tableSpace;
+        tableSpace.loHz = 100.0;
+        tableSpace.hiHz = 1600.0;
+        std::vector<upic::TablePoint> table { { 0.0f, (float) std::log2 (100.0) },
+                                               { 1.0f, (float) std::log2 (1600.0) } };
+        const auto c = upic::tableToCurve (table, tableSpace);
+        check (std::abs (c.points[0].y - 0.0) < 1e-5 && std::abs (c.points[1].y - 1.0) < 1e-5,
+               "WP9 the table's curve carries the ambitus",
+               juce::String (c.points[0].y, 4) + " .. " + juce::String (c.points[1].y, 4));
+
+        const auto back = upic::curveToTable (c, tableSpace);
+        bool same = back.size() == table.size();
+        for (size_t i = 0; same && i < back.size(); ++i)
+            same = std::abs (back[i].x - table[i].x) < 1e-5f
+                && std::abs (back[i].log2Hz - table[i].log2Hz) < 1e-4f;
+        check (same,
+               "WP9 the table comes back from the curve",
+               juce::String (back.size()) + " points");
+    }
+
+    // --- between the coordinate systems -------------------------------------------
+    {
+        auto c = upic::makeCurve (upic::GraphicalCurve::Domain::Normalised,
+                                  { { 0.0, 0.0 }, { 0.5, 0.5 }, { 1.0, 1.0 } });
+
+        upic::GraphicalCurve secondsCurve;
+        const bool ok1 = upic::rescaleDomain (c, upic::GraphicalCurve::Domain::Seconds, space, secondsCurve);
+        check (ok1 && secondsCurve.domain == upic::GraphicalCurve::Domain::Seconds
+               && std::abs (secondsCurve.points[1].x - 15.0) < 1e-9,
+               "WP9 a normalised curve becomes a curve over the seconds",
+               juce::String (secondsCurve.points[1].x, 4));
+
+        upic::GraphicalCurve backCurve;
+        const bool ok2 = upic::rescaleDomain (secondsCurve, upic::GraphicalCurve::Domain::Normalised,
+                                              space, backCurve);
+        check (ok2 && std::abs (backCurve.points[1].x - 0.5) < 1e-9,
+               "WP9 a curve over the seconds comes back to the positions",
+               juce::String (backCurve.points[1].x, 4));
+
+        upic::GraphicalCurve pitchCurve;
+        const bool ok3 = upic::rescaleDomain (c, upic::GraphicalCurve::Domain::LogHz, space, pitchCurve);
+        check (ok3 && std::abs (pitchCurve.points[0].x - std::log2 (space.loHz)) < 1e-9
+               && std::abs (pitchCurve.points[2].x - std::log2 (space.hiHz)) < 1e-9,
+               "WP9 a normalised curve becomes a curve over the ambitus",
+               juce::String (pitchCurve.points[2].x, 4));
+
+        // a span of zero is not a conversion
+        upic::CurveSpace noSpan;
+        noSpan.seconds = 0.0;
+        upic::GraphicalCurve refused;
+        const bool ok4 = upic::rescaleDomain (c, upic::GraphicalCurve::Domain::Seconds, noSpan, refused);
+        check (! ok4 && refused.size() == c.size(),
+               "WP9 a conversion with no span is refused and changes nothing");
+    }
+
+    // --- the empty curve ----------------------------------------------------------
+    {
+        upic::GraphicalCurve empty;
+        const auto wave = upic::curveToWaveform (empty, 64);
+        bool flat = wave.size() == 64;
+        for (auto s : wave) if (std::abs (s) > 1.0e-6f) flat = false;
+        check (flat, "WP9 an empty curve makes a flat wave");
+        check (upic::curveToEnvelope (empty).points.size() == 2,
+               "WP9 an empty curve makes the flat envelope");
+        check (upic::curveToTable (empty, space).empty(),
+               "WP9 an empty curve makes no table");
+    }
 }
 

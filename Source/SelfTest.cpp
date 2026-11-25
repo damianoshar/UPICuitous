@@ -107,6 +107,7 @@ int upic::runSelfTest()
     upic::runWP8TransformChecks (t);
     upic::runWP8CommandChecks (t);
     upic::runWP8PerformanceViewChecks (t);
+    upic::runWP9CurveChecks (t);
     upic::runFreqTableChecks (t);
     upic::runAmpTableChecks (t);
     upic::runGroupChecks (t);
