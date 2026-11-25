@@ -123,6 +123,7 @@ int upic::runSelfTest()
     upic::runWP9ConvertChecks (t);
     upic::runWP9WorkspaceChecks (t);
     upic::runWP10EnvelopeChecks (t);
+    upic::runWP10ArcChecks (t);
     upic::runFreqTableChecks (t);
     upic::runAmpTableChecks (t);
     upic::runGroupChecks (t);

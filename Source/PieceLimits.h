@@ -59,12 +59,12 @@ namespace upic
         // --- the arrays in a piece ---
         constexpr int kMaxPages = 100;
         // The real UPIC's page carried 2024 arcs (Mâche) or 4000
-        // (Robindoré); the clone follows the smaller number. This is a
-        // memory and parse guard, not a realtime one - the engine's
-        // overload guard (U6 option B) bounds what the audio thread is
-        // asked to do, and the cursor render path (option C) made the
-        // worst case fit the block budget.
-        constexpr int kMaxArcsPerPage = 2024;
+        // (Robindoré); the clone follows the larger number now (WP10).
+        // This is a memory and parse guard, not a realtime one - the
+        // engine's overload guard (U6 option B) bounds what the audio
+        // thread is asked to do, and the cursor render path (option C)
+        // made the worst case fit the block budget.
+        constexpr int kMaxArcsPerPage = 4000;
         constexpr int kMaxPointsPerArc = 1000;
         constexpr int kMaxWaveforms = 200;
         // WP10: the envelope bank grows from 50 to 128. The bank is a

@@ -308,8 +308,8 @@ public:
     // v1.33.4 (U6-B): the overload guard.
     //
     // A page can ask the audio thread for more work than one block has time
-    // for: the 2024-arc cap (U6 option A) allows a page whose arcs all
-    // sound at once, and that costs ~2.5x a 48 kHz/512-sample block even
+    // for: the 4000-arc cap (WP10) allows a page whose arcs all
+    // sound at once, and that costs ~5x a 48 kHz/512-sample block even
     // with the cursor path. The guard measures every
     // block; when the smoothed load stays over the budget it fades out the
     // quietest sounding arcs - over 5 ms, inside the block, so a dropped arc
@@ -368,7 +368,10 @@ private:
     //
     // The cap is the piece format's arc cap (H13, U6 option A): a page
     // cannot hold more arcs than that, so the pool cannot run out.
-    static constexpr int kPoolCapacity = 2048; // >= kMaxArcsPerPage (2024)
+    // WP10: the page cap is 4000 arcs, so the pool holds 4096.
+    static constexpr int kPoolCapacity = 4096; // >= kMaxArcsPerPage (4000)
+    static_assert (kPoolCapacity >= upic::limits::kMaxArcsPerPage,
+                   "the voice pools must hold a whole page");
 
     // How many slots of the voice pools are built in prepare() (the message
     // thread). A page with more arcs than this grows the pool while it
@@ -425,8 +428,14 @@ private:
     // silent); a fully restored arc is removed, so the table stays small
     // and the hash keeps the per-arc lookup O(1). The table is sized in
     // prepare() and the audio thread only reads and writes it.
-    static constexpr int kGuardTableSize = 4096; // power of two; > 2x the arc cap
-    static constexpr int kGuardMaxArcs = 2048;   // the level scratch / the "off" point
+    // WP10: the page cap is 4000 arcs, so the table holds twice that and
+    // the level scratch holds a whole page.
+    static constexpr int kGuardTableSize = 8192; // power of two; > 2x the arc cap
+    static constexpr int kGuardMaxArcs = 4096;   // the level scratch / the "off" point
+    static_assert (kGuardTableSize > 2 * upic::limits::kMaxArcsPerPage,
+                   "the guard's table must hold the whole page twice over");
+    static_assert (kGuardMaxArcs >= upic::limits::kMaxArcsPerPage,
+                   "the guard's level scratch must hold a whole page");
     struct GuardSlot { int id = 0; float gain = 1.0f; bool used = false; };
 
     std::vector<GuardSlot> guardTable;

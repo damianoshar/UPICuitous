@@ -4350,3 +4350,126 @@ void upic::runWP10EnvelopeChecks (upic::SelfTest& t)
     }
 }
 
+//==============================================================================
+// WP10 (part 2): the page holds 4000 arcs.
+//
+// The cap is the piece format's guard against a hostile file, and the
+// engine has to be able to carry a page that is full: the voice pools and
+// the overload guard's table are sized for the cap, and a full page must
+// not run out of them. The realtime cost of the full page is measured by
+// the benchmark next to the worst-case page (Source/SelfTestAudio.cpp): it
+// renders the page the cap allows and compares it with a tenth of itself.
+void upic::runWP10ArcChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    // --- the cap ------------------------------------------------------------
+    check (upic::limits::kMaxArcsPerPage == 4000,
+           "WP10 a page holds 4000 arcs",
+           juce::String (upic::limits::kMaxArcsPerPage));
+
+    // --- a page at the cap -------------------------------------------------
+    {
+        upic::PieceModel m;
+        upic::Page pg;
+        pg.durationSec = 10.0;
+        pg.nextArcId = upic::limits::kMaxArcsPerPage + 1;
+        for (int i = 0; i < upic::limits::kMaxArcsPerPage; ++i)
+        {
+            upic::Arc a;
+            a.id = i + 1;
+            a.mode = 0; a.waveformId = 0; a.envelopeId = 0;
+            a.intensity = 0.5f;
+            a.points = { { 0.0, 220.0 }, { 10.0, 220.0 } };
+            pg.arcs.push_back (a);
+        }
+        m.pages.push_back (pg);
+
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+        check (mc.loadFromVar (upic::pieceToVar (m)),
+               "WP10 the piece with 4000 arcs loads");
+        check (mc.arcCountForTest() == upic::limits::kMaxArcsPerPage,
+               "WP10 the whole page is kept",
+               juce::String (mc.arcCountForTest()));
+    }
+
+    // --- the voice pools hold a full page ---------------------------------
+    {
+        // A PM arc takes a voice slot of its own, so a page of PM arcs is
+        // the page the pools have to carry.
+        const int arcs = upic::limits::kMaxArcsPerPage;
+        upic::Page pg;
+        pg.durationSec = 10.0;
+        for (int i = 0; i < arcs; ++i)
+        {
+            upic::Arc a;
+            a.id = i + 1;
+            a.mode = 3; // phase modulation: a voice of its own
+            a.waveformId = 0; a.envelopeId = 0;
+            a.pmRatio = 1.5; a.pmIndex = 0.4; a.pmFeedback = 0.1;
+            a.intensity = 0.2f;
+            a.points = { { 0.0, 220.0 }, { 10.0, 220.0 } };
+            pg.arcs.push_back (a);
+        }
+        const auto waves = upic::defaultWaveforms();
+        const auto envs = upic::defaultEnvelopes();
+        const std::vector<upic::SampleSlot> noSlots;
+        const int sr = 48000, blk = 512;
+        UpicEngine eng; eng.prepare (sr, blk);
+        juce::AudioBuffer<float> buf (2, blk);
+        eng.render (pg, 0.0, waves, envs, noSlots, buf.getWritePointer (0),
+                    buf.getWritePointer (1), blk, 0.8f, 1.0, false);
+        check (eng.activeVoiceCountForTest() == arcs,
+               "WP10 the voice pools hold a full page",
+               juce::String (eng.activeVoiceCountForTest()));
+    }
+
+    // --- the guard can fade a whole page ----------------------------------
+    {
+        const int arcs = upic::limits::kMaxArcsPerPage;
+        upic::Page pg;
+        pg.durationSec = 10.0;
+        for (int i = 0; i < arcs; ++i)
+        {
+            upic::Arc a;
+            a.id = i + 1;
+            a.mode = 0; a.waveformId = 0; a.envelopeId = 0;
+            // every arc has its own level, so the guard's ranking has no ties
+            a.intensity = 1.0f - (float) i / (float) arcs;
+            a.points = { { 0.0, 220.0 }, { 10.0, 220.0 } };
+            pg.arcs.push_back (a);
+        }
+        const auto waves = upic::defaultWaveforms();
+        const auto envs = upic::defaultEnvelopes();
+        const std::vector<upic::SampleSlot> noSlots;
+        const int sr = 48000, blk = 512;
+        UpicEngine eng; eng.prepare (sr, blk);
+        eng.setOverloadGuardEnabled (true);
+        eng.setGuardLimitForTest (100);
+        juce::AudioBuffer<float> buf (2, blk);
+        eng.render (pg, 0.0, waves, envs, noSlots, buf.getWritePointer (0),
+                    buf.getWritePointer (1), blk, 0.8f, 1.0, false);
+        check (eng.guardGainForTest (1) == 1.0f,
+               "WP10 the guard keeps the loudest arc of a full page",
+               juce::String (eng.guardGainForTest (1), 3));
+        check (eng.guardGainForTest (arcs) == 0.0f,
+               "WP10 the guard fades the quietest arc of a full page",
+               juce::String (eng.guardGainForTest (arcs), 3));
+
+        // the next block skips the faded arcs: every one of them has to be
+        // found in the guard's table, so a table that was too small for the
+        // page would show up here as arcs that are still sounding
+        eng.render (pg, (double) blk / 48000.0, waves, envs, noSlots,
+                    buf.getWritePointer (0), buf.getWritePointer (1), blk, 0.8f, 1.0, false);
+        check (eng.guardState().silenced == arcs - 100,
+               "WP10 the guard tracks every faded arc of a full page",
+               juce::String (eng.guardState().silenced) + " of "
+               + juce::String (arcs - 100));
+    }
+}
+
