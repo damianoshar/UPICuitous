@@ -612,6 +612,12 @@ void MainComponent::buildLiveControls()
         transform.addItem (107, "Augment (stretch it in time x2)");
         transform.addItem (108, "Diminish (compress it in time x0.5)");
         m.addSubMenu ("Transform the page...", transform);
+        // WP8: the geometric transforms of the drawn curve. The UPIC's page
+        // was a surface: a drawing could be turned, mirrored, aligned,
+        // stretched and repeated on it.
+        juce::PopupMenu drawing;
+        fillTransformMenu (drawing, 200);
+        m.addSubMenu ("Transform the drawing...", drawing);
         juce::Component::SafePointer<MainComponent> sp (this);
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&menuBtn),
             [sp] (int r) {
@@ -632,7 +638,11 @@ void MainComponent::buildLiveControls()
                              break;                    // v1.33.4 (H3)
                     case 12: sp->importScalaTuning(); break;  // M4
                     case 13: sp->applyTuning (upic::Tuning{}); break;  // M4
-                    default: sp->transformPage (r); break;
+                    default:
+                        // WP8: the transform menu's items are 200 and up.
+                        if (r >= 200) sp->transformArcs (r - 200);
+                        else sp->transformPage (r);
+                        break;
                 }
             });
     };
@@ -1218,4 +1228,254 @@ void MainComponent::transformPage (int op)
            + (onlySelected ? " (the selection)" : ""));
     score.repaint();
     repaint();
+}
+
+//==============================================================================
+// WP8: the geometric transforms of the drawn curve.
+//
+// The commands live here, the model's half in Source/Arc.h. The scope (the
+// selection, a group or the whole page) is remembered by the app, so the
+// user does not have to choose it again for every command.
+void MainComponent::fillTransformMenu (juce::PopupMenu& m, int firstId)
+{
+    // --- the scope ------------------------------------------------------
+    juce::PopupMenu scope;
+    scope.addItem (firstId + transformScopeSelection, "The selection", true,
+                   transformScope == TransformScope::selection);
+    scope.addItem (firstId + transformScopePage, "The whole page", true,
+                   transformScope == TransformScope::page);
+    {
+        juce::PopupMenu groups;
+        const auto& gs = curPage().groups;
+        int id = firstId + transformScopeGroupBase;
+        for (const auto& g : gs)
+            groups.addItem (id++, g.name, true,
+                            transformScope == TransformScope::group
+                                && transformGroupId == g.id);
+        if (gs.empty()) groups.addItem (id, "No groups on this page", false);
+        scope.addSubMenu ("A group", groups);
+    }
+    m.addSubMenu ("Apply to", scope);
+    m.addSeparator();
+
+    // --- the commands ---------------------------------------------------
+    m.addItem (firstId + transformRotateLeft,   "Turn it left (15 degrees)");
+    m.addItem (firstId + transformRotateRight,  "Turn it right (15 degrees)");
+    m.addItem (firstId + transformMirrorTime,   "Mirror it in time");
+    m.addItem (firstId + transformMirrorPitch,  "Mirror it in pitch");
+    m.addSeparator();
+    m.addItem (firstId + transformAlignStarts,  "Line the starts up");
+    m.addItem (firstId + transformAlignEnds,    "Line the ends up");
+    m.addItem (firstId + transformAlignPitch,   "Line the pitch centres up");
+    m.addSeparator();
+    m.addItem (firstId + transformStretchTime,  "Stretch it in time (x2)");
+    m.addItem (firstId + transformCompressTime, "Compress it in time (x0.5)");
+    m.addItem (firstId + transformStretchPitch, "Stretch it in pitch (an octave up)");
+    m.addItem (firstId + transformCompressPitch, "Compress it in pitch (an octave down)");
+    m.addSeparator();
+    m.addItem (firstId + transformRepeatUp,     "Repeat it (two copies, an octave up)");
+    m.addItem (firstId + transformRepeatSame,   "Repeat it (two copies, the same pitch)");
+}
+
+bool MainComponent::transformArcs (int op)
+{
+    // --- the scope items ------------------------------------------------
+    // They change what the commands work on; they are not commands.
+    if (op == transformScopeSelection)
+    {
+        transformScope = TransformScope::selection;
+        transformGroupId = -1;
+        flash ("The transforms work on the selection");
+        return false;
+    }
+    if (op == transformScopePage)
+    {
+        transformScope = TransformScope::page;
+        transformGroupId = -1;
+        flash ("The transforms work on the whole page");
+        return false;
+    }
+    if (op >= transformScopeGroupBase)
+    {
+        const int index = op - transformScopeGroupBase;
+        juce::String name;
+        {
+            const juce::ScopedLock l (dataLock);
+            const auto& gs = curPage().groups;
+            if (index < 0 || index >= (int) gs.size()) return false;
+            transformScope = TransformScope::group;
+            transformGroupId = gs[(size_t) index].id;
+            name = gs[(size_t) index].name;
+        }
+        flash ("The transforms work on the group " + name);
+        return false;
+    }
+
+    // --- the command ----------------------------------------------------
+    // The selection is read outside the lock: it is the editor's state, not
+    // the model's.
+    const auto selected = score.getSelectedArcs();
+
+    bool changed = false;
+    juce::String refusal;
+
+    // v1.33.4 (L15, part 2): one transaction for the whole command, so the
+    // undo stack gets one step for it.
+    beginEdit ("Transform the drawing");
+    {
+        const juce::ScopedLock l (dataLock);
+        auto& page = curPage();
+
+        // the scope's arcs
+        upic::ArcRefs arcs;
+        if (transformScope == TransformScope::selection)
+        {
+            for (auto& a : page.arcs)
+                if (std::find (selected.begin(), selected.end(), a.id) != selected.end())
+                    arcs.push_back (&a);
+        }
+        else if (transformScope == TransformScope::group)
+        {
+            const upic::ArcGroup* g = nullptr;
+            for (const auto& gg : page.groups)
+                if (gg.id == transformGroupId) { g = &gg; break; }
+            if (g != nullptr)
+                for (auto& a : page.arcs)
+                    if (std::find (g->arcIds.begin(), g->arcIds.end(), a.id) != g->arcIds.end())
+                        arcs.push_back (&a);
+        }
+        else
+        {
+            for (auto& a : page.arcs) arcs.push_back (&a);
+        }
+
+        if (arcs.empty())
+        {
+            refusal = (transformScope == TransformScope::selection)
+                        ? "Nothing to transform - select an arc first"
+                        : "Nothing to transform on this page";
+        }
+        else
+        {
+            const auto frame = page.frame();
+            const auto bounds = upic::arcBounds (arcs, frame);
+            if (! bounds.valid)
+            {
+                refusal = "Nothing to transform";
+            }
+            else
+            {
+                // the points from before, so a command that changes nothing
+                // does not become an undo step
+                auto pointsOf = [] (const upic::ArcRefs& refs)
+                {
+                    std::vector<double> out;
+                    for (const auto* a : refs)
+                    {
+                        if (a == nullptr) continue;
+                        for (const auto& p : a->points) { out.push_back (p.t); out.push_back (p.freq); }
+                    }
+                    return out;
+                };
+                const auto before = pointsOf (arcs);
+                bool addedCopies = false;
+
+                switch (op)
+                {
+                    case transformRotateLeft:
+                        upic::transformRotate (arcs, frame, bounds.centreX(), bounds.centreY(),
+                                               15.0 * juce::MathConstants<double>::pi / 180.0);
+                        break;
+                    case transformRotateRight:
+                        upic::transformRotate (arcs, frame, bounds.centreX(), bounds.centreY(),
+                                               -15.0 * juce::MathConstants<double>::pi / 180.0);
+                        break;
+                    case transformMirrorTime:
+                        upic::transformMirrorTime (arcs, frame, bounds.centreX());
+                        break;
+                    case transformMirrorPitch:
+                        upic::transformMirrorPitch (arcs, frame, bounds.centreY());
+                        break;
+                    case transformAlignStarts:
+                        upic::transformAlign (arcs, frame, 0);
+                        break;
+                    case transformAlignEnds:
+                        upic::transformAlign (arcs, frame, 1);
+                        break;
+                    case transformAlignPitch:
+                        upic::transformAlign (arcs, frame, 2);
+                        break;
+                    case transformStretchTime:
+                        upic::transformScale (arcs, frame, bounds.centreX(), bounds.centreY(), 2.0, 1.0);
+                        break;
+                    case transformCompressTime:
+                        upic::transformScale (arcs, frame, bounds.centreX(), bounds.centreY(), 0.5, 1.0);
+                        break;
+                    case transformStretchPitch:
+                        upic::transformScale (arcs, frame, bounds.centreX(), bounds.centreY(), 1.0, 2.0);
+                        break;
+                    case transformCompressPitch:
+                        upic::transformScale (arcs, frame, bounds.centreX(), bounds.centreY(), 1.0, 0.5);
+                        break;
+                    case transformRepeatUp:
+                    case transformRepeatSame:
+                    {
+                        // the copies follow the scope in time: the first one
+                        // starts where the scope ends
+                        const double span = (bounds.x1 - bounds.x0) * frame.duration;
+                        if (span <= 0.0)
+                        {
+                            refusal = "Nothing to repeat";
+                            break;
+                        }
+                        if ((int) page.arcs.size() + (int) arcs.size() > upic::limits::kMaxArcsPerPage)
+                        {
+                            refusal = "The page is full - the repeat would not fit";
+                            break;
+                        }
+                        const double dPitch = (op == transformRepeatUp) ? 12.0 : 0.0;
+                        const auto copies = upic::transformRepeat (arcs, frame, span, dPitch,
+                                                                  2, page.nextArcId);
+                        if (copies.empty())
+                        {
+                            refusal = "Nothing to repeat";
+                            break;
+                        }
+                        for (auto& c : copies) page.arcs.push_back (std::move (c));
+                        page.nextArcId += (int) copies.size();
+                        addedCopies = true;
+                        break;
+                    }
+                    default:
+                        refusal = "That transform does not exist";
+                        break;
+                }
+
+                changed = addedCopies || (before != pointsOf (arcs));
+            }
+        }
+
+        if (changed)
+        {
+            markModelChanged();   // the voices re-anchor -> fade across it
+            publishModelSnapshot();
+            arcListDirty = true;
+        }
+    }
+
+    endEdit();
+
+    if (! changed)
+    {
+        flash (refusal.isNotEmpty() ? refusal : juce::String ("Nothing changed"));
+        return false;
+    }
+
+    flash (juce::String (transformScope == TransformScope::selection ? "The selection"
+                         : transformScope == TransformScope::group ? "The group"
+                                                                  : "The page")
+           + " is transformed");
+    score.repaint();
+    repaint();
+    return true;
 }

@@ -402,6 +402,14 @@ void MainComponent::buildScoreArea()
     };
     score.onUndo = [this]{ undo(); };
     score.onRedo = [this]{ redo(); };
+    // WP8: the geometric transforms of the drawn curve. The app fills the
+    // menu, so the File menu and the canvas show the same items, and it
+    // runs the command.
+    score.fillTransformMenu = [this](juce::PopupMenu& m, int firstId)
+    {
+        fillTransformMenu (m, firstId);
+    };
+    score.onTransformCommand = [this](int op){ transformArcs (op); };
 }
 
 void MainComponent::buildEditors()

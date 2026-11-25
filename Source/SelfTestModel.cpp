@@ -3317,3 +3317,90 @@ void upic::runWP8TransformChecks (upic::SelfTest& t)
                "WP8 a rotation with a broken angle changes nothing");
     }
 }
+
+//==============================================================================
+// WP8: the app's commands for the geometric transforms.
+//
+// The model's half is in runWP8TransformChecks. These drive the app the way
+// the user does: a scope, a command, an undo.
+void upic::runWP8CommandChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    auto mcHolder = std::make_unique<MainComponent> (true);
+    auto& mc = *mcHolder;
+    mc.setSize (1280, 800);
+    const juce::String json =
+        R"({"pages":[{"duration":10.0,"arcs":[)"
+        R"({"id":1,"points":[{"t":1,"f":220},{"t":3,"f":440}]},)"
+        R"({"id":2,"points":[{"t":2,"f":330},{"t":4,"f":660}]},)"
+        R"({"id":3,"points":[{"t":5,"f":220},{"t":6,"f":220}]}],)"
+        R"("groups":[{"id":1,"name":"G1","arcs":[1]},{"id":2,"name":"G2","arcs":[2,3]}]}]})";
+    check (mc.loadFromVar (juce::JSON::parse (json)),
+           "WP8 the piece with two groups loads");
+
+    const auto before1 = mc.arcPointsForTest (1);
+    const auto before2 = mc.arcPointsForTest (2);
+    const auto before3 = mc.arcPointsForTest (3);
+
+    // --- the scope is the group -----------------------------------------
+    mc.setTransformScopeForTest (1, 1);   // the group G1
+    const int depthBefore = mc.undoDepth();
+    check (mc.transformArcsForTest (MainComponent::transformRotateLeft),
+           "WP8 the transform command runs");
+    check (mc.arcPointsForTest (1) != before1,
+           "WP8 the group's arc is transformed");
+    check (mc.arcPointsForTest (2) == before2 && mc.arcPointsForTest (3) == before3,
+           "WP8 the transform respects the group's membership");
+
+    // --- one command, one undo step -------------------------------------
+    check (mc.undoDepth() == depthBefore + 1,
+           "WP8 the command is one undo step",
+           juce::String (mc.undoDepth() - depthBefore));
+
+    // --- the undo gives the points back exactly -------------------------
+    mc.undo();
+    check (mc.arcPointsForTest (1) == before1,
+           "WP8 the undo restores the exact points");
+    check (mc.undoDepth() == depthBefore,
+           "WP8 the undo takes the step back");
+
+    // --- nothing to transform --------------------------------------------
+    mc.setTransformScopeForTest (0, -1);   // the selection
+    mc.selectArcsForTest ({});
+    const int depthNow = mc.undoDepth();
+    check (! mc.transformArcsForTest (MainComponent::transformRotateLeft),
+           "WP8 the command refuses when nothing is selected");
+    check (mc.undoDepth() == depthNow,
+           "WP8 a refused command adds no undo step");
+    check (mc.arcPointsForTest (1) == before1,
+           "WP8 a refused command changes nothing");
+
+    // --- the repeat adds copies with their own ids -----------------------
+    mc.setTransformScopeForTest (1, 1);   // the group G1
+    const int arcsBefore = mc.arcCountForTest();
+    const int idBefore = mc.nextArcIdForTest();
+    check (mc.transformArcsForTest (MainComponent::transformRepeatUp),
+           "WP8 the repeat adds the copies");
+    check (mc.arcCountForTest() == arcsBefore + 2,
+           "WP8 the repeat adds two copies",
+           juce::String (mc.arcCountForTest() - arcsBefore));
+    check (mc.nextArcIdForTest() == idBefore + 2,
+           "WP8 the copies get their own ids",
+           juce::String (mc.nextArcIdForTest() - idBefore));
+
+    // --- the menu ---------------------------------------------------------
+    // The File menu and the arc context menu show the same items, so both
+    // are built by the same function.
+    {
+        juce::PopupMenu m;
+        mc.fillTransformMenu (m, 200);
+        check (m.getNumItems() > 0,
+               "WP8 the transform menu can be built",
+               juce::String (m.getNumItems()) + " items");
+    }
+}
+
