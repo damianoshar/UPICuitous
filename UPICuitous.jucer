@@ -29,6 +29,10 @@
             file="Source/MainComponentControls.cpp"/>
       <FILE id="mLay3" name="MainComponentLayout.cpp" compile="1" resource="0"
             file="Source/MainComponentLayout.cpp"/>
+      <FILE id="cEng1" name="CardLayoutEngine.h" compile="0" resource="0"
+            file="Source/CardLayoutEngine.h"/>
+      <FILE id="cEng2" name="CardLayoutEngine.cpp" compile="1" resource="0"
+            file="Source/CardLayoutEngine.cpp"/>
       <FILE id="mMod4" name="MainComponentModel.cpp" compile="1" resource="0"
             file="Source/MainComponentModel.cpp"/>
       <FILE id="mAud5" name="MainComponentAudio.cpp" compile="1" resource="0"
