@@ -24,16 +24,23 @@ can come later, and then the check is the thing that says the two agree.
 
 | Rule | Says | Why |
 |---|---|---|
-| **B1** | the layout engines include no JUCE header | the geometry is pure: a rectangle in, a rectangle out. A JUCE header would drag the GUI back into it. |
-| **B2** | the layout engines include no app header outside the engine group | the engines must not know the shell. `MainComponent.h` is 2,900 lines of GUI; an engine that includes it can never be tested without it. |
+| **B1** | the JUCE-free groups include no JUCE header | the geometry is pure: a rectangle in, a rectangle out. The domain's core is pure numbers. A JUCE header would drag the GUI back into them. |
+| **B2** | the JUCE-free groups include no app header outside their group | the engines must not know the shell. `MainComponent.h` is 2,900 lines of GUI; an engine that includes it can never be tested without it. |
 | **B3** | `UPICuitous.jucer` lists every `Source/*.cpp` on disk | the Projucer project is the committed source of truth for the file list. A new `.cpp` it does not know is not compiled by the app project - and the gate would pass without ever building it. |
 | **B4** | the plugin's two CMake targets carry the same, complete source list | the VST3 and its smoke test build the same sources. A new engine or a new `MainComponent*.cpp` that is missing from one of them is a plugin that does not have the code it needs. |
 | **B5** | the generated Visual Studio project lists every `Source/*.cpp` | the same trap as B3, on the machine that runs the gate. `Builds/VisualStudio2026` is generated and not in the repository, so this rule only runs where the project has been generated. |
 
-B1 and B2 cover the seven files of the pure-geometry group:
-`LayoutRect.h`, `CardLayoutEngine.{h,cpp}`, `BottomLayoutEngine.{h,cpp}`
-and `OverlayLayoutEngine.{h,cpp}`. Their only permitted project headers are
-each other.
+B1 and B2 cover three groups, each with its own permitted project headers:
+
+| Group | Files | May include |
+|---|---|---|
+| the layout engines | `LayoutRect.h`, `CardLayoutEngine.{h,cpp}`, `BottomLayoutEngine.{h,cpp}`, `OverlayLayoutEngine.{h,cpp}` | each other |
+| the domain's numeric core | `UpicConstants.h`, `PieceLimits.h`, `UpicMath.h`, `Ids.h` | the units, the validation and the math |
+| the arc | `Arc.h` | the units, the validation and the math |
+
+The codec (`Source/ArcCodec.h`) is deliberately **not** in a group: it is
+the edge where the JUCE value types live. The plan keeps them there (R2),
+and the check says so by leaving the edge out.
 
 B4's required set is every `Source/*.cpp` that is not a selftest and whose
 name says it belongs to the shell or to an engine (`MainComponent*.cpp`,
@@ -67,9 +74,11 @@ build. The gate's step is:
 ```
 ==> Dependency boundaries
     B1/B2 the layout engines (7 files): no JUCE header, no header outside the group
-    B3 the Projucer project lists all 35 source files
+    B1/B2 the domain's numeric core (4 files): no JUCE header, no header outside the group
+    B1/B2 the arc (1 file): no JUCE header, no header outside the group
+    B3 the Projucer project lists all 37 source files
     B4 the plugin's two targets carry the same 19 source files
-    B5 the generated Visual Studio project lists all 35 source files
+    B5 the generated Visual Studio project lists all 37 source files
     dependency boundaries: 5 rules, 0 violations
 ```
 

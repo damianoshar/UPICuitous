@@ -320,6 +320,29 @@ the golden render and the legacy fixture are unchanged, the full gate is
 green, and the gate's second JUCE-free group is this one - a JUCE header in
 any of the four headers fails the gate before the build.
 
+### 6.6 R2.2 - the arc's codec edge
+
+**What moves.** The arc's file format leaves the class: `Arc::toVar()` and
+`Arc::fromVar()` become `upic::arcToVar (const Arc&)` and `upic::arcFromVar
+(const juce::var&)` in the new `Source/ArcCodec.h`. `Source/Arc.h` loses
+the JUCE umbrella header and the three numeric helpers it used for it.
+
+**What stays.** The file format: the property names, their order, the
+optional keys a default arc does not write and the clamps a crafted file
+gets. The bodies are the old members, body for body. The plan keeps the
+JUCE value types at the codec edge (R2).
+
+**The contract.** A suite of the arc's own, written before the move:
+`Source/SelfTestArc.cpp`, 87 checks that reach the arc through the
+domain's headers alone - no `MainComponent`, no window, no component tree.
+It pins the transformations, the interpolation and the codec, including
+the file's short keys.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, the full
+gate is green, and the gate's third JUCE-free group is the arc - a JUCE
+header in `Arc.h` fails the gate before the build.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -346,7 +369,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 shipped** | `ea83dac`, `d58120d` | app selftest 2,054/2,054, the domain's numeric core is JUCE-free and checked by the gate, the domain's own suite 61/61, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 shipped** | `ea83dac`, `d58120d`, `bb23e1c` | app selftest 2,141/2,141, the domain's numeric core and the arc are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
@@ -604,5 +627,59 @@ selftest binary, which is a JUCE application (the review's R089). See
 [`domain-numeric-core.md`](domain-numeric-core.md).
 
 Gate: app selftest 2,054/2,054, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
+
+### R2.2 record (2026-11-26)
+
+The arc's codec edge: the model's central type no longer depends on JUCE.
+
+| Measure | Before | After |
+|---|---|---|
+| the arc | `Source/Arc.h`, 582 lines, including `<JuceHeader.h>` | `Source/Arc.h`, 524 lines, no JUCE header |
+| the codec | two members of the class | `Source/ArcCodec.h`, two free functions |
+| the arc's own suite | - | `Source/SelfTestArc.cpp`, 87 checks |
+| the gate's JUCE-free groups | 2 (the layout engines, the domain's numeric core) | 3 (the layout engines, the domain's numeric core, the arc) |
+
+The two members became `upic::arcToVar (const Arc&)` and `upic::arcFromVar
+(const juce::var&)`. The bodies are the old members, body for body: the
+property names, their order, the optional keys a default arc does not
+write and the clamps a crafted file gets are the file format, and not a
+character of them changed. The rest of the class lost JUCE in the same
+step - `juce::jmax`, `juce::jmin` and `juce::jlimit` became `std::max`,
+`std::min` and `std::clamp`, the same substitution R2.1 made in the
+numeric core, with the same expressions and therefore the same results.
+
+The suite came first. `Source/SelfTestArc.cpp` (87 checks) was written
+against the arc as it was, and it passes unchanged after the move; it
+reaches the codec through two helpers at the top of the file, so the
+rename touched the suite in one place only. It pins the arc's defaults,
+the four classical transformations with their edges (an empty arc, a
+single-point arc, a zero or non-finite factor, the clamps), the
+interpolation the engine reads per sample (the log-domain pitch, the life,
+the pressure, the cursor that follows the time forwards and backwards),
+and the codec: the round trip of every field, the defaults of an arc that
+is not there, the clamps a crafted file gets, the points that come back in
+time order, and the file's shape - the short keys and the optional keys a
+default arc does not write.
+
+The last part is why the suite is written this way: the property names
+are the file format. A rename in the codec would silently drop everything
+a piece carries, and no golden render would notice.
+
+The gate's third JUCE-free group is the arc, so the boundary cannot be
+broken quietly: a JUCE header in `Arc.h` fails the gate before the build.
+The negative test was run on the tree - `#include <JuceHeader.h>` in
+`Arc.h` fails the gate with the file and the line named.
+
+What is still open: the other domain headers still carry their own
+`toVar` / `fromVar` members (the page's codec is the next one that
+matters - it holds the arcs); the arc's geometry is still in the same file
+as its data (the review's R012); and there is no headless domain target
+yet - the suite runs inside the app's selftest binary, which is a JUCE
+application (the review's R089). See
+[`arc-codec-edge.md`](arc-codec-edge.md).
+
+Gate: app selftest 2,141/2,141, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.

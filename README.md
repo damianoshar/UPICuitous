@@ -70,10 +70,10 @@ build checks that the others still agree with it. `-SkipApp` or `-SkipPlugin`
 narrows the run. See `BUILDING.md` in the private `UPICuitous-docs` repository
 for the manual CMake commands, the Android project and troubleshooting.
 
-The gate starts with `scripts/check-boundaries.ps1`: the layout engines stay
-JUCE-free and know only each other, and every source file is listed in the
-Projucer project and in the plugin's build. A broken boundary stops the gate
-before the build.
+The gate starts with `scripts/check-boundaries.ps1`: the layout engines, the
+domain's numeric core and the arc stay JUCE-free and know only their own
+group, and every source file is listed in the Projucer project and in the
+plugin's build. A broken boundary stops the gate before the build.
 
 First run of the standalone: press **Audio** and pick the output device.
 The microphone is opened on demand (Sample tab -> **Mon** / **Capture**, or
