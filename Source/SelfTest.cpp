@@ -147,6 +147,8 @@ int upic::runSelfTest()
     upic::runDomainChecks (t);
     // R2.2: the arc - its transformations, its interpolation and its codec.
     upic::runArcChecks (t);
+    // R2.3: the arc's geometry - the frame, the bounds and the transforms.
+    upic::runArcGeometryChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
