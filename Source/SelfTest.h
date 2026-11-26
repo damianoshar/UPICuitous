@@ -60,6 +60,7 @@ namespace upic
     void runWP10ArcChecks (SelfTest& t);       // WP10: the page at 4000 arcs
     void runWP10WaveChecks (SelfTest& t);      // WP10: the wavetable at 4096 samples
     void runWP10PageChecks (SelfTest& t);      // WP10: the page at an hour
+    void runLayoutCharacterizationChecks (SelfTest& t); // R0: the layout, before it moves
     void runFreqTableChecks (SelfTest& t); // WP1: the drawn conversion tables
     void runAmpTableChecks (SelfTest& t);  // WP2: the amplitude conversion tables
     void runGroupChecks (SelfTest& t);     // WP3: the arc groups

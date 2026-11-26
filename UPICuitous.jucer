@@ -13,6 +13,7 @@
       <FILE id="sTa10" name="SelfTestAudio.cpp" compile="1" resource="0" file="Source/SelfTestAudio.cpp"/>
       <FILE id="sTe11" name="SelfTestEngine.cpp" compile="1" resource="0" file="Source/SelfTestEngine.cpp"/>
       <FILE id="sTf12" name="SelfTestFiles.cpp" compile="1" resource="0" file="Source/SelfTestFiles.cpp"/>
+      <FILE id="sTl18" name="SelfTestLayout.cpp" compile="1" resource="0" file="Source/SelfTestLayout.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>
