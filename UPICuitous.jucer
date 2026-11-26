@@ -18,6 +18,7 @@
       <FILE id="sTt20" name="SelfTestTransport.cpp" compile="1" resource="0" file="Source/SelfTestTransport.cpp"/>
       <FILE id="sTb21" name="SelfTestBottomLayout.cpp" compile="1" resource="0" file="Source/SelfTestBottomLayout.cpp"/>
       <FILE id="sTo22" name="SelfTestOverlayLayout.cpp" compile="1" resource="0" file="Source/SelfTestOverlayLayout.cpp"/>
+      <FILE id="sTd23" name="SelfTestDomain.cpp" compile="1" resource="0" file="Source/SelfTestDomain.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>

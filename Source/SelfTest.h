@@ -77,6 +77,7 @@ namespace upic
     void runChannelRoutingChecks (SelfTest& t); // WP6.3: the mixer
     void runUntrustedPieceChecks (SelfTest& t);
     void runModelMathChecks (SelfTest& t);
+    void runDomainChecks (SelfTest& t);  // R2.1: the domain's numeric core, on its own
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);

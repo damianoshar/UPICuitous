@@ -142,6 +142,9 @@ int upic::runSelfTest()
     upic::runChannelRoutingChecks (t);
     upic::runUntrustedPieceChecks (t);
     upic::runModelMathChecks (t);
+    // R2.1: the domain's own suite - the units, the validation and the
+    // lookups, without the app around them.
+    upic::runDomainChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
