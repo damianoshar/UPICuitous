@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "ArcGeometry.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>

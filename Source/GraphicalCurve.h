@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Arc.h"
+#include "ArcGeometry.h"
 #include "Envelope.h"
 #include "FreqSpace.h"
 #include "PieceLimits.h"

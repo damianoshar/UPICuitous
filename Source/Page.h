@@ -8,6 +8,7 @@
 
 #include "Arc.h"
 #include "ArcCodec.h"
+#include "ArcGeometry.h"
 #include "ArcGroup.h"
 #include "Envelope.h"
 #include "FreqSpace.h"

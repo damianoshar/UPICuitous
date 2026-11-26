@@ -3,6 +3,7 @@
 #include "SelfTest.h"
 #include "AllocCounter.h"
 #include "ArcCodec.h"
+#include "ArcGeometry.h"
 #include "GraphicalCurve.h"
 
 //==============================================================================

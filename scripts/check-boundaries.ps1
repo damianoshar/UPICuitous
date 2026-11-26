@@ -93,6 +93,21 @@ $juceFreeGroups = @(
             "PieceLimits.h",
             "UpicMath.h"
         )
+    },
+    @{
+        Name    = "the arc's geometry"
+        Message = "B1/B2 the arc's geometry stays JUCE-free and knows only the arc and the domain"
+        Files   = @(
+            "Source/ArcGeometry.h"
+        )
+        # The arc it moves, and the domain's headers. The geometry does not
+        # know the codec, the shell or anything else.
+        Allowed = @(
+            "Arc.h",
+            "UpicConstants.h",
+            "PieceLimits.h",
+            "UpicMath.h"
+        )
     }
 )
 

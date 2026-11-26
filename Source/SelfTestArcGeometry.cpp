@@ -5,7 +5,7 @@
 #include <limits>
 #include <vector>
 
-#include "Arc.h"
+#include "ArcGeometry.h"
 #include "PieceLimits.h"
 #include "UpicConstants.h"
 

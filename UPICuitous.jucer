@@ -100,6 +100,7 @@
       <FILE id="mdEnv34" name="Envelope.h" compile="0" resource="0" file="Source/Envelope.h"/>
       <FILE id="mdArc35" name="Arc.h" compile="0" resource="0" file="Source/Arc.h"/>
       <FILE id="mdArc45" name="ArcCodec.h" compile="0" resource="0" file="Source/ArcCodec.h"/>
+      <FILE id="mdArc46" name="ArcGeometry.h" compile="0" resource="0" file="Source/ArcGeometry.h"/>
       <FILE id="mdFrq36" name="FreqSpace.h" compile="0" resource="0" file="Source/FreqSpace.h"/>
       <FILE id="mdSiv37" name="Sieve.h" compile="0" resource="0" file="Source/Sieve.h"/>
       <FILE id="mdGen38" name="Generators.h" compile="0" resource="0" file="Source/Generators.h"/>
