@@ -80,6 +80,7 @@ namespace upic
     void runDomainChecks (SelfTest& t);  // R2.1: the domain's numeric core, on its own
     void runArcChecks (SelfTest& t);     // R2.2: the arc - its rules and its codec
     void runArcGeometryChecks (SelfTest& t); // R2.3: the arc's geometry, on its own
+    void runPageCodecChecks (SelfTest& t);   // R2.4: the page's codec - the file format
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);

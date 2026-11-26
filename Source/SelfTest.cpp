@@ -149,6 +149,8 @@ int upic::runSelfTest()
     upic::runArcChecks (t);
     // R2.3: the arc's geometry - the frame, the bounds and the transforms.
     upic::runArcGeometryChecks (t);
+    // R2.4: the page's codec - the file format of a page.
+    upic::runPageCodecChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

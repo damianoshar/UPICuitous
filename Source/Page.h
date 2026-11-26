@@ -12,6 +12,7 @@
 #include "ArcGroup.h"
 #include "Envelope.h"
 #include "FreqSpace.h"
+#include "Ids.h"
 #include "PieceLimits.h"
 #include "Sieve.h"
 #include "UpicConstants.h"
