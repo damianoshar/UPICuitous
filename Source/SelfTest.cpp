@@ -127,6 +127,7 @@ int upic::runSelfTest()
     upic::runWP10WaveChecks (t);
     upic::runWP10PageChecks (t);
     upic::runLayoutCharacterizationChecks (t);
+    upic::runDocumentCharacterizationChecks (t);
     upic::runFreqTableChecks (t);
     upic::runAmpTableChecks (t);
     upic::runGroupChecks (t);
