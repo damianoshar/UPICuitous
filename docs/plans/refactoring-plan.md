@@ -172,7 +172,9 @@ contracts R6's `TransportStateMachine` and `PreviewRouter` must keep.
 **R0.4 - the baseline metrics.** This section's tables, refreshed at the end of
 R0, plus the gate line and the commit hash of the baseline.
 
-## 6. Phase R1.1 in detail - the card layout engine
+## 6. Phase R1 in detail
+
+### 6.1 R1.1 - the card layout engine
 
 The review's proposed first executable task, confirmed as the best one:
 
@@ -209,6 +211,40 @@ section of `resized()`. `resized()` went from 1,400 to 1,051 lines and
 identical before and after the extraction. See
 [`card-layout-engine.md`](card-layout-engine.md) for the boundary.
 
+### 6.2 R1.2 - the bottom layout engine
+
+**What moves.** The bottom half of `MainComponent::resized()` becomes
+`Source/BottomLayoutEngine.h` (+ `.cpp`): the editor height budget (the
+150/110/300/240 dp rules, the 42% cap, the 6 px gap), the view bar's row,
+each editor column (bank manager, preset row, focus button, editor), the
+voice strip and voice column, the tab strip, the arc list's width rule
+(300 dp, with 240 dp kept for the canvas) and the workspace splitter's
+position.
+
+**What stays.** `MainComponent::resized()` keeps the JUCE calls: it builds the
+specification from the UI state and applies the rectangles. The focus views
+call the engine's `layoutEditorColumn()` / `layoutTabStrip()` directly.
+`PageWorkspace::boundsForCanvas()` and the canvas translation stay
+component-side, because they are the workspace's own two-canvas rule.
+
+**Constraints.** Same order, same spacing, same sizes, same visibility
+decisions, including the controls that are hidden but keep their previous
+bounds (PM, the score's focus button, the arc-list toggle) and the workspace
+toggle's empty bounds. C++17, no new dependency, no layout framework.
+
+**Gate.** The new R1.2 characterization suite (71 checks) passes unchanged,
+the R0.1 suite is untouched, the full gate is green, and the golden render
+and legacy fixture are unchanged.
+
+**Shipped (R1.2, 2026-11-26).** The engine is `Source/BottomLayoutEngine.{h,cpp}`
+(374 lines: 101 header + 273 implementation); the adapter is the bottom
+section of `resized()`. `resized()` went from 1,051 to 989 lines and
+`MainComponentLayout.cpp` from 2,127 lines / 100,013 bytes to 2,066 lines /
+96,558 bytes (-61 lines, -3,455 bytes). The engine includes `<vector>`,
+`<algorithm>` and `<cmath>` only and no JUCE header. The seven-viewport
+component-tree digest was identical before and after the extraction. See
+[`bottom-layout-engine.md`](bottom-layout-engine.md) for the boundary.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -234,7 +270,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | Phase | Status | Commit | Gate |
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R1 Low-risk extraction | **R1.1 shipped** | `1ba66d2` | app selftest 1,846/1,846, R0.1 unchanged, five-viewport digest identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R1 Low-risk extraction | **R1.2 shipped** | `1ba66d2`, `713dabd` | app selftest 1,917/1,917, R0.1 unchanged, R1.2 suite 71/71, seven-viewport digest identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R2 Domain boundaries | not started | - | - |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
@@ -294,4 +330,47 @@ explicit sources) picks it up on the next Projucer resave; the H5 wave owns
 that step.
 
 Gate: app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged,
+plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS.
+
+### R1.2 record (2026-11-26)
+
+The bottom half of `resized()` is out as well; `upic::layout` owns the
+panels below the toolbar and `MainComponent` applies them.
+
+| Measure | Before | After |
+|---|---|---|
+| `resized()` | 1,051 lines | 989 lines |
+| `MainComponentLayout.cpp` | 2,127 lines / 100,013 bytes | 2,066 lines / 96,558 bytes |
+| the engine | - | `BottomLayoutEngine.h` 101 + `BottomLayoutEngine.cpp` 273 lines |
+| the suite | - | `Source/SelfTestBottomLayout.cpp`, 71 checks |
+
+The engine's types: `EditorColumnLayout`, `VoiceLayout`, `TabStripLayout`,
+`BottomLayoutConstraints`, `BottomLayoutResult`, and the entry points
+`layoutEditorColumn()`, `layoutTabStrip()` and `layoutBottom()`. It
+includes `<vector>`, `<algorithm>` and `<cmath>` and no JUCE header. The
+adapter keeps the UI state flags, the preset buttons' ideal widths, every
+`setBounds` / `setVisible` call, the rule that a hidden control keeps its
+previous bounds, `PageWorkspace::boundsForCanvas()` and the canvas origin.
+See `bottom-layout-engine.md`.
+
+The proof is two-layered: the new structural suite (71 checks) passes, and
+a temporary digest of every descendant's bounds and visibility was
+identical at all seven viewports before and after (`5d39547a…`,
+`13c5ae71…`, `1e9bb2f4…`, `f6286086…`, `39644fb4…`, `8905b165…`,
+`8460fc44…`). The digest was removed; the structural suite stays. The R0.1
+suite is untouched.
+
+The seven viewports are the five R0 ones plus 700×900 (a wide portrait
+window, the editors side by side) and 460×1400 (a tall portrait window,
+the editors stacked). The tall window is deliberate: at 460×800 the
+toolbar's fit-shrink drops the layout scale to 0.55, and the 460 dp
+side-by-side threshold shrinks with the scale, so the editors do not stack
+there. At 460×1400 the scale stays at 1.0 and the stacked branch is
+reached.
+
+The plugin's `Plugin/CMakeLists.txt` (both targets) and the `.jucer` list
+carry the new source. The Android generated list picks it up on the next
+Projucer resave; the H5 wave owns that step.
+
+Gate: app selftest 1,917/1,917, legacy fixture `8BF28ABA7975` unchanged,
 plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS.
