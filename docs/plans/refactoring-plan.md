@@ -245,6 +245,40 @@ section of `resized()`. `resized()` went from 1,051 to 989 lines and
 component-tree digest was identical before and after the extraction. See
 [`bottom-layout-engine.md`](bottom-layout-engine.md) for the boundary.
 
+### 6.3 R1.3 - the overlay layout engine
+
+**What moves.** The three in-app overlay cards (the audio device selector,
+the MIDI + OSC settings and the "clear page?" warning) become
+`Source/OverlayLayoutEngine.h` (+ `.cpp`): each card's padding, title row,
+button row and the rows of its contents.
+
+**What stays.** `MainComponent::layoutOverlays()` keeps the backdrops, the
+visibility rules and every `setBounds()`. The card's frame stays with the
+overlay component, because the overlay paints it.
+
+**Also.** The rectangle the engines share moves into `Source/LayoutRect.h`:
+the plain `upic::layout::Rect` and the `juce::Rectangle` semantics the
+three engines need, so they cannot drift apart. The bottom engine's own
+copies are gone.
+
+**Constraints.** Same order, same spacing, same sizes, same visibility
+decisions. The four MIDI Learn buttons keep the name "Learn", because the
+button icons are chosen by the name. C++17, no new dependency.
+
+**Gate.** The new R1.3 characterization suite (76 checks) passes unchanged,
+the R0.1 and R1.2 suites are untouched, the full gate is green, and the
+golden render and legacy fixture are unchanged.
+
+**Shipped (R1.3, 2026-11-26).** The engine is
+`Source/OverlayLayoutEngine.{h,cpp}` (187 lines: 64 header + 123
+implementation) and the shared rectangle is `Source/LayoutRect.h` (79
+lines). `layoutOverlays()` went from 100 to 73 lines, `resized()` from 989
+to 980 lines, and `MainComponentLayout.cpp` from 2,066 lines / 96,558
+bytes to 2,088 lines / 95,830 bytes (+22 lines: 45 of them are the
+suite's hooks in the same file; -728 bytes). The four-viewport
+component-tree digest was identical before and after the extraction. See
+[`overlay-layout-engine.md`](overlay-layout-engine.md) for the boundary.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -270,7 +304,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | Phase | Status | Commit | Gate |
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R1 Low-risk extraction | **R1.2 shipped** | `1ba66d2`, `713dabd` | app selftest 1,917/1,917, R0.1 unchanged, R1.2 suite 71/71, seven-viewport digest identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R2 Domain boundaries | not started | - | - |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
@@ -373,4 +407,51 @@ carry the new source. The Android generated list picks it up on the next
 Projucer resave; the H5 wave owns that step.
 
 Gate: app selftest 1,917/1,917, legacy fixture `8BF28ABA7975` unchanged,
+plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS.
+
+### R1.3 record (2026-11-26)
+
+The overlay cards are out as well; `upic::layout` owns the three cards and
+`MainComponent` applies them. With R1.3, `MainComponent` no longer computes
+any layout geometry of its own.
+
+| Measure | Before | After |
+|---|---|---|
+| `layoutOverlays()` | 100 lines | 73 lines |
+| `resized()` | 989 lines | 980 lines |
+| `MainComponentLayout.cpp` | 2,066 lines / 96,558 bytes | 2,088 lines / 95,830 bytes |
+| the engine | - | `OverlayLayoutEngine.h` 64 + `OverlayLayoutEngine.cpp` 123 lines |
+| the shared rectangle | - | `Source/LayoutRect.h`, 79 lines |
+| the suite | - | `Source/SelfTestOverlayLayout.cpp`, 76 checks |
+
+The engine's types: `AudioOverlayLayout`, `SettingsOverlayLayout`,
+`ClearOverlayLayout`, and the entry points `layoutAudioOverlay()`,
+`layoutSettingsOverlay()` and `layoutClearOverlay()`. It includes
+`<cmath>` only and no JUCE header. The adapter keeps the backdrops, the
+visibility rules and every `setBounds()` call; the card's frame stays with
+the overlay component, because the overlay paints it. See
+`overlay-layout-engine.md`.
+
+`Source/LayoutRect.h` now holds the rectangle the engines share and the
+`juce::Rectangle` semantics they need (`reduced`, `removeFromTop`,
+`removeFromBottom`, `removeFromLeft`, `removeFromRight`, with the
+clamping). The card engine, the bottom engine and the overlay engine use
+that one implementation.
+
+The proof is two-layered: the new structural suite (76 checks) passes, and
+a temporary digest of every widget's bounds and visibility was identical at
+all four viewports before and after (`1298551f…`, `3d438b40…`,
+`d1fc67f6…`, `411e71af…`). The digest was removed; the structural suite
+stays. The R0.1 and R1.2 suites are untouched.
+
+The suite runs last in the selftest: it opens the audio device selector and
+refreshes the MIDI device list, and nothing after it should see that. The
+four MIDI Learn buttons all carry the name "Learn" (the button icons are
+chosen by the name), so the suite tells them apart by the row they are in.
+
+The plugin's `Plugin/CMakeLists.txt` (both targets) and the `.jucer` list
+carry the new sources. The Android generated list picks them up on the
+next Projucer resave; the H5 wave owns that step.
+
+Gate: app selftest 1,993/1,993, legacy fixture `8BF28ABA7975` unchanged,
 plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS.
