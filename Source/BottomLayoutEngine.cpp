@@ -16,62 +16,20 @@ namespace upic::layout
 {
     namespace
     {
+        // The rectangle semantics live in LayoutRect.h, so this engine and
+        // the overlay engine compute the same pixels with the same code.
+        using rect::maxOf;
+        using rect::minOf;
+        using rect::clamp;
+        using rect::reduced;
+        using rect::removeFromTop;
+        using rect::removeFromBottom;
+        using rect::removeFromLeft;
+        using rect::removeFromRight;
+
         int scaled (int dp, float scale) noexcept
         {
             return (int) std::lround ((float) dp * scale);
-        }
-
-        int maxOf (int a, int b) noexcept { return a > b ? a : b; }
-        int minOf (int a, int b) noexcept { return a < b ? a : b; }
-        int clamp (int value, int lo, int hi) noexcept
-        {
-            return value < lo ? lo : (value > hi ? hi : value);
-        }
-
-        // juce::Rectangle::reduced
-        Rect reduced (Rect r, int deltaX, int deltaY) noexcept
-        {
-            return { r.x + deltaX, r.y + deltaY,
-                     maxOf (0, r.w - deltaX * 2),
-                     maxOf (0, r.h - deltaY * 2) };
-        }
-
-        // juce::Rectangle::removeFromTop
-        Rect removeFromTop (Rect& r, int amount) noexcept
-        {
-            const int h = minOf (amount, r.h);
-            const Rect out { r.x, r.y, r.w, h };
-            r.y += h;
-            r.h -= h;
-            return out;
-        }
-
-        // juce::Rectangle::removeFromBottom
-        Rect removeFromBottom (Rect& r, int amount) noexcept
-        {
-            const int newHeight = maxOf (0, r.h - amount);
-            const Rect out { r.x, r.y + newHeight, r.w, r.h - newHeight };
-            r.h = newHeight;
-            return out;
-        }
-
-        // juce::Rectangle::removeFromLeft
-        Rect removeFromLeft (Rect& r, int amount) noexcept
-        {
-            const int w = minOf (amount, r.w);
-            const Rect out { r.x, r.y, w, r.h };
-            r.x += w;
-            r.w -= w;
-            return out;
-        }
-
-        // juce::Rectangle::removeFromRight
-        Rect removeFromRight (Rect& r, int amount) noexcept
-        {
-            const int newWidth = maxOf (0, r.w - amount);
-            const Rect out { r.x + newWidth, r.y, r.w - newWidth, r.h };
-            r.w = newWidth;
-            return out;
         }
 
         EditorColumnLayout layoutEditor (const Rect& column, float scale,

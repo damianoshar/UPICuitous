@@ -2164,7 +2164,17 @@ void MainComponent::buildMidiControls()
     intenSlider.setName("intenSlider");
     midiActLab.setName("midiActLab");
     midiBindGainLab.setName("midiBindGainLab");
+    midiBindIntLab.setName("midiBindIntLab");
+    midiBindScrubLab.setName("midiBindScrubLab");
+    midiBindTransportLab.setName("midiBindTransportLab");
     midiDevBox.setName("midiDevBox");
+    midiDevLab.setName("midiDevLab");
+    midiGainLab.setName("midiGainLab");
+    midiIntLab.setName("midiIntLab");
+    midiScrubLab.setName("midiScrubLab");
+    midiTransportLab.setName("midiTransportLab");
+    // the four Learn buttons keep the name "Learn": the button icons are
+    // chosen by the name, and "Learn" is in the icon table.
     midiDevBox.setTooltip ("The MIDI input the app listens to");
     midiDevBox.onChange = [this]
     {

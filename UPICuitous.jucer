@@ -17,6 +17,7 @@
       <FILE id="sTl18" name="SelfTestLayout.cpp" compile="1" resource="0" file="Source/SelfTestLayout.cpp"/>
       <FILE id="sTt20" name="SelfTestTransport.cpp" compile="1" resource="0" file="Source/SelfTestTransport.cpp"/>
       <FILE id="sTb21" name="SelfTestBottomLayout.cpp" compile="1" resource="0" file="Source/SelfTestBottomLayout.cpp"/>
+      <FILE id="sTo22" name="SelfTestOverlayLayout.cpp" compile="1" resource="0" file="Source/SelfTestOverlayLayout.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>
@@ -38,6 +39,12 @@
             file="Source/BottomLayoutEngine.h"/>
       <FILE id="bEng2" name="BottomLayoutEngine.cpp" compile="1" resource="0"
             file="Source/BottomLayoutEngine.cpp"/>
+      <FILE id="oEng1" name="OverlayLayoutEngine.h" compile="0" resource="0"
+            file="Source/OverlayLayoutEngine.h"/>
+      <FILE id="oEng2" name="OverlayLayoutEngine.cpp" compile="1" resource="0"
+            file="Source/OverlayLayoutEngine.cpp"/>
+      <FILE id="lRct1" name="LayoutRect.h" compile="0" resource="0"
+            file="Source/LayoutRect.h"/>
       <FILE id="mMod4" name="MainComponentModel.cpp" compile="1" resource="0"
             file="Source/MainComponentModel.cpp"/>
       <FILE id="mAud5" name="MainComponentAudio.cpp" compile="1" resource="0"

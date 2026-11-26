@@ -166,6 +166,9 @@ int upic::runSelfTest()
     upic::runTransportChecks (t);
     upic::runTransportStateChecks (t);
     upic::runChooserChecks (t);
+    // R1.3 last: the overlay suite opens the audio device selector and
+    // refreshes the MIDI device list, and nothing after it should see that.
+    upic::runOverlayLayoutCharacterizationChecks (t);
 
     const juce::String summary = "\n" + (t.failures == 0 ? juce::String ("ALL CHECKS PASSED")
                                                             : juce::String (t.failures) + " CHECK(S) FAILED") + "\n";

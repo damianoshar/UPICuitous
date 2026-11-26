@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include "LayoutRect.h"
+
 #include <cstddef>
 #include <vector>
 
@@ -37,15 +39,6 @@ namespace upic::layout
 
         // The permanent strip's design rules (dp).
         int stripRowH = 36, stripGroupGap = 6, stripPad = 2;
-    };
-
-    /** A half-open pixel rectangle: x .. x+w, y .. y+h. */
-    struct Rect
-    {
-        int x = 0, y = 0, w = 0, h = 0;
-
-        int getRight()  const noexcept { return x + w; }
-        int getBottom() const noexcept { return y + h; }
     };
 
     /** One cell of a card, with every text measurement already resolved. */

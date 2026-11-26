@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "CardLayoutEngine.h"
 #include "BottomLayoutEngine.h"
+#include "OverlayLayoutEngine.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -14,6 +15,17 @@ bool MainComponent::sessionSettingsPersistent = false;
 
 namespace
 {
+    // The engines speak in plain rectangles; the widgets speak in JUCE's.
+    upic::layout::Rect toEngineRect (const juce::Rectangle<int>& r) noexcept
+    {
+        return { r.getX(), r.getY(), r.getWidth(), r.getHeight() };
+    }
+
+    juce::Rectangle<int> toJuceRect (const upic::layout::Rect& r) noexcept
+    {
+        return { r.x, r.y, r.w, r.h };
+    }
+
     // F5: the session settings live beside the app's other preferences. The
     // selftest never enables this, so the checks do not touch the user's
     // file; Main.cpp turns it on for the app.
@@ -1096,15 +1108,6 @@ void MainComponent::resized()
     // the text in design units, hands the engine a plain specification, and
     // applies the result with setBounds(). The engine never sees a
     // juce::Component.
-    auto toEngineRect = [] (juce::Rectangle<int> r)
-    {
-        return upic::layout::Rect { r.getX(), r.getY(), r.getWidth(), r.getHeight() };
-    };
-    auto toJuceRect = [] (const upic::layout::Rect& r)
-    {
-        return juce::Rectangle<int> (r.x, r.y, r.w, r.h);
-    };
-
     auto layoutMetrics = []()
     {
         upic::layout::LayoutMetrics m;
@@ -1980,87 +1983,106 @@ void MainComponent::layoutOverlays (float s)
     audioOverlay.setBounds(getLocalBounds());
     if (audioSelector != nullptr && audioOverlay.isVisible())
     {
-        auto card = audioOverlay.cardRect().reduced(12);
-        card.removeFromTop(AudioOverlay::titleH);
-        // v1.30: the MIDI section moved to the settings overlay. The audio
-        // card is the device selector plus OK.
-        card.removeFromTop(6);
-        auto btnRow = card.removeFromBottom(40);
-        card.removeFromBottom(6);
-        audioOkBtn.setBounds(btnRow.removeFromRight(120).reduced(2));
-        audioSelector->setBounds(card);
+        // R1.3: the card's contents are the overlay engine's.
+        const auto card = upic::layout::layoutAudioOverlay (
+            toEngineRect (audioOverlay.cardRect()));
+        audioOkBtn.setBounds (toJuceRect (card.okButton));
+        audioSelector->setBounds (toJuceRect (card.selector));
     }
 
     // v1.30 (UPIC-54): MIDI + OSC settings overlay.
     settingsOverlay.setBounds(getLocalBounds());
     if (settingsOverlay.isVisible())
     {
-        auto card = settingsOverlay.cardRect().reduced(12);
-        card.removeFromTop(AudioOverlay::titleH);
-        auto btnRow = card.removeFromBottom(40);
-        card.removeFromBottom(6);
-        settingsOkBtn.setBounds(btnRow.removeFromRight(100).reduced(2));
-        btnRow.removeFromRight(8);
-        oscApplyBtn.setBounds(btnRow.removeFromRight(110).reduced(2));
+        // R1.3: the card's contents are the overlay engine's.
+        const auto card = upic::layout::layoutSettingsOverlay (
+            toEngineRect (settingsOverlay.cardRect()), s);
+        settingsOkBtn.setBounds (toJuceRect (card.ok));
+        oscApplyBtn.setBounds (toJuceRect (card.apply));
 
-        // --- MIDI ---
-        midiSectionLab.setBounds(card.removeFromTop((int) std::lround(22.0f * s)).reduced(2));
-        {
-            auto devRow = card.removeFromTop((int) std::lround (28.0f * s));
-            midiDevLab.setBounds (devRow.removeFromLeft ((int) std::lround (76.0f * s)).reduced (2));
-            midiDevBox.setBounds (devRow.removeFromLeft ((int) std::lround (220.0f * s)).reduced (2));
-            card.removeFromTop (2);
-            auto actRow = card.removeFromTop ((int) std::lround (22.0f * s));
-            midiActLab.setBounds (actRow.removeFromLeft ((int) std::lround (300.0f * s)).reduced (2));
-            card.removeFromTop (2);
-            auto gainRow = card.removeFromTop ((int) std::lround (26.0f * s));
-            midiGainLab.setBounds (gainRow.removeFromLeft ((int) std::lround (76.0f * s)).reduced (2));
-            midiLearnGain.setBounds (gainRow.removeFromLeft ((int) std::lround (64.0f * s)).reduced (2));
-            midiBindGainLab.setBounds (gainRow.removeFromLeft ((int) std::lround (90.0f * s)).reduced (2));
-            card.removeFromTop (2);
-            auto intRow = card.removeFromTop ((int) std::lround (26.0f * s));
-            midiIntLab.setBounds (intRow.removeFromLeft ((int) std::lround (76.0f * s)).reduced (2));
-            midiLearnInt.setBounds (intRow.removeFromLeft ((int) std::lround (64.0f * s)).reduced (2));
-            midiBindIntLab.setBounds (intRow.removeFromLeft ((int) std::lround (90.0f * s)).reduced (2));
-            card.removeFromTop (2);
-            auto scrubRow = card.removeFromTop ((int) std::lround (26.0f * s));
-            midiScrubLab.setBounds (scrubRow.removeFromLeft ((int) std::lround (76.0f * s)).reduced (2));
-            midiLearnScrub.setBounds (scrubRow.removeFromLeft ((int) std::lround (64.0f * s)).reduced (2));
-            midiBindScrubLab.setBounds (scrubRow.removeFromLeft ((int) std::lround (90.0f * s)).reduced (2));
-            card.removeFromTop (2);
-            auto transportRow = card.removeFromTop ((int) std::lround (26.0f * s));
-            midiTransportLab.setBounds (transportRow.removeFromLeft ((int) std::lround (76.0f * s)).reduced (2));
-            midiLearnTransport.setBounds (transportRow.removeFromLeft ((int) std::lround (64.0f * s)).reduced (2));
-            midiBindTransportLab.setBounds (transportRow.removeFromLeft ((int) std::lround (90.0f * s)).reduced (2));
-        }
+        midiSectionLab.setBounds (toJuceRect (card.midiSection));
+        midiDevLab.setBounds (toJuceRect (card.midiDeviceLabel));
+        midiDevBox.setBounds (toJuceRect (card.midiDeviceBox));
+        midiActLab.setBounds (toJuceRect (card.midiActivity));
+        midiGainLab.setBounds (toJuceRect (card.midiGainLabel));
+        midiLearnGain.setBounds (toJuceRect (card.midiLearnGain));
+        midiBindGainLab.setBounds (toJuceRect (card.midiBindGain));
+        midiIntLab.setBounds (toJuceRect (card.midiIntervalLabel));
+        midiLearnInt.setBounds (toJuceRect (card.midiLearnInterval));
+        midiBindIntLab.setBounds (toJuceRect (card.midiBindInterval));
+        midiScrubLab.setBounds (toJuceRect (card.midiScrubLabel));
+        midiLearnScrub.setBounds (toJuceRect (card.midiLearnScrub));
+        midiBindScrubLab.setBounds (toJuceRect (card.midiBindScrub));
+        midiTransportLab.setBounds (toJuceRect (card.midiTransportLabel));
+        midiLearnTransport.setBounds (toJuceRect (card.midiLearnTransport));
+        midiBindTransportLab.setBounds (toJuceRect (card.midiBindTransport));
 
-        card.removeFromTop(8);
-        // --- OSC ---
-        oscSectionLab.setBounds(card.removeFromTop((int) std::lround(22.0f * s)).reduced(2));
-        oscStatusLab.setBounds(card.removeFromTop((int) std::lround(20.0f * s)).reduced(2));
-        auto onRow = card.removeFromTop((int) std::lround(28.0f * s));
-        oscOnBtn.setBounds(onRow.removeFromLeft((int) std::lround(100.0f * s)).reduced(2));
-        auto portRow = card.removeFromTop((int) std::lround(28.0f * s));
-        oscPortLab.setBounds(portRow.removeFromLeft((int) std::lround(76.0f * s)).reduced(2));
-        oscPortSlider.setBounds(portRow.removeFromLeft((int) std::lround(180.0f * s)).reduced(2));
-        auto mcRow = card.removeFromTop((int) std::lround(28.0f * s));
-        oscMcBtn.setBounds(mcRow.removeFromLeft((int) std::lround(100.0f * s)).reduced(2));
-        oscGroupLab.setBounds(mcRow.removeFromLeft((int) std::lround(46.0f * s)).reduced(2));
-        oscGroupEdit.setBounds(mcRow.removeFromLeft((int) std::lround(150.0f * s)).reduced(2));
-        oscMcPortLab.setBounds(mcRow.removeFromLeft((int) std::lround(50.0f * s)).reduced(2));
-        oscMcPortSlider.setBounds(mcRow.reduced(2));
+        oscSectionLab.setBounds (toJuceRect (card.oscSection));
+        oscStatusLab.setBounds (toJuceRect (card.oscStatus));
+        oscOnBtn.setBounds (toJuceRect (card.oscOn));
+        oscPortLab.setBounds (toJuceRect (card.oscPortLabel));
+        oscPortSlider.setBounds (toJuceRect (card.oscPortSlider));
+        oscMcBtn.setBounds (toJuceRect (card.oscMulticast));
+        oscGroupLab.setBounds (toJuceRect (card.oscGroupLabel));
+        oscGroupEdit.setBounds (toJuceRect (card.oscGroupEdit));
+        oscMcPortLab.setBounds (toJuceRect (card.oscMulticastPortLabel));
+        oscMcPortSlider.setBounds (toJuceRect (card.oscMulticastPortSlider));
     }
 
     // v1.27: the clear warning overlay (full-window backdrop + card)
     clearOverlay.setBounds(getLocalBounds());
     if (clearOverlay.isVisible())
     {
-        auto card = clearOverlay.cardRect().reduced(16);
-        card.removeFromTop(ClearOverlay::titleH);
-        auto btnRow = card.removeFromBottom(36);
-        card.removeFromBottom(6);
-        clearCancelBtn.setBounds(btnRow.removeFromRight(110).reduced(2));
-        btnRow.removeFromRight(8);
-        clearConfirmBtn.setBounds(btnRow.removeFromRight(130).reduced(2));
+        // R1.3: the card's contents are the overlay engine's.
+        const auto card = upic::layout::layoutClearOverlay (
+            toEngineRect (clearOverlay.cardRect()));
+        clearCancelBtn.setBounds (toJuceRect (card.cancel));
+        clearConfirmBtn.setBounds (toJuceRect (card.confirm));
     }
+}
+
+//==============================================================================
+// R1.3: the overlay hooks for the characterization suite.
+//
+// The overlays are opened the way the user opens them (the same methods the
+// buttons call), so the suite sees the production layout and not a test-only
+// arrangement.
+//==============================================================================
+void MainComponent::showAudioOverlayForTest()
+{
+    showAudioSettings();
+}
+
+void MainComponent::showSettingsOverlayForTest()
+{
+    showSettings();
+}
+
+void MainComponent::showClearOverlayForTest()
+{
+    showClearWarning();
+}
+
+void MainComponent::closeOverlaysForTest()
+{
+    closeAudioSettings();
+    closeSettings();
+    closeClearWarning();
+}
+
+juce::Component* MainComponent::overlayForTest (const juce::String& which)
+{
+    if (which == "audio")    return &audioOverlay;
+    if (which == "settings") return &settingsOverlay;
+    if (which == "clear")    return &clearOverlay;
+    return nullptr;
+}
+
+juce::Rectangle<int> MainComponent::overlayCardRectForTest (const juce::String& which)
+{
+    if (which == "audio" || which == "settings")
+        return audioOverlay.cardRect();
+    if (which == "clear")
+        return clearOverlay.cardRect();
+    return {};
 }

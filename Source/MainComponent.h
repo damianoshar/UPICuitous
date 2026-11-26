@@ -1372,6 +1372,17 @@ public:
         resized();
     }
 
+    // --- R1.3: the overlay cards -----------------------------------------
+    // The three in-app overlays (audio, MIDI + OSC settings, clear page)
+    // for the characterization suite that runs before their geometry moves
+    // out of layoutOverlays().
+    void showAudioOverlayForTest();
+    void showSettingsOverlayForTest();
+    void showClearOverlayForTest();
+    void closeOverlaysForTest();
+    juce::Component* overlayForTest (const juce::String& which);
+    juce::Rectangle<int> overlayCardRectForTest (const juce::String& which);
+
     // --- F4 (2026-11-17): the focus views --------------------------------
     // A focus view maximises one panel: the score, the wave editor or the
     // envelope editor. The permanent strip (Menu, Play/Stop, the tool and
