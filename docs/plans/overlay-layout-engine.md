@@ -78,7 +78,7 @@ removed. That comparison is a local proof, not a committed check.
 ## Follow-ups
 
 - The design-unit numbers of the three cards are still literals in the
-  engine. The review's "centralize layout metrics" (R055) is the place to
+  engine. The review's "centralize layout metrics" (R054) is the place to
   collect them, together with the bottom engine's numbers, in one table.
 - The card frame itself (the centred, maximum-size rectangle) is still the
   overlay component's own rule. It could move into the engine together with

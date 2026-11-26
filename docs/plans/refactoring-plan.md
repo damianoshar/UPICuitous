@@ -116,7 +116,7 @@ move.
 |---|---|---|---|---|
 | **R0 Baseline** | Freeze the behaviour that must survive | Characterization tests for layout geometry, load/save round trip, transport transitions and preview routing; baseline metrics recorded here | R001–R004 | The four characterization suites exist and pass; this document carries the baseline table. |
 | **R1 Low-risk extraction** | Take the pure geometry out of `MainComponent` | **Extract the card layout engine** out of `resized()` into `CardLayoutEngine` (pure, no JUCE components) | R039, R040, R054, R055, R010, R056, R089 | `resized()` applies a result instead of computing it; the layout characterization suite passes unchanged. |
-| **R2 Domain boundaries** | Make the composition model testable without a GUI | Split `Arc` data from geometry; centralize units and validation | R012–R021, R084 | Domain headers depend on no GUI header; the domain tests run headless. |
+| **R2 Domain boundaries** | Make the composition model testable without a GUI | The domain's numeric core loses JUCE (R2.1), then `Arc`'s codec edge and its geometry are split out | R012–R021, R084 | Domain headers depend on no GUI header; the domain tests run headless. |
 | **R3 Document and commands** | One authoritative owner, one transaction per edit | `DocumentSession` façade over the existing piece model, then undo/selection behind it | R005–R010, R047, R030 | One model command = one labelled undo transaction; the revision counter advances per command. |
 | **R4 Persistence** | Loading is transactional and validated | `PieceCodec` / validation split out of `loadFromVar()`; a failed load leaves the active piece untouched | R059–R067, R090 | A malformed document fails with diagnostics and changes nothing; the v0.29 fixture still renders byte-identically. |
 | **R5 UI decomposition** | Rendering, hit-testing and interaction are separate | `ScoreRenderer` + `ScoreHitTester` + a coordinate mapper, out of `ScoreEditor` | R043–R053, R058, R059 | A hit test can be run without painting; the UI checks pass unchanged. |
@@ -300,6 +300,26 @@ that cannot be shown to fire fails the gate instead of passing it.
 include, on a source file the `.jucer` does not know and on a source missing
 from the plugin's list, and the full gate is green with the new step.
 
+### 6.5 R2.1 - the domain's numeric core
+
+**What moves.** Nothing moves. R2.1 takes the JUCE umbrella header out of
+the domain's numeric core: `UpicConstants.h` (the units),
+`PieceLimits.h` (the validation), `UpicMath.h` (the conversions and the
+lookups) and `Ids.h` (the id helpers).
+
+**What stays.** Everything else. The three numeric helpers those headers
+used (`juce::jmax`, `juce::jmin`, `juce::jlimit`) are the standard library's,
+with the same expressions and therefore the same results.
+
+**The contract.** A suite of the domain's own, written before the move:
+`Source/SelfTestDomain.cpp`, 61 checks that exercise the domain through the
+domain's headers alone - no `MainComponent`, no window, no component tree.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is untouched,
+the golden render and the legacy fixture are unchanged, the full gate is
+green, and the gate's second JUCE-free group is this one - a JUCE header in
+any of the four headers fails the gate before the build.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -326,7 +346,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | not started | - | - |
+| R2 Domain boundaries | **R2.1 shipped** | `ea83dac`, `d58120d` | app selftest 2,054/2,054, the domain's numeric core is JUCE-free and checked by the gate, the domain's own suite 61/61, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
@@ -527,4 +547,62 @@ Projucer resave, which the H5 wave owns. See
 
 Gate: dependency boundaries 5 rules / 18 self-tests, app selftest
 1,993/1,993, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
+
+### R2.1 record (2026-11-26)
+
+The domain wave starts with its numeric core: the four headers the rest of
+the model stands on no longer depend on JUCE.
+
+| Measure | Before | After |
+|---|---|---|
+| the domain's numeric core | 4 headers, 3 of them including `<JuceHeader.h>` | 4 headers, no JUCE header |
+| the numeric helpers | `juce::jmax` / `jmin` / `jlimit` | `std::max` / `std::min` / `std::clamp` |
+| the domain's own suite | - | `Source/SelfTestDomain.cpp`, 61 checks |
+| the gate's JUCE-free groups | 1 (the layout engines) | 2 (the layout engines, the domain's numeric core) |
+
+The four headers are `UpicConstants.h` (the units - the frequency range, the
+default ambitus, the page's length), `PieceLimits.h` (the validation - the
+file caps, the id range, the array sizes, and the clamps that reject a
+NaN), `UpicMath.h` (the conversions and the lookups - MIDI and frequency,
+the pitch space, the page's own interval, the snap, the time grid, the stop
+fade, the segment search and the cursor) and `Ids.h` (the id helpers).
+Three of them included the JUCE umbrella header for three numeric helpers
+and nothing else.
+
+The replacements are the standard library's, with the same expressions:
+`jmax (a,b)` and `std::max (a,b)` are both `a < b ? b : a`, `jmin (a,b)`
+and `std::min (a,b)` are both `b < a ? b : a`, and `jlimit (lo,hi,v)` and
+`std::clamp (v,lo,hi)` are both `v < lo ? lo : (hi < v ? hi : v)`. The NaN
+behaviour is therefore the same - all three leave a NaN unchanged, which is
+exactly why the domain has its own `clampFinite`.
+
+The suite came first. `Source/SelfTestDomain.cpp` (61 checks) was written
+against the headers as they were, and it passes unchanged after the move. It
+pins the units (A4 is 440 Hz, the round trip, the clamping; the pitch
+space's ends and its logarithmic middle; the page's own interval, including
+the rule that a pitch outside it is *off the page* and not clamped), the
+validation (the clamps, the NaN rule, the infinities, the gain and the
+intensity), the lookups (the segment search finds the first point at or
+after the key; the cursor follows the time forwards and backwards and
+answers the same) and the ids (the duplicate that gets a free id, the
+impossible id that gets replaced, the bank's first hole). Those checks did
+not exist before: the units and the lookups were covered only indirectly,
+through the app.
+
+The gate's second JUCE-free group is this one, so the boundary cannot be
+broken quietly: a JUCE header in any of the four headers fails the gate
+before the build. The negative test was run on the tree - `#include
+<JuceHeader.h>` in `UpicMath.h` fails the gate with the file and the line
+named.
+
+What is still open: `Arc.h` needs JUCE for its `juce::var` serialization,
+so the codec edge has to move out of the class first (R2.2); the other
+domain headers still carry their own `toVar` / `fromVar` members; and
+there is no headless domain target yet - the suite runs inside the app's
+selftest binary, which is a JUCE application (the review's R089). See
+[`domain-numeric-core.md`](domain-numeric-core.md).
+
+Gate: app selftest 2,054/2,054, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
