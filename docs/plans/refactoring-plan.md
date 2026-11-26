@@ -224,7 +224,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 
 | Phase | Status | Commit | Gate |
 |---|---|---|---|
-| R0 Baseline | not started | - | - |
+| R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | not started | - | - |
 | R2 Domain boundaries | not started | - | - |
 | R3 Document and commands | not started | - | - |
@@ -237,3 +237,18 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 
 Baseline commit: `b5368b1` (0.38.0), app selftest 1,785/1,785, legacy fixture
 `8BF28ABA7975…`, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS.
+
+### R0 record (2026-11-26)
+
+Three characterization suites, 61 new checks, no production-code change:
+
+| Suite | File | Checks | Pins |
+|---|---|---|---|
+| Layout | `Source/SelfTestLayout.cpp` | 30 | The card rank order and placement at five viewports (1600×1000, 1280×800, 1024×700, 800×600, 460×360), no overlap, the cards inside the window and the toolbar, every toolbar control on a card, determinism (twice, and after a resize and back), the document untouched, the permanent strip at every size. |
+| Document | `Source/SelfTestDocument.cpp` | 10 | A piece with every optional feature (WP2 table, WP4 sequence, WP5 modulation, WP6 channel, M4 tuning, WP9 workspace) keeps its banks and the arcs' material names through load and save, the canonical form is stable across save/load/save, a non-piece is rejected without touching the active piece, and a plain piece does not grow the optional properties. |
+| Transport and preview | `Source/SelfTestTransport.cpp` | 21 | Play and Stop from each of the four states (including the no-ops and the cancelled fade), previews refused while the transport is not stopped, one route at a time, a stale cancel cannot release a newer route, Play from Stopped cancels the routes. |
+
+Test family after R0: 14 files, 938 KB, 19,296 lines (was 11 files,
+905 KB). The `MainComponent` family is unchanged: 13 files, 762 KB,
+17,169 lines. The R0 commits contain test code and three `.jucer` file
+entries only.
