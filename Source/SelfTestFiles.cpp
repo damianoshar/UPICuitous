@@ -3,6 +3,7 @@
 #include "SelfTest.h"
 #include "AllocCounter.h"
 #include "ArcCodec.h"
+#include "PageCodec.h"
 
 #if JUCE_WINDOWS
  #ifndef NOMINMAX
@@ -583,7 +584,7 @@ void upic::runUntrustedPieceChecks (upic::SelfTest& t)
                 json += "{\"id\":" + juce::String (i + 1) + ",\"points\":[]}";
             }
             json += "]}";
-            const auto pg = upic::Page::fromVar (juce::JSON::parse (json));
+            const auto pg = upic::pageFromVar (juce::JSON::parse (json));
             check ((int) pg.arcs.size () <= upic::limits::kMaxArcsPerPage,
                    "an oversized arc list is truncated",
                    juce::String ((int) pg.arcs.size ()) + " of 2000");
@@ -1147,7 +1148,7 @@ void upic::runLegacyFixtureChecks (upic::SelfTest& t)
     if (sourcePages == nullptr || sourcePages->isEmpty())
         return;
 
-    const auto legacyPage = upic::Page::fromVar (sourcePages->getReference (0));
+    const auto legacyPage = upic::pageFromVar (sourcePages->getReference (0));
     check (legacyPage.arcs.size() == 1
            && legacyPage.arcs.front().id == 1
            && legacyPage.arcs.front().points.size() == 2,

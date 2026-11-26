@@ -5,6 +5,7 @@
 #include "ArcCodec.h"
 #include "ArcGeometry.h"
 #include "GraphicalCurve.h"
+#include "PageCodec.h"
 
 //==============================================================================
 // The model: the pitch transformations, the frequency spaces, the staircase,
@@ -247,7 +248,7 @@ void upic::runTransformChecks (upic::SelfTest& t)
         check (saved.space == 1, "the frequency space travels with the piece");
         check (upic::arcFromVar (upic::arcToVar (a1)).space == 0,
                "an arc without a space is in the page's own");
-        const auto pageBack = upic::Page::fromVar (pg.toVar());
+        const auto pageBack = upic::pageFromVar (upic::pageToVar (pg));
         check (pageBack.spaces[1] == 3 && pageBack.spaces[2] == 1,
                "the page's four spaces travel with the piece");
     }
@@ -281,14 +282,14 @@ void upic::runTransformChecks (upic::SelfTest& t)
         upic::Page pg;
         pg.pitchLo = lo;
         pg.pitchHi = hi;
-        const auto back = upic::Page::fromVar (pg.toVar());
+        const auto back = upic::pageFromVar (upic::pageToVar (pg));
         check (std::abs (back.pitchLo - lo) < 1e-9
             && std::abs (back.pitchHi - hi) < 1e-9,
                "the ambitus travels with the piece",
                juce::String (back.pitchLo, 1) + " - "
                + juce::String (back.pitchHi, 1) + " Hz");
         // and a piece without one is the default interval
-        const auto plain = upic::Page::fromVar (upic::Page().toVar());
+        const auto plain = upic::pageFromVar (upic::pageToVar (upic::Page()));
         check (plain.pitchLo == upic::kDefaultPitchLo
             && plain.pitchHi == upic::kDefaultPitchHi,
                "a piece without an ambitus is the default interval");
@@ -396,9 +397,9 @@ void upic::runTransformChecks (upic::SelfTest& t)
 
         // it travels with the piece
         upic::Page warped; warped.warp = 0.3;
-        check (std::abs (upic::Page::fromVar (warped.toVar()).warp - 0.3) < 1e-9,
+        check (std::abs (upic::pageFromVar (upic::pageToVar (warped)).warp - 0.3) < 1e-9,
                "the acceleration travels with the piece");
-        check (upic::Page::fromVar (upic::Page().toVar()).warp == 0.0,
+        check (upic::pageFromVar (upic::pageToVar (upic::Page())).warp == 0.0,
                "a piece without one is a straight line");
 
         // and the render follows the sweep: a short arc at page time
@@ -471,7 +472,7 @@ void upic::runTransformChecks (upic::SelfTest& t)
                + juce::String (upic::kMaxPageSeconds, 0) + " s");
 
         // a millisecond-scale page survives the parser
-        const auto pg = upic::Page::fromVar (juce::JSON::parse (
+        const auto pg = upic::pageFromVar (juce::JSON::parse (
             "{\"duration\":0.02,\"arcs\":[{\"id\":1,\"points\":["
             "{\"t\":0,\"f\":220},{\"t\":0.015,\"f\":440}]}]}"));
         check (std::abs (pg.durationSec - 0.02) < 1e-9,
@@ -485,7 +486,7 @@ void upic::runTransformChecks (upic::SelfTest& t)
         // and a page inside the hour-long range (WP10 lifted the top of the
         // range from twelve minutes to an hour - the pull back to the cap is
         // checked with the other WP10 page checks)
-        const auto longPg = upic::Page::fromVar (juce::JSON::parse (
+        const auto longPg = upic::pageFromVar (juce::JSON::parse (
             "{\"duration\":900,\"arcs\":[{\"id\":1,\"points\":["
             "{\"t\":0,\"f\":220},{\"t\":700,\"f\":440}]}]}"));
         check (std::abs (longPg.durationSec - 900.0) < 1e-9,
@@ -640,11 +641,11 @@ void upic::runModelMathChecks (upic::SelfTest& t)
         check(zpeak < 1e-6, "pressure 0 => silence", juce::String(zpeak, 8));
 
         // JSON round-trip of point pressure (old files: absent -> 1.0)
-        auto back = upic::Page::fromVar(juce::JSON::parse(juce::JSON::toString(pg.toVar(), false)));
+        auto back = upic::pageFromVar(juce::JSON::parse(juce::JSON::toString(upic::pageToVar (pg), false)));
         check(! back.arcs.empty() && ! back.arcs[0].points.empty()
               && std::abs(back.arcs[0].points[0].i - 0.0f) < 1e-6f,
               "json round-trip point pressure (i)");
-        auto legacy = upic::Page::fromVar(juce::JSON::parse(
+        auto legacy = upic::pageFromVar(juce::JSON::parse(
             "{\"duration\":10,\"arcs\":[{\"id\":1,\"points\":[{\"t\":0,\"f\":440}]}]}"));
         check(! legacy.arcs.empty() && legacy.arcs[0].points[0].i == 1.0f,
               "legacy point without i defaults to 1");
@@ -761,9 +762,9 @@ void upic::runSieveChecks (upic::SelfTest& t)
         }
 
         upic::Page pz; pz.durationSec = 20; pz.zones.push_back(z); pz.nextZoneId = 8;
-        auto pb = upic::Page::fromVar(juce::JSON::parse(juce::JSON::toString(pz.toVar(), false)));
+        auto pb = upic::pageFromVar(juce::JSON::parse(juce::JSON::toString(upic::pageToVar (pz), false)));
         check(pb.zones.size() == 1 && pb.nextZoneId == 8, "page zones JSON round-trip");
-        auto oldPg = upic::Page::fromVar(juce::JSON::parse("{\"duration\":10,\"arcs\":[]}"));
+        auto oldPg = upic::pageFromVar(juce::JSON::parse("{\"duration\":10,\"arcs\":[]}"));
         check(oldPg.zones.empty() && oldPg.nextZoneId == 1, "legacy page has no zones");
 
         // zone sieve beats global sieve; global grid applies outside the zone
@@ -1661,7 +1662,7 @@ void upic::runFreqTableChecks (upic::SelfTest& t)
         bool allDefault = true;
         for (auto& d : pg.spaceDefs) allDefault = allDefault && d.isDefault();
         check (allDefault, "freq tables: a page's four spaces start as presets");
-        const auto v = pg.toVar();
+        const auto v = upic::pageToVar (pg);
         check (! v.hasProperty ("spaceTables"),
                "freq tables: a preset-only page writes no frequency tables");
     }
@@ -1706,7 +1707,7 @@ void upic::runFreqTableChecks (upic::SelfTest& t)
                juce::String (worst * 100.0, 4) + " % worst error");
 
         // WP1-d: the table travels with the piece.
-        const auto back = upic::Page::fromVar (pg.toVar());
+        const auto back = upic::pageFromVar (upic::pageToVar (pg));
         check (back.spaceDefs[1].editable && back.spaceDefs[1].points.size() == 3
                && std::abs (std::exp2 (back.spaceDefs[1].points[1].log2Hz) - 440.0) < 1e-2,
                "freq tables: the drawn table travels with the piece");
@@ -1761,7 +1762,7 @@ void upic::runFreqTableChecks (upic::SelfTest& t)
         auto* pv = new juce::DynamicObject();
         pv->setProperty ("duration", 10.0);
         pv->setProperty ("spaceTables", tables);
-        const upic::Page loaded = upic::Page::fromVar (juce::var (pv));
+        const upic::Page loaded = upic::pageFromVar (juce::var (pv));
         check ((int) loaded.spaceDefs[0].points.size() == upic::limits::kMaxTablePoints,
                "freq tables: an oversized table is truncated to the cap",
                juce::String ((int) loaded.spaceDefs[0].points.size()) + " points");
@@ -1771,7 +1772,7 @@ void upic::runFreqTableChecks (upic::SelfTest& t)
     {
         const juce::String oldJson = R"({"duration":4.0,"nextArcId":2,"arcs":[{"id":1,"waveformId":0,"envelopeId":0,"intensity":0.8,"points":[{"t":0.0,"f":220.0},{"t":4.0,"f":440.0}]}]})";
         const juce::var v = juce::JSON::parse (oldJson);
-        const upic::Page loaded = upic::Page::fromVar (v);
+        const upic::Page loaded = upic::pageFromVar (v);
 
         upic::Page built;
         built.durationSec = 4.0;
@@ -2170,7 +2171,7 @@ void upic::runGroupChecks (upic::SelfTest& t)
     {
         upic::Page pg;
         pg.arcs = { arcWith (1, 220.0), arcWith (2, 330.0) };
-        const auto plain = pg.toVar();
+        const auto plain = upic::pageToVar (pg);
         check (! plain.hasProperty ("groups"),
                "groups: a page without groups writes no key");
 
@@ -2178,9 +2179,9 @@ void upic::runGroupChecks (upic::SelfTest& t)
         g.id = 1; g.name = "A"; g.arcIds = { 1, 999, 1 };
         g.gain = 0.5f; g.transposeSemitones = 7.0; g.waveformId = 2;
         pg.groups = { g };
-        const auto saved = pg.toVar();
+        const auto saved = upic::pageToVar (pg);
         check (saved.hasProperty ("groups"), "groups: the groups travel with the page");
-        const upic::Page back = upic::Page::fromVar (saved);
+        const upic::Page back = upic::pageFromVar (saved);
         check (back.groups.size() == 1 && back.groups[0].arcIds.size() == 1
                && back.groups[0].arcIds[0] == 1,
                "groups: an absent arc is dropped and a duplicate is folded",
@@ -2639,14 +2640,14 @@ void upic::runModulationChecks (upic::SelfTest& t)
         upic::Arc a;
         a.id = 1; a.points = { { 0.0, 220.0 }, { 1.0, 220.0 } };
         pg.arcs = { a };
-        const auto plain = pg.toVar();
+        const auto plain = upic::pageToVar (pg);
         check (! plain.hasProperty ("mod"), "modulation: an arc without one writes no key");
 
         pg.arcs[0].modulatorArcId = 7;
         pg.arcs[0].modTarget = 1;
         pg.arcs[0].modArcDepth = 0.25;
         pg.arcs[0].modAlign = 1;
-        const auto back = upic::Page::fromVar (pg.toVar());
+        const auto back = upic::pageFromVar (upic::pageToVar (pg));
         check (back.arcs[0].modulatorArcId == 7 && back.arcs[0].modTarget == 1
                && std::abs (back.arcs[0].modArcDepth - 0.25) < 1e-9
                && back.arcs[0].modAlign == 1,
@@ -4697,7 +4698,7 @@ void upic::runWP10PageChecks (upic::SelfTest& t)
 
     // --- the parser keeps the long duration --------------------------------
     {
-        const auto pg = upic::Page::fromVar (juce::JSON::parse (
+        const auto pg = upic::pageFromVar (juce::JSON::parse (
             "{\"duration\":3599.0,\"arcs\":[{\"id\":1,\"points\":["
             "{\"t\":0,\"f\":220},{\"t\":3500,\"f\":440}]}]}"));
         check (std::abs (pg.durationSec - 3599.0) < 1e-9,
@@ -4712,7 +4713,7 @@ void upic::runWP10PageChecks (upic::SelfTest& t)
 
     // --- a page over the cap is pulled back --------------------------------
     {
-        const auto pg = upic::Page::fromVar (juce::JSON::parse (
+        const auto pg = upic::pageFromVar (juce::JSON::parse (
             "{\"duration\":7201.0,\"arcs\":[{\"id\":1,\"points\":["
             "{\"t\":0,\"f\":220},{\"t\":7200,\"f\":440}]}]}"));
         check (std::abs (pg.durationSec - upic::kMaxPageSeconds) < 1e-9,

@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "PageCodec.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -225,7 +226,7 @@ bool MainComponent::loadFromVar(const juce::var& v)
             // (a duplicate id made the selection and the delete hit the
             // wrong arc) and derives the next id from the arcs that are
             // there. `renamed` counts what it had to change.
-            newPages.push_back(upic::Page::fromVar(pv, &renamed));
+            newPages.push_back(upic::pageFromVar(pv, &renamed));
         }
         noteDrop ("page", "pages", (int) arr->size() - (int) newPages.size());
         // the arcs, the sieve zones and the arc points of the pages that

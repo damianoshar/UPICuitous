@@ -108,6 +108,35 @@ $juceFreeGroups = @(
             "PieceLimits.h",
             "UpicMath.h"
         )
+    },
+    @{
+        Name    = "the page"
+        Message = "B1/B2 the page asks for no JUCE header of its own and knows only the domain"
+        Files   = @(
+            "Source/Page.h"
+        )
+        # The domain's headers the page holds: the arc it draws, the zone
+        # and the group it owns, the four frequency spaces, the material
+        # banks and the units. The codecs (Source/PageCodec.h and
+        # Source/ArcCodec.h) are the edge, and they are not in the group:
+        # they are where the JUCE value types live.
+        #
+        # The JUCE the page still sees comes from the types it holds (the
+        # group's name and colour), not from its own code. That is the
+        # next step of the wave.
+        Allowed = @(
+            "Arc.h",
+            "ArcGeometry.h",
+            "ArcGroup.h",
+            "Envelope.h",
+            "FreqSpace.h",
+            "Ids.h",
+            "PieceLimits.h",
+            "Sieve.h",
+            "UpicConstants.h",
+            "UpicTheme.h",
+            "Waveform.h"
+        )
     }
 )
 

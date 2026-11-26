@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "Page.h"
+#include "PageCodec.h"
 #include "PieceLimits.h"
 #include "Sample.h"
 #include "Tuning.h"
@@ -105,7 +106,7 @@ namespace upic
         for (auto& w : m.waveforms) wa.add (w.toVar());
         for (auto& e : m.envelopes) ea.add (e.toVar());
         for (auto& s : m.sampleSlots) if (s.loaded()) sa.add (s.toVar (includeSampleAudio));
-        for (auto& p : m.pages) pa.add (p.toVar());
+        for (auto& p : m.pages) pa.add (pageToVar (p));
         o->setProperty("waveforms", wa);
         o->setProperty("envelopes", ea);
         // WP2: omitted for a piece that never made a table, so old files and

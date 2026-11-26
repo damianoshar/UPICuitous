@@ -2,6 +2,7 @@
 #include "MainComponent.h"
 #include "SelfTest.h"
 #include "AllocCounter.h"
+#include "PageCodec.h"
 
 //==============================================================================
 // The offscreen snapshot of the whole window: the layout at every size, the
@@ -1176,7 +1177,7 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                     std::vector<upic::SampleSlot> slots;
                     const auto pagesVar = pv.getProperty ("pages", juce::var());
                     if (auto* pages = pagesVar.getArray(); pages != nullptr && ! pages->isEmpty())
-                        page = upic::Page::fromVar (pages->getReference (0));
+                        page = upic::pageFromVar (pages->getReference (0));
                     const auto wavesVar = pv.getProperty ("waveforms", juce::var());
                     if (auto* arr = wavesVar.getArray(); arr != nullptr)
                         for (auto& w : *arr) waves.push_back (upic::Waveform::fromVar (w, 0));
@@ -1588,11 +1589,11 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                     const auto varAt = juce::JSON::parse (pieceWithPoints (1000));
                     const auto* pagesAt = varAt.getProperty ("pages", juce::var()).getArray();
                     const auto pgAt = pagesAt != nullptr
-                        ? upic::Page::fromVar (pagesAt->getReference (0)) : upic::Page();
+                        ? upic::pageFromVar (pagesAt->getReference (0)) : upic::Page();
                     const auto varOver = juce::JSON::parse (pieceWithPoints (1001));
                     const auto* pagesOver = varOver.getProperty ("pages", juce::var()).getArray();
                     const auto pgOver = pagesOver != nullptr
-                        ? upic::Page::fromVar (pagesOver->getReference (0)) : upic::Page();
+                        ? upic::pageFromVar (pagesOver->getReference (0)) : upic::Page();
                     const int atPts = pgAt.arcs.empty() ? -1 : (int) pgAt.arcs[0].points.size();
                     const int overPts = pgOver.arcs.empty() ? -1 : (int) pgOver.arcs[0].points.size();
                     check (atPts == 1000 && overPts == 1000,

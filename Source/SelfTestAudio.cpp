@@ -4,6 +4,7 @@
 #include "MainComponent.h"
 #include "SelfTest.h"
 #include "AllocCounter.h"
+#include "PageCodec.h"
 
 //==============================================================================
 // The audio path: the lock-free snapshot, the audio thread (no allocation),
@@ -1443,7 +1444,7 @@ void upic::runRealtimeChecks (upic::SelfTest& t)
         a.points = { { 0.0, 220.0 }, { 4.0, 220.0 } };
         pg.arcs.push_back(a);
         juce::Array<juce::var> pages;
-        pages.add(pg.toVar());
+        pages.add(upic::pageToVar (pg));
         root->setProperty("pages", pages);
         mc.loadFromVar(juce::var(root));
 
@@ -2428,7 +2429,7 @@ void upic::runMaterialChecks (upic::SelfTest& t)
         a.points = { { 0.0, 220.0 }, { 2.0, 220.0 } };
         pg.arcs.push_back (a);
         juce::Array<juce::var> pages;
-        pages.add (pg.toVar());
+        pages.add (upic::pageToVar (pg));
         root->setProperty ("pages", pages);
         mc.loadFromVar (juce::var (root));
 
@@ -2470,7 +2471,7 @@ void upic::runMaterialChecks (upic::SelfTest& t)
             pg.arcs.push_back (a);
         }
         juce::Array<juce::var> pages;
-        pages.add (pg.toVar());
+        pages.add (upic::pageToVar (pg));
         root->setProperty ("pages", pages);
         mc.loadFromVar (juce::var (root));
 

@@ -10,6 +10,7 @@
 #include "ArcGroup.h"
 #include "FreqSpace.h"
 #include "Page.h"
+#include "PageCodec.h"
 #include "PieceLimits.h"
 #include "Sieve.h"
 #include "UpicConstants.h"
@@ -46,8 +47,8 @@
 namespace
 {
     // The page's codec, reached through one door.
-    juce::var encode (const upic::Page& p) { return p.toVar(); }
-    upic::Page decode (const juce::var& v, int* renamed = nullptr) { return upic::Page::fromVar (v, renamed); }
+    juce::var encode (const upic::Page& p) { return upic::pageToVar (p); }
+    upic::Page decode (const juce::var& v, int* renamed = nullptr) { return upic::pageFromVar (v, renamed); }
 
     // The property names of an object, in the order they were written.
     juce::StringArray names (const juce::var& v)

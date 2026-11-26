@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include "AllocCounter.h"
+#include "PageCodec.h"
 
 //==============================================================================
 // The engine and the maths: the pitch and the envelope curves, the offline
@@ -145,8 +146,8 @@ void upic::runDspChecks (upic::SelfTest& t)
     {
         auto page = upic::demoPage();
         page.arcs[0].mode = 1; page.arcs[0].sampleId = 3; page.arcs[0].refFreq = 110.0;
-        auto parsed = juce::JSON::parse(juce::JSON::toString(page.toVar(), false));
-        auto back = upic::Page::fromVar(parsed);
+        auto parsed = juce::JSON::parse(juce::JSON::toString(upic::pageToVar (page), false));
+        auto back = upic::pageFromVar(parsed);
         check(back.arcs.size() == page.arcs.size() && ! back.arcs.empty(),
               "json round-trip arc count",
               juce::String((int) back.arcs.size()) + "/" + juce::String((int) page.arcs.size()));
@@ -159,7 +160,7 @@ void upic::runDspChecks (upic::SelfTest& t)
 
         // file from the Python version (no nextArcId field): new arcs must
         // never collide with loaded ids 1 and 2
-        auto legacy = upic::Page::fromVar(juce::JSON::parse(
+        auto legacy = upic::pageFromVar(juce::JSON::parse(
             "{\"duration\":30,\"arcs\":["
             "{\"id\":1,\"points\":[{\"t\":0,\"f\":440},{\"t\":1,\"f\":880}]},"
             "{\"id\":2,\"points\":[{\"t\":0,\"f\":220},{\"t\":1,\"f\":440}]}]}"));

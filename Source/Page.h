@@ -1,13 +1,17 @@
 #pragma once
 
-#include <JuceHeader.h>
+// R2.4: no JUCE header. The page is the model's surface - the arcs, the
+// zones, the four frequency spaces, the groups, the ambitus and the page's
+// own time - and it is data and rules. The file format is not part of it:
+// the codec lives at the edge (Source/PageCodec.h), where the JUCE value
+// types are kept.
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <vector>
 
 #include "Arc.h"
-#include "ArcCodec.h"
 #include "ArcGeometry.h"
 #include "ArcGroup.h"
 #include "Envelope.h"
@@ -77,7 +81,7 @@ namespace upic
         double rateAt (double playhead) const
         {
             if (warp == 0.0 || durationSec <= 0.0) return 1.0;
-            const double x = juce::jlimit (0.0, 1.0, playhead / durationSec);
+            const double x = std::clamp (playhead / durationSec, 0.0, 1.0);
             return 1.0 + warp * (2.0 * x - 1.0);
         }
 
@@ -100,7 +104,7 @@ namespace upic
         {
             if (durationSec <= 0.0) return 0.0;
             if (std::abs (warp) < 1.0e-6) return durationSec;
-            const double w = juce::jlimit (-0.99, 0.99, warp);
+            const double w = std::clamp (warp, -0.99, 0.99);
             return durationSec / (2.0 * w) * std::log ((1.0 + w) / (1.0 - w));
         }
 
@@ -109,7 +113,7 @@ namespace upic
         {
             if (durationSec <= 0.0) return 0.0;
             if (std::abs (warp) < 1.0e-6) return audioSec;
-            const double w = juce::jlimit (-0.99, 0.99, warp);
+            const double w = std::clamp (warp, -0.99, 0.99);
             const double e = std::exp (2.0 * w * audioSec / durationSec);
             return durationSec / (2.0 * w) * (1.0 - w) * (e - 1.0);
         }
@@ -119,8 +123,8 @@ namespace upic
         {
             if (durationSec <= 0.0) return 0.0;
             if (std::abs (warp) < 1.0e-6) return scoreSec;
-            const double w = juce::jlimit (-0.99, 0.99, warp);
-            const double x = juce::jlimit (0.0, 1.0, scoreSec / durationSec);
+            const double w = std::clamp (warp, -0.99, 0.99);
+            const double x = std::clamp (scoreSec / durationSec, 0.0, 1.0);
             return durationSec / (2.0 * w) * std::log ((1.0 - w + 2.0 * w * x) / (1.0 - w));
         }
 
@@ -188,9 +192,9 @@ namespace upic
                 double out = hz;
                 if (! identity)
                 {
-                    const double n = juce::jlimit (0.0, 1.0,
-                                    (std::log2 (juce::jmax (1.0, hz)) - a0)
-                                      / juce::jmax (1.0e-6, a1 - a0));
+                    const double n = std::clamp (
+                                    (std::log2 (std::max (1.0, hz)) - a0)
+                                      / std::max (1.0e-6, a1 - a0), 0.0, 1.0);
                     if (lut != nullptr && lut->valid)
                         out = std::exp2 ((double) lut->at ((float) n));
                     else if (def != nullptr)
@@ -206,11 +210,11 @@ namespace upic
         // space has a drawn curve (null for the presets, which stay analytic).
         SpaceMap spaceMap (int index, const FreqLut* lut = nullptr) const
         {
-            const int i = juce::jlimit (0, 3, index);
+            const int i = std::clamp (index, 0, 3);
             const FreqSpaceDef& def = spaceDefs[(size_t) i];
             SpaceMap m;
-            m.a0 = std::log2 (juce::jmax (1.0, pitchLo));
-            m.a1 = std::log2 (juce::jmax (1.0, pitchHi));
+            m.a0 = std::log2 (std::max (1.0, pitchLo));
+            m.a1 = std::log2 (std::max (1.0, pitchHi));
             m.stepDivisions = (def.stepped && def.stepDivisions > 0) ? def.stepDivisions : 0;
 
             if (def.editable || def.inverted)
@@ -225,8 +229,8 @@ namespace upic
             }
 
             const auto& presets = freqSpacePresets();
-            const FreqSpacePreset p = presets[(size_t) juce::jlimit (0, (int) presets.size() - 1,
-                                                spaces[(size_t) i])];
+            const FreqSpacePreset p = presets[(size_t) std::clamp (spaces[(size_t) i], 0,
+                                                (int) presets.size() - 1)];
             const double centre = (m.a0 + m.a1) * 0.5 + p.shift;
             const double half   = (m.a1 - m.a0) * 0.5 * p.span;
             m.t0 = centre - half;
@@ -266,7 +270,7 @@ namespace upic
             // WP5: the arc index by id, once per page (the modulation chain
             // walk and the resolved modulator index both need it).
             int maxId = 0;
-            for (auto& a : arcs) maxId = juce::jmax (maxId, a.id);
+            for (auto& a : arcs) maxId = std::max (maxId, a.id);
             std::vector<int> indexOf ((size_t) maxId + 1, -1);
             for (size_t ai = 0; ai < arcs.size(); ++ai)
                 if (arcs[ai].id >= 0 && arcs[ai].id <= maxId)
@@ -318,9 +322,9 @@ namespace upic
                             bool first = true;
                             for (auto& p : arcs[(size_t) mi].points)
                             {
-                                const double l = std::log2 (juce::jmax (1.0e-6, p.freq));
+                                const double l = std::log2 (std::max (1.0e-6, p.freq));
                                 if (first) { lo = hi = l; first = false; }
-                                else { lo = juce::jmin (lo, l); hi = juce::jmax (hi, l); }
+                                else { lo = std::min (lo, l); hi = std::max (hi, l); }
                             }
                             o.modIndex = mi;
                             o.modTarget = carrier.modTarget;
@@ -333,172 +337,6 @@ namespace upic
                 }
             }
             return out;
-        }
-
-        juce::var toVar() const
-        {
-            auto* o = new juce::DynamicObject();
-            o->setProperty("duration", durationSec);
-            if (tempoBpm != 120.0) o->setProperty("tempo", tempoBpm);
-            o->setProperty("nextArcId", nextArcId);
-            juce::Array<juce::var> arr;
-            for (auto& a : arcs) arr.add(arcToVar (a));
-            o->setProperty("arcs", arr);
-            // omitted when empty (old/Python readers never see the key)
-            if (! zones.empty())
-            {
-                juce::Array<juce::var> zarr;
-                for (auto& z : zones) zarr.add(z.toVar());
-                o->setProperty("zones", zarr);
-                o->setProperty("nextZoneId", nextZoneId);
-            }
-            // v1.33: the ambitus and the four spaces. Omitted when they are
-            // the defaults, so an old piece's file is byte-for-byte what it
-            // was.
-            if (pitchLo != kDefaultPitchLo || pitchHi != kDefaultPitchHi)
-            {
-                o->setProperty("ambLo", pitchLo);
-                o->setProperty("ambHi", pitchHi);
-            }
-            bool anySpace = false;
-            for (auto s : spaces) if (s != 0) { anySpace = true; break; }
-            if (anySpace)
-            {
-                juce::Array<juce::var> sarr;
-                for (auto s : spaces) sarr.add((int) s);
-                o->setProperty("spaces", sarr);
-            }
-            // WP1: the drawn tables. Omitted for every space that is still a
-            // preset, so an old piece's file is byte-for-byte what it was.
-            {
-                juce::Array<juce::var> tarr;
-                for (int i = 0; i < (int) spaceDefs.size(); ++i)
-                    if (! spaceDefs[(size_t) i].isDefault())
-                        tarr.add (spaceDefs[(size_t) i].toVar (i));
-                if (! tarr.isEmpty())
-                    o->setProperty ("spaceTables", tarr);
-            }
-            // v1.33: the page's acceleration (omitted when it is zero)
-            if (warp != 0.0) o->setProperty("warp", warp);
-            // WP3: the groups. Omitted when the page has none, so an old
-            // piece's file is byte-for-byte what it was.
-            if (! groups.empty())
-            {
-                juce::Array<juce::var> garr;
-                for (auto& g : groups) garr.add (g.toVar());
-                o->setProperty ("groups", garr);
-                o->setProperty ("nextGroupId", nextGroupId);
-            }
-            return juce::var(o);
-        }
-        static Page fromVar(const juce::var& v, int* renamedIds = nullptr)
-        {
-            Page p;
-            p.durationSec = limits::clampFinite((double) v.getProperty("duration", 30.0),
-                                              kMinPageSeconds, kMaxPageSeconds);
-            p.tempoBpm    = limits::clampFinite((double) v.getProperty("tempo", 120.0), 20.0, 400.0);
-            // v1.33.4 (L13): the file's own "next id" is only a suggestion -
-            // it is checked against the arcs that are there (and against the
-            // range an id can have) further down.
-            const int fileNextArcId = (int) v.getProperty("nextArcId", 1);
-            if (auto* arr = v.getProperty("arcs", juce::var()).getArray())
-                for (auto& av : *arr)
-                {
-                    if ((int) p.arcs.size() >= limits::kMaxArcsPerPage) break;
-                    p.arcs.push_back(arcFromVar (av));
-                }
-            // v1.33.4 (L13): the arc ids are the key of the per-arc maps (the
-            // selection, the drag map, the arc list). A file with two arcs
-            // carrying the same id made the selection and the delete hit the
-            // wrong arc, so the ids are made unique here - the first arc of
-            // an id keeps it, a duplicate or an impossible id gets a free
-            // one.
-            int renamed = uniquifyIds (p.arcs, 1);
-            // The next id is derived from the arcs that are there: a file
-            // could hand out an id that is already in use, or one so large
-            // that the counter overflowed. The file's value is still used
-            // when it is sane and higher (the ids it handed out earlier may
-            // still be in the user's notes).
-            p.nextArcId = 1;
-            for (auto& a : p.arcs)
-                p.nextArcId = juce::jmax(p.nextArcId, a.id + 1);
-            if (fileNextArcId > p.nextArcId && fileNextArcId <= limits::kMaxItemId)
-                p.nextArcId = fileNextArcId;
-            // zones absent in old / Python-written files -> no zones, as before
-            const int fileNextZoneId = (int) v.getProperty("nextZoneId", 1);
-            if (auto* zarr = v.getProperty("zones", juce::var()).getArray())
-                for (auto& zv : *zarr)
-                {
-                    if ((int) p.zones.size() >= limits::kMaxSieveZones) break;
-                    p.zones.push_back(SieveZone::fromVar(zv));
-                }
-            renamed += uniquifyIds (p.zones, 1);
-            p.nextZoneId = 1;
-            for (auto& z : p.zones)
-                p.nextZoneId = juce::jmax(p.nextZoneId, z.id + 1);
-            if (fileNextZoneId > p.nextZoneId && fileNextZoneId <= limits::kMaxItemId)
-                p.nextZoneId = fileNextZoneId;
-            if (renamedIds != nullptr) *renamedIds += renamed;
-            // v1.33: the ambitus and the four spaces (absent in old pieces ->
-            // the whole canvas range, and the page's own space)
-            p.pitchLo = limits::clampFinite((double) v.getProperty("ambLo", kDefaultPitchLo),
-                                            kMinFreq, kMaxFreq);
-            p.pitchHi = limits::clampFinite((double) v.getProperty("ambHi", kDefaultPitchHi),
-                                            kMinFreq, kMaxFreq);
-            if (p.pitchHi <= p.pitchLo * 1.0001)
-            {
-                p.pitchLo = kDefaultPitchLo;
-                p.pitchHi = kDefaultPitchHi;
-            }
-            if (auto* sarr = v.getProperty("spaces", juce::var()).getArray())
-                for (size_t i = 0; i < p.spaces.size() && i < (size_t) sarr->size(); ++i)
-                    p.spaces[i] = juce::jlimit (0, (int) freqSpacePresets().size() - 1,
-                                               (int) (*sarr)[(int) i]);
-            // WP1: the drawn tables (absent in old pieces -> presets only)
-            if (auto* tarr = v.getProperty ("spaceTables", juce::var()).getArray())
-                for (auto& tv : *tarr)
-                {
-                    const int idx = juce::jlimit (0, 3, (int) tv.getProperty ("space", 0));
-                    p.spaceDefs[(size_t) idx] = FreqSpaceDef::fromVar (tv);
-                }
-            // v1.33: the page's acceleration (absent in old pieces -> a
-            // straight line)
-            p.warp = limits::clampFinite ((double) v.getProperty ("warp", 0.0), -0.9, 0.9);
-            // WP3: the groups (absent in old pieces -> none). Membership is
-            // cleaned here: only arcs that are on the page, no duplicates,
-            // and one group per arc - the first group of an arc keeps it.
-            const int fileNextGroupId = (int) v.getProperty ("nextGroupId", 1);
-            if (auto* garr = v.getProperty ("groups", juce::var()).getArray())
-                for (auto& gv : *garr)
-                {
-                    if ((int) p.groups.size() >= limits::kMaxGroupsPerPage) break;
-                    p.groups.push_back (ArcGroup::fromVar (gv, (int) p.groups.size() + 1));
-                }
-            renamed += uniquifyIds (p.groups, 1);
-            p.nextGroupId = 1;
-            for (auto& g : p.groups)
-                p.nextGroupId = juce::jmax (p.nextGroupId, g.id + 1);
-            if (fileNextGroupId > p.nextGroupId && fileNextGroupId <= limits::kMaxItemId)
-                p.nextGroupId = fileNextGroupId;
-            {
-                std::vector<int> claimed; // the arcs already in an earlier group
-                for (auto& g : p.groups)
-                {
-                    std::vector<int> kept;
-                    for (int aid : g.arcIds)
-                    {
-                        const bool onPage = std::any_of (p.arcs.begin(), p.arcs.end(),
-                                                         [aid] (const Arc& a) { return a.id == aid; });
-                        if (! onPage) continue;
-                        if (std::find (claimed.begin(), claimed.end(), aid) != claimed.end())
-                            continue;
-                        claimed.push_back (aid);
-                        kept.push_back (aid);
-                    }
-                    g.arcIds = std::move (kept);
-                }
-            }
-            return p;
         }
     };
 
