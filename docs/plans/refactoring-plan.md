@@ -172,7 +172,7 @@ contracts R6's `TransportStateMachine` and `PreviewRouter` must keep.
 **R0.4 - the baseline metrics.** This section's tables, refreshed at the end of
 R0, plus the gate line and the commit hash of the baseline.
 
-## 6. Phase R1 in detail
+## 6. Phase details
 
 ### 6.1 R1.1 - the card layout engine
 
@@ -279,6 +279,27 @@ suite's hooks in the same file; -728 bytes). The four-viewport
 component-tree digest was identical before and after the extraction. See
 [`overlay-layout-engine.md`](overlay-layout-engine.md) for the boundary.
 
+### 6.4 R8.1 - the dependency-boundary check
+
+**What moves.** Nothing moves. R8.1 adds the check §2 promised: the
+dependency rules are enforced by a source-level check in the gate, because
+the Windows gate does not build through the root CMake file that the
+review's CMake target split would touch.
+
+**The rules.** B1: the layout engines include no JUCE header. B2: they
+include no app header outside the engine group. B3: `UPICuitous.jucer`
+lists every `Source/*.cpp`. B4: the plugin's two CMake targets carry the
+same, complete source list. B5: the generated Visual Studio project lists
+every `Source/*.cpp`.
+
+**The checker's own contract.** The checker tests itself before it checks
+the tree - 18 cases, one per rule and one per manifest reader - so a rule
+that cannot be shown to fire fails the gate instead of passing it.
+
+**Gate.** The check is green on the tree, the gate *fails* on a forbidden
+include, on a source file the `.jucer` does not know and on a source missing
+from the plugin's list, and the full gate is green with the new step.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -311,7 +332,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
-| R8 Build and tests | runs alongside | - | - |
+| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 18 self-tests, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 1,993/1,993, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R9 Integration and cleanup | not started | - | - |
 
 Baseline commit: `b5368b1` (0.38.0), app selftest 1,785/1,785, legacy fixture
@@ -455,3 +476,55 @@ next Projucer resave; the H5 wave owns that step.
 
 Gate: app selftest 1,993/1,993, legacy fixture `8BF28ABA7975` unchanged,
 plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS.
+
+### R8.1 record (2026-11-26)
+
+The boundary is now enforced instead of described. R8 runs alongside the
+other waves; this is its first piece.
+
+| Measure | Before | After |
+|---|---|---|
+| the dependency rules | written down in the notes | 5 rules, checked by the gate |
+| the check | - | `scripts/check-boundaries.ps1`, 432 lines, 18 self-tests |
+| the gate | 6 steps | 7 steps - the boundaries run before the build |
+
+The rules: **B1** the layout engines include no JUCE header; **B2** they
+include no app header outside the engine group (`LayoutRect.h`,
+`CardLayoutEngine.h`, `BottomLayoutEngine.h`, `OverlayLayoutEngine.h`);
+**B3** `UPICuitous.jucer` lists every `Source/*.cpp` on disk; **B4** the
+plugin's two CMake targets carry the same, complete source list; **B5** the
+generated Visual Studio project lists every `Source/*.cpp` on disk.
+
+B3 to B5 are the silent-omission rules. A new `.cpp` that the Projucer does
+not know about is not compiled by the app project, so the gate would pass
+without ever building it - the failure mode R1.3 walked into by hand. B4
+catches the same omission in the plugin, where a new engine would otherwise
+be missing from the VST3 and from its smoke test.
+
+The checker is tested before it is trusted: 18 cases prove that every rule
+fires on a tree that breaks it, that the permitted includes stay quiet, and
+that each manifest reader reads the real manifest (the `.jucer` entries
+under `Source/`, the right CMake target's list across the lines, the Visual
+Studio project's entries). The self-test runs on every gate run, so a
+checker that stops detecting anything fails the gate rather than passing
+it. Two of the readers were wrong when the check was first written - a
+multi-line CMake block that was not matched and a selftest file that the
+plugin pattern caught - and the tree check found both before the check
+reached the gate.
+
+The negative test is the real proof, and it was run on the tree: a JUCE
+header in `OverlayLayoutEngine.cpp`, a source file the `.jucer` does not
+know, and a source missing from the plugin's list each fail the gate with
+the file and the line named, before the build starts.
+
+What the check does not cover yet: the plugin still depends on the desktop
+shell (`PluginProcessor.cpp` includes `MainComponent.h`) - that is R7's job
+and the highest-risk change in the list; the CMake targets do not exist yet
+(R079–R082); the test suites are not split yet (R086–R089); and the
+Android generated list is not checked, because it is only rewritten by a
+Projucer resave, which the H5 wave owns. See
+[`dependency-boundary-check.md`](dependency-boundary-check.md).
+
+Gate: dependency boundaries 5 rules / 18 self-tests, app selftest
+1,993/1,993, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
