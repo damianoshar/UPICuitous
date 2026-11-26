@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "Arc.h"
+#include "ArcCodec.h"
 #include "ArcGroup.h"
 #include "Envelope.h"
 #include "FreqSpace.h"
@@ -339,7 +340,7 @@ namespace upic
             if (tempoBpm != 120.0) o->setProperty("tempo", tempoBpm);
             o->setProperty("nextArcId", nextArcId);
             juce::Array<juce::var> arr;
-            for (auto& a : arcs) arr.add(a.toVar());
+            for (auto& a : arcs) arr.add(arcToVar (a));
             o->setProperty("arcs", arr);
             // omitted when empty (old/Python readers never see the key)
             if (! zones.empty())
@@ -402,7 +403,7 @@ namespace upic
                 for (auto& av : *arr)
                 {
                     if ((int) p.arcs.size() >= limits::kMaxArcsPerPage) break;
-                    p.arcs.push_back(Arc::fromVar(av));
+                    p.arcs.push_back(arcFromVar (av));
                 }
             // v1.33.4 (L13): the arc ids are the key of the per-arc maps (the
             // selection, the drag map, the arc list). A file with two arcs

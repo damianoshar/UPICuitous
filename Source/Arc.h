@@ -1,6 +1,10 @@
 #pragma once
 
-#include <JuceHeader.h>
+// R2.2: no JUCE header. The arc is the model's central type, and it is
+// data and rules - the points, the material, the settings, the four
+// classical transformations and the interpolation the engine reads per
+// sample. The file format is not part of it: the codec lives at the edge
+// (Source/ArcCodec.h), where the JUCE value types are kept.
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -145,7 +149,7 @@ namespace upic
         {
             if (points.size() < 2) return;
             double sumLog = 0.0;
-            for (auto& p : points) sumLog += std::log2 (juce::jmax (1.0, p.freq));
+            for (auto& p : points) sumLog += std::log2 (std::max (1.0, p.freq));
             const double centre = std::pow (2.0, sumLog / (double) points.size());
             for (auto& p : points)
                 p.freq = limits::clampFinite (centre * centre / p.freq, kMinFreq, kMaxFreq);
@@ -206,8 +210,8 @@ namespace upic
             if (i == 0 || i >= points.size()) return;   // guarded by the callers
             const size_t i0 = i - 1, i1 = i;
             c.t0 = points[i0].t; c.t1 = points[i1].t;
-            c.l0 = std::log2 (juce::jmax (1.0, points[i0].freq));
-            c.l1 = std::log2 (juce::jmax (1.0, points[i1].freq));
+            c.l0 = std::log2 (std::max (1.0, points[i0].freq));
+            c.l1 = std::log2 (std::max (1.0, points[i1].freq));
             c.i0 = points[i0].i;   c.i1 = points[i1].i;
         }
 
@@ -235,7 +239,7 @@ namespace upic
         {
             double s = startTime(), e = endTime();
             if (e <= s) return 0.0f;
-            return (float) juce::jlimit(0.0, 1.0, (t - s) / (e - s));
+            return (float) std::clamp ((t - s) / (e - s), 0.0, 1.0);
         }
         // per-point pressure intensity curve (linear, 1.0 where no pressure)
         float intensityAt(double t) const
@@ -256,107 +260,6 @@ namespace upic
             return c.i0 + (c.i1 - c.i0) * f;
         }
 
-        juce::var toVar() const
-        {
-            auto* o = new juce::DynamicObject();
-            o->setProperty("id", id); o->setProperty("waveformId", waveformId);
-            o->setProperty("envelopeId", envelopeId); o->setProperty("intensity", intensity);
-            o->setProperty("muted", muted);
-            o->setProperty("mode", mode);
-            o->setProperty("pmRatio", pmRatio);
-            o->setProperty("pmIndex", pmIndex);
-            o->setProperty("pmIndexEnv", pmIndexEnv);
-            o->setProperty("pmFeedback", pmFeedback);
-            o->setProperty ("pmOps", pmOps); o->setProperty ("pmR2", pmR2); o->setProperty ("pmR3", pmR3); o->setProperty ("pmR4", pmR4);
-            o->setProperty ("pmI2", pmI2); o->setProperty ("pmI3", pmI3); o->setProperty ("pmI4", pmI4);
-            o->setProperty("sampleId", sampleId);
-            o->setProperty("refFreq", refFreq);
-            // v1.31 (U1): the polyagogy settings travel with the piece
-            o->setProperty("waveUse", waveUse);
-            o->setProperty("modRate", modRate);
-            o->setProperty("modDepth", modDepth);
-            // v1.32: the discrete frequency space travels with the piece
-            if (stepDivisions > 0) o->setProperty("sd", stepDivisions);
-            if (amplitudeTableId >= 0) o->setProperty ("ampTable", amplitudeTableId);
-            if (modulatorArcId >= 0) o->setProperty ("mod", modulatorArcId);
-            if (modTarget != 0) o->setProperty ("modTarget", modTarget);
-            if (std::abs (modArcDepth - 0.5) > 1e-9) o->setProperty ("modArcDepth", modArcDepth);
-            if (modAlign != 0) o->setProperty ("modAlign", modAlign);
-            if (channelId > 0) o->setProperty ("ch", channelId);
-            // v1.33: the frequency space the arc is played in
-            if (space != 0) o->setProperty("sp", space);
-            // v1.33.4 (H7): the per-arc overrides change the sound, so they
-            // travel with the piece (and with the host state)
-            if (pitchMode >= 0) o->setProperty("pitchMode", pitchMode);
-            if (reversed) o->setProperty("reversed", true);
-            juce::Array<juce::var> arr;
-            for (auto& p : points)
-            {
-                auto* po = new juce::DynamicObject();
-                po->setProperty("t", p.t); po->setProperty("f", p.freq);
-                if (p.i != 1.0f) po->setProperty("i", p.i); // omit default (keeps files compact)
-                arr.add(juce::var(po));
-            }
-            o->setProperty("points", arr);
-            return juce::var(o);
-        }
-        static Arc fromVar(const juce::var& v)
-        {
-            Arc a;
-            a.id = (int) v.getProperty("id", 0);
-            a.waveformId = (int) v.getProperty("waveformId", 0);
-            a.envelopeId = (int) v.getProperty("envelopeId", 0);
-            a.intensity = limits::clampIntensity((float)(double) v.getProperty("intensity", 0.8));
-            a.muted = (bool) v.getProperty("muted", false);
-            // absent in old / Python-written files -> oscillator mode, as before
-            a.mode = juce::jlimit(0, 3, (int) v.getProperty("mode", 0));
-            a.pmRatio    = limits::clampFinite((double) v.getProperty("pmRatio", 2.0), 0.25, 16.0);
-            a.pmIndex    = limits::clampFinite((double) v.getProperty("pmIndex", 1.5), 0.0, 100.0);
-            a.pmIndexEnv = (int)    v.getProperty("pmIndexEnv", 0);
-            a.pmFeedback  = limits::clampFinite((double) v.getProperty("pmFeedback", 0.0), -1.0, 1.0);
-            a.pmOps = juce::jlimit (2, 4, (int) v.getProperty ("pmOps", 2));
-            a.pmR2  = limits::clampFinite((double) v.getProperty ("pmR2", 2.0), 0.25, 16.0);  a.pmR3 = limits::clampFinite((double) v.getProperty ("pmR3", 3.0), 0.25, 16.0);  a.pmR4 = limits::clampFinite((double) v.getProperty ("pmR4", 5.0), 0.25, 16.0);
-            a.pmI2  = limits::clampFinite((double) v.getProperty ("pmI2", 1.0), 0.0, 100.0);  a.pmI3 = limits::clampFinite((double) v.getProperty ("pmI3", 1.0), 0.0, 100.0);  a.pmI4 = limits::clampFinite((double) v.getProperty ("pmI4", 1.0), 0.0, 100.0);
-            a.sampleId = juce::jlimit(1, kMaxSampleSlots, (int) v.getProperty("sampleId", 1));
-            a.refFreq = limits::clampFinite((double) v.getProperty("refFreq", 261.63), 20.0, 4000.0);
-            // v1.31 (U1): the polyagogy settings (absent in older pieces ->
-            // the classic oscillator)
-            a.waveUse = juce::jlimit (0, 2, (int) v.getProperty ("waveUse", 0));
-            a.modRate  = limits::clampFinite ((double) v.getProperty ("modRate", 1.0), 0.01, 100.0);
-            a.modDepth = limits::clampFinite ((double) v.getProperty ("modDepth", 0.0), 0.0, 1.0);
-            // v1.32: the discrete frequency space (absent in older pieces ->
-            // the continuum)
-            a.stepDivisions = juce::jlimit (0, 99, (int) v.getProperty ("sd", 0));
-            a.amplitudeTableId = juce::jlimit (-1, limits::kMaxItemId,
-                                            (int) v.getProperty ("ampTable", -1));
-            a.modulatorArcId = juce::jlimit (-1, limits::kMaxItemId,
-                                           (int) v.getProperty ("mod", -1));
-            a.modTarget = juce::jlimit (0, 1, (int) v.getProperty ("modTarget", 0));
-            a.modArcDepth = limits::clampFinite ((double) v.getProperty ("modArcDepth", 0.5), 0.0, 1.0);
-            a.modAlign = juce::jlimit (0, 1, (int) v.getProperty ("modAlign", 0));
-            a.channelId = juce::jlimit (0, limits::kMaxItemId, (int) v.getProperty ("ch", 0));
-            // v1.33: the frequency space (absent in older pieces -> the
-            // page's own range, which is the identity)
-            a.space = juce::jlimit (0, 3, (int) v.getProperty ("sp", 0));
-            // v1.33.4 (H7): the per-arc overrides (absent in older pieces ->
-            // follow the tab's setting, play forward)
-            a.pitchMode = juce::jlimit (-1, 2, (int) v.getProperty ("pitchMode", -1));
-            a.reversed = (bool) v.getProperty ("reversed", false);
-            if (auto* arr = v.getProperty("points", juce::var()).getArray())
-                for (auto& pv : *arr)
-                {
-                    if ((int) a.points.size() >= limits::kMaxPointsPerArc) break;
-                    upic::ArcPoint pt;
-                    pt.t = limits::clampFinite((double) pv.getProperty("t", 0), 0.0, kMaxPageSeconds);
-                    pt.freq = limits::clampFinite((double) pv.getProperty("f", 440), kMinFreq, kMaxFreq);
-                    pt.i = limits::clampIntensity((float)(double) pv.getProperty("i", 1.0));
-                    a.points.push_back(pt);
-                }
-            // stable: a staircase's corners share a time, and their order is
-            // the direction of the jump
-            std::stable_sort(a.points.begin(), a.points.end(), [](auto& x, auto& y){ return x.t < y.t; });
-            return a;
-        }
     };
 
     //================ WP8: the geometric transforms =================
@@ -377,12 +280,12 @@ namespace upic
         double pitchLo  = kDefaultPitchLo;
         double pitchHi  = kDefaultPitchHi;
 
-        double logLo()   const { return std::log2 (juce::jmax (1.0, pitchLo)); }
-        double logHi()   const { return std::log2 (juce::jmax (1.0, pitchHi)); }
-        double logSpan() const { return juce::jmax (1.0e-6, logHi() - logLo()); }
+        double logLo()   const { return std::log2 (std::max (1.0, pitchLo)); }
+        double logHi()   const { return std::log2 (std::max (1.0, pitchHi)); }
+        double logSpan() const { return std::max (1.0e-6, logHi() - logLo()); }
 
         double normX (double t) const { return duration > 1.0e-9 ? t / duration : 0.0; }
-        double normY (double f) const { return (std::log2 (juce::jmax (1.0, f)) - logLo()) / logSpan(); }
+        double normY (double f) const { return (std::log2 (std::max (1.0, f)) - logLo()) / logSpan(); }
         double denormX (double x) const { return x * duration; }
         double denormY (double y) const { return std::exp2 (logLo() + y * logSpan()); }
     };
@@ -415,8 +318,8 @@ namespace upic
                     b.x0 = b.x1 = x; b.y0 = b.y1 = y; b.valid = true;
                     continue;
                 }
-                b.x0 = juce::jmin (b.x0, x); b.x1 = juce::jmax (b.x1, x);
-                b.y0 = juce::jmin (b.y0, y); b.y1 = juce::jmax (b.y1, y);
+                b.x0 = std::min (b.x0, x); b.x1 = std::max (b.x1, x);
+                b.y0 = std::min (b.y0, y); b.y1 = std::max (b.y1, y);
             }
         }
         return b;
@@ -428,7 +331,7 @@ namespace upic
     {
         if (a.points.empty()) return 0.0;
         double sumLog = 0.0;
-        for (const auto& p : a.points) sumLog += std::log2 (juce::jmax (1.0, p.freq));
+        for (const auto& p : a.points) sumLog += std::log2 (std::max (1.0, p.freq));
         return std::pow (2.0, sumLog / (double) a.points.size());
     }
 
@@ -438,7 +341,7 @@ namespace upic
     inline void writeTransformedPoint (ArcPoint& p, double t, double f, const ArcFrame& frame)
     {
         if (std::isfinite (t))
-            p.t = limits::clampFinite (t, 0.0, juce::jmax (0.0, frame.duration));
+            p.t = limits::clampFinite (t, 0.0, std::max (0.0, frame.duration));
         if (std::isfinite (f))
             p.freq = limits::clampFinite (f, kMinFreq, kMaxFreq);
     }
@@ -546,7 +449,7 @@ namespace upic
             {
                 if (a == nullptr || a->points.empty()) continue;
                 const double t = edge == 0 ? a->startTime() : a->endTime();
-                target = edge == 0 ? juce::jmin (target, t) : juce::jmax (target, t);
+                target = edge == 0 ? std::min (target, t) : std::max (target, t);
                 any = true;
             }
             if (! any) return;
@@ -571,7 +474,7 @@ namespace upic
                 if (a == nullptr) continue;
                 for (const auto& p : a->points)
                 {
-                    sumLog += std::log2 (juce::jmax (1.0, p.freq));
+                    sumLog += std::log2 (std::max (1.0, p.freq));
                     ++count;
                 }
             }

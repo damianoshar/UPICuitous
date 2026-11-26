@@ -39,9 +39,10 @@ $root = Split-Path -Parent $PSScriptRoot
 
 # ------------------------------------------------------------------ rules ---
 
-# B1 + B2: the JUCE-free groups. The geometry stays pure, and so does the
-# domain's numeric core - the units, the validation and the lookups the
-# rest of the model stands on.
+# B1 + B2: the JUCE-free groups. The geometry stays pure, the domain's
+# numeric core stays pure, and so does the arc - the model's central type.
+# The codec (Source/ArcCodec.h) is the edge where the JUCE value types
+# live, and it is deliberately not in a group.
 $juceFreeGroups = @(
     @{
         Name    = "the layout engines"
@@ -72,6 +73,21 @@ $juceFreeGroups = @(
             "Source/UpicMath.h",
             "Source/Ids.h"
         )
+        Allowed = @(
+            "UpicConstants.h",
+            "PieceLimits.h",
+            "UpicMath.h"
+        )
+    },
+    @{
+        Name    = "the arc"
+        Message = "B1/B2 the arc stays JUCE-free and knows only the domain"
+        Files   = @(
+            "Source/Arc.h"
+        )
+        # The domain's headers the arc may use - the units, the validation
+        # and the lookups. The codec (Source/ArcCodec.h) is the edge, and it
+        # is not in the group: it is where the JUCE value types live.
         Allowed = @(
             "UpicConstants.h",
             "PieceLimits.h",
@@ -441,7 +457,9 @@ if ($violations.Count -gt 0) {
 }
 
 foreach ($g in $juceFreeGroups) {
-    Write-Host "    B1/B2 $($g.Name) ($($g.Files.Count) files): no JUCE header, no header outside the group"
+    $n = $g.Files.Count
+    $word = if ($n -eq 1) { "file" } else { "files" }
+    Write-Host "    B1/B2 $($g.Name) ($n $word): no JUCE header, no header outside the group"
 }
 Write-Host "    B3 the Projucer project lists all $($manifest.SourceCpp.Count) source files"
 Write-Host "    B4 the plugin's two targets carry the same $($manifest.PluginTargets['UPICuitousPlugin'].Count) source files"

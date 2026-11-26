@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "Arc.h"
+#include "ArcCodec.h"
 #include "PieceLimits.h"
 #include "UpicConstants.h"
 
@@ -31,8 +32,8 @@ namespace
     // The suite talks to the codec through these two helpers, so the move
     // that renames the codec's entry points touches the suite in one place
     // only - the checks themselves stay exactly as they are.
-    juce::var encode (const upic::Arc& a) { return a.toVar(); }
-    upic::Arc decode (const juce::var& v) { return upic::Arc::fromVar (v); }
+    juce::var encode (const upic::Arc& a) { return upic::arcToVar (a); }
+    upic::Arc decode (const juce::var& v) { return upic::arcFromVar (v); }
 }
 
 void upic::runArcChecks (upic::SelfTest& t)

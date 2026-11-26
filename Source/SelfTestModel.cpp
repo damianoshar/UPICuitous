@@ -2,6 +2,7 @@
 #include "MainComponent.h"
 #include "SelfTest.h"
 #include "AllocCounter.h"
+#include "ArcCodec.h"
 #include "GraphicalCurve.h"
 
 //==============================================================================
@@ -181,11 +182,11 @@ void upic::runTransformChecks (upic::SelfTest& t)
                "the stepping leaves the drawn curve alone");
 
         // it travels with the piece
-        upic::Arc saved = upic::Arc::fromVar (g.toVar());
+        upic::Arc saved = upic::arcFromVar (upic::arcToVar (g));
         check (saved.stepDivisions == 12,
                "the discrete frequency space travels with the piece",
                juce::String (saved.stepDivisions) + " divisions");
-        upic::Arc plain = upic::Arc::fromVar (upic::Arc().toVar());
+        upic::Arc plain = upic::arcFromVar (upic::arcToVar (upic::Arc()));
         check (plain.stepDivisions == 0,
                "a piece without it is the continuum");
     }
@@ -241,9 +242,9 @@ void upic::runTransformChecks (upic::SelfTest& t)
                + juce::String (UpicEngine::arcPitch (a2, 0.5, m1), 1) + " Hz");
 
         // the space travels with the piece
-        upic::Arc saved = upic::Arc::fromVar (a2.toVar());
+        upic::Arc saved = upic::arcFromVar (upic::arcToVar (a2));
         check (saved.space == 1, "the frequency space travels with the piece");
-        check (upic::Arc::fromVar (a1.toVar()).space == 0,
+        check (upic::arcFromVar (upic::arcToVar (a1)).space == 0,
                "an arc without a space is in the page's own");
         const auto pageBack = upic::Page::fromVar (pg.toVar());
         check (pageBack.spaces[1] == 3 && pageBack.spaces[2] == 1,
@@ -588,7 +589,7 @@ void upic::runTransformChecks (upic::SelfTest& t)
                juce::String (maxDiffF, 4));
 
         // and the settings travel with the piece
-        upic::Arc saved = upic::Arc::fromVar (modAmp.toVar());
+        upic::Arc saved = upic::arcFromVar (upic::arcToVar (modAmp));
         check (saved.waveUse == upic::Arc::waveAlsoAmplitude
             && std::abs (saved.modRate - 4.0) < 1e-6
             && std::abs (saved.modDepth - 1.0) < 1e-6,

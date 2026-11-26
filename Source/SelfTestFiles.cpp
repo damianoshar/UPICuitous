@@ -2,6 +2,7 @@
 #include "MainComponent.h"
 #include "SelfTest.h"
 #include "AllocCounter.h"
+#include "ArcCodec.h"
 
 #if JUCE_WINDOWS
  #ifndef NOMINMAX
@@ -534,7 +535,7 @@ void upic::runUntrustedPieceChecks (upic::SelfTest& t)
     //     cannot be used to freeze the UI or to push NaN into the audio
     //     thread.
     {
-        upic::Arc arc = upic::Arc::fromVar (juce::JSON::parse (
+        upic::Arc arc = upic::arcFromVar (juce::JSON::parse (
             "{\"id\":1,\"mode\":0,\"intensity\":99,\"refFreq\":1e300,"
             "\"points\":[{\"t\":0,\"f\":440,\"i\":5},{\"t\":1e300,\"f\":NaN}]}"));
         check (arc.intensity >= 0.0f && arc.intensity <= 1.0f,
@@ -558,7 +559,7 @@ void upic::runUntrustedPieceChecks (upic::SelfTest& t)
                 json += "{\"t\":" + juce::String (i) + ",\"f\":440}";
             }
             json += "]}";
-            const auto a2 = upic::Arc::fromVar (juce::JSON::parse (json));
+            const auto a2 = upic::arcFromVar (juce::JSON::parse (json));
             check ((int) a2.points.size () <= upic::limits::kMaxPointsPerArc,
                    "an oversized point list is truncated",
                    juce::String ((int) a2.points.size ()) + " of 5000");
