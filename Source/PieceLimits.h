@@ -15,8 +15,12 @@
 //
 // v1.30 (UPIC): added with the security hardening (S-03).
 //==============================================================================
-#include <JuceHeader.h>
+
+// R2.1: no JUCE header. The limits are the domain's own, and the domain
+// has to be usable without the GUI around it.
+#include <cmath>
 #include <cstdint>
+#include <type_traits>
 
 namespace upic
 {

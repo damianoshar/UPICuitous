@@ -1,6 +1,10 @@
 #pragma once
 
-#include <JuceHeader.h>
+// R2.1: no JUCE header. The three numeric helpers this file used
+// (juce::jmax, juce::jmin, juce::jlimit) are the standard library's, with
+// the same expressions and therefore the same results - including the NaN
+// behaviour, which all three leave unchanged. The domain's own clampFinite
+// is the one that refuses a NaN.
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -13,19 +17,19 @@ namespace upic
     inline double midiToFreq(double midi) { return 440.0 * std::pow(2.0, (midi - 69.0) / 12.0); }
     inline double freqToMidi(double f)
     {
-        f = juce::jlimit(kMinFreq, kMaxFreq, f);
+        f = std::clamp (f, kMinFreq, kMaxFreq);
         return 69.0 + 12.0 * std::log2(f / 440.0);
     }
 
     inline float freqToNormY(double f) // 0=bottom(low) 1=top(high), log scale
     {
         double lo = std::log2(kMinFreq), hi = std::log2(kMaxFreq);
-        double v = (std::log2(juce::jlimit(kMinFreq, kMaxFreq, f)) - lo) / (hi - lo);
-        return (float) juce::jlimit(0.0, 1.0, v);
+        double v = (std::log2(std::clamp (f, kMinFreq, kMaxFreq)) - lo) / (hi - lo);
+        return (float) std::clamp (v, 0.0, 1.0);
     }
     inline double normYToFreq(float n)
     {
-        n = juce::jlimit(0.0f, 1.0f, n);
+        n = std::clamp (n, 0.0f, 1.0f);
         double lo = std::log2(kMinFreq), hi = std::log2(kMaxFreq);
         return std::pow(2.0, lo + n * (hi - lo));
     }
@@ -42,16 +46,16 @@ namespace upic
     // holds what is inside it.
     inline float freqToNormYIn (double f, double lo, double hi)
     {
-        const double l0 = std::log2 (juce::jmax (1.0, lo));
-        const double l1 = std::log2 (juce::jmax (1.0, hi));
-        return (float) ((std::log2 (juce::jmax (1.0, f)) - l0)
-                        / juce::jmax (1.0e-6, l1 - l0));
+        const double l0 = std::log2 (std::max (1.0, lo));
+        const double l1 = std::log2 (std::max (1.0, hi));
+        return (float) ((std::log2 (std::max (1.0, f)) - l0)
+                        / std::max (1.0e-6, l1 - l0));
     }
     inline double normYToFreqIn (float n, double lo, double hi)
     {
-        n = juce::jlimit (0.0f, 1.0f, n);
-        const double l0 = std::log2 (juce::jmax (1.0, lo));
-        const double l1 = std::log2 (juce::jmax (1.0, hi));
+        n = std::clamp (n, 0.0f, 1.0f);
+        const double l0 = std::log2 (std::max (1.0, lo));
+        const double l1 = std::log2 (std::max (1.0, hi));
         return std::exp2 (l0 + (double) n * (l1 - l0));
     }
     //---------------- the point lookups ----------------
@@ -121,7 +125,7 @@ namespace upic
     // (0 = free drawing, 1 = fully magnetic — the "Stickiness" slider).
     inline double stickify(double value, double snapped, double stickiness)
     {
-        stickiness = juce::jlimit(0.0, 1.0, stickiness);
+        stickiness = std::clamp (stickiness, 0.0, 1.0);
         return value + (snapped - value) * stickiness;
     }
 
@@ -137,6 +141,6 @@ namespace upic
     inline double stopFadeGain(double tToEnd, double fadeSec)
     {
         if (fadeSec <= 0.0) return tToEnd > 0.0 ? 1.0 : 0.0;
-        return juce::jlimit(0.0, 1.0, tToEnd / fadeSec);
+        return std::clamp (tToEnd / fadeSec, 0.0, 1.0);
     }
 }

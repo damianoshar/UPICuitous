@@ -1,5 +1,8 @@
 #pragma once
 
+// R2.1: no JUCE header. The id helpers need one numeric helper
+// (juce::jmax), which is std::max with the same expression.
+#include <algorithm>
 #include <cstddef>
 #include <set>
 #include <vector>
@@ -70,7 +73,7 @@ namespace upic
     template <typename T>
     inline int nextBankId (const std::vector<T>& items, int minId = 0)
     {
-        minId = juce::jmax (0, minId);
+        minId = std::max (0, minId);
         std::set<int> used;
         for (const auto& it : items)
             if (it.id >= minId && it.id <= limits::kMaxItemId)

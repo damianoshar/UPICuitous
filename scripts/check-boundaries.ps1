@@ -39,24 +39,45 @@ $root = Split-Path -Parent $PSScriptRoot
 
 # ------------------------------------------------------------------ rules ---
 
-# B1 + B2: the geometry stays pure. These files are the JUCE-free group -
-# the three layout engines and the rectangle they share.
-$layoutEngineFiles = @(
-    "Source/LayoutRect.h",
-    "Source/CardLayoutEngine.h",
-    "Source/CardLayoutEngine.cpp",
-    "Source/BottomLayoutEngine.h",
-    "Source/BottomLayoutEngine.cpp",
-    "Source/OverlayLayoutEngine.h",
-    "Source/OverlayLayoutEngine.cpp"
-)
-
-# The only project headers the group may include - each other.
-$layoutEngineHeaders = @(
-    "LayoutRect.h",
-    "CardLayoutEngine.h",
-    "BottomLayoutEngine.h",
-    "OverlayLayoutEngine.h"
+# B1 + B2: the JUCE-free groups. The geometry stays pure, and so does the
+# domain's numeric core - the units, the validation and the lookups the
+# rest of the model stands on.
+$juceFreeGroups = @(
+    @{
+        Name    = "the layout engines"
+        Message = "B1/B2 the layout engines stay JUCE-free and know only each other"
+        Files   = @(
+            "Source/LayoutRect.h",
+            "Source/CardLayoutEngine.h",
+            "Source/CardLayoutEngine.cpp",
+            "Source/BottomLayoutEngine.h",
+            "Source/BottomLayoutEngine.cpp",
+            "Source/OverlayLayoutEngine.h",
+            "Source/OverlayLayoutEngine.cpp"
+        )
+        # The only project headers the group may include - each other.
+        Allowed = @(
+            "LayoutRect.h",
+            "CardLayoutEngine.h",
+            "BottomLayoutEngine.h",
+            "OverlayLayoutEngine.h"
+        )
+    },
+    @{
+        Name    = "the domain's numeric core"
+        Message = "B1/B2 the domain's numeric core stays JUCE-free and knows only the domain"
+        Files   = @(
+            "Source/UpicConstants.h",
+            "Source/PieceLimits.h",
+            "Source/UpicMath.h",
+            "Source/Ids.h"
+        )
+        Allowed = @(
+            "UpicConstants.h",
+            "PieceLimits.h",
+            "UpicMath.h"
+        )
+    }
 )
 
 # B4: the sources the plugin needs from Source/ - the shell's own translation
@@ -394,23 +415,23 @@ target_sources(UPICuitousPluginSmokeTest PRIVATE
 $selfTestFailures = Invoke-SelfTest
 if ($SelfTest) { exit $selfTestFailures }
 
-$engineRule = @{
-    Name           = "B1/B2 the layout engines stay JUCE-free and know only each other"
-    ForbidJuce     = $true
-    AllowedProject = $layoutEngineHeaders
-}
-
-$contents = @{}
-foreach ($rel in $layoutEngineFiles) {
-    $p = Join-Path $root ($rel -replace '/', '\')
-    if (Test-Path $p) {
-        $contents[$rel] = [IO.File]::ReadAllText($p, [Text.Encoding]::UTF8)
-    }
-}
-
 $manifest = Get-TreeManifest $root
 $violations = @()
-$violations += Find-IncludeViolations $layoutEngineFiles $contents $engineRule
+foreach ($g in $juceFreeGroups) {
+    $contents = @{}
+    foreach ($rel in $g.Files) {
+        $p = Join-Path $root ($rel -replace '/', '\')
+        if (Test-Path $p) {
+            $contents[$rel] = [IO.File]::ReadAllText($p, [Text.Encoding]::UTF8)
+        }
+    }
+    $rule = @{
+        Name           = $g.Message
+        ForbidJuce     = $true
+        AllowedProject = $g.Allowed
+    }
+    $violations += Find-IncludeViolations $g.Files $contents $rule
+}
 $violations += Find-ManifestViolations $manifest
 
 if ($violations.Count -gt 0) {
@@ -419,7 +440,9 @@ if ($violations.Count -gt 0) {
     exit 1
 }
 
-Write-Host "    B1/B2 the layout engines ($($layoutEngineFiles.Count) files): no JUCE header, no header outside the group"
+foreach ($g in $juceFreeGroups) {
+    Write-Host "    B1/B2 $($g.Name) ($($g.Files.Count) files): no JUCE header, no header outside the group"
+}
 Write-Host "    B3 the Projucer project lists all $($manifest.SourceCpp.Count) source files"
 Write-Host "    B4 the plugin's two targets carry the same $($manifest.PluginTargets['UPICuitousPlugin'].Count) source files"
 if ($manifest.VisualStudio.Count -gt 0) {
