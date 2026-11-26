@@ -145,6 +145,8 @@ int upic::runSelfTest()
     // R2.1: the domain's own suite - the units, the validation and the
     // lookups, without the app around them.
     upic::runDomainChecks (t);
+    // R2.2: the arc - its transformations, its interpolation and its codec.
+    upic::runArcChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
