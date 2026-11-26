@@ -200,6 +200,15 @@ and legacy fixture are untouched.
 and after metrics for `resized()` and the file, and an architecture note for
 the new boundary.
 
+**Shipped (R1.1, 2026-11-26).** The engine is `Source/CardLayoutEngine.{h,cpp}`
+(705 lines: 140 header + 565 implementation); the adapter is the card/strip
+section of `resized()`. `resized()` went from 1,400 to 1,051 lines and
+`MainComponentLayout.cpp` from 2,475 lines / 114,402 bytes to 2,127 lines /
+100,013 bytes (-348 lines, -14,389 bytes). The engine depends on `<vector>`,
+`<algorithm>` and `<cmath>` only. The five-viewport component-tree digest was
+identical before and after the extraction. See
+[`card-layout-engine.md`](card-layout-engine.md) for the boundary.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -225,7 +234,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | Phase | Status | Commit | Gate |
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R1 Low-risk extraction | not started | - | - |
+| R1 Low-risk extraction | **R1.1 shipped** | `1ba66d2` | app selftest 1,846/1,846, R0.1 unchanged, five-viewport digest identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R2 Domain boundaries | not started | - | - |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
@@ -252,3 +261,37 @@ Test family after R0: 14 files, 938 KB, 19,296 lines (was 11 files,
 905 KB). The `MainComponent` family is unchanged: 13 files, 762 KB,
 17,169 lines. The R0 commits contain test code and three `.jucer` file
 entries only.
+
+### R1.1 record (2026-11-26)
+
+The card layout engine is out of `resized()`; `upic::layout` owns the
+geometry and `MainComponent` applies it.
+
+| Measure | Before | After |
+|---|---|---|
+| `resized()` | 1,400 lines | 1,051 lines |
+| `MainComponentLayout.cpp` | 2,475 lines / 114,402 bytes | 2,127 lines / 100,013 bytes |
+| the engine | - | `CardLayoutEngine.h` 140 + `CardLayoutEngine.cpp` 565 lines |
+
+The engine's types: `LayoutMetrics`, `CellSpecification`,
+`CardSpecification`, `CardLayoutConstraints`, `CellPlacement`,
+`CardPlacement`, `CardLayoutResult`, `StripCardPlacement`,
+`StripLayoutResult`. It includes `<vector>`, `<algorithm>` and `<cmath>` and
+no JUCE header. The adapter keeps the widget pointers (`FlowItem` /
+`FlowGroup`), the text measurement (`neededWidth`, `captionWidthDp`,
+`headerWidthDp`), the knob's design scale/caption/fallback and every
+`setBounds` / `setVisible` call. See `card-layout-engine.md`.
+
+The proof is two-layered: the R0.1 suite (30 checks) passes unchanged, and
+a temporary digest of every descendant's bounds and visibility plus every
+card rectangle was identical at all five viewports before and after
+(`ec5437a1…`, `40f5233c…`, `bedc4aa2…`, `9b09ff5f…`, `1f982028…`). The
+digest was removed; the structural suite stays.
+
+The plugin's `Plugin/CMakeLists.txt` and the `.jucer` list carry the new
+source. The Android generated list (`Builds/Android/app/CMakeLists.txt`,
+explicit sources) picks it up on the next Projucer resave; the H5 wave owns
+that step.
+
+Gate: app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged,
+plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS.
