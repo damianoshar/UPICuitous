@@ -459,11 +459,12 @@ void upic::runTransformChecks (upic::SelfTest& t)
     }
 
     // 6i-c. v1.31 (U2): the micro-time end of the duration range. The
-    //      real UPIC's page ran from a few milliseconds to 12 minutes.
+    //      real UPIC's page ran from a few milliseconds to 12 minutes;
+    //      WP10 lifts the clone's ceiling to an hour.
     {
         check (upic::kMinPageSeconds <= 0.01
-            && upic::kMaxPageSeconds >= 700.0,
-               "the page duration range reaches micro-time and macro-time",
+            && upic::kMaxPageSeconds >= 3600.0,
+               "the page duration range reaches micro-time and an hour",
                juce::String (upic::kMinPageSeconds, 3) + " s .. "
                + juce::String (upic::kMaxPageSeconds, 0) + " s");
 
@@ -479,14 +480,16 @@ void upic::runTransformChecks (upic::SelfTest& t)
                "the arcs of a millisecond-scale page keep their times",
                juce::String (pg.arcs[0].points[1].t, 4));
 
-        // and a 12-minute page too
+        // and a page inside the hour-long range (WP10 lifted the top of the
+        // range from twelve minutes to an hour - the pull back to the cap is
+        // checked with the other WP10 page checks)
         const auto longPg = upic::Page::fromVar (juce::JSON::parse (
             "{\"duration\":900,\"arcs\":[{\"id\":1,\"points\":["
             "{\"t\":0,\"f\":220},{\"t\":700,\"f\":440}]}]}"));
-        check (std::abs (longPg.durationSec - 720.0) < 1e-9,
-               "a 12-minute page is clamped to the top of the range",
+        check (std::abs (longPg.durationSec - 900.0) < 1e-9,
+               "a 15-minute page loads inside the hour-long range",
                juce::String (longPg.durationSec, 1) + " s");
-        check (longPg.arcs[0].points[1].t <= 720.0,
+        check (longPg.arcs[0].points[1].t <= 900.0,
                "an arc beyond the top of the range is clamped",
                juce::String (longPg.arcs[0].points[1].t, 1));
     }
@@ -4661,6 +4664,153 @@ void upic::runWP10WaveChecks (upic::SelfTest& t)
         check (stored == 2,
                "WP10 the library holds the two accepted wavetables",
                juce::String (stored));
+
+        if (hadRoot)
+            upic::UserLibrary::setRootForTest (previousRoot);
+        else
+            upic::UserLibrary::clearRootForTest();
+        root.deleteRecursively();
+    }
+}
+
+//==============================================================================
+// WP10 (part 4): a page may last an hour.
+//
+// The page duration is the piece's clock, and its ceiling was twelve
+// minutes. The lift is a parser bound and a control range; the heavy half
+// is the export, which streams the page to disk block by block - that
+// check lives with the export checks (Source/SelfTestFiles.cpp), next to
+// the peak-memory probe. The performance's own clock follows the page's, so
+// a sparse gesture can reach the end of a long page.
+void upic::runWP10PageChecks (upic::SelfTest& t)
+{
+    auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
+    {
+        t.check (ok, name, detail);
+    };
+
+    check (upic::kMaxPageSeconds == 3600.0,
+           "WP10 a page may last an hour",
+           juce::String (upic::kMaxPageSeconds, 0) + " s");
+
+    // --- the parser keeps the long duration --------------------------------
+    {
+        const auto pg = upic::Page::fromVar (juce::JSON::parse (
+            "{\"duration\":3599.0,\"arcs\":[{\"id\":1,\"points\":["
+            "{\"t\":0,\"f\":220},{\"t\":3500,\"f\":440}]}]}"));
+        check (std::abs (pg.durationSec - 3599.0) < 1e-9,
+               "WP10 a 59-minute page loads",
+               juce::String (pg.durationSec, 1) + " s");
+        check (pg.arcs.size() == 1 && pg.arcs[0].points.size() == 2
+               && std::abs (pg.arcs[0].points.back().t - 3500.0) < 1e-9,
+               "WP10 an arc keeps a time late in the hour",
+               pg.arcs.empty() ? juce::String ("no arc")
+                               : juce::String (pg.arcs[0].points.back().t, 1) + " s");
+    }
+
+    // --- a page over the cap is pulled back --------------------------------
+    {
+        const auto pg = upic::Page::fromVar (juce::JSON::parse (
+            "{\"duration\":7201.0,\"arcs\":[{\"id\":1,\"points\":["
+            "{\"t\":0,\"f\":220},{\"t\":7200,\"f\":440}]}]}"));
+        check (std::abs (pg.durationSec - upic::kMaxPageSeconds) < 1e-9,
+               "WP10 a page over the cap is pulled back to the cap",
+               juce::String (pg.durationSec, 1) + " s");
+        check (pg.arcs.size() == 1
+               && pg.arcs[0].points.back().t <= upic::kMaxPageSeconds,
+               "WP10 an arc past the cap is pulled back too",
+               pg.arcs.empty() ? juce::String ("no arc")
+                               : juce::String (pg.arcs[0].points.back().t, 1) + " s");
+    }
+
+    // --- the app carries the long page -------------------------------------
+    {
+        upic::PieceModel m;
+        upic::Page pg;
+        pg.durationSec = upic::kMaxPageSeconds;
+        pg.nextArcId = 2;
+        upic::Arc a;
+        a.id = 1; a.mode = 0; a.waveformId = 0; a.envelopeId = 0; a.intensity = 0.8f;
+        a.points = { { 0.0, 220.0 }, { 3500.0, 440.0 } };
+        pg.arcs.push_back (a);
+        m.pages.push_back (pg);
+
+        auto mcHolder = std::make_unique<MainComponent> (true);
+        auto& mc = *mcHolder;
+        mc.setSize (1280, 800);
+        check (mc.loadFromVar (upic::pieceToVar (m)),
+               "WP10 the piece with an hour-long page loads");
+        check (std::abs (mc.pageDurationForTest() - upic::kMaxPageSeconds) < 1e-9,
+               "WP10 the app keeps the long duration",
+               juce::String (mc.pageDurationForTest(), 1) + " s");
+
+        std::function<juce::Component*(juce::Component&, const juce::String&)> findByName =
+            [&findByName](juce::Component& c, const juce::String& n) -> juce::Component* {
+                if (c.getName() == n) return &c;
+                for (int i = 0; i < c.getNumChildComponents(); ++i)
+                    if (auto* r = findByName (*c.getChildComponent (i), n)) return r;
+                return nullptr;
+            };
+        auto* slider = dynamic_cast<juce::Slider*> (findByName (mc, "durSlider"));
+        check (slider != nullptr
+               && std::abs (slider->getMaximum() - upic::kMaxPageSeconds) < 1e-9,
+               "WP10 the duration control reaches the cap",
+               slider != nullptr ? juce::String (slider->getMaximum(), 0) + " s"
+                                 : juce::String ("no control"));
+    }
+
+    // --- a sparse performance reaches the end of the page -------------------
+    {
+        const auto seq = upic::PerformanceSequence::fromVar (juce::JSON::parse (
+            "{\"id\":1,\"name\":\"Long\",\"points\":["
+            "{\"t\":0,\"page\":0,\"pos\":0},{\"t\":3500,\"page\":0,\"pos\":3500}]}"), 1);
+        check ((int) seq.points.size() == 2
+               && std::abs (seq.points.back().t - 3500.0) < 1e-9
+               && std::abs (seq.points.back().pos - 3500.0) < 1e-9,
+               "WP10 a performance can reach the end of the hour",
+               (int) seq.points.size() == 0 ? juce::String ("no points")
+                                            : juce::String (seq.points.back().t, 1) + " s");
+    }
+
+    // --- the user library takes a point late in the hour --------------------
+    {
+        const auto root = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("upic_wp10_page_selftest");
+        root.deleteRecursively();
+        root.createDirectory();
+        const bool hadRoot = upic::UserLibrary::rootIsOverriddenForTest();
+        const auto previousRoot = upic::UserLibrary::rootFolder();
+        upic::UserLibrary::setRootForTest (root);
+
+        auto sequenceWith = [] (double lastPos)
+        {
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("id", 1);
+            o->setProperty ("name", "Long");
+            juce::Array<juce::var> points;
+            for (double pos : { 0.0, lastPos })
+            {
+                auto* p = new juce::DynamicObject();
+                p->setProperty ("t", pos);
+                p->setProperty ("page", 0);
+                p->setProperty ("pos", pos);
+                points.add (juce::var (p));
+            }
+            o->setProperty ("points", points);
+            return juce::var (o);
+        };
+
+        juce::String error;
+        check (upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 1, "Long",
+                                           juce::Colours::white,
+                                           sequenceWith (3500.0), error),
+               "WP10 the library accepts a sequence that reaches the hour", error);
+        error.clear();
+        check (! upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 2, "Too Long",
+                                             juce::Colours::white,
+                                             sequenceWith (upic::kMaxPageSeconds + 1.0), error)
+               && error.contains ("malformed"),
+               "WP10 the library refuses a sequence past the hour", error);
 
         if (hadRoot)
             upic::UserLibrary::setRootForTest (previousRoot);

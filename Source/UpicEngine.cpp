@@ -1384,6 +1384,14 @@ bool writePageToWavFile(const juce::File& target, const upic::Page& page, const 
 {
     if (target == juce::File() || sr <= 0.0 || page.durationSec <= 0.0) return false;
 
+    // The page's own time decides the length: a warped page needs more
+    // audio than it has score. WP10: an hour at a high rate can pass a WAV
+    // file's 4 GB, so the length is checked BEFORE anything is written - a
+    // file that cannot be described by its own header is never started.
+    const double framesD = std::ceil (page.audioDurationSec() * sr);
+    if (! wavLengthFits (framesD, mono ? 1 : 2, 16)) return false;
+    const int frames = (int) framesD;
+
     juce::TemporaryFile temp (target);
     std::unique_ptr<juce::OutputStream> out = temp.getFile().createOutputStream();
     if (out == nullptr) return false;
@@ -1400,9 +1408,8 @@ bool writePageToWavFile(const juce::File& target, const upic::Page& page, const 
     if (sampleGrainMs > 0) eng.setSampleGrainMs (sampleGrainMs);
     if (liveGrainMs > 0) eng.setLiveGrainMs (liveGrainMs);
 
-    // the page's own time decides the length: a warped page needs more
-    // audio than it has score
-    const int frames = (int) std::ceil (page.audioDurationSec() * sr);
+    // the page's own time decides the length (checked above, before the
+    // file was opened)
     int done = 0;
     eng.setChannelFilter (channelBucket);
     // WP6.4: a mono file (a mixer channel is a mono bus). The mix is mono,

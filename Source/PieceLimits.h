@@ -81,12 +81,14 @@ namespace upic
         // WP3: the page's arc groups (the four performance groups the
         // historical page had, with room to organise).
         constexpr int kMaxGroupsPerPage = 64;
-        // WP4: the performance sequences. The historical UPIC kept two;
-        // 20000 points is a 10-minute gesture at the 30 Hz recorder (a
-        // 12-minute page at the 6 ms historical resolution).
+        // WP4: the performance sequences. The historical UPIC kept two.
+        // 20000 points is an eleven-minute gesture at the 30 Hz recorder;
+        // WP10 makes the clock follow the page's, so a sparse gesture can
+        // reach the end of a 60-minute page while a dense recording stays
+        // bounded by the point count above.
         constexpr int kMaxSequences = 2;
         constexpr int kMaxSequencePoints = 20000;
-        constexpr int kMaxSequenceSeconds = 720;
+        constexpr int kMaxSequenceSeconds = 3600;
         // WP6: the mixer channels (model only in 0.34; the engine/UI follow).
         constexpr int kMaxChannels = 16;
 

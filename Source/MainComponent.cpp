@@ -864,10 +864,10 @@ void MainComponent::buildToolbarControls()
     addAndMakeVisible(timeLab); addAndMakeVisible(statusLab);
 
     // v1.31 (U2): the page duration runs from the UPIC's micro-time end
-    // (a few milliseconds) to its macro-time end (12 minutes). A linear
-    // slider over that range would be useless at the top, so the travel is
-    // skewed: 30 s sits in the middle and the value box takes an exact
-    // number (the UPIC's range was 6 ms to 12 min).
+    // (a few milliseconds) to its macro-time end (12 minutes; WP10 lifts the
+    // clone's ceiling to an hour). A linear slider over that range would be
+    // useless at the top, so the travel is skewed: 30 s sits in the middle
+    // and the value box takes an exact number.
     durSlider.setRange (upic::kMinPageSeconds, upic::kMaxPageSeconds, 0.005);
     durSlider.setSkewFactorFromMidPoint (30.0);
     durSlider.setValue (30.0);

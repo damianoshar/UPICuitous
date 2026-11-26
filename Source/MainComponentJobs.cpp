@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <memory>
 #include <utility>
 
@@ -274,7 +275,13 @@ void MainComponent::exportPageAsJob (const juce::URL& url)
             // memory stays flat. The session's pitch algorithm and grain
             // sizes come with it, so the file sounds like the session.
             const juce::File target = isLocal ? url.getLocalFile() : temp;
-            const bool rendered = exportPageToFile (target, *model,
+            // WP10: a page may last an hour now, but a WAV file cannot hold
+            // more than 4 GB - at a high sample rate (or warped, which makes
+            // the audio longer than the score) the hour does not fit. Say so
+            // instead of writing a file whose header cannot describe it.
+            const double framesWanted = std::ceil (model->page.audioDurationSec() * model->sr);
+            const bool fitsAWav = wavLengthFits (framesWanted, 2, 16);
+            const bool rendered = fitsAWav && exportPageToFile (target, *model,
                 [&job] (int percent)
                 {
                     job.progress.store (juce::jlimit (0, 100, percent),
@@ -292,6 +299,9 @@ void MainComponent::exportPageAsJob (const juce::URL& url)
             job.ok = ok;
             if (job.cancelled.load (std::memory_order_relaxed))
                 job.message = "Render cancelled - " + upic::pickedFileName (url) + " was not written";
+            else if (! fitsAWav)
+                job.message = "Render refused - the page is too long for a WAV file at "
+                            + juce::String (model->sr / 1000.0, 1) + " kHz";
             else if (ok)
                 job.message = "Rendered " + upic::pickedFileName (url);
             else

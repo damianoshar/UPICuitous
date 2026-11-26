@@ -41,6 +41,13 @@ namespace upic
     // drawings could sit in micro-time as well as in macro-time. The page
     // duration is the piece's clock: the same drawing can be played fast or
     // slow, and it is the one control that sets the time scale.
+    //
+    // WP10: the clone's ceiling is an hour. A page is a drawing in time, so
+    // a long one (a drone, a slowly evolving field) is a legitimate form
+    // even though the 1990s machine stopped at twelve minutes. The export
+    // streams the page to disk block by block, so the length costs time and
+    // disk, not memory - and a file that cannot fit in a WAV's 4 GB is
+    // refused before the render starts (upic::wavLengthFits).
     constexpr double kMinPageSeconds = 0.005;  // 5 ms
-    constexpr double kMaxPageSeconds = 720.0;  // 12 minutes
+    constexpr double kMaxPageSeconds = 3600.0; // 60 minutes
 }

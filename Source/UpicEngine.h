@@ -624,6 +624,19 @@ bool writeWavFile (const juce::File& target,
 // `mono` writes ONE channel instead of two. A mixer channel is a mono bus
 // (the plan's "mono WAV per channel"); the master render and the per-voice
 // stems stay stereo.
+
+// WP10: a WAV file is RIFF, so its data chunk is 32 bits wide - the file
+// cannot hold more than ~4 GB. A page may now last an hour, and at a high
+// sample rate (or warped, which makes it longer than its score) an hour can
+// pass that ceiling. The export asks first and refuses a file it could not
+// finish, instead of writing one whose header says something else.
+inline bool wavLengthFits (double frames, int channels = 2, int bitsPerSample = 16)
+{
+    const double bytes = frames * (double) channels * (double) bitsPerSample / 8.0;
+    return frames >= 1.0 && frames <= 2147483647.0
+           && bytes <= 4294967295.0 - 65536.0;
+}
+
 bool writePageToWavFile (const juce::File& target,
                                 const upic::Page& page,
                                 const std::vector<upic::Waveform>& waves,

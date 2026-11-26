@@ -3,6 +3,14 @@
 #include "SelfTest.h"
 #include "AllocCounter.h"
 
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+ #include <psapi.h>
+#endif
+
 namespace
 {
     // The release gate runs from the repository root, but the selftest is also
@@ -635,6 +643,37 @@ void upic::runUntrustedPieceChecks (upic::SelfTest& t)
 
 }
 
+#if JUCE_WINDOWS
+namespace
+{
+    // WP10: the peak working set of this process, in bytes (0 when it cannot
+    // be read). The export streams the page to disk, so an hour-long page
+    // must not move this peak by the page's own size. The function is looked
+    // up at run time - kernel32 exports it as K32GetProcessMemoryInfo - so
+    // the app needs no extra import library, and psapi.dll is only the
+    // fallback for an older system.
+    juce::int64 processPeakWorkingSet()
+    {
+        using GetProcessMemoryInfoFn = BOOL (WINAPI*) (HANDLE, PROCESS_MEMORY_COUNTERS*, DWORD);
+        static GetProcessMemoryInfoFn fn = nullptr;
+        static bool looked = false;
+        if (! looked)
+        {
+            looked = true;
+            if (auto* k32 = GetModuleHandleA ("kernel32.dll"))
+                fn = (GetProcessMemoryInfoFn) (void*) GetProcAddress (k32, "K32GetProcessMemoryInfo");
+            if (fn == nullptr)
+                if (auto* psapi = LoadLibraryA ("psapi.dll"))
+                    fn = (GetProcessMemoryInfoFn) (void*) GetProcAddress (psapi, "GetProcessMemoryInfo");
+        }
+        if (fn == nullptr) return 0;
+        PROCESS_MEMORY_COUNTERS pmc {};
+        if (! fn (GetCurrentProcess(), &pmc, (DWORD) sizeof (pmc))) return 0;
+        return (juce::int64) pmc.PeakWorkingSetSize;
+    }
+}
+#endif
+
 void upic::runExportChecks (upic::SelfTest& t)
 {
     auto check = [&t] (bool ok, const juce::String& name, const juce::String& detail = {})
@@ -812,6 +851,99 @@ void upic::runExportChecks (upic::SelfTest& t)
             dir.deleteRecursively();
         }
         target.deleteFile();
+    }
+
+    // WP10 (part 4): a page may last an hour. The render walks the page
+    // block by block and writes each block as it goes, so the hour costs
+    // disk and time, not memory. The check exports a whole hour at 8 kHz
+    // (28.8 M frames, 57.6 MB mono) and watches the process's peak working
+    // set: holding the page as float pairs would need 230 MB, so the peak
+    // must not jump by anything like that.
+    {
+        const auto target = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("upic_wp10_hour_export.wav");
+        target.deleteFile();
+
+        upic::Page pg;
+        pg.durationSec = upic::kMaxPageSeconds;
+        upic::Arc a;
+        a.id = 1; a.waveformId = 0; a.envelopeId = 0; a.intensity = 0.5f;
+        a.points = { { 0.0, 220.0 }, { upic::kMaxPageSeconds, 220.0 } };
+        pg.arcs.push_back (a);
+
+        const auto waves = upic::defaultWaveforms();
+        const auto envs  = upic::defaultEnvelopes();
+        const std::vector<upic::SampleSlot> noSlots;
+
+        const double sr = 8000.0;   // still an hour of frames, a small file
+#if JUCE_WINDOWS
+        const juce::int64 peakBefore = processPeakWorkingSet();
+#endif
+        const bool wrote = writePageToWavFile (target, pg, waves, envs, noSlots,
+                                               sr, 0.5f, 0, 0, 0, nullptr, nullptr, -1,
+                                               [] (int) { return true; }, true);
+#if JUCE_WINDOWS
+        const juce::int64 peakAfter = processPeakWorkingSet();
+#endif
+
+        const juce::int64 expectedBytes = (juce::int64) (upic::kMaxPageSeconds * sr) * 2;
+        check (wrote, "WP10 an hour-long page renders to a WAV file");
+        check (target.existsAsFile() && target.getSize() >= expectedBytes,
+               "WP10 the hour-long render holds the whole page",
+               juce::String (target.getSize() / (1024 * 1024)) + " MB");
+
+#if JUCE_WINDOWS
+        if (peakBefore > 0 && peakAfter > 0)
+        {
+            const double grewMb = (double) (peakAfter - peakBefore) / (1024.0 * 1024.0);
+            const double peakMb = (double) peakAfter / (1024.0 * 1024.0);
+            t.note ("BENCH  export of a 60-minute page at 8 kHz: peak working set grew "
+                    + juce::String (grewMb, 1) + " MB, now "
+                    + juce::String (peakMb, 0)
+                    + " MB (buffering the page would need 230 MB)");
+            check (grewMb < 40.0,
+                   "WP10 the export streams the page instead of buffering it",
+                   juce::String (grewMb, 1) + " MB (allowed 40)");
+            // the plan's ceiling for the export: the whole process must stay
+            // under 300 MB, hour-long page or not
+            check (peakMb < 300.0,
+                   "WP10 the export's peak working set stays under the ceiling",
+                   juce::String (peakMb, 0) + " MB (allowed 300)");
+        }
+#endif
+        target.deleteFile();
+    }
+
+    // WP10: a WAV file cannot describe more than 4 GB, and an hour at
+    // 192 kHz with a strongly warped page is longer than that. The export
+    // refuses it before it writes a byte, and the destination is left alone.
+    {
+        upic::Page pg;
+        pg.durationSec = upic::kMaxPageSeconds;
+        pg.warp = 0.99;    // an audio length about 2.7x the score
+        upic::Arc a;
+        a.id = 1; a.waveformId = 0; a.envelopeId = 0; a.intensity = 0.5f;
+        a.points = { { 0.0, 220.0 }, { upic::kMaxPageSeconds, 220.0 } };
+        pg.arcs.push_back (a);
+
+        const auto target = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("upic_wp10_too_long.wav");
+        target.deleteFile();
+        const auto waves = upic::defaultWaveforms();
+        const auto envs  = upic::defaultEnvelopes();
+        const std::vector<upic::SampleSlot> noSlots;
+        const bool wrote = writePageToWavFile (target, pg, waves, envs, noSlots,
+                                               192000.0, 0.5f, 0, 0, 0, nullptr, nullptr, -1, {}, false);
+        check (! wrote && ! target.existsAsFile(),
+               "WP10 a page too long for a WAV file is refused, not half-written");
+
+        // the length check itself: an hour at 48 kHz fits, the same hour at
+        // 192 kHz with the warp does not
+        const double framesWarped = std::ceil (pg.audioDurationSec() * 192000.0);
+        check (! wavLengthFits (framesWarped, 2, 16)
+               && wavLengthFits (upic::kMaxPageSeconds * 48000.0, 2, 16),
+               "WP10 the WAV length check tells an hour at 48 kHz from one at 192 kHz",
+               juce::String (framesWarped / 1.0e6, 0) + " M frames");
     }
 
 }
