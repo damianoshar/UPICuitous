@@ -62,6 +62,7 @@ namespace upic
     void runWP10PageChecks (SelfTest& t);      // WP10: the page at an hour
     void runLayoutCharacterizationChecks (SelfTest& t); // R0: the layout, before it moves
     void runDocumentCharacterizationChecks (SelfTest& t); // R0: the document, before it moves
+    void runTransportPreviewCharacterizationChecks (SelfTest& t); // R0: the transport + preview
     void runFreqTableChecks (SelfTest& t); // WP1: the drawn conversion tables
     void runAmpTableChecks (SelfTest& t);  // WP2: the amplitude conversion tables
     void runGroupChecks (SelfTest& t);     // WP3: the arc groups
