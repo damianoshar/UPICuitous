@@ -70,6 +70,11 @@ build checks that the others still agree with it. `-SkipApp` or `-SkipPlugin`
 narrows the run. See `BUILDING.md` in the private `UPICuitous-docs` repository
 for the manual CMake commands, the Android project and troubleshooting.
 
+The gate starts with `scripts/check-boundaries.ps1`: the layout engines stay
+JUCE-free and know only each other, and every source file is listed in the
+Projucer project and in the plugin's build. A broken boundary stops the gate
+before the build.
+
 First run of the standalone: press **Audio** and pick the output device.
 The microphone is opened on demand (Sample tab -> **Mon** / **Capture**, or
 **Play** with live arcs on the page).
@@ -518,8 +523,8 @@ Source/              JUCE app + shared engine/UI
                      checks by area (Engine / Audio / Model / Files /
                      Midi / Ui / Snapshot) and the allocation counter
 Plugin/              VST3 wrapper (CMake): processor, editor, smoke test
-scripts/             build.ps1, install_plugin.ps1, fix_android.ps1,
-                     check_juce.ps1, fetch_pluginval.ps1
+scripts/             build.ps1, check-boundaries.ps1, install_plugin.ps1,
+                     fix_android.ps1, check_juce.ps1, fetch_pluginval.ps1
 Builds/Android/      Android Studio project (Gradle + CMake)
 Builds/VisualStudio2026/  generated Projucer solution (not committed)
 docs/android-build.md  what the .jucer owns and what the script owns

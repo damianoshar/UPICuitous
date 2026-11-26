@@ -35,6 +35,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 $validateSummary = "validation skipped"
+$boundarySummary = "skipped"
 
 function Step([string] $msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Die([string] $msg) { Write-Host "FAILED: $msg" -ForegroundColor Red; exit 1 }
@@ -390,6 +391,22 @@ function Test-CMakeCompilersExist {
 if ($Version) { Set-ProjectVersion $Version }
 Test-VersionSync
 
+# ---------------------------------------------------- dependency boundaries ---
+# The refactoring plan's adaptation of the review's "enforce the dependency
+# rules": the Windows gate does not build through the root CMake file, so the
+# boundary is enforced by a source-level check (scripts/check-boundaries.ps1).
+# It runs before the build - a boundary violation must not cost a build.
+Step "Dependency boundaries"
+try {
+    & (Join-Path $PSScriptRoot "check-boundaries.ps1") -Quiet
+    $boundaryRc = $LASTEXITCODE
+}
+catch {
+    Die "the dependency-boundary check failed: $_"
+}
+if ($boundaryRc -ne 0) { Die "the dependency-boundary check failed" }
+$boundarySummary = "5 rules, 0 violations"
+
 # ------------------------------------------------------------------- app ---
 $appOk = $true
 $appSummary = "skipped"
@@ -542,5 +559,5 @@ if (-not $SkipPlugin) {
 
 Write-Host ""
 $versionSummary = "version " + (Get-ProjectVersion)
-Write-Host "app selftest: $appSummary   |   legacy: $legacySummary   |   plugin: $pluginSummary   |   smoke: $smokeSummary   |   $validateSummary   |   $versionSummary" -ForegroundColor Green
+Write-Host "app selftest: $appSummary   |   legacy: $legacySummary   |   plugin: $pluginSummary   |   smoke: $smokeSummary   |   boundaries: $boundarySummary   |   $validateSummary   |   $versionSummary" -ForegroundColor Green
 Write-Host ""
