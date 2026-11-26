@@ -343,6 +343,29 @@ untouched, the golden render and the legacy fixture are unchanged, the full
 gate is green, and the gate's third JUCE-free group is the arc - a JUCE
 header in `Arc.h` fails the gate before the build.
 
+### 6.7 R2.3 - the arc's geometry
+
+**What moves.** The page-as-a-surface operations move out of `Arc.h` into
+the new `Source/ArcGeometry.h`: the frame (the page's normalised space),
+the scope and its bounds, the pitch centre, the rule that writes a moved
+point back, and the six operations - the rotation, the two mirrors, the
+scale, the alignment, the repeat.
+
+**What stays.** The arc's data in `Arc.h`: the points, the material, the
+settings, the four classical transformations and the interpolation. The
+direction is the point: the geometry knows the arc, the arc does not know
+the geometry. This is the review's R012.
+
+**The contract.** A suite of the geometry's own, written before the move:
+`Source/SelfTestArcGeometry.cpp`, 58 checks that reach the geometry
+through the domain's headers alone - no `MainComponent`, no window, no
+component tree. It pins the frame, the bounds, the pitch centre, the
+write-back rule and each transform with its edges and its invariants.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, the full
+gate is green, and the gate's fourth JUCE-free group is the geometry.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -369,7 +392,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 + R2.2 shipped** | `ea83dac`, `d58120d`, `bb23e1c` | app selftest 2,141/2,141, the domain's numeric core and the arc are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399` | app selftest 2,199/2,199, the domain's numeric core, the arc and the arc's geometry are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
@@ -681,5 +704,57 @@ application (the review's R089). See
 [`arc-codec-edge.md`](arc-codec-edge.md).
 
 Gate: app selftest 2,141/2,141, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
+
+### R2.3 record (2026-11-26)
+
+The arc's data and the arc's geometry are separate now - the review's
+R012.
+
+| Measure | Before | After |
+|---|---|---|
+| the arc | `Source/Arc.h`, 524 lines: the data and the geometry | `Source/Arc.h`, 264 lines: the data only |
+| the geometry | in the same file | `Source/ArcGeometry.h`, 291 lines |
+| the geometry's own suite | - | `Source/SelfTestArcGeometry.cpp`, 58 checks |
+| the gate's JUCE-free groups | 3 (the layout engines, the domain's numeric core, the arc) | 4 (the layout engines, the domain's numeric core, the arc, the arc's geometry) |
+
+The whole WP8 block moved, the same text in the same order: the frame (the
+page's normalised space), the scope and its bounds, the pitch centre, the
+rule that writes a moved point back, the rule that puts the points back in
+time order, and the six operations the UPIC's page could do to a drawing
+- the rotation, the two mirrors, the scale, the alignment, the repeat.
+
+`Source/Arc.h` keeps the data: `ArcPoint`, `Arc`, the four classical
+transformations and the interpolation the engine reads per sample.
+
+The direction is the point: the geometry knows the arc, the arc does not
+know the geometry. The gate says so - `ArcGeometry.h` may include
+`Arc.h`, `Arc.h` may not include `ArcGeometry.h` - and the geometry is the
+gate's fourth JUCE-free group, so a JUCE header in it fails the gate
+before the build. The negative test was run on the tree: `#include
+<JuceHeader.h>` in `ArcGeometry.h` fails the gate with the file and the
+line named.
+
+The suite came first. `Source/SelfTestArcGeometry.cpp` (58 checks) was
+written against the geometry where it was, and it passes unchanged after
+the move; it reaches the geometry through one include, so the move touched
+the suite in one place. It pins the frame (the times to 0..1, the ambitus
+to 0..1, the conversions are their own inverse - and the edges: a frame
+without time, a frame without an ambitus, a pitch below 1 Hz), the bounds
+of a scope, the pitch centre, the write-back rule, and each transform
+with its edges and its invariants: a transform may move a curve, but it may
+not leave it unsorted, out of range or not a number.
+
+What is still open: the other domain headers still carry their own
+`toVar` / `fromVar` members (the page's codec is the next one that
+matters - it holds the arcs); the coordinate conversions are still in two
+places - the frame's in the geometry, the model's in `UpicMath.h` (the
+review's R015 asks for one); and there is no headless domain target yet -
+the suites run inside the app's selftest binary, which is a JUCE
+application (the review's R089). See
+[`arc-geometry.md`](arc-geometry.md).
+
+Gate: app selftest 2,199/2,199, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
