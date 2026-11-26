@@ -366,6 +366,32 @@ write-back rule and each transform with its edges and its invariants.
 untouched, the golden render and the legacy fixture are unchanged, the full
 gate is green, and the gate's fourth JUCE-free group is the geometry.
 
+### 6.8 R2.4 - the page's codec edge
+
+**What moves.** The page's file format moves out of `Page.h` into the new
+`Source/PageCodec.h`: `juce::var toVar()` and `static Page fromVar()`
+become `upic::pageToVar (const Page&)` and `upic::pageFromVar (const
+juce::var&, int* renamedIds)`. The bodies are the old members, body for
+body. The page's own code loses JUCE with them: the numeric helpers it
+used are the standard library's, and `Page.h` no longer includes
+`<JuceHeader.h>`.
+
+**What stays.** The page's data and its rules in `Page.h`: the arcs, the
+zones, the four frequency spaces, the groups, the ambitus, the warp and
+the time map. The JUCE the page still sees comes from the types it holds
+(the group's `juce::String name` and `juce::Colour`), not from its own
+code - that is the next step of the wave.
+
+**The contract.** A suite of the edge's own, written before the move:
+`Source/SelfTestPageCodec.cpp`, 73 checks that reach the page through the
+domain's headers alone. It pins the keys and their order, the optional
+keys, the clamps, the ids, the caps, the group's membership and the round
+trip.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, the full
+gate is green, and the gate's fifth group is the page.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -392,7 +418,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399` | app selftest 2,199/2,199, the domain's numeric core, the arc and the arc's geometry are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977` | app selftest 2,272/2,272, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
@@ -756,5 +782,85 @@ application (the review's R089). See
 [`arc-geometry.md`](arc-geometry.md).
 
 Gate: app selftest 2,199/2,199, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
+
+### R2.4 record (2026-11-27)
+
+The page's data and the page's file format are separate now - the review's
+R020, "Remove unnecessary JUCE dependencies from domain", one step further.
+
+| Measure | Before | After |
+|---|---|---|
+| the page | `Source/Page.h`, 547 lines: the data, the rules and the file format | `Source/Page.h`, 381 lines: the data and the rules, no JUCE header |
+| the page's codec | two members of the class | `Source/PageCodec.h`, 214 lines: `pageToVar` and `pageFromVar` |
+| the page's own suite | - | `Source/SelfTestPageCodec.cpp`, 73 checks |
+| the gate's JUCE-free groups | 4 (the layout engines, the domain's numeric core, the arc, the arc's geometry) | 5 (the same, plus the page) |
+
+The two members became two free functions:
+
+| before | after |
+|---|---|
+| `Page::toVar()` | `upic::pageToVar (const Page&)` |
+| `Page::fromVar (const juce::var&)` | `upic::pageFromVar (const juce::var&, int* renamedIds)` |
+
+The bodies are the old members, body for body - the comparison is
+mechanical, line for line, modulo the `p.` the free function needs. The
+property names, their order, the optional keys a default page does not
+write and the clamps a crafted file gets are the file format itself, and
+they did not change by a character.
+
+`Source/Page.h` keeps the data and the rules: the arcs, the zones, the
+four frequency spaces, the groups, the ambitus, the warp and the time map.
+It lost JUCE with the codec: the numeric helpers it used (`juce::jlimit`,
+`juce::jmax`, `juce::jmin`) are the standard library's, with the same
+expressions and therefore the same results - the same substitution R2.1
+made in the numeric core and R2.2 made in the arc. `Page.h` no longer
+includes `<JuceHeader.h>`.
+
+The page is the gate's fifth group, so the boundary cannot be broken
+quietly: a JUCE header in `Page.h` fails the gate before the build, and so
+does a shell header the page has no business knowing. The negative test was
+run on the tree: `#include <JuceHeader.h>` in `Page.h` fails the gate with
+the file and the line named.
+
+The JUCE the page still sees comes from the types it holds (the group's
+`juce::String name` and `juce::Colour`), not from its own code. That is
+the next step of the wave: the `juce::String` and the `juce::Colour` leave
+the domain's data.
+
+The suite came first. `Source/SelfTestPageCodec.cpp` (73 checks) was
+written against the codec where it was, and it passes unchanged after the
+move; it reaches the codec through one door (the `encode` / `decode`
+helpers at the top of the file), so the move touched the suite in one
+place. It pins the keys and their order, the optional keys, the clamps,
+the ids, the caps, the group's membership and the round trip.
+
+Two things came out of writing it:
+
+- **`Source/Page.h` called `uniquifyIds()` without including `Ids.h`.** It
+  only compiled because every file that reached the page included
+  `UpicModel.h` first, and the model included `Ids.h` before `Page.h`. The
+  new suite reaches the page directly, and the compiler said so. The page
+  now includes what it uses.
+- **A renamed group is not reported.** The counter the loader hands back
+  counts the arcs and the zones; the groups are counted after the counter
+  was read. The suite pins the behaviour as it is - a refactoring phase does
+  not change what a piece load tells the user - and the note is on record
+  so that a later phase can decide whether it is a bug worth fixing on its
+  own.
+
+What is still open: the other domain headers still carry their own
+`toVar` / `fromVar` members (`Envelope.h`, `Piece.h`, `Sample.h`,
+`Tuning.h`, `Sieve.h`, `Waveform.h`, `ArcGroup.h`, `Channel.h`,
+`Performance.h`, `FreqSpace.h`), and the domain's data still holds JUCE
+values (the `juce::String name` and the `juce::Colour` of the groups, the
+envelopes, the waveforms and the channels); the sample's file reading is
+still in the domain (`Source/Sample.h` reads `juce::File`s); and there is
+no headless domain target yet - the suites run inside the app's selftest
+binary, which is a JUCE application (the review's R089). See
+[`page-codec-edge.md`](page-codec-edge.md).
+
+Gate: app selftest 2,272/2,272, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.

@@ -30,7 +30,7 @@ can come later, and then the check is the thing that says the two agree.
 | **B4** | the plugin's two CMake targets carry the same, complete source list | the VST3 and its smoke test build the same sources. A new engine or a new `MainComponent*.cpp` that is missing from one of them is a plugin that does not have the code it needs. |
 | **B5** | the generated Visual Studio project lists every `Source/*.cpp` | the same trap as B3, on the machine that runs the gate. `Builds/VisualStudio2026` is generated and not in the repository, so this rule only runs where the project has been generated. |
 
-B1 and B2 cover four groups, each with its own permitted project headers:
+B1 and B2 cover five groups, each with its own permitted project headers:
 
 | Group | Files | May include |
 |---|---|---|
@@ -38,10 +38,18 @@ B1 and B2 cover four groups, each with its own permitted project headers:
 | the domain's numeric core | `UpicConstants.h`, `PieceLimits.h`, `UpicMath.h`, `Ids.h` | the units, the validation and the math |
 | the arc | `Arc.h` | the units, the validation and the math |
 | the arc's geometry | `ArcGeometry.h` | the arc it moves, and the domain's headers |
+| the page | `Page.h` | the domain's headers it holds: the arc, the geometry, the group, the envelope, the frequency space, the ids, the limits, the sieve, the units, the theme and the waveform |
 
-The codec (`Source/ArcCodec.h`) is deliberately **not** in a group: it is
-the edge where the JUCE value types live. The plan keeps them there (R2),
-and the check says so by leaving the edge out.
+The codecs (`Source/ArcCodec.h` and `Source/PageCodec.h`) are deliberately
+**not** in a group: they are the edge where the JUCE value types live. The
+plan keeps them there (R2), and the check says so by leaving the edge out.
+
+The page's group is the one that is not JUCE-free yet, and the check says
+exactly what it checks: `Page.h` asks for **no JUCE header of its own**.
+The JUCE the page still sees comes from the types it holds (the group's
+`juce::String name` and `juce::Colour`), not from its own code. When those
+leave the domain's data, the page becomes JUCE-free in the whole sense and
+the group's rule stays the same.
 
 B4's required set is every `Source/*.cpp` that is not a selftest and whose
 name says it belongs to the shell or to an engine (`MainComponent*.cpp`,
@@ -78,9 +86,10 @@ build. The gate's step is:
     B1/B2 the domain's numeric core (4 files): no JUCE header, no header outside the group
     B1/B2 the arc (1 file): no JUCE header, no header outside the group
     B1/B2 the arc's geometry (1 file): no JUCE header, no header outside the group
-    B3 the Projucer project lists all 38 source files
+    B1/B2 the page (1 file): no JUCE header, no header outside the group
+    B3 the Projucer project lists all 39 source files
     B4 the plugin's two targets carry the same 19 source files
-    B5 the generated Visual Studio project lists all 38 source files
+    B5 the generated Visual Studio project lists all 39 source files
     dependency boundaries: 5 rules, 0 violations
 ```
 
