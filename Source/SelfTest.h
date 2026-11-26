@@ -61,6 +61,7 @@ namespace upic
     void runWP10WaveChecks (SelfTest& t);      // WP10: the wavetable at 4096 samples
     void runWP10PageChecks (SelfTest& t);      // WP10: the page at an hour
     void runLayoutCharacterizationChecks (SelfTest& t); // R0: the layout, before it moves
+    void runBottomLayoutCharacterizationChecks (SelfTest& t); // R1.2: the panels below the toolbar
     void runDocumentCharacterizationChecks (SelfTest& t); // R0: the document, before it moves
     void runTransportPreviewCharacterizationChecks (SelfTest& t); // R0: the transport + preview
     void runFreqTableChecks (SelfTest& t); // WP1: the drawn conversion tables

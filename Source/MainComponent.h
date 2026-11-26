@@ -1324,6 +1324,54 @@ public:
     }
     juce::Rectangle<int> toolbarBoundsForTest() const { return toolbarBounds; }
 
+    // --- R1.2: the panels below the toolbar ------------------------------
+    // The bottom half of the window, for the characterization suite that
+    // runs before its geometry moves out of resized().
+    juce::Rectangle<int> scoreBoundsForTest() const { return score.getBounds(); }
+    bool scoreVisibleForTest() const { return score.isVisible(); }
+    float layoutScaleForTest() const { return appLaf.uiScale; }
+    juce::Rectangle<int> viewBarBoundsForTest() const { return viewBar.getBounds(); }
+    bool viewBarVisibleForTest() const { return viewBar.isVisible(); }
+    juce::Rectangle<int> waveEditorBoundsForTest() const { return waveEd.getBounds(); }
+    bool waveEditorVisibleForTest() const { return waveEd.isVisible(); }
+    juce::Rectangle<int> envelopeEditorBoundsForTest() const { return envEd.getBounds(); }
+    bool envelopeEditorVisibleForTest() const { return envEd.isVisible(); }
+    juce::Rectangle<int> waveLibraryBoundsForTest() const { return waveLib.getBounds(); }
+    juce::Rectangle<int> envelopeLibraryBoundsForTest() const { return envLib.getBounds(); }
+    juce::Rectangle<int> voiceLabelBoundsForTest() const { return voiceLab.getBounds(); }
+    juce::Rectangle<int> voiceButtonBoundsForTest (int i) const
+    {
+        switch (i)
+        {
+            case 0: return assignBtn.getBounds();
+            case 1: return delArcBtn.getBounds();
+            case 2: return muteArcBtn.getBounds();
+            case 3: return dupArcBtn.getBounds();
+            case 4: return selectAllBtn.getBounds();
+            default: return {};
+        }
+    }
+    juce::Rectangle<int> arcListPanelBoundsForTest() const { return arcListPanel.getBounds(); }
+    bool arcListPanelVisibleForTest() const { return arcListPanel.isVisible(); }
+    juce::Rectangle<int> workspaceBoundsForTest() const { return workspace.getBounds(); }
+    juce::Rectangle<int> workspaceSplitterBoundsForTest() const { return workspaceSplitter.getBounds(); }
+    bool workspaceSplitterVisibleForTest() const { return workspaceSplitter.isVisible(); }
+    void setEditorsVisibleForTest (bool wave, bool env)
+    {
+        showWaveEd = wave;
+        showEnvEd = env;
+        waveTog.setToggleState (wave, juce::dontSendNotification);
+        envTog.setToggleState (env, juce::dontSendNotification);
+        resized();
+    }
+    void setArcListVisibleForTest (bool on)
+    {
+        showArcList = on;
+        arcListBtn.setToggleState (on, juce::dontSendNotification);
+        arcListDirty = true;
+        resized();
+    }
+
     // --- F4 (2026-11-17): the focus views --------------------------------
     // A focus view maximises one panel: the score, the wave editor or the
     // envelope editor. The permanent strip (Menu, Play/Stop, the tool and

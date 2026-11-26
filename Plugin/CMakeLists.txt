@@ -45,6 +45,7 @@ target_sources(UPICuitousPlugin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentControls.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentLayout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/CardLayoutEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/BottomLayoutEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentModel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentAudio.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentInput.cpp
@@ -96,6 +97,7 @@ target_sources(UPICuitousPluginSmokeTest PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentControls.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentLayout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/CardLayoutEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Source/BottomLayoutEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentModel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentAudio.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../Source/MainComponentInput.cpp

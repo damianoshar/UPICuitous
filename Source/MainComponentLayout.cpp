@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "CardLayoutEngine.h"
+#include "BottomLayoutEngine.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -1078,7 +1079,7 @@ void MainComponent::resized()
     }
 
     auto b = getLocalBounds().reduced(8);
-    const int rowH36 = 36, minScoreH = 150, minEdH = 110, wantEdH = 300;
+    const int rowH36 = 36, minScoreH = 150, minEdH = 110;
     // Landscape (wider than tall): voice controls become a slim strip under
     // the editors - a tall side column would sit mostly empty on short
     // screens. Portrait keeps the side column.
@@ -1427,67 +1428,62 @@ void MainComponent::resized()
     // the whole area below the toolbar, the other panels and the groups go.
     // The branch is placed after the helpers (the editor placement and the
     // tab strip), so both paths use the same code.
-    auto placeEditor = [&] (juce::Rectangle<int> col, juce::Component& editor,
-                           LibraryManager& manager, juce::Component* const* btns,
-                           const int* ideal, int n, juce::Component* focusBtn)
+    // R1.2: the editor column's geometry (the bank row, the preset row and
+    // the editor) comes from BottomLayoutEngine; this applies it.
+    auto applyEditorLayout = [&] (const upic::layout::EditorColumnLayout& ed,
+                                  juce::Component& editor, LibraryManager& manager,
+                                  juce::Component* const* btns,
+                                  juce::Component* focusBtn)
     {
-        // F2/F3: two header rows - the bank manager (selector, swatch and
-        // commands) and the preset buttons. The editor takes the rest.
-        manager.setBounds(col.removeFromTop((int) std::lround(26.0f * s)).reduced(2));
-        auto t = col.removeFromTop((int) std::lround(26.0f * s));
-        // F4: the focus button sits at the right end of the preset row.
+        manager.setBounds (toJuceRect (ed.manager));
         if (focusBtn != nullptr)
-            focusBtn->setBounds (t.removeFromRight ((int) std::lround (64.0f * s)).reduced (1));
-        int idealSum = 0;
-        for (int i = 0; i < n; ++i)
-            idealSum += ideal[i];
-        const int avail = t.getWidth();
-        for (int i = 0; i < n; ++i)
-        {
-            const int rem = t.getWidth();
-            if (rem <= 0) break;
-            const int w = juce::jlimit(1, rem, (int) std::lround((double)avail
-                                        * (double)ideal[i]
-                                        / (double)juce::jmax(1, idealSum)));
-            btns[i]->setBounds(t.removeFromLeft(w).reduced(1));
-        }
-        editor.setBounds(col.reduced(2));
+            focusBtn->setBounds (toJuceRect (ed.focusButton));
+        for (size_t i = 0; i < ed.buttons.size(); ++i)
+            if (btns[i] != nullptr)
+                btns[i]->setBounds (toJuceRect (ed.buttons[i]));
+        editor.setBounds (toJuceRect (ed.editor));
     };
 
     // v1.8 one strip directly above the canvas: each material is a tab and
     // its own canvas layer - Osc | Sample | Live - with the v1.7 view
-    // toggles at the right end of the same strip
-    auto placeTabStrip = [&] (juce::Rectangle<int> tabs)
+    // toggles at the right end of the same strip. R1.2: the geometry is the
+    // engine's; the visibility rules stay here.
+    auto applyTabStrip = [&] (const upic::layout::TabStripLayout& tabs)
     {
         matPmTog.setVisible (true);
         arcListBtn.setVisible (true);
-        matOscTog.setBounds(tabs.removeFromLeft((int) std::lround(56.0f * s)).reduced(1));
-        matSampleTog.setBounds(tabs.removeFromLeft((int) std::lround(76.0f * s)).reduced(1));
-        matLiveTog.setBounds(tabs.removeFromLeft((int) std::lround(56.0f * s)).reduced(1));
-        if (tabs.getWidth() >= (int) std::lround (40.0f * s)) matPmTog.setBounds (tabs.removeFromLeft ((int) std::lround (40.0f * s)).reduced (1));
-        else matPmTog.setVisible (false);
+        matOscTog.setBounds (toJuceRect (tabs.osc));
+        matSampleTog.setBounds (toJuceRect (tabs.sample));
+        matLiveTog.setBounds (toJuceRect (tabs.live));
+        if (tabs.pmVisible)
+            matPmTog.setBounds (toJuceRect (tabs.pm));
+        else
+            matPmTog.setVisible (false);
         // F4: the score's focus button sits at the right end of the score's
         // own row (the canvas may not be covered by a control - the layout
         // is a pure tiling).
-        if (tabs.getWidth() >= (int) std::lround (60.0f * s))
-            scoreFocusBtn.setBounds (tabs.removeFromRight ((int) std::lround (60.0f * s)).reduced (1));
-        else scoreFocusBtn.setVisible (false);
-        hintsTog.setBounds(tabs.removeFromRight((int) std::lround(56.0f * s)).reduced(1));
-        envTog.setBounds(tabs.removeFromRight((int) std::lround(46.0f * s)).reduced(1));
-        waveTog.setBounds(tabs.removeFromRight((int) std::lround(52.0f * s)).reduced(1));
+        if (tabs.scoreFocusVisible)
+            scoreFocusBtn.setBounds (toJuceRect (tabs.scoreFocus));
+        else
+            scoreFocusBtn.setVisible (false);
+        hintsTog.setBounds (toJuceRect (tabs.hints));
+        envTog.setBounds (toJuceRect (tabs.env));
+        waveTog.setBounds (toJuceRect (tabs.wave));
         // WP9: the workspace toggle sits with the other view toggles
-        if (tabs.getWidth() >= (int) std::lround (72.0f * s))
-            workspaceBtn.setBounds (tabs.removeFromRight ((int) std::lround (72.0f * s)).reduced (1));
-        else workspaceBtn.setBounds ({});
+        workspaceBtn.setBounds (toJuceRect (tabs.workspace));
         // v1.21: the arc list toggle sits with the other view toggles
-        if (tabs.getWidth() >= (int) std::lround (52.0f * s)) arcListBtn.setBounds (tabs.removeFromRight ((int) std::lround (52.0f * s)).reduced (1));
-        else arcListBtn.setVisible (false);
+        if (tabs.arcListVisible)
+            arcListBtn.setBounds (toJuceRect (tabs.arcList));
+        else
+            arcListBtn.setVisible (false);
     };
 
     juce::Component* wbtns[8] = { &wSine, &wSaw, &wSqr, &wTri, &wNoise, &wSmooth, &wNorm, &waveAsEnvBtn };
     const int wideal[] = { 30, 30, 30, 30, 44, 48, 34, 56 };
     juce::Component* ebtns[6] = { &eFlat, &ePerc, &eSwell, &eGate, &eStr, &envAsWaveBtn };
     const int eideal[] = { 40, 40, 44, 40, 34, 56 };
+    const std::vector<int> widealDp (wideal, wideal + 8);
+    const std::vector<int> eidealDp (eideal, eideal + 6);
 
     // --- F4: the focus view ---------------------------------------------
     if (focusedPanel != FocusPanel::none)
@@ -1520,7 +1516,8 @@ void MainComponent::resized()
         {
             // the material tabs belong to the score: they stay with it
             b.removeFromBottom(6);
-            placeTabStrip (b.removeFromTop ((int) std::lround (26.0f * s)));
+            applyTabStrip (upic::layout::layoutTabStrip (
+                toEngineRect (b.removeFromTop ((int) std::lround (26.0f * s))), s));
             // F6: the view bar keeps its own row, under the canvas
             viewBar.setVisible (true);
             viewBar.setLayoutScale (s);
@@ -1540,13 +1537,17 @@ void MainComponent::resized()
             {
                 waveEd.setVisible (true); waveLib.setVisible (true);
                 for (auto* w : wbtns) w->setVisible (true);
-                placeEditor (b, waveEd, waveLib, wbtns, wideal, 8, &waveFocusBtn);
+                applyEditorLayout (upic::layout::layoutEditorColumn (
+                                       toEngineRect (b), s, widealDp),
+                                   waveEd, waveLib, wbtns, &waveFocusBtn);
             }
             else
             {
                 envEd.setVisible (true); envLib.setVisible (true);
                 for (auto* eb : ebtns) eb->setVisible (true);
-                placeEditor (b, envEd, envLib, ebtns, eideal, 6, &envFocusBtn);
+                applyEditorLayout (upic::layout::layoutEditorColumn (
+                                       toEngineRect (b), s, eidealDp),
+                                   envEd, envLib, ebtns, &envFocusBtn);
             }
         }
 
@@ -1555,25 +1556,22 @@ void MainComponent::resized()
         return;
     }
 
-    const int stripH = stripMode ? (int) std::lround(34.0f * s) : 0;
-    // F6: the score's view bar has its own row, directly under the canvas.
-    // The row comes out of the editors' height, so the canvas keeps the
-    // space it had (the canvas is the app's main work area).
-    const int viewBarH = (int) std::lround (26.0f * s);
-    // a single visible editor gets a little less height than two side by side
-    const float wantEdHNow = (showWaveEd && showEnvEd) ? wantEdH : 240.0f;
-    int edH = anyEditors ? (int) std::lround(wantEdHNow * s) : 0;
-    const int budget = b.getHeight() - (int) std::lround(minScoreH * s) - 6 - stripH;
-    // v1.34.1: the score is the composition canvas, so the editors keep at
-    // most ~42% of the height below the toolbar even when they would like
-    // 300dp. The recovered toolbar height goes to the score, not to empty
-    // space at the bottom of a fixed-height editor.
-    const int edCap = juce::jmax ((int) std::lround (minEdH * s),
-                                  (int) std::lround ((float) juce::jmax (0, b.getHeight() - stripH) * 0.42f));
-    if (anyEditors)
-        edH = juce::jmin(edH, juce::jmax((int) std::lround(minEdH * s),
-                                         juce::jmin (budget, edCap)));
-    auto bottom = b.removeFromBottom(edH + stripH);
+    // R1.2: the whole bottom half - the editor height budget, the view bar,
+    // the editor columns, the voice controls, the tab strip, the arc list
+    // and the canvas - is BottomLayoutEngine's. This method builds the plain
+    // specification and applies the result.
+    upic::layout::BottomLayoutConstraints bottomSpec;
+    bottomSpec.area = toEngineRect (b);
+    bottomSpec.scale = s;
+    bottomSpec.waveEditor = showWaveEd;
+    bottomSpec.envelopeEditor = showEnvEd;
+    bottomSpec.landscape = landscape;
+    bottomSpec.arcList = showArcList;
+    bottomSpec.workspace = workspaceOpen && ! anyFocus;
+    bottomSpec.workspaceSplit = workspace.getSplit();
+    bottomSpec.waveIdealsDp = widealDp;
+    bottomSpec.envelopeIdealsDp = eidealDp;
+    const auto bottom = upic::layout::layoutBottom (bottomSpec);
 
     // F6: the view bar sits between the canvas and the editors. When the
     // editors are there, its row comes out of their height, so the canvas
@@ -1581,47 +1579,18 @@ void MainComponent::resized()
     // the canvas's own area (there is nothing else to give).
     viewBar.setVisible (true);
     viewBar.setLayoutScale (s);
-    if (anyEditors)
-        viewBar.setBounds (bottom.removeFromTop (viewBarH));
-    else
-        viewBar.setBounds (b.removeFromBottom (viewBarH));
-
-    juce::Rectangle<int> vcol, vstrip;
-    if (stripMode)
-        vstrip = bottom.removeFromBottom(stripH);
-    else
-        vcol = bottom.removeFromRight(jmax((int) std::lround(150.0f * s),
-                                           bottom.getWidth() * 12 / 100));
-
-    // Editors side-by-side when there's room; on narrow layouts (portrait
-    // phones) stack them so each keeps a usable width. A single visible
-    // editor takes the whole width.
-    juce::Rectangle<int> waveCol, envCol;
-    if (showWaveEd && showEnvEd)
-    {
-        if (bottom.getWidth() >= (int) std::lround(460.0f * s))
-        {
-            waveCol = bottom.removeFromLeft(bottom.getWidth() * 42 / 100);
-            envCol  = bottom;
-        }
-        else
-        {
-            waveCol = bottom.removeFromTop(bottom.getHeight() / 2);
-            envCol  = bottom;
-        }
-    }
-    else if (showWaveEd) waveCol = bottom;
-    else if (showEnvEd)  envCol  = bottom;
+    viewBar.setBounds (toJuceRect (bottom.viewBar));
 
     waveEd.setVisible(showWaveEd);
     waveLib.setVisible(showWaveEd);
     for (auto* w : wbtns) w->setVisible(showWaveEd);
-    if (showWaveEd) placeEditor(waveCol, waveEd, waveLib, wbtns, wideal, 8, &waveFocusBtn);
+    if (showWaveEd) applyEditorLayout (bottom.waveEditor, waveEd, waveLib, wbtns, &waveFocusBtn);
 
     envEd.setVisible(showEnvEd);
     envLib.setVisible(showEnvEd);
     for (auto* eb : ebtns) eb->setVisible(showEnvEd);
-    if (showEnvEd) placeEditor(envCol, envEd, envLib, ebtns, eideal, 6, &envFocusBtn);
+    if (showEnvEd) applyEditorLayout (bottom.envelopeEditor, envEd, envLib, ebtns, &envFocusBtn);
+
     // F4: leaving a focus view restores everything the focus hid.
     score.setVisible (true);
     voiceLab.setVisible (true);
@@ -1637,55 +1606,27 @@ void MainComponent::resized()
     scoreFocusBtn.setVisible (true);
     waveFocusBtn.setVisible (showWaveEd);
     envFocusBtn.setVisible (showEnvEd);
-    // voice controls: side column (portrait with editors) or slim strip
-    if (stripMode)
-    {
-        auto v = vstrip.reduced(4);
-        voiceLab.setBounds(v.removeFromLeft((int) std::lround(140.0f * s)).reduced(2));
-        const int bw = juce::jmax(1, v.getWidth() / 5);
-        assignBtn.setBounds(v.removeFromLeft(bw).reduced(2));
-        delArcBtn.setBounds(v.removeFromLeft(bw).reduced(2));
-        muteArcBtn.setBounds(v.removeFromLeft(bw).reduced(2));
-        dupArcBtn.setBounds(v.removeFromLeft(bw).reduced(2));
-        selectAllBtn.setBounds(v.reduced(2));
-    }
-    else
-    {
-        auto v = vcol.reduced(4);
-        voiceLab.setBounds(v.removeFromTop((int) std::lround(20.0f * s)));
-        auto row = v.removeFromTop((int) std::lround(26.0f * s));
-        assignBtn.setBounds(row.removeFromLeft(row.getWidth()/2).reduced(2));
-        delArcBtn.setBounds(row.removeFromLeft(row.getWidth()/2).reduced(2));
-        muteArcBtn.setBounds(row.reduced(2));
-        // v1.34.4: the second row carries Duplicate and Select all.
-        auto row2 = v.removeFromTop((int) std::lround (26.0f * s));
-        const int bw2 = juce::jmax (1, row2.getWidth() / 2);
-        dupArcBtn.setBounds(row2.removeFromLeft(bw2).reduced(2));
-        selectAllBtn.setBounds(row2.reduced(2));
-    }
 
-    b.removeFromBottom(6);
+    // voice controls: the engine already chose the side column (portrait
+    // with editors) or the slim strip
+    voiceLab.setBounds (toJuceRect (bottom.voice.label));
+    assignBtn.setBounds (toJuceRect (bottom.voice.assign));
+    delArcBtn.setBounds (toJuceRect (bottom.voice.del));
+    muteArcBtn.setBounds (toJuceRect (bottom.voice.mute));
+    dupArcBtn.setBounds (toJuceRect (bottom.voice.dup));
+    selectAllBtn.setBounds (toJuceRect (bottom.voice.selectAll));
+
     // v1.8 one strip directly above the canvas: each material is a tab and
     // its own canvas layer - Osc | Sample | Live - with the v1.7 view
     // toggles at the right end of the same strip
-    placeTabStrip (b.removeFromTop ((int) std::lround (26.0f * s)));
+    applyTabStrip (bottom.tabStrip);
     workspaceBtn.setVisible (! anyFocus && workspaceBtn.getWidth() > 0);   // WP9
 
     // v1.21: the arc list takes the right side of the canvas
-    if (showArcList)
+    if (bottom.arcListVisible)
     {
-        // at most 300 dp, and never so much that the canvas gets too narrow
-        const int panelW = juce::jmin ((int) std::lround (300.0f * s),
-                                        juce::jmax (0, b.getWidth() - (int) std::lround (240.0f * s)));
-        if (panelW > 60)
-        {
-            arcListPanel.setBounds (b.removeFromRight (panelW).reduced (2));
-            arcListPanel.setVisible (true);
-        }
-        else
-        {
-            arcListPanel.setVisible (false);
-        }
+        arcListPanel.setBounds (toJuceRect (bottom.arcList));
+        arcListPanel.setVisible (true);
     }
     else
     {
@@ -1695,9 +1636,10 @@ void MainComponent::resized()
     // WP9: the workspace takes the canvas area when it is open: its
     // canvases stand side by side, and the app's own canvas is the first
     // of them. The focus view is one canvas, so the workspace waits there.
+    const auto canvas = toJuceRect (bottom.canvas);
     if (workspaceOpen && ! anyFocus)
     {
-        workspace.setBounds (b);
+        workspace.setBounds (canvas);
         const auto origin = workspace.getPosition();
         for (int i = 0; i < workspace.canvasCount(); ++i)
         {
@@ -1709,11 +1651,8 @@ void MainComponent::resized()
             }
         }
         // the divider stands where the split is
-        const int dividerX = b.getX()
-                           + juce::roundToInt ((double) b.getWidth() * workspace.getSplit())
-                           - 3;
-        workspaceSplitter.setArea (b);
-        workspaceSplitter.setBounds (dividerX, b.getY(), 6, b.getHeight());
+        workspaceSplitter.setArea (canvas);
+        workspaceSplitter.setBounds (toJuceRect (bottom.splitter));
         workspaceSplitter.setVisible (true);
         workspace.repaint();
     }
@@ -1723,7 +1662,7 @@ void MainComponent::resized()
         workspaceSplitter.setVisible (false);
         for (auto& c : workspaceScores)
             if (c != nullptr) c->setVisible (false);
-        score.setBounds(b);
+        score.setBounds (canvas);
     }
 
 
