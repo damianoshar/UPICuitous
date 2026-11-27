@@ -19,6 +19,7 @@
 #include "UserLibrary.h"
 #include "Ids.h"
 #include "EnvelopeCodec.h"
+#include "FreqSpaceCodec.h"
 #include "PerformanceCodec.h"
 #include "WaveformCodec.h"
 
@@ -145,7 +146,7 @@ namespace
 
     juce::var frequencyPayload (int space, int page)
     {
-        auto payload = frequencyDef().toVar (space);
+        auto payload = upic::freqSpaceDefToVar (frequencyDef(), space);
         if (auto* object = payload.getDynamicObject())
             object->setProperty ("page", page);
         return payload;
@@ -406,7 +407,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 upic::UserAsset asset;
                 const bool ok = upic::UserLibrary::read (upic::UserAssetKind::FreqTable,
                                                          file, asset, error);
-                const auto d = upic::FreqSpaceDef::fromVar (asset.payload);
+                const auto d = upic::freqSpaceDefFromVar (asset.payload);
                 check (ok && d.editable && d.points.size() == 3
                        && std::abs (std::exp2 ((double) d.points[1].log2Hz) - 440.0) < 0.5
                        && (int) asset.payload.getProperty ("space", -1) == 1

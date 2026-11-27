@@ -201,68 +201,9 @@ namespace upic
             return p0.log2Hz + (p1.log2Hz - p0.log2Hz) * (double) f;
         }
 
-        // The curve as a var. Only the non-default fields are written, so a
-        // piece that never edited a table is byte-for-byte what it was.
-        static juce::var pointsToVar (const std::vector<TablePoint>& pts)
-        {
-            juce::Array<juce::var> arr;
-            for (const auto& p : pts)
-            {
-                auto* o = new juce::DynamicObject();
-                o->setProperty ("x", p.x);
-                o->setProperty ("hz", std::exp2 ((double) p.log2Hz));
-                arr.add (juce::var (o));
-            }
-            return juce::var (arr);
-        }
-
-        juce::var toVar (int index) const
-        {
-            auto* o = new juce::DynamicObject();
-            o->setProperty ("space", index);
-            if (preset != 0) o->setProperty ("preset", preset);
-            o->setProperty ("editable", editable);
-            if (stepped) o->setProperty ("stepped", true);
-            if (stepDivisions > 0) o->setProperty ("divisions", stepDivisions);
-            if (inverted) o->setProperty ("inverted", true);
-            if (! points.empty()) o->setProperty ("points", pointsToVar (points));
-            return juce::var (o);
-        }
-
-        static FreqSpaceDef fromVar (const juce::var& v)
-        {
-            FreqSpaceDef d;
-            d.preset = juce::jlimit (0, (int) freqSpacePresets().size() - 1,
-                                     (int) v.getProperty ("preset", 0));
-            d.editable = (bool) v.getProperty ("editable", false);
-            d.stepped = (bool) v.getProperty ("stepped", false);
-            d.stepDivisions = juce::jlimit (0, limits::kMaxStepDivisions,
-                                            (int) v.getProperty ("divisions", 0));
-            d.inverted = (bool) v.getProperty ("inverted", false);
-            if (auto* arr = v.getProperty ("points", juce::var()).getArray())
-            {
-                const double loLog = std::log2 (kMinFreq);
-                const double hiLog = std::log2 (kMaxFreq);
-                for (auto& pv : *arr)
-                {
-                    if ((int) d.points.size() >= limits::kMaxTablePoints) break;
-                    TablePoint p;
-                    p.x = (float) limits::clampFinite ((double) pv.getProperty ("x", 0.0), 0.0, 1.0);
-                    const double hz = limits::clampFinite ((double) pv.getProperty ("hz", 440.0),
-                                                          kMinFreq, kMaxFreq);
-                    p.log2Hz = (float) limits::clampFinite (std::log2 (juce::jmax (1.0e-6, hz)),
-                                                           loLog, hiLog);
-                    d.points.push_back (p);
-                }
-                std::sort (d.points.begin(), d.points.end(),
-                           [] (const TablePoint& a, const TablePoint& b) { return a.x < b.x; });
-            }
-            // a table needs two points to be a curve; anything less falls
-            // back to the preset rather than producing a constant pitch
-            if (d.points.size() < 2) d.editable = false;
-            if (! d.editable) d.points.clear();
-            return d;
-        }
+        // R2.13: the file format of a frequency space definition is a
+        // different thing from what a definition is. It lives at the edge
+        // (Source/FreqSpaceCodec.h), where the JUCE value types are kept.
     };
 
     //---------------- the render-time lookup table (WP1) ----------------

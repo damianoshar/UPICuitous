@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "FreqSpace.h"
+#include "FreqSpaceCodec.h"
 #include "PieceLimits.h"
 #include "UpicConstants.h"
 
@@ -36,8 +37,8 @@
 namespace
 {
     // The frequency space definition's codec, reached through one door.
-    juce::var encode (const upic::FreqSpaceDef& d, int index) { return d.toVar (index); }
-    upic::FreqSpaceDef decode (const juce::var& v) { return upic::FreqSpaceDef::fromVar (v); }
+    juce::var encode (const upic::FreqSpaceDef& d, int index) { return upic::freqSpaceDefToVar (d, index); }
+    upic::FreqSpaceDef decode (const juce::var& v) { return upic::freqSpaceDefFromVar (v); }
 
     // The property names of an object, in the order they were written.
     juce::StringArray names (const juce::var& v)

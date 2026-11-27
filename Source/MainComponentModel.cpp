@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "UserLibrary.h"
+#include "FreqSpaceCodec.h"
 #include "PerformanceCodec.h"
 #include "GraphicalCurve.h"
 #include "EnvelopeCodec.h"
@@ -1458,7 +1459,7 @@ bool MainComponent::libraryPublishFreqTable()
         def = pages[(size_t) page].spaceDefs[(size_t) space];
     }
 
-    auto payload = def.toVar (space);
+    auto payload = upic::freqSpaceDefToVar (def, space);
     if (auto* object = payload.getDynamicObject())
         object->setProperty ("page", page);
 
@@ -1534,7 +1535,7 @@ bool MainComponent::libraryImportFreqTable()
             return false;
         }
 
-        auto imported = upic::FreqSpaceDef::fromVar (asset.payload);
+        auto imported = upic::freqSpaceDefFromVar (asset.payload);
         auto& destination = pages[(size_t) page].spaceDefs[(size_t) space];
         destination = imported;
         pages[(size_t) page].spaces[(size_t) space] = imported.preset;

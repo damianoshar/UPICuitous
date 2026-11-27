@@ -32,6 +32,7 @@
 #include "ArcGroup.h"
 #include "ArcGroupCodec.h"
 #include "FreqSpace.h"
+#include "FreqSpaceCodec.h"
 #include "Ids.h"
 #include "Page.h"
 #include "Sieve.h"
@@ -82,7 +83,7 @@ namespace upic
             juce::Array<juce::var> tarr;
             for (int i = 0; i < (int) p.spaceDefs.size(); ++i)
                 if (! p.spaceDefs[(size_t) i].isDefault())
-                    tarr.add (p.spaceDefs[(size_t) i].toVar (i));
+                    tarr.add (freqSpaceDefToVar (p.spaceDefs[(size_t) i], i));
             if (! tarr.isEmpty())
                 o->setProperty ("spaceTables", tarr);
         }
@@ -172,7 +173,7 @@ namespace upic
             for (auto& tv : *tarr)
             {
                 const int idx = juce::jlimit (0, 3, (int) tv.getProperty ("space", 0));
-                p.spaceDefs[(size_t) idx] = FreqSpaceDef::fromVar (tv);
+                p.spaceDefs[(size_t) idx] = freqSpaceDefFromVar (tv);
             }
         // v1.33: the page's acceleration (absent in old pieces -> a
         // straight line)
