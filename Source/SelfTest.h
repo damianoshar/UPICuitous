@@ -87,6 +87,7 @@ namespace upic
     void runChannelCodecChecks (SelfTest& t);  // R2.8: the channel's codec - the file format
     void runSampleCodecChecks (SelfTest& t);   // R2.9: the sample slot's codec - the file format
     void runTuningCodecChecks (SelfTest& t);   // R2.10: the tuning's codec - the file format
+    void runSieveCodecChecks (SelfTest& t);    // R2.11: the sieve zone's codec - the file format
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);

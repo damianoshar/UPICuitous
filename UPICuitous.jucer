@@ -28,6 +28,7 @@
       <FILE id="sTc30" name="SelfTestChannelCodec.cpp" compile="1" resource="0" file="Source/SelfTestChannelCodec.cpp"/>
       <FILE id="sTs31" name="SelfTestSampleCodec.cpp" compile="1" resource="0" file="Source/SelfTestSampleCodec.cpp"/>
       <FILE id="sTt32" name="SelfTestTuningCodec.cpp" compile="1" resource="0" file="Source/SelfTestTuningCodec.cpp"/>
+      <FILE id="sTs33" name="SelfTestSieveCodec.cpp" compile="1" resource="0" file="Source/SelfTestSieveCodec.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>
