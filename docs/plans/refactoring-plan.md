@@ -667,6 +667,47 @@ at the edge.
 untouched, the golden render and the legacy fixture are unchanged, and the
 full gate is green.
 
+### 6.18 R3.1 - the document session
+
+**What moves.** The document's own state leaves `MainComponent` and moves
+into the new `Source/DocumentSession.h`: the model epoch, the model
+revision and the piece's unsaved flag become `upic::DocumentSession`'s
+`epoch()`, `revision()` and `isDirty()`, with `markChanged (bool
+affectsPiece)`, `markSaved()` and the two reads beside them. The
+component's `markModelChanged()`, `pieceHasUnsavedChanges()` and
+`markPieceSaved()` keep their names and their meaning and become the
+shell's way of asking the session.
+
+**What stays.** The piece's data in the component's members (the
+waveforms, the envelopes, the pages, the arcs, the channels, the sample
+slots, the tuning, the sieve), the undo history, and the selection. They
+come behind the session in R3.
+
+**The ten read sites.** The status timer, the snapshot publisher, the
+audio thread, the recovery snapshot, the saver (twice), "make unique"
+(twice) and the undo transaction (twice) now ask the session.
+
+**Why the revision and the epoch stay two counters.** They move together,
+but they answer different questions for different threads: the revision is
+the document's own counter (the status timer, the recovery snapshot, the
+saver, "make unique", the undo transaction), the epoch is the audio
+thread's "the model moved" signal. One thread must not have to know about
+the other's users.
+
+**The contract.** A suite of the session's own, written before the move:
+`Source/SelfTestDocumentSession.cpp`, 30 checks that read the document's
+state through one door. It pins the fresh document, what one model change
+does, what a change that does not affect the piece does, what saving does,
+the undo rule the revision backs, that an undo and a redo are model
+changes, and that two documents share nothing.
+
+**The class needs no JUCE.** Three counters: `<atomic>` and `<cstdint>`.
+The undo history will bring JUCE with it.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, and the
+full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -696,7 +737,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R3 Document and commands | not started | - | - |
+| R3 Document and commands | **R3.1 shipped** | `5e0c897`, `5836337` | app selftest 2,736/2,736, the document's revision, the epoch and the unsaved flag have one owner - the document session, the session's own suite 30/30, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
@@ -1908,5 +1949,92 @@ binary, which is a JUCE application (the review's R089). See
 [`freqspace-codec-edge.md`](freqspace-codec-edge.md).
 
 Gate: app selftest 2,706/2,706, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
+
+### R3.1 record (2026-11-27)
+
+R3 begins. The document's own state - the revision, the epoch and the
+unsaved flag - has one owner now: the document session.
+
+| Measure | Before | After |
+|---|---|---|
+| the document's state | three members of `MainComponent` | `Source/DocumentSession.h`: the session owns them |
+| the model's own counter | `MainComponent::modelRevision` | `DocumentSession::revision()` |
+| the audio thread's signal | `MainComponent::modelEpoch` | `DocumentSession::epoch()` |
+| the unsaved flag | `MainComponent::pieceDirty` | `DocumentSession::isDirty()` |
+| the session's own suite | - | `Source/SelfTestDocumentSession.cpp`, 30 checks |
+| the gate's JUCE-free groups | 5 | 5 |
+
+The state moved:
+
+| before | after |
+|---|---|
+| `MainComponent::modelEpoch` (`std::atomic<int>`) | `DocumentSession::epoch()` |
+| `MainComponent::modelRevision` (`std::atomic<uint64_t>`) | `DocumentSession::revision()` |
+| `MainComponent::pieceDirty` (`std::atomic<bool>`) | `DocumentSession::isDirty()` |
+| `markModelChanged (bool affectsPiece)` | the same method, over `markChanged (bool affectsPiece)` |
+| `pieceHasUnsavedChanges()` | the same method, over `isDirty()` |
+| `markPieceSaved()` | the same method, over `markSaved()` |
+
+The ten read sites now ask the session: the status timer, the snapshot
+publisher, the audio thread, the recovery snapshot, the saver (twice),
+"make unique" (twice) and the undo transaction (twice).
+
+**The revision and the epoch stay two counters.** They move together - one
+model change moves both - but they answer different questions for
+different threads. The revision is the document's own counter (the status
+timer publishes a snapshot only when it moved, the recovery snapshot
+notices a change, the saver notices that the disk is already older than
+the screen, "make unique" notices that its own work changed something, and
+the undo transaction notices that a gesture changed something at all). The
+epoch is the audio thread's "the model moved" signal: the audio thread
+asks "did it move since I looked?", and it must not have to know about the
+revision's other users.
+
+**The suite came first.** `Source/SelfTestDocumentSession.cpp` (30 checks)
+was written against the counters where they were, and it passes unchanged
+after the move. It reads the document's state through one door (the
+`state` helper), so the move touched the suite in one place and the checks
+themselves did not change. The components in the suite are made in plugin
+mode: the document's state does not depend on the window, and the plugin
+mode does not open an audio device.
+
+What the suite pins, and what is worth knowing:
+
+- **A change that does not affect the piece still moves the counters.**
+  The loop toggle is not part of the piece, so it does not make the app
+  ask to save - but the model did move, so the revision and the epoch move
+  with it. It is also still a change for the undo rule: a gesture whose
+  only change was the loop toggle is an undo step.
+- **Saving moves neither counter.** It clears the unsaved flag and nothing
+  else: the piece on the disk now matches the piece on the screen, but the
+  model did not change.
+- **An undo and a redo are model changes.** They advance the revision and
+  the epoch, and they leave the piece unsaved - the piece on the screen is
+  not what is on the disk any more.
+- **The epoch and the revision count the same changes.** The suite pins
+  that their difference stays what it was.
+
+**The class needs no JUCE.** Three counters: `<atomic>` and `<cstdint>`.
+That will not last - the undo history comes behind the session, and it
+holds pieces (which hold JUCE values) and labels (which are strings) - and
+the session will be an application-level class then.
+
+**The piece's data has not moved.** The component still holds the
+waveforms, the envelopes, the pages, the arcs, the channels, the sample
+slots, the tuning and the sieve as its own members. The session owns the
+document's *state*, not its *data*; moving the data is a much bigger job,
+and it comes later in R3.
+
+What is still open: the undo history (the review's R007) and the
+selection (R006) are still the component's own, and the model still
+changes through `markModelChanged()` at the end of a hundred call sites
+rather than through a command that says what it did (R008) - one command
+= one labelled transaction = one revision is R3's exit criterion, and it
+is not reached yet. See
+[`document-session.md`](document-session.md).
+
+Gate: app selftest 2,736/2,736, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
