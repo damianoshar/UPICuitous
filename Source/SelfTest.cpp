@@ -155,6 +155,8 @@ int upic::runSelfTest()
     upic::runArcGroupCodecChecks (t);
     // R2.6: the envelope's codec - the file format of an envelope.
     upic::runEnvelopeCodecChecks (t);
+    // R2.7: the wave's codec - the file format of a wave.
+    upic::runWaveCodecChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
