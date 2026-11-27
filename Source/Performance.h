@@ -36,51 +36,9 @@ namespace upic
 
         double lengthSec() const { return points.empty() ? 0.0 : points.back().t; }
 
-        juce::var toVar() const
-        {
-            auto* o = new juce::DynamicObject();
-            o->setProperty ("id", id);
-            o->setProperty ("name", name);
-            if (! loop) o->setProperty ("loop", false);
-            juce::Array<juce::var> arr;
-            for (auto& p : points)
-            {
-                auto* po = new juce::DynamicObject();
-                po->setProperty ("t", p.t);
-                po->setProperty ("page", p.page);
-                po->setProperty ("pos", p.pos);
-                arr.add (juce::var (po));
-            }
-            o->setProperty ("points", arr);
-            return juce::var (o);
-        }
-
-        static PerformanceSequence fromVar (const juce::var& v, int fallbackId)
-        {
-            PerformanceSequence s;
-            s.id = juce::jlimit (1, limits::kMaxItemId, (int) v.getProperty ("id", fallbackId));
-            if (s.id <= 0) s.id = juce::jmax (1, fallbackId);
-            const auto n = v.getProperty ("name", "Sequence").toString();
-            s.name = n.isNotEmpty() ? n.substring (0, 64) : juce::String ("Sequence");
-            s.loop = (bool) v.getProperty ("loop", true);
-            if (auto* arr = v.getProperty ("points", juce::var()).getArray())
-                for (auto& pv : *arr)
-                {
-                    if ((int) s.points.size() >= limits::kMaxSequencePoints) break;
-                    PerformancePoint p;
-                    p.t = limits::clampFinite ((double) pv.getProperty ("t", 0.0),
-                                               0.0, (double) limits::kMaxSequenceSeconds);
-                    p.page = juce::jlimit (0, limits::kMaxPages - 1,
-                                           (int) pv.getProperty ("page", 0));
-                    p.pos = limits::clampFinite ((double) pv.getProperty ("pos", 0.0),
-                                                  0.0, kMaxPageSeconds);
-                    s.points.push_back (p);
-                }
-            std::sort (s.points.begin(), s.points.end(),
-                       [] (const PerformancePoint& a, const PerformancePoint& b)
-                       { return a.t < b.t; });
-            return s;
-        }
+        // R2.12: the file format of a performance sequence is a different
+        // thing from what a sequence is. It lives at the edge
+        // (Source/PerformanceCodec.h), where the JUCE value types are kept.
     };
 
     // The position the performance is at, at performance time t. Before the

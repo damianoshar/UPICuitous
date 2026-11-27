@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Performance.h"
+#include "PerformanceCodec.h"
 #include "PieceLimits.h"
 #include "UpicConstants.h"
 
@@ -37,10 +38,10 @@
 namespace
 {
     // The performance sequence's codec, reached through one door.
-    juce::var encode (const upic::PerformanceSequence& s) { return s.toVar(); }
+    juce::var encode (const upic::PerformanceSequence& s) { return upic::performanceSequenceToVar (s); }
     upic::PerformanceSequence decode (const juce::var& v, int fallbackId = 1)
     {
-        return upic::PerformanceSequence::fromVar (v, fallbackId);
+        return upic::performanceSequenceFromVar (v, fallbackId);
     }
 
     // The sequence's name as text - whatever the domain holds.

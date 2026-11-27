@@ -4,6 +4,7 @@
 #include "WaveformCodec.h"
 #include "ChannelCodec.h"
 #include "SampleCodec.h"
+#include "PerformanceCodec.h"
 #include "TuningCodec.h"
 #include <algorithm>
 #include <cmath>
@@ -204,7 +205,7 @@ bool MainComponent::loadFromVar(const juce::var& v)
         for (auto& sv : *sarr)
         {
             if ((int) newSequences.size() >= upic::limits::kMaxSequences) break;
-            newSequences.push_back (upic::PerformanceSequence::fromVar (sv, si++));
+            newSequences.push_back (upic::performanceSequenceFromVar (sv, si++));
         }
         noteDrop ("performance sequence", "performance sequences",
                   (int) sarr->size() - (int) newSequences.size());

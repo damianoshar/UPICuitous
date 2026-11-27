@@ -7,6 +7,7 @@
 #include "ChannelCodec.h"
 #include "Page.h"
 #include "PageCodec.h"
+#include "PerformanceCodec.h"
 #include "PieceLimits.h"
 #include "Sample.h"
 #include "SampleCodec.h"
@@ -119,7 +120,7 @@ namespace upic
         if (! m.sequences.empty())
         {
             juce::Array<juce::var> sa;
-            for (auto& s : m.sequences) sa.add (s.toVar());
+            for (auto& s : m.sequences) sa.add (upic::performanceSequenceToVar (s));
             o->setProperty ("sequences", sa);
         }
         if (! m.amplitudeTables.empty())

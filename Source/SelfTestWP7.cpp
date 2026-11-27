@@ -19,6 +19,7 @@
 #include "UserLibrary.h"
 #include "Ids.h"
 #include "EnvelopeCodec.h"
+#include "PerformanceCodec.h"
 #include "WaveformCodec.h"
 
 #if JUCE_WINDOWS
@@ -156,7 +157,7 @@ namespace
         s.id = id;
         s.name = name;
         s.points = { { 0.0, 0, 0.0 }, { 1.0, 0, 2.0 }, { 2.0, 1, 0.0 } };
-        return s.toVar();
+        return upic::performanceSequenceToVar (s);
     }
 
     juce::var minimalPiece()
@@ -420,7 +421,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 upic::UserAsset asset;
                 const bool ok = upic::UserLibrary::read (upic::UserAssetKind::Sequence,
                                                          file, asset, error);
-                const auto s = upic::PerformanceSequence::fromVar (asset.payload, 0);
+                const auto s = upic::performanceSequenceFromVar (asset.payload, 0);
                 check (ok && s.points.size() == 3 && s.points[2].page == 1,
                        "wp7 library: the sequence reads back", error);
             }
@@ -434,7 +435,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 empty.loop = false;
                 check (upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 6,
                                                    empty.name, juce::Colours::purple,
-                                                   empty.toVar(), error),
+                                                   upic::performanceSequenceToVar (empty), error),
                        "wp7 library: an empty sequence publishes", error);
                 const auto file = upic::UserLibrary::folderFor (
                                       upic::UserAssetKind::Sequence)
@@ -443,7 +444,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 upic::UserAsset asset;
                 const bool ok = upic::UserLibrary::read (upic::UserAssetKind::Sequence,
                                                          file, asset, error);
-                const auto s = upic::PerformanceSequence::fromVar (asset.payload, 0);
+                const auto s = upic::performanceSequenceFromVar (asset.payload, 0);
                 check (ok && s.points.empty() && s.name == "Empty Seq" && ! s.loop,
                        "wp7 library: an empty sequence reads back without repair", error);
             }
@@ -1826,7 +1827,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                     check (upic::UserLibrary::publish (
                                upic::UserAssetKind::Sequence, empty.id,
                                empty.name, juce::Colours::purple,
-                               empty.toVar(), error),
+                               upic::performanceSequenceToVar (empty), error),
                            "wp7 import: the empty sequence publishes", error);
                     mc.librarySequenceSourceForTest (true);
                     check (selectUser (mc.librarySequenceItemCountForTest(),
@@ -1859,7 +1860,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 check (upic::UserLibrary::publish (
                            upic::UserAssetKind::Sequence, badPage.id,
                            badPage.name, juce::Colours::purple,
-                           badPage.toVar(), error),
+                           upic::performanceSequenceToVar (badPage), error),
                        "wp7 import: the missing-page sequence publishes", error);
 
                 upic::PerformanceSequence badPosition;
@@ -1869,7 +1870,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 check (upic::UserLibrary::publish (
                            upic::UserAssetKind::Sequence, badPosition.id,
                            badPosition.name, juce::Colours::purple,
-                           badPosition.toVar(), error),
+                           upic::performanceSequenceToVar (badPosition), error),
                        "wp7 import: the invalid-position sequence publishes", error);
 
                 auto mcHolder = std::make_unique<MainComponent> (true);

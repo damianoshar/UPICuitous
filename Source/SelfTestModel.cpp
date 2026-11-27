@@ -6,6 +6,7 @@
 #include "ArcGeometry.h"
 #include "GraphicalCurve.h"
 #include "PageCodec.h"
+#include "PerformanceCodec.h"
 #include "SieveCodec.h"
 #include "WaveformCodec.h"
 
@@ -4766,7 +4767,7 @@ void upic::runWP10PageChecks (upic::SelfTest& t)
 
     // --- a sparse performance reaches the end of the page -------------------
     {
-        const auto seq = upic::PerformanceSequence::fromVar (juce::JSON::parse (
+        const auto seq = upic::performanceSequenceFromVar (juce::JSON::parse (
             "{\"id\":1,\"name\":\"Long\",\"points\":["
             "{\"t\":0,\"page\":0,\"pos\":0},{\"t\":3500,\"page\":0,\"pos\":3500}]}"), 1);
         check ((int) seq.points.size() == 2

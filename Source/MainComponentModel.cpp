@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "UserLibrary.h"
+#include "PerformanceCodec.h"
 #include "GraphicalCurve.h"
 #include "EnvelopeCodec.h"
 #include "WaveformCodec.h"
@@ -1602,7 +1603,7 @@ bool MainComponent::libraryPublishSequence()
     juce::String error;
     if (! upic::UserLibrary::publish (upic::UserAssetKind::Sequence, sequence.id,
                                       sequence.name, juce::Colour (0xffa07fd8),
-                                      sequence.toVar(), error))
+                                      upic::performanceSequenceToVar (sequence), error))
     {
         flash (error);
         return false;
@@ -1685,7 +1686,7 @@ bool MainComponent::libraryImportSequence()
             }
 
             upic::PerformanceSequence imported =
-                upic::PerformanceSequence::fromVar (asset.payload, newId);
+                upic::performanceSequenceFromVar (asset.payload, newId);
             imported.id = newId; // the library's id never becomes a local id
             imported.name = uniqueBankName (sequences, asset.name);
             sequences.push_back (std::move (imported));
