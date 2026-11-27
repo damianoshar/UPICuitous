@@ -1,4 +1,4 @@
-# The arc group's data and its file format
+# The arc group's codec edge
 
 The architecture note for R2.5. It describes the boundary R2.5 introduced -
 the arc group's data and the arc group's file format - as it is after that
@@ -10,13 +10,11 @@ phase, not as it is meant to be at the end of the refactoring.
 Source/ArcGroup.h        the group: the id, the name, the colour, the
                          membership, the mute, the solo, the gain, the
                          transpose and the four bank ids - and the
-                         render-time override beside it. It asks for no
-                         JUCE header, and it includes no project header at
-                         all: it is a leaf.
+                         render-time override beside it.
 Source/ArcGroupCodec.h   the codec edge: the two functions that read and
                          write the file format of a group
         |
-        |  the domain side asks for no JUCE header
+        |  the codec edge keeps the JUCE value types
         v
 Source/PageCodec.h, ...  the rest of the app
 ```
@@ -26,8 +24,7 @@ shared, non-destructive attributes - mute, solo, gain, transpose and the
 timbre/channel overrides. The arcs' own data is never changed; the group is
 resolved into a render-time override at snapshot publication.
 
-It carried two things that were not the model: the file format of a group,
-and two JUCE value types (the name and the colour).
+What it carried that was not the model: the file format of a group.
 
 ## What moved
 
@@ -48,51 +45,38 @@ The codec edge now holds three of them side by side: `Source/ArcCodec.h`
 (the group). The piece's own writer was already a free function
 (`pieceToVar` in `Source/Piece.h`).
 
-## The name and the colour
+## What did not move
 
-The group held `juce::String name` and `juce::Colour colour`. Both were
-already numbers or text in the file:
+The group still holds `juce::String name` and `juce::Colour colour`. A
+first cut of this phase replaced them with text and an ARGB number, which
+made the group JUCE-free and let it join the gate's groups - but that is
+the type migration the plan defers (the plan's section 2), so it was taken
+back. The separation stays; the data keeps what it had.
 
-- the colour was written as `(int) colour.getARGB()` and read as
-  `(uint32) (int) value` - an ARGB number, negative in the file. The domain
-  now holds that number itself (`std::uint32_t`), so the file is byte for
-  byte what it was;
-- the name was text. The domain now holds text (`std::string`). The
-  64-character cut stays at the edge - in the codec and in the panel's
-  rename - where the JUCE string can count characters, so a name is cut
-  exactly as it was.
-
-The UI converts at the boundary and nowhere else: `juce::Colour
-(grp.colour)` to paint, `juce::String (g.name)` to show.
-
-This is the first domain type whose JUCE value types leave its data. The
-plan's deferral (section 2) is narrowed, not lifted: the codec edge keeps
-the JUCE value types - the piece format is JSON, so `juce::var` stays
-there - and the domain's data gives them up one type at a time, each in its
-own phase, with the gate behind it. The envelopes, the waves and the
-channels still hold theirs.
-
-## What the group still is
-
-`Source/ArcGroup.h` is the gate's sixth group:
+The consequence is honest and visible: `Source/ArcGroup.h` still asks for
+the JUCE header, and the group is **not** one of the gate's JUCE-free
+groups. The gate's five groups are the same five as before this phase:
 
 ```
-B1/B2 the arc's group (1 file): no JUCE header, no header outside the group
+B1/B2 the layout engines (7 files): no JUCE header, no header outside the group
+B1/B2 the domain's numeric core (4 files): no JUCE header, no header outside the group
+B1/B2 the arc (1 file): no JUCE header, no header outside the group
+B1/B2 the arc's geometry (1 file): no JUCE header, no header outside the group
+B1/B2 the page (1 file): no JUCE header, no header outside the group
 ```
 
-- **B1** - the group's header includes no JUCE header.
-- **B2** - the group's header includes no project header at all. It is a
-  leaf: it holds text and a number, and nothing of the project's own.
+The page's group says exactly what it checks: `Page.h` asks for **no JUCE
+header of its own**. The JUCE the page still sees comes from the types it
+holds - the group's name and colour among them - not from its own code.
 
-Both boundaries were tested on the tree: a JUCE header and a project header
-in `Source/ArcGroup.h` each fail the gate before the build, with the file
-and the line named.
+## The checker learned one thing
 
-The second test needed the checker to learn one thing. An empty allowed
-list is a list: it forbids every project header. The old test skipped the
-check when the list was empty - an empty array is falsy in PowerShell - so
-the group's boundary would have been unenforced. Two self-tests cover the
-new behaviour; the checker's own tests are 20 now.
+An empty permitted list is a list: it forbids every project header. The
+old test skipped the check when the list was empty - an empty array is
+falsy in PowerShell - so a group that may include no project header at all
+could not be expressed. No group uses one yet (the leaf rule is for the day
+the domain's value types move), but the rule is now correct, and two
+self-tests cover it: the checker's own tests are 20 now.
 
 ## The suite
 
@@ -135,17 +119,15 @@ Three things worth knowing, all pinned by the suite:
 
 ## What is not covered yet
 
-- **The other domain types still hold JUCE values**: the `juce::String name`
-  and the `juce::Colour` of the envelopes, the waves and the channels, the
-  `juce::String name` of the sample slots, the sequences and the tunings.
-  That is the rest of the review's R020, one type at a time.
 - **The other domain headers still carry their own `toVar` / `fromVar`
   members**: `Envelope.h`, `Piece.h`, `Sample.h`, `Tuning.h`, `Sieve.h`,
   `Waveform.h`, `Channel.h`, `Performance.h` and `FreqSpace.h`. They need
   the codec edge treatment, one type at a time.
-- **The page is not JUCE-free yet.** It asks for no JUCE header of its own,
-  but it still sees JUCE through the types it holds (the envelope's and the
-  wave's name and colour, the sieve's presets, the tuning and the theme).
+- **The domain's data still holds JUCE values**: the `juce::String name`
+  and the `juce::Colour` of the groups, the envelopes, the waves and the
+  channels, the `juce::String name` of the sample slots, the sequences and
+  the tunings. That is the deferred type migration (the plan's section 2),
+  not this wave.
 - **The sample's file reading is still in the domain** (`Source/Sample.h`
   reads `juce::File`s). Reading a file is an edge of its own.
 - **There is no headless domain target yet.** The suite is JUCE-free in its

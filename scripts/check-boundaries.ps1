@@ -122,9 +122,8 @@ $juceFreeGroups = @(
         # they are where the JUCE value types live.
         #
         # The JUCE the page still sees comes from the types it holds (the
-        # envelope's and the wave's name and colour, the sieve's presets and
-        # the tuning), not from its own code. That is the next step of the
-        # wave.
+        # group's name and colour), not from its own code. That is the
+        # next step of the wave.
         Allowed = @(
             "Arc.h",
             "ArcGeometry.h",
@@ -138,18 +137,6 @@ $juceFreeGroups = @(
             "UpicTheme.h",
             "Waveform.h"
         )
-    },
-    @{
-        Name    = "the arc's group"
-        Message = "B1/B2 the arc's group stays JUCE-free and knows nothing but the standard library"
-        Files   = @(
-            "Source/ArcGroup.h"
-        )
-        # The group is a leaf: it holds text and a number, and nothing of the
-        # project's own - so no project header is allowed at all. The codec
-        # (Source/ArcGroupCodec.h) is the edge, and it is not in the group:
-        # it is where the JUCE value types live.
-        Allowed = @()
     }
 )
 

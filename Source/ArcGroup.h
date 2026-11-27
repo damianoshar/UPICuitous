@@ -1,7 +1,6 @@
 #pragma once
 
-#include <cstdint>
-#include <string>
+#include <JuceHeader.h>
 #include <vector>
 
 //==============================================================================
@@ -16,18 +15,18 @@
 // (the four groups a page could address), not an edit. Deleting a group
 // leaves every arc exactly as it was.
 //
-// R2.5: no JUCE header. The group is the model's data and nothing else: the
-// name is text and the colour is the ARGB number the file carries - the two
-// shapes the format already used. The file format of a group is a
-// different thing: it lives at the edge (Source/ArcGroupCodec.h), where
-// the JUCE value types are kept.
+// R2.5: the file format of a group is a different thing from what a group
+// is. It lives at the edge (Source/ArcGroupCodec.h), where the JUCE value
+// types are kept. The name and the colour stay JUCE's for now: the plan
+// defers replacing the domain's value types (section 2), so the group
+// still asks for the JUCE header.
 namespace upic
 {
     struct ArcGroup
     {
         int id = 0;
-        std::string name = "Group";
-        std::uint32_t colour { 0xff5ac8fa };  // ARGB, as the file carries it
+        juce::String name = "Group";
+        juce::Colour colour { 0xff5ac8fa };
         std::vector<int> arcIds;      // membership, one group per arc
         bool muted = false;
         bool solo = false;

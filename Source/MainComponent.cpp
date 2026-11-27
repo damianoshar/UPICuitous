@@ -1290,7 +1290,7 @@ void MainComponent::fillTransformMenu (juce::PopupMenu& m, int firstId)
         const auto& gs = curPage().groups;
         int id = firstId + transformScopeGroupBase;
         for (const auto& g : gs)
-            groups.addItem (id++, juce::String (g.name), true,
+            groups.addItem (id++, g.name, true,
                             transformScope == TransformScope::group
                                 && transformGroupId == g.id);
         if (gs.empty()) groups.addItem (id, "No groups on this page", false);

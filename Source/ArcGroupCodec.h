@@ -25,8 +25,8 @@ namespace upic
     {
         auto* o = new juce::DynamicObject();
         o->setProperty ("id", g.id);
-        o->setProperty ("name", juce::String (g.name));
-        o->setProperty ("colour", (int) g.colour);
+        o->setProperty ("name", g.name);
+        o->setProperty ("colour", (int) g.colour.getARGB());
         juce::Array<juce::var> a;
         for (int aid : g.arcIds) a.add (aid);
         o->setProperty ("arcs", a);
@@ -50,8 +50,8 @@ namespace upic
         g.id = juce::jlimit (1, limits::kMaxItemId, (int) v.getProperty ("id", fallbackId));
         if (g.id <= 0) g.id = juce::jmax (1, fallbackId);
         const auto n = v.getProperty ("name", "Group").toString();
-        g.name = n.isNotEmpty() ? n.substring (0, 64).toStdString() : std::string ("Group");
-        g.colour = (std::uint32_t) (int) v.getProperty ("colour", (int) 0xff5ac8fa);
+        g.name = n.isNotEmpty() ? n.substring (0, 64) : juce::String ("Group");
+        g.colour = juce::Colour ((juce::uint32) (int) v.getProperty ("colour", (int) 0xff5ac8fa));
         if (auto* arr = v.getProperty ("arcs", juce::var()).getArray())
             for (auto& av : *arr)
             {
