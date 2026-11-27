@@ -223,6 +223,20 @@ public:
     void undo();
     void redo();
 
+    // R3.2: the history's bounds and the size of a step, for the suite that
+    // pins the history's contract. The production code never changes them:
+    // the stack keeps at most 50 steps and at most 64 MB of snapshots.
+    void setUndoLimitsForTest (int steps, juce::int64 bytes)
+    {
+        kMaxUndoSteps = steps;
+        kMaxUndoBytes = bytes;
+    }
+
+    juce::int64 undoStepBytesForTest() const
+    {
+        return undoStack.empty() ? 0 : undoStack.back().bytes;
+    }
+
     // --- WP8: the geometric transforms of the drawn curve ---
     //
     // The UPIC's page was a surface: a drawing could be turned, mirrored,
@@ -1882,8 +1896,8 @@ private:
     juce::String pendingLabel;
     // the bounds: the stack is bounded by the number of steps and by the
     // memory it holds (the oldest steps go first).
-    static constexpr int kMaxUndoSteps = 50;
-    static constexpr juce::int64 kMaxUndoBytes = 64ll * 1024 * 1024;
+    int kMaxUndoSteps = 50;
+    juce::int64 kMaxUndoBytes = 64ll * 1024 * 1024;
     // --- v1.33.4 (L15, part 3): the crash recovery ---
     // when the last recovery snapshot was written, and the model revision it
     // was written from (a snapshot is only worth writing when something

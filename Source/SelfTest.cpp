@@ -171,6 +171,8 @@ int upic::runSelfTest()
     upic::runFreqSpaceCodecChecks (t);
     // R3.1: the document session - the document's revision and its unsaved flag.
     upic::runDocumentSessionChecks (t);
+    // R3.2: the undo history - the document's steps.
+    upic::runUndoHistoryChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
