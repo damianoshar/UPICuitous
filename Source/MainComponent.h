@@ -632,15 +632,15 @@ public:
     void groupTransposeForTest (double v) { groupPanel.setTransposeForTest (v); }
     void groupOverrideForTest (int kind, int id) { groupPanel.setOverrideForTest (kind, id); }
     void groupRenameForTest (const juce::String& n) { groupPanel.renameForTest (n); }
-    int selectedGroupIdForTest() const { return selGroupId; }
+    int selectedGroupIdForTest() const { return document.selection().group; }
     // R3.3: the rest of the selection - the amplitude table, the sample
     // slot, the mixer channel and the arc the canvas points at. The suite
     // that pins the selection model's contract reads them here.
-    int selectedAmpTableIdForTest() const { return selAmpTableId; }
-    int selectedSampleSlotForTest() const { return selSlot; }
-    int selectedChannelIdForTest() const { return selChannelId; }
-    int selectedArcIdForTest() const { return selectedArcId; }
-    int selectedArcIdsCountForTest() const { return (int) lastArcSelection.size(); }
+    int selectedAmpTableIdForTest() const { return document.selection().ampTable; }
+    int selectedSampleSlotForTest() const { return document.selection().sampleSlot; }
+    int selectedChannelIdForTest() const { return document.selection().channel; }
+    int selectedArcIdForTest() const { return document.selection().arc; }
+    int selectedArcIdsCountForTest() const { return (int) document.selection().arcSelection.size(); }
     // WP4: the sequences.
     int seqCountForTest() const { return (int) sequences.size(); }
     int seqIdAtForTest (int i) const
@@ -651,7 +651,7 @@ public:
     { return (i >= 0 && i < (int) sequences.size()) ? sequences[(size_t) i].name : juce::String(); }
     bool seqLoopAtForTest (int i) const
     { return i >= 0 && i < (int) sequences.size() && sequences[(size_t) i].loop; }
-    int selectedSeqIdForTest() const { return selSeqId; }
+    int selectedSeqIdForTest() const { return document.selection().sequence; }
     bool seqRecordingForTest() const { return seqRecording; }
     bool seqPlayActiveForTest() const { return seqPlayActive.load(); }
     bool seqPanelOpenForTest() const { return seqPanel.isVisible(); }
@@ -748,8 +748,8 @@ public:
     // --- F2/F3: the wavetable and envelope libraries ---
     int waveformCountForTest() const { return (int) waveforms.size(); }
     int envelopeCountForTest() const { return (int) envelopes.size(); }
-    int selectedWaveformIdForTest() const { return selWave; }
-    int selectedEnvelopeIdForTest() const { return selEnv; }
+    int selectedWaveformIdForTest() const { return document.selection().wave; }
+    int selectedEnvelopeIdForTest() const { return document.selection().envelope; }
     int waveformIdForTest (int i) const
     {
         return i >= 0 && i < (int) waveforms.size() ? waveforms[(size_t) i].id : -1;
@@ -779,15 +779,15 @@ public:
     // references (the delete tests).
     void selectWaveformForTest (int id)
     {
-        selWave = id;
-        waveEd.bind (&waveforms, &selWave, [this]{ markModelChanged(); });
+        document.selection().wave = id;
+        waveEd.bind (&waveforms, &document.selection().wave, [this]{ markModelChanged(); });
         refreshBoxes();
         pushVoice();
     }
     void selectEnvelopeForTest (int id)
     {
-        selEnv = id;
-        envEd.bind (&envelopes, &selEnv, [this]{ markModelChanged(); });
+        document.selection().envelope = id;
+        envEd.bind (&envelopes, &document.selection().envelope, [this]{ markModelChanged(); });
         refreshBoxes();
         pushVoice();
     }
@@ -1176,9 +1176,9 @@ public:
     void selectArcsAndSyncForTest (const std::vector<int>& ids)
     {
         score.setSelectedArcs (ids);
-        selectedArcId = score.getSelectedArc();
-        lastArcSelection = score.getSelectedArcs();
-        syncControlsToArc (selectedArcId);
+        document.selection().arc = score.getSelectedArc();
+        document.selection().arcSelection = score.getSelectedArcs();
+        syncControlsToArc (document.selection().arc);
     }
     int selectedArcCountForTest() const { return (int) score.getSelectedArcs().size(); }
 
@@ -1834,9 +1834,7 @@ private:
     // WP6: the mixer channels (model only; engine/UI in later milestones).
     std::vector<upic::Channel> channels;
     int nextChannelId = 1;
-    int selChannelId = -1;
 
-    int selSeqId = -1;
     bool seqRecording = false;
     double seqRecordStartMs = 0.0;
     double seqRecordTimeOffset = 0.0;   // replace-tail recordings start at this t
@@ -1851,7 +1849,6 @@ private:
     std::vector<upic::SampleSlot> sampleSlots; // fixed 8 slots, ids 1..8
     std::vector<upic::Page> pages;
     int currentPage = 0;
-    int selWave = 0, selEnv = 0, selSlot = 0;
     int drawMatMode = 0;                 // 0 = oscillator, 1 = sample pitch-shift
     double drawRef = upic::kDefaultRefFreq;
     float drawIntensity = 0.8f;
@@ -2269,7 +2266,8 @@ private:
     // R3.1: the document session - the one owner of the document's own
     // state: the revision (it moves when the model moves), the epoch (the
     // audio thread's "the model moved") and the unsaved flag (the piece
-    // differs from what is on the disk).
+    // differs from what is on the disk). Since R3.2 it owns the history,
+    // and since R3.3 the selection (what is selected).
     upic::DocumentSession document;
 
     // The model can change under the audio thread (a page change, a loaded
@@ -2498,7 +2496,6 @@ private:
     juce::Label ampTableLab{ {}, "Amp" };
     juce::TextButton ampTableBtn{ "Tables..." };
     AmpTableEditor ampTableEd;
-    int selAmpTableId = -1;
 
     // WP3: the arc groups (non-destructive, per page).
     juce::TextButton groupBtn{ "Groups..." };
@@ -2548,7 +2545,6 @@ private:
     // WP8: the performance view - one screen for the things a performer
     // needs. It is a view over the app's transport, not a second one.
     PerformanceView perfView;
-    int selGroupId = -1;
     bool groupLevelsEditing = false;
 
     // WP1: the in-app frequency-table editor (an overlay: Android has no
@@ -2625,8 +2621,6 @@ private:
     ArcListPanel arcListPanel;
     bool showArcList = false;
     bool arcListDirty = true;   // the rows have to be rebuilt
-    int selectedArcId = -1;    // the arc the panel (and the canvas) point at
-    std::vector<int> lastArcSelection; // canvas selection the panel last showed
 
     // v1.23 (wave 20): the MIDI input foundation - the device list, the
     // activity monitor and the learn (in the audio settings overlay).

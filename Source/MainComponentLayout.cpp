@@ -308,9 +308,9 @@ void MainComponent::buildScoreArea()
         // so no preview or save can use the old region.
         invalidateSampleExtractSource();
         // the trimmed material is a different length
-        if (selSlot >= 0 && selSlot < (int) sampleSlots.size())
+        if (document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size())
         {
-            const auto& slot = sampleSlots[(size_t) selSlot];
+            const auto& slot = sampleSlots[(size_t) document.selection().sampleSlot];
             score.sampleDurations[slot.id] = slot.durationSec();
         }
         publishModelSnapshot();
@@ -447,11 +447,11 @@ void MainComponent::buildEditors()
     updateFocusButtons();
 
     auto curW = [this]() -> upic::Waveform* {
-        for (auto& w : waveforms) if (w.id == selWave) return &w;
+        for (auto& w : waveforms) if (w.id == document.selection().wave) return &w;
         return waveforms.empty() ? nullptr : &waveforms.front();
     };
     auto curE = [this]() -> upic::Envelope* {
-        for (auto& e : envelopes) if (e.id == selEnv) return &e;
+        for (auto& e : envelopes) if (e.id == document.selection().envelope) return &e;
         return envelopes.empty() ? nullptr : &envelopes.front();
     };
 
@@ -629,7 +629,7 @@ void MainComponent::updateWaveButtonColours()
     }
     juce::Colour cur = upic::paletteColour (0);
     for (auto& w : waveforms)
-        if (w.id == selWave) { cur = w.colour; break; }
+        if (w.id == document.selection().wave) { cur = w.colour; break; }
     for (auto* b : { &wSmooth, &wNorm })
     {
         b->setColour (juce::TextButton::buttonColourId,   cur.withAlpha (0.40f));

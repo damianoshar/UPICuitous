@@ -138,6 +138,8 @@
       <FILE id="mSnp12" name="ModelSnapshot.h" compile="0" resource="0" file="Source/ModelSnapshot.h"/>
       <!-- R3.1: the document session - the one owner of the document's state. -->
       <FILE id="mDcs56" name="DocumentSession.h" compile="0" resource="0" file="Source/DocumentSession.h"/>
+      <!-- R3.3: the selection model - what is selected. -->
+      <FILE id="sSel57" name="SelectionModel.h" compile="0" resource="0" file="Source/SelectionModel.h"/>
       <!-- WP6.4: the lazily constructed mixer-panel overlay. -->
       <FILE id="chPnl13" name="ChannelPanel.h" compile="0" resource="0" file="Source/ChannelPanel.h"/>
       <FILE id="aLsp13" name="ArcListPanel.h" compile="0" resource="0" file="Source/ArcListPanel.h"/>

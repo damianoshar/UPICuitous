@@ -414,11 +414,11 @@ void MainComponent::buildFrequencyControls()
     ampTableBox.onChange = [this]{
         if (refreshingControls) return; // a refresh is not a command
         const int item = ampTableBox.getSelectedId();
-        if (item <= 1) { selAmpTableId = -1; applyAmpTableToSelection (-1); return; }
+        if (item <= 1) { document.selection().ampTable = -1; applyAmpTableToSelection (-1); return; }
         const int idx = juce::jlimit (0, (int) ampTables.size() - 1, item - 2);
         if (idx < 0 || idx >= (int) ampTables.size()) return;
-        selAmpTableId = ampTables[(size_t) idx].id;
-        applyAmpTableToSelection (selAmpTableId);
+        document.selection().ampTable = ampTables[(size_t) idx].id;
+        applyAmpTableToSelection (document.selection().ampTable);
     };
     ampTableBtn.onClick = [this]{ showAmpTableEditor(); };
     refreshAmpTableBox();
@@ -445,7 +445,7 @@ void MainComponent::buildFrequencyControls()
     };
     ampTableEd.library.onSelectedId = [this] (int id)
     {
-        selAmpTableId = id;
+        document.selection().ampTable = id;
         refreshAmpTableEditor();
         refreshAmpTableBox();
     };
@@ -480,7 +480,7 @@ void MainComponent::buildFrequencyControls()
     {
         if (refreshingControls) return; // a refresh is not a command
         const int i = seqBox.getSelectedId() - 1;
-        if (i >= 0 && i < (int) sequences.size()) selSeqId = sequences[(size_t) i].id;
+        if (i >= 0 && i < (int) sequences.size()) document.selection().sequence = sequences[(size_t) i].id;
         refreshSequencePanel();
     };
     seqRecBtn.onClick = [this]
@@ -525,7 +525,7 @@ void MainComponent::buildFrequencyControls()
     };
     seqPanel.library.onSelectedId = [this] (int id)
     {
-        selSeqId = id;
+        document.selection().sequence = id;
         refreshSequencePanel();
     };
     refreshSequencePanel();
@@ -812,10 +812,10 @@ void MainComponent::refreshAmpTableBox()
             if (! ids.empty() && std::find (ids.begin(), ids.end(), a.id) != ids.end())
             { cur = a.amplitudeTableId; break; }
     }
-    if (cur < 0) cur = selAmpTableId;
+    if (cur < 0) cur = document.selection().ampTable;
     const int idx = ampTableIndexOfId (cur);
     ampTableBox.setSelectedId (idx < 0 ? 1 : idx + 2, juce::dontSendNotification);
-    selAmpTableId = cur;
+    document.selection().ampTable = cur;
 }
 
 void MainComponent::applyAmpTableToSelection (int id)
@@ -830,7 +830,7 @@ void MainComponent::applyAmpTableToSelection (int id)
     }
 
     const auto ids = score.getSelectedArcs();
-    selAmpTableId = id;
+    document.selection().ampTable = id;
     const juce::String tableName = tableIndex >= 0 ? ampTables[(size_t) tableIndex].name
                                                    : juce::String ("none");
     if (ids.empty())
@@ -860,20 +860,20 @@ void MainComponent::refreshAmpTableEditor()
 {
     std::vector<int> uses;
     for (auto& t : ampTables) uses.push_back (ampTableUseCount (t.id));
-    ampTableEd.setBank (ampTables, uses, juce::jmax (0, ampTableIndexOfId (selAmpTableId)));
+    ampTableEd.setBank (ampTables, uses, juce::jmax (0, ampTableIndexOfId (document.selection().ampTable)));
 }
 
 void MainComponent::showAmpTableEditor()
 {
     std::vector<int> uses;
     for (auto& t : ampTables) uses.push_back (ampTableUseCount (t.id));
-    int idx = ampTableIndexOfId (selAmpTableId);
-    if (idx < 0 && ! ampTables.empty()) { idx = 0; selAmpTableId = ampTables.front().id; }
+    int idx = ampTableIndexOfId (document.selection().ampTable);
+    if (idx < 0 && ! ampTables.empty()) { idx = 0; document.selection().ampTable = ampTables.front().id; }
 
     ampTableEd.onSelectIndex = [this] (int i)
     {
         if (i < 0 || i >= (int) ampTables.size()) return;
-        selAmpTableId = ampTables[(size_t) i].id;
+        document.selection().ampTable = ampTables[(size_t) i].id;
         refreshAmpTableBox();
     };
     ampTableEd.onCurve = [this] (int i, const std::vector<upic::EnvPoint>& pts)
@@ -925,7 +925,7 @@ void MainComponent::showAmpTableEditor()
                                                            juce::Colour (0xff5aa0c8),
                                                            upic::ampLinear));
         }
-        selAmpTableId = nextId;
+        document.selection().ampTable = nextId;
         markModelChanged();
         endEdit();
         publishModelSnapshot();
@@ -935,7 +935,7 @@ void MainComponent::showAmpTableEditor()
     };
     ampTableEd.onDuplicate = [this]
     {
-        const int i = ampTableIndexOfId (selAmpTableId);
+        const int i = ampTableIndexOfId (document.selection().ampTable);
         if (i < 0 || (int) ampTables.size() >= upic::limits::kMaxAmplitudeTables)
         { flash ("The amplitude table bank is full"); return; }
         const int nextId = upic::nextBankId (ampTables, 1);
@@ -952,7 +952,7 @@ void MainComponent::showAmpTableEditor()
             copy.name = copy.name + " copy";
             ampTables.push_back (std::move (copy));
         }
-        selAmpTableId = nextId;
+        document.selection().ampTable = nextId;
         markModelChanged();
         endEdit();
         publishModelSnapshot();
@@ -962,16 +962,16 @@ void MainComponent::showAmpTableEditor()
     };
     ampTableEd.onDelete = [this]
     {
-        const int i = ampTableIndexOfId (selAmpTableId);
+        const int i = ampTableIndexOfId (document.selection().ampTable);
         if (i < 0) return;
-        if (ampTableUseCount (selAmpTableId) > 0)
+        if (ampTableUseCount (document.selection().ampTable) > 0)
         { flash ("That table is in use - assign another one first"); return; }
         beginEdit ("Delete the amplitude table");
         {
             const juce::ScopedLock l (dataLock);
             ampTables.erase (ampTables.begin() + i);
         }
-        selAmpTableId = ampTables.empty() ? -1 : ampTables.front().id;
+        document.selection().ampTable = ampTables.empty() ? -1 : ampTables.front().id;
         markModelChanged();
         endEdit();
         publishModelSnapshot();
@@ -1023,7 +1023,7 @@ void MainComponent::refreshGroupPanel()
     // a group's arcs to one of them
     for (auto& c : channels) chans.push_back ({ c.id, c.name });
     groupPanel.setBank (page.groups, counts, waves, envs, tabs, chans,
-                        juce::jmax (0, groupIndexOfId (selGroupId)));
+                        juce::jmax (0, groupIndexOfId (document.selection().group)));
 }
 
 void MainComponent::showGroupPanel()
@@ -1040,7 +1040,7 @@ void MainComponent::showGroupPanel()
     groupPanel.onSelectIndex = [this] (int i)
     {
         if (i >= 0 && i < (int) curPage().groups.size())
-            selGroupId = curPage().groups[(size_t) i].id;
+            document.selection().group = curPage().groups[(size_t) i].id;
         refreshGroupPanel();
     };
     groupPanel.onNew = [this, colourFor]
@@ -1060,7 +1060,7 @@ void MainComponent::showGroupPanel()
             g.colour = colourFor (newId);
             page.groups.push_back (g);
         }
-        selGroupId = newId;
+        document.selection().group = newId;
         markModelChanged();
         endEdit();
         publishModelSnapshot();
@@ -1069,7 +1069,7 @@ void MainComponent::showGroupPanel()
     };
     groupPanel.onDelete = [this]
     {
-        const int idx = groupIndexOfId (selGroupId);
+        const int idx = groupIndexOfId (document.selection().group);
         if (idx < 0) return;
         beginEdit ("Delete group");
         {
@@ -1077,7 +1077,7 @@ void MainComponent::showGroupPanel()
             auto& gr = curPage().groups;
             gr.erase (gr.begin() + idx);
         }
-        selGroupId = curPage().groups.empty() ? -1 : curPage().groups.front().id;
+        document.selection().group = curPage().groups.empty() ? -1 : curPage().groups.front().id;
         markModelChanged();
         endEdit();
         publishModelSnapshot();
@@ -1144,7 +1144,7 @@ void MainComponent::showGroupPanel()
     };
     groupPanel.onAddSelection = [this]
     {
-        const int idx = groupIndexOfId (selGroupId);
+        const int idx = groupIndexOfId (document.selection().group);
         const auto ids = score.getSelectedArcs();
         if (idx < 0 || ids.empty()) { flash ("Select arcs first"); return; }
         beginEdit ("Add arcs to the group");
@@ -1174,7 +1174,7 @@ void MainComponent::showGroupPanel()
     };
     groupPanel.onRemoveSelection = [this]
     {
-        const int idx = groupIndexOfId (selGroupId);
+        const int idx = groupIndexOfId (document.selection().group);
         const auto ids = score.getSelectedArcs();
         if (idx < 0 || ids.empty()) { flash ("Select arcs first"); return; }
         beginEdit ("Remove arcs from the group");
@@ -1198,7 +1198,7 @@ void MainComponent::showGroupPanel()
     };
     groupPanel.onSelectMembers = [this]
     {
-        const int idx = groupIndexOfId (selGroupId);
+        const int idx = groupIndexOfId (document.selection().group);
         if (idx < 0) return;
         score.setSelectedArcs (curPage().groups[(size_t) idx].arcIds);
         refreshBoxes();
@@ -1385,19 +1385,19 @@ int MainComponent::sequenceIndexOfId (int id) const
 
 bool MainComponent::seqLoopIsOn() const
 {
-    const int idx = sequenceIndexOfId (selSeqId);
+    const int idx = sequenceIndexOfId (document.selection().sequence);
     return idx >= 0 && sequences[(size_t) idx].loop;
 }
 
 void MainComponent::refreshSequencePanel()
 {
-    int idx = sequenceIndexOfId (selSeqId);
+    int idx = sequenceIndexOfId (document.selection().sequence);
     if (idx < 0 && ! sequences.empty())
     {
         idx = 0;
-        selSeqId = sequences.front().id;
+        document.selection().sequence = sequences.front().id;
     }
-    if (sequences.empty()) selSeqId = -1;
+    if (sequences.empty()) document.selection().sequence = -1;
 
     seqBox.clear (juce::dontSendNotification);
     for (int i = 0; i < (int) sequences.size(); ++i)
@@ -1427,7 +1427,7 @@ void MainComponent::showSequencePanel()
     };
     seqPanel.onClear = [this]
     {
-        const int i = sequenceIndexOfId (selSeqId);
+        const int i = sequenceIndexOfId (document.selection().sequence);
         if (i < 0 || seqRecording) return;
         beginEdit ("Clear the performance sequence");
         {
@@ -1443,7 +1443,7 @@ void MainComponent::showSequencePanel()
     seqPanel.onLoopToggle = [this]{ toggleSequenceLoop(); };
     seqPanel.onPointsEdited = [this] (const std::vector<upic::PerformancePoint>& pts)
     {
-        const int i = sequenceIndexOfId (selSeqId);
+        const int i = sequenceIndexOfId (document.selection().sequence);
         if (i < 0 || seqRecording) return;
         beginEdit ("Move a performance point");
         {
@@ -1458,7 +1458,7 @@ void MainComponent::showSequencePanel()
     };
     seqPanel.onTrim = [this]
     {
-        const int i = sequenceIndexOfId (selSeqId);
+        const int i = sequenceIndexOfId (document.selection().sequence);
         const int j = seqPanel.selectedPointIndex();
         if (i < 0 || j < 0 || j >= (int) sequences[(size_t) i].points.size() || seqRecording)
             return;
@@ -1480,7 +1480,7 @@ void MainComponent::showSequencePanel()
     };
     seqPanel.onReplace = [this]
     {
-        const int i = sequenceIndexOfId (selSeqId);
+        const int i = sequenceIndexOfId (document.selection().sequence);
         const int j = seqPanel.selectedPointIndex();
         if (i < 0 || j < 0 || j >= (int) sequences[(size_t) i].points.size() || seqRecording)
             return;
@@ -1511,7 +1511,7 @@ void MainComponent::startSequenceRecording()
     bool needsConfirm = false;
     {
         const juce::ScopedLock l (dataLock);
-        idx = sequenceIndexOfId (selSeqId);
+        idx = sequenceIndexOfId (document.selection().sequence);
         if (idx < 0)
         {
             if ((int) sequences.size() >= upic::limits::kMaxSequences)
@@ -1529,7 +1529,7 @@ void MainComponent::startSequenceRecording()
             s.name = "Sequence " + juce::String (s.id);
             sequences.push_back (s);
             idx = (int) sequences.size() - 1;
-            selSeqId = sequences[(size_t) idx].id;
+            document.selection().sequence = sequences[(size_t) idx].id;
         }
         needsConfirm = seqReplaceFromT < 0.0 && ! sequences[(size_t) idx].points.empty();
     }
@@ -1589,7 +1589,7 @@ void MainComponent::startSequenceRecording()
 
 void MainComponent::sequenceAppendRecorderPoint (double t, int page, double pos)
 {
-    const int idx = sequenceIndexOfId (selSeqId);
+    const int idx = sequenceIndexOfId (document.selection().sequence);
     if (idx < 0) return;
     auto& s = sequences[(size_t) idx];
     // WP4 fix: at the point cap, thin the take instead of silently refusing
@@ -1632,7 +1632,7 @@ void MainComponent::stopSequenceRecording()
 {
     if (! seqRecording) return;
     seqRecording = false;
-    const int idx = sequenceIndexOfId (selSeqId);
+    const int idx = sequenceIndexOfId (document.selection().sequence);
     if (idx >= 0)
     {
         const juce::ScopedLock l (dataLock);
@@ -1660,7 +1660,7 @@ void MainComponent::stopSequenceRecording()
 
 void MainComponent::startSequencePlayback()
 {
-    const int idx = sequenceIndexOfId (selSeqId);
+    const int idx = sequenceIndexOfId (document.selection().sequence);
     if (idx < 0 || sequences[(size_t) idx].points.size() < 2)
     {
         flash ("Record a performance first");
@@ -1687,7 +1687,7 @@ void MainComponent::stopSequencePlayback()
 
 void MainComponent::toggleSequenceLoop()
 {
-    const int idx = sequenceIndexOfId (selSeqId);
+    const int idx = sequenceIndexOfId (document.selection().sequence);
     if (idx < 0) return;
     beginEdit ("Sequence loop");
     {
@@ -1753,7 +1753,7 @@ void MainComponent::setChannelOnSelection (int channelId)
 void MainComponent::refreshChannelPanel()
 {
     if (channelPanel != nullptr)
-        channelPanel->setChannels (channels, juce::jmax (0, channelIndexOfId (selChannelId)));
+        channelPanel->setChannels (channels, juce::jmax (0, channelIndexOfId (document.selection().channel)));
 }
 
 void MainComponent::showChannelPanel()
@@ -1775,7 +1775,7 @@ void MainComponent::showChannelPanel()
     }
     channelPanel->onSelectIndex = [this] (int i)
     {
-        if (i >= 0 && i < (int) channels.size()) selChannelId = channels[(size_t) i].id;
+        if (i >= 0 && i < (int) channels.size()) document.selection().channel = channels[(size_t) i].id;
         refreshChannelBox();
     };
     channelPanel->onRename = [this] (int i, const juce::String& name)
@@ -1869,14 +1869,14 @@ void MainComponent::showChannelPanel()
             c.colour = colourFor (newId);
             channels.push_back (c);
         }
-        selChannelId = newId;
+        document.selection().channel = newId;
         markModelChanged(); endEdit(); publishModelSnapshot();
         refreshChannelPanel(); refreshChannelBox();
         flash ("Channel " + juce::String (newId) + " added");
     };
     channelPanel->onDelete = [this]
     {
-        const int i = channelIndexOfId (selChannelId);
+        const int i = channelIndexOfId (document.selection().channel);
         if (i < 0) return;
         const int removedId = channels[(size_t) i].id;
         beginEdit ("Delete the channel");
@@ -1889,7 +1889,7 @@ void MainComponent::showChannelPanel()
                 for (auto& g : pg.groups) if (g.channelId == removedId) g.channelId = -1;
             }
         }
-        selChannelId = channels.empty() ? -1 : channels.front().id;
+        document.selection().channel = channels.empty() ? -1 : channels.front().id;
         markModelChanged(); endEdit(); publishModelSnapshot();
         refreshChannelPanel(); refreshChannelBox(); score.repaint();
         flash ("Channel deleted - its arcs return to Main");
@@ -2117,10 +2117,10 @@ void MainComponent::buildArcListPanel()
         else ids.push_back(arcId);
         score.setSelectedArcs(ids);
 
-        selectedArcId = score.getSelectedArc();
-        lastArcSelection = score.getSelectedArcs();
-        arcListPanel.setSelectedArcs(page, lastArcSelection);
-        if (selectedArcId >= 0) syncControlsToArc(selectedArcId);
+        document.selection().arc = score.getSelectedArc();
+        document.selection().arcSelection = score.getSelectedArcs();
+        arcListPanel.setSelectedArcs(page, document.selection().arcSelection);
+        if (document.selection().arc >= 0) syncControlsToArc(document.selection().arc);
         updateStatus();
     };
     // the Rev box: a live arc plays the microphone backwards
@@ -2268,15 +2268,15 @@ void MainComponent::buildMaterialTabs()
         drawRef = refSlider.getValue();
         const auto ids = score.getSelectedArcs();
         bool changed = false;
-        if (drawMatMode == 1 && selSlot >= 0 && selSlot < (int) sampleSlots.size())
+        if (drawMatMode == 1 && document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size())
         {
             // M5: the Sample tab's Ref is the SLOT's - the material's base
             // pitch (the UPIC's per-slot REF). Every arc that plays the
             // slot follows it, on every page: the material has one unity
             // point, so every arc on it shares it.
-            const int sid = sampleSlots[(size_t) selSlot].id;
+            const int sid = sampleSlots[(size_t) document.selection().sampleSlot].id;
             juce::ScopedLock l(dataLock);
-            sampleSlots[(size_t) selSlot].refFreq = drawRef;
+            sampleSlots[(size_t) document.selection().sampleSlot].refFreq = drawRef;
             changed = true;
             for (auto& pg : pages)
                 for (auto& a : pg.arcs)
@@ -2298,7 +2298,7 @@ void MainComponent::buildMaterialTabs()
         {
             // WP7: the slot Ref is part of the captured material's identity.
             // Invalidate an extraction source before publishing the new Ref.
-            if (drawMatMode == 1 && selSlot >= 0 && selSlot < (int) sampleSlots.size())
+            if (drawMatMode == 1 && document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size())
                 invalidateSampleExtractSource();
             publishModelSnapshot();
             score.repaint();
@@ -2482,13 +2482,13 @@ void MainComponent::buildSampleControls()
 {
     sampleBox.onChange = [this]{
         int i = sampleBox.getSelectedId() - 1;
-        if (i >= 0 && i < (int) sampleSlots.size()) selSlot = i;
+        if (i >= 0 && i < (int) sampleSlots.size()) document.selection().sampleSlot = i;
         // v1.26: the slot is an arc setting too - changing it with a
         // multi-selection assigns the slot to every selected sample arc.
         const auto ids = score.getSelectedArcs();
-        if (! ids.empty() && selSlot >= 0 && selSlot < (int) sampleSlots.size())
+        if (! ids.empty() && document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size())
         {
-            const int sid = sampleSlots[(size_t) selSlot].id;
+            const int sid = sampleSlots[(size_t) document.selection().sampleSlot].id;
             {
                 const juce::ScopedLock sl (dataLock);
                 for (auto& a : curPage().arcs)
@@ -2503,12 +2503,12 @@ void MainComponent::buildSampleControls()
         // buttons follow the slot.
         syncRefToSlot();
         updateMaterialButtons();
-        levelSlider.setValue (selSlot >= 0 && selSlot < (int) sampleSlots.size()
-                                ? (double) sampleSlots[(size_t) selSlot].level : 1.0,
+        levelSlider.setValue (document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size()
+                                ? (double) sampleSlots[(size_t) document.selection().sampleSlot].level : 1.0,
                               juce::dontSendNotification);
         updateRevButton(); // v1.19: the button shows the selected slot's state
     };
-    loadSampleBtn.onClick = [this]{ loadSampleIntoSlot(selSlot); };
+    loadSampleBtn.onClick = [this]{ loadSampleIntoSlot(document.selection().sampleSlot); };
 
     // WP7: the cycle-aware extraction panel. The panel is built lazily when
     // it opens; this button only asks for it.
@@ -2525,7 +2525,7 @@ void MainComponent::buildSampleControls()
     revBtn.setClickingTogglesState(true);
     revBtn.setTooltip("Play the selected slot backwards");
     revBtn.onClick = [this]{
-        if (selSlot < 0 || selSlot >= (int) sampleSlots.size()) return;
+        if (document.selection().sampleSlot < 0 || document.selection().sampleSlot >= (int) sampleSlots.size()) return;
         const bool on = revBtn.getToggleState();
         // v1.26: the slot direction applies to the selected sample arcs too
         // (a multi-selection may use more than one slot). The selected slot
@@ -2533,7 +2533,7 @@ void MainComponent::buildSampleControls()
         const auto ids = score.getSelectedArcs();
         {
             const juce::ScopedLock sl (dataLock);
-            sampleSlots[(size_t) selSlot].reversed = on;
+            sampleSlots[(size_t) document.selection().sampleSlot].reversed = on;
             if (! ids.empty())
             {
                 for (auto& a : curPage().arcs)
@@ -2566,11 +2566,11 @@ void MainComponent::buildSampleControls()
     levelSlider.setTooltip ("The slot's level - how loud the material is "
                             "(1 = as it was loaded)");
     levelSlider.onValueChange = [this]{
-        if (selSlot < 0 || selSlot >= (int) sampleSlots.size()) return;
+        if (document.selection().sampleSlot < 0 || document.selection().sampleSlot >= (int) sampleSlots.size()) return;
         const float v = (float) levelSlider.getValue();
         {
             juce::ScopedLock l (dataLock);
-            sampleSlots[(size_t) selSlot].level = v;
+            sampleSlots[(size_t) document.selection().sampleSlot].level = v;
         }
         // WP7: the level is part of the captured material's identity. Do
         // not leave an extraction preview pointing at the old take.

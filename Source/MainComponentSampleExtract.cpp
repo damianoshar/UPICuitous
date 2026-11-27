@@ -100,8 +100,8 @@ void MainComponent::openSampleExtractPanel()
     upic::SampleSlot material;
     {
         const juce::ScopedLock l (dataLock);
-        if (selSlot >= 0 && selSlot < (int) sampleSlots.size())
-            material = sampleSlots[(size_t) selSlot];
+        if (document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size())
+            material = sampleSlots[(size_t) document.selection().sampleSlot];
     }
 
     sampleExtractPanel->setMaterial (&material);
@@ -299,7 +299,7 @@ bool MainComponent::saveSampleCycleToWave()
             wave.name = uniqueName (waveforms, base);
             wave.colour = upic::paletteColour (id);
             waveforms.push_back (wave);
-            selWave = id;
+            document.selection().wave = id;
             ok = true;
         }
     }
@@ -312,7 +312,7 @@ bool MainComponent::saveSampleCycleToWave()
     endEdit();
 
     if (ok)
-        flash ("Saved the extracted cycle as wavetable " + juce::String (selWave));
+        flash ("Saved the extracted cycle as wavetable " + juce::String (document.selection().wave));
     return ok;
 }
 
@@ -352,7 +352,7 @@ bool MainComponent::saveSampleEnvelope()
             envelope.points = sampleExtractPanel->envelopePoints();
             if (envelope.points.size() < 2) envelope.presetFlat();
             envelopes.push_back (envelope);
-            selEnv = id;
+            document.selection().envelope = id;
             ok = true;
         }
     }
@@ -365,7 +365,7 @@ bool MainComponent::saveSampleEnvelope()
     endEdit();
 
     if (ok)
-        flash ("Saved the extracted contour as envelope " + juce::String (selEnv));
+        flash ("Saved the extracted contour as envelope " + juce::String (document.selection().envelope));
     return ok;
 }
 

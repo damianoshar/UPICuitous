@@ -29,8 +29,12 @@
 // to put back, through the two doors the component installs. It does not
 // know how a piece is captured or loaded - that is the shell's business.
 //
-// The selection (the review's R006) and the command dispatcher (R008) come
-// behind this class; so does one command = one transaction = one revision.
+// and - since R3.3 - the document's selection: what is selected (the review's
+// R006). The selection is plain data (the ids the piece's banks use), so it
+// lives in its own class and the session owns it.
+//
+// The command dispatcher (R008) comes behind this class; so does one command
+// = one transaction = one revision.
 //
 // The class needs JUCE now: the steps are labelled with strings and the
 // snapshots are pieces. It is an application-level class, not a part of the
@@ -45,6 +49,7 @@
 #include <vector>
 
 #include "Piece.h"
+#include "SelectionModel.h"
 
 namespace upic
 {
@@ -292,6 +297,18 @@ namespace upic
             return StepResult::applied;
         }
 
+        // =====================================================================
+        // The selection (R3.3)
+        // =====================================================================
+
+        // What is selected: the wavetable, the envelope, the amplitude
+        // table, the performance sequence, the group, the mixer channel,
+        // the sample slot and the arc. The session owns it - the selection
+        // is part of the document's state, not of the shell - and the shell
+        // asks it.
+        SelectionModel& selection() noexcept { return selection_; }
+        const SelectionModel& selection() const noexcept { return selection_; }
+
     private:
         // One step: the state from before a change, and what the change was
         // called.
@@ -331,6 +348,9 @@ namespace upic
         std::unique_ptr<upic::PieceModel> pendingEdit_;
         std::uint64_t pendingRevision_ = 0;
         juce::String pendingLabel_;
+
+        // what is selected (R3.3)
+        SelectionModel selection_;
 
         std::atomic<std::uint64_t> epoch_ { 0 };
         std::atomic<std::uint64_t> revision_ { 0 };

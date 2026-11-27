@@ -280,7 +280,7 @@ void MainComponent::finalizeCapture()
     take.copyFrom(0, 0, capBuf, 0, 0, capFinalCount);
     take.copyFrom(1, 0, capBuf, 1, 0, capFinalCount);
 
-    const int slotIndex = juce::jlimit(0, (int) sampleSlots.size() - 1, selSlot);
+    const int slotIndex = juce::jlimit(0, (int) sampleSlots.size() - 1, document.selection().sampleSlot);
     const int sid = sampleSlots[(size_t) slotIndex].id;
     auto slot = upic::slotFromCapture(sid, takeName(), take, capRate);
 

@@ -70,13 +70,13 @@ void MainComponent::refreshLibraryBoxes()
     waveItems.reserve (waveforms.size());
     for (const auto& w : waveforms)
         waveItems.push_back ({ w.id, w.name, w.colour, waveUseCount (w.id) });
-    waveLib.setItems (waveItems, selWave);
+    waveLib.setItems (waveItems, document.selection().wave);
 
     std::vector<LibraryManager::Item> envItems;
     envItems.reserve (envelopes.size());
     for (const auto& e : envelopes)
         envItems.push_back ({ e.id, e.name, e.colour, envelopeUseCount (e.id) });
-    envLib.setItems (envItems, selEnv);
+    envLib.setItems (envItems, document.selection().envelope);
 
     // WP7: the overlay panels keep their own piece-bank commands, but their
     // shared managers still list the piece's assets on the Piece side.
@@ -84,13 +84,13 @@ void MainComponent::refreshLibraryBoxes()
     ampItems.reserve (ampTables.size());
     for (const auto& t : ampTables)
         ampItems.push_back ({ t.id, t.name, t.colour, ampTableUseCount (t.id) });
-    ampTableEd.library.setItems (ampItems, selAmpTableId);
+    ampTableEd.library.setItems (ampItems, document.selection().ampTable);
 
     std::vector<LibraryManager::Item> seqItems;
     seqItems.reserve (sequences.size());
     for (const auto& s : sequences)
         seqItems.push_back ({ s.id, s.name, juce::Colour (0xffa07fd8), 0 });
-    seqPanel.library.setItems (seqItems, selSeqId);
+    seqPanel.library.setItems (seqItems, document.selection().sequence);
 
     const int freqPage = juce::jlimit (0, juce::jmax (0, (int) pages.size() - 1),
                                        freqTablePage);
@@ -266,20 +266,20 @@ void MainComponent::refreshBoxes()
                           + (sampleSlots[i].loaded() ? sampleSlots[i].name : juce::String("(empty)"))
                           + (sampleSlots[i].reversed ? " (rev)" : ""),
                           (int)i + 1);
-    selSlot = juce::jlimit(0, (int) sampleSlots.size() - 1, selSlot);
-    sampleBox.setSelectedId(selSlot + 1, juce::dontSendNotification);
+    document.selection().sampleSlot = juce::jlimit(0, (int) sampleSlots.size() - 1, document.selection().sampleSlot);
+    sampleBox.setSelectedId(document.selection().sampleSlot + 1, juce::dontSendNotification);
     // M5: the Sample tab shows the slot's own Ref and level, and the
     // material's buttons follow the slot.
     syncRefToSlot();
-    levelSlider.setValue (selSlot >= 0 && selSlot < (int) sampleSlots.size()
-                            ? (double) sampleSlots[(size_t) selSlot].level : 1.0,
+    levelSlider.setValue (document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size()
+                            ? (double) sampleSlots[(size_t) document.selection().sampleSlot].level : 1.0,
                           juce::dontSendNotification);
     updateMaterialButtons();
 
     // keep selections valid
     auto findIdx = [](auto& vec, int id){ for (size_t i = 0; i < vec.size(); ++i) if (vec[i].id == id) return (int)i; return 0; };
-    waveBox.setSelectedId(findIdx(waveforms, selWave) + 1, juce::dontSendNotification);
-    envBox.setSelectedId(findIdx(envelopes, selEnv) + 1, juce::dontSendNotification);
+    waveBox.setSelectedId(findIdx(waveforms, document.selection().wave) + 1, juce::dontSendNotification);
+    envBox.setSelectedId(findIdx(envelopes, document.selection().envelope) + 1, juce::dontSendNotification);
     updateStatus();
 }
 
@@ -294,8 +294,8 @@ void MainComponent::refreshScoreBinding()
         markModelChanged(); updateStatus(); refreshBoxes(); });
     pushVoice();
     score.setPlaying(transportActive());
-    waveEd.bind(&waveforms, &selWave, [this]{ markModelChanged(); });
-    envEd.bind(&envelopes, &selEnv, [this]{ markModelChanged(); });
+    waveEd.bind(&waveforms, &document.selection().wave, [this]{ markModelChanged(); });
+    envEd.bind(&envelopes, &document.selection().envelope, [this]{ markModelChanged(); });
     // v1.33.4 (L15, part 2): the undo transaction for the envelope editor.
     // F3 (2026-11-17): a shared envelope forks first, exactly like the
     // wavetable; the fork is part of the same undo step.
@@ -333,12 +333,12 @@ bool MainComponent::prepareWaveEdit()
     {
         const juce::ScopedLock l(dataLock);
         upic::Waveform* src = nullptr;
-        for (auto& w : waveforms) if (w.id == selWave) { src = &w; break; }
+        for (auto& w : waveforms) if (w.id == document.selection().wave) { src = &w; break; }
         if (src == nullptr && ! waveforms.empty())
         {
             // match WaveformEditor::current(), which falls back to the first
             src = &waveforms.front();
-            selWave = src->id;
+            document.selection().wave = src->id;
         }
         if (src == nullptr) return false;
 
@@ -348,7 +348,7 @@ bool MainComponent::prepareWaveEdit()
         for (size_t p = 0; p < pages.size() && !shared; ++p)
             for (const auto& a : pages[p].arcs)
             {
-                if (a.waveformId != selWave) continue;
+                if (a.waveformId != document.selection().wave) continue;
                 const bool selected = (p == (size_t) currentPage
                                        && std::find(ids.begin(), ids.end(), a.id) != ids.end());
                 if (!selected) { shared = true; break; }
@@ -386,7 +386,7 @@ bool MainComponent::prepareWaveEdit()
             }
             copy.name = name;
             waveforms.push_back(copy);
-            selWave = newId;
+            document.selection().wave = newId;
             forked = true;
             changed = true;
         }
@@ -395,9 +395,9 @@ bool MainComponent::prepareWaveEdit()
         for (auto& a : curPage().arcs)
             if (std::find(ids.begin(), ids.end(), a.id) != ids.end())
             {
-                if (a.waveformId != selWave)
+                if (a.waveformId != document.selection().wave)
                 {
-                    a.waveformId = selWave;
+                    a.waveformId = document.selection().wave;
                     changed = true;
                 }
             }
@@ -563,7 +563,7 @@ bool MainComponent::convertAs (int op)
                                               upic::paletteColour (id));
                             w.samples = upic::curveToWaveform (curve, upic::kWaveSize);
                             waveforms.push_back (w);
-                            selWave = id;
+                            document.selection().wave = id;
                             changed = true;
                             made = "The selection is now the wavetable " + w.name;
                         }
@@ -597,7 +597,7 @@ bool MainComponent::convertAs (int op)
                                               upic::paletteColour (id));
                             e.points = upic::curveToEnvelope (resampled).points;
                             envelopes.push_back (e);
-                            selEnv = id;
+                            document.selection().envelope = id;
                             changed = true;
                             made = "The selection is now the envelope " + e.name;
                         }
@@ -651,7 +651,7 @@ bool MainComponent::convertAs (int op)
         else if (op == convertWaveAsEnvelope)
         {
             const upic::Waveform* src = nullptr;
-            for (const auto& w : waveforms) if (w.id == selWave) { src = &w; break; }
+            for (const auto& w : waveforms) if (w.id == document.selection().wave) { src = &w; break; }
             if (src == nullptr)
             {
                 refusal = "There is no wavetable to convert";
@@ -680,7 +680,7 @@ bool MainComponent::convertAs (int op)
                                       upic::paletteColour (id));
                     e.points = upic::curveToEnvelope (resampled).points;
                     envelopes.push_back (e);
-                    selEnv = id;
+                    document.selection().envelope = id;
                     changed = true;
                     made = "The wavetable is now the envelope " + e.name;
                 }
@@ -689,7 +689,7 @@ bool MainComponent::convertAs (int op)
         else if (op == convertEnvAsWaveform)
         {
             const upic::Envelope* src = nullptr;
-            for (const auto& e : envelopes) if (e.id == selEnv) { src = &e; break; }
+            for (const auto& e : envelopes) if (e.id == document.selection().envelope) { src = &e; break; }
             if (src == nullptr)
             {
                 refusal = "There is no envelope to convert";
@@ -714,7 +714,7 @@ bool MainComponent::convertAs (int op)
                                       upic::paletteColour (id));
                     w.samples = upic::curveToWaveform (curve, upic::kWaveSize);
                     waveforms.push_back (w);
-                    selWave = id;
+                    document.selection().wave = id;
                     changed = true;
                     made = "The envelope is now the wavetable " + w.name;
                 }
@@ -770,7 +770,7 @@ bool MainComponent::libraryNewWave()
                           upic::paletteColour (id));
         w.makeSine();
         waveforms.push_back (w);
-        selWave = id;
+        document.selection().wave = id;
     }
     afterLibraryChange();
     return true;
@@ -789,7 +789,7 @@ bool MainComponent::libraryDuplicateWave()
         const juce::ScopedLock l (dataLock);
         const upic::Waveform* src = nullptr;
         for (const auto& w : waveforms)
-            if (w.id == selWave) { src = &w; break; }
+            if (w.id == document.selection().wave) { src = &w; break; }
         if (src == nullptr) return false;
 
         upic::Waveform copy = *src;
@@ -802,7 +802,7 @@ bool MainComponent::libraryDuplicateWave()
         copy.id = id;
         copy.name = uniqueBankName (waveforms, src->name + " copy");
         waveforms.push_back (copy);
-        selWave = copy.id;
+        document.selection().wave = copy.id;
     }
     afterLibraryChange();
     return true;
@@ -821,7 +821,7 @@ bool MainComponent::libraryRenameWave (const juce::String& newName)
         const juce::ScopedLock l (dataLock);
         upic::Waveform* w = nullptr;
         for (auto& x : waveforms)
-            if (x.id == selWave) { w = &x; break; }
+            if (x.id == document.selection().wave) { w = &x; break; }
         if (w == nullptr) return false;
         if (bankHasName (waveforms, name, w))
         {
@@ -842,7 +842,7 @@ bool MainComponent::libraryDeleteWave (int replacementId)
         return false;
     }
 
-    const int id = selWave;
+    const int id = document.selection().wave;
     bool exists = false;
     for (const auto& w : waveforms)
         if (w.id == id) { exists = true; break; }
@@ -875,9 +875,9 @@ bool MainComponent::libraryDeleteWave (int replacementId)
                          waveforms.end());
 
         if (uses > 0)
-            selWave = replacementId;
+            document.selection().wave = replacementId;
         else
-            selWave = waveforms.empty() ? 0 : waveforms.front().id;
+            document.selection().wave = waveforms.empty() ? 0 : waveforms.front().id;
     }
     afterLibraryChange();
     return true;
@@ -931,7 +931,7 @@ bool MainComponent::libraryNewEnvelope()
                           upic::paletteColour (id));
         e.presetFlat();
         envelopes.push_back (e);
-        selEnv = id;
+        document.selection().envelope = id;
     }
     afterLibraryChange();
     return true;
@@ -950,7 +950,7 @@ bool MainComponent::libraryDuplicateEnvelope()
         const juce::ScopedLock l (dataLock);
         const upic::Envelope* src = nullptr;
         for (const auto& e : envelopes)
-            if (e.id == selEnv) { src = &e; break; }
+            if (e.id == document.selection().envelope) { src = &e; break; }
         if (src == nullptr) return false;
 
         upic::Envelope copy = *src;
@@ -963,7 +963,7 @@ bool MainComponent::libraryDuplicateEnvelope()
         copy.id = id;
         copy.name = uniqueBankName (envelopes, src->name + " copy");
         envelopes.push_back (copy);
-        selEnv = copy.id;
+        document.selection().envelope = copy.id;
     }
     afterLibraryChange();
     return true;
@@ -982,7 +982,7 @@ bool MainComponent::libraryRenameEnvelope (const juce::String& newName)
         const juce::ScopedLock l (dataLock);
         upic::Envelope* e = nullptr;
         for (auto& x : envelopes)
-            if (x.id == selEnv) { e = &x; break; }
+            if (x.id == document.selection().envelope) { e = &x; break; }
         if (e == nullptr) return false;
         if (bankHasName (envelopes, name, e))
         {
@@ -1003,7 +1003,7 @@ bool MainComponent::libraryDeleteEnvelope (int replacementId)
         return false;
     }
 
-    const int id = selEnv;
+    const int id = document.selection().envelope;
     bool exists = false;
     for (const auto& e : envelopes)
         if (e.id == id) { exists = true; break; }
@@ -1038,9 +1038,9 @@ bool MainComponent::libraryDeleteEnvelope (int replacementId)
                          envelopes.end());
 
         if (uses > 0)
-            selEnv = replacementId;
+            document.selection().envelope = replacementId;
         else
-            selEnv = envelopes.empty() ? 0 : envelopes.front().id;
+            document.selection().envelope = envelopes.empty() ? 0 : envelopes.front().id;
     }
     afterLibraryChange();
     return true;
@@ -1056,15 +1056,15 @@ bool MainComponent::forkEnvelopeForSelection (bool& forked)
         const juce::ScopedLock l (dataLock);
         upic::Envelope* src = nullptr;
         for (auto& e : envelopes)
-            if (e.id == selEnv) { src = &e; break; }
+            if (e.id == document.selection().envelope) { src = &e; break; }
         if (src == nullptr) return false;
 
         bool shared = false;
         for (size_t p = 0; p < pages.size() && ! shared; ++p)
             for (const auto& a : pages[p].arcs)
             {
-                const bool refsAmp = (a.envelopeId == selEnv);
-                const bool refsPm  = (a.pmIndexEnv == selEnv);
+                const bool refsAmp = (a.envelopeId == document.selection().envelope);
+                const bool refsPm  = (a.pmIndexEnv == document.selection().envelope);
                 if (! refsAmp && ! refsPm) continue;
                 const bool selected = (p == (size_t) currentPage
                                        && std::find (ids.begin(), ids.end(), a.id) != ids.end());
@@ -1093,10 +1093,10 @@ bool MainComponent::forkEnvelopeForSelection (bool& forked)
         copy.id = id;
         copy.name = uniqueBankName (envelopes, src->name + " copy");
         envelopes.push_back (copy);
-        selEnv = copy.id;
+        document.selection().envelope = copy.id;
         for (auto& a : curPage().arcs)
             if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
-                a.envelopeId = selEnv;
+                a.envelopeId = document.selection().envelope;
         forked = true;
     }
 
@@ -1143,7 +1143,7 @@ bool MainComponent::libraryPublishWave()
         const juce::ScopedLock l (dataLock);
         const upic::Waveform* src = nullptr;
         for (const auto& w : waveforms)
-            if (w.id == selWave) { src = &w; break; }
+            if (w.id == document.selection().wave) { src = &w; break; }
         if (src == nullptr)
         {
             flash ("Choose a wavetable to publish");
@@ -1212,7 +1212,7 @@ bool MainComponent::libraryImportWave()
         imported.name = uniqueBankName (waveforms, asset.name);
         imported.colour = asset.colour;
         waveforms.push_back (imported);
-        selWave = newId;
+        document.selection().wave = newId;
     }
 
     // Show the piece's bank again, with the imported wavetable selected.
@@ -1243,7 +1243,7 @@ bool MainComponent::libraryPublishEnvelope()
         const juce::ScopedLock l (dataLock);
         const upic::Envelope* src = nullptr;
         for (const auto& e : envelopes)
-            if (e.id == selEnv) { src = &e; break; }
+            if (e.id == document.selection().envelope) { src = &e; break; }
         if (src == nullptr)
         {
             flash ("Choose an envelope to publish");
@@ -1311,7 +1311,7 @@ bool MainComponent::libraryImportEnvelope()
         imported.name = uniqueBankName (envelopes, asset.name);
         imported.colour = asset.colour;
         envelopes.push_back (imported);
-        selEnv = newId;
+        document.selection().envelope = newId;
     }
 
     envLib.setSource (LibraryManager::Source::Piece);
@@ -1345,7 +1345,7 @@ bool MainComponent::libraryPublishAmpTable()
         const juce::ScopedLock l (dataLock);
         const upic::AmplitudeTable* src = nullptr;
         for (const auto& t : ampTables)
-            if (t.id == selAmpTableId) { src = &t; break; }
+            if (t.id == document.selection().ampTable) { src = &t; break; }
         if (src == nullptr)
         {
             flash ("Choose an amplitude table to publish");
@@ -1412,7 +1412,7 @@ bool MainComponent::libraryImportAmpTable()
         imported.name = uniqueBankName (ampTables, asset.name);
         imported.colour = asset.colour;
         ampTables.push_back (std::move (imported));
-        selAmpTableId = newId;
+        document.selection().ampTable = newId;
     }
 
     ampTableEd.library.setSource (LibraryManager::Source::Piece);
@@ -1592,7 +1592,7 @@ bool MainComponent::libraryPublishSequence()
         const juce::ScopedLock l (dataLock);
         const upic::PerformanceSequence* src = nullptr;
         for (const auto& s : sequences)
-            if (s.id == selSeqId) { src = &s; break; }
+            if (s.id == document.selection().sequence) { src = &s; break; }
         if (src == nullptr)
         {
             flash ("Choose a performance sequence to publish");
@@ -1691,7 +1691,7 @@ bool MainComponent::libraryImportSequence()
             imported.id = newId; // the library's id never becomes a local id
             imported.name = uniqueBankName (sequences, asset.name);
             sequences.push_back (std::move (imported));
-            selSeqId = newId;
+            document.selection().sequence = newId;
         }
     }
 
@@ -1725,15 +1725,15 @@ void MainComponent::pushVoice()
 {
     int w = waveBox.getSelectedId() - 1;
     int e = envBox.getSelectedId() - 1;
-    if (w >= 0 && ! waveforms.empty()) selWave = waveforms[(size_t)(w % (int) waveforms.size())].id;
-    if (e >= 0 && ! envelopes.empty()) selEnv = envelopes[(size_t)(e % (int) envelopes.size())].id;
-    const int sid = (selSlot >= 0 && selSlot < (int) sampleSlots.size())
-                        ? sampleSlots[(size_t) selSlot].id : 1;
+    if (w >= 0 && ! waveforms.empty()) document.selection().wave = waveforms[(size_t)(w % (int) waveforms.size())].id;
+    if (e >= 0 && ! envelopes.empty()) document.selection().envelope = envelopes[(size_t)(e % (int) envelopes.size())].id;
+    const int sid = (document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size())
+                        ? sampleSlots[(size_t) document.selection().sampleSlot].id : 1;
     drawSampleId = sid; // remembered for procedural generation
     // M5: on the Sample tab the Ref is the slot's (the material's base
     // pitch), so the grid and the new arcs are born with it.
     syncRefToSlot();
-    score.setCurrentVoice(selWave, selEnv, drawIntensity, drawMatMode, sid, drawRef);
+    score.setCurrentVoice(document.selection().wave, document.selection().envelope, drawIntensity, drawMatMode, sid, drawRef);
     // v1.32: a new arc is born with the frequency space on show
     score.setCurrentStep (stepBtn.getToggleState()
                             ? juce::jlimit (1, 99, (int) stepDivSlider.getValue()) : 0);
@@ -1754,8 +1754,8 @@ void MainComponent::syncControlsToArc(int arcId)
 {
     if (arcId < 0)
     {
-        selectedArcId = -1;
-        lastArcSelection.clear();
+        document.selection().arc = -1;
+        document.selection().arcSelection.clear();
         arcListPanel.setSelectedArcs(currentPage, {});
         // WP2/WP5/WP6: the toolbar's combos follow the selection. With no
         // selection the modulator is "None" and the channel is "Main".
@@ -1803,8 +1803,8 @@ void MainComponent::syncControlsToArc(int arcId)
             drawMatMode = juce::jlimit(0, 3, a.mode);
             syncMaterialTabs();
             for (size_t i = 0; i < sampleSlots.size(); ++i)
-                if (sampleSlots[i].id == a.sampleId) { selSlot = (int) i; break; }
-            sampleBox.setSelectedId(selSlot + 1, juce::dontSendNotification);
+                if (sampleSlots[i].id == a.sampleId) { document.selection().sampleSlot = (int) i; break; }
+            sampleBox.setSelectedId(document.selection().sampleSlot + 1, juce::dontSendNotification);
             updateRevButton();
             drawRef = a.refFreq;
             refSlider.setValue(drawRef, juce::dontSendNotification);
@@ -1817,9 +1817,9 @@ void MainComponent::syncControlsToArc(int arcId)
         }
     }
 
-    selectedArcId = score.getSelectedArc();
-    lastArcSelection = score.getSelectedArcs();
-    arcListPanel.setSelectedArcs(currentPage, lastArcSelection);
+    document.selection().arc = score.getSelectedArc();
+    document.selection().arcSelection = score.getSelectedArcs();
+    arcListPanel.setSelectedArcs(currentPage, document.selection().arcSelection);
 
     // WP2/WP5/WP6: the toolbar's combos follow the selected arc. Without
     // this they kept showing the PREVIOUS arc's amplitude table, modulator
@@ -1831,8 +1831,8 @@ void MainComponent::syncControlsToArc(int arcId)
 
 void MainComponent::updateSampleView()
 {
-    if (drawMatMode == 1 && selSlot >= 0 && selSlot < (int) sampleSlots.size())
-        waveEd.setSampleView(&sampleSlots, selSlot);
+    if (drawMatMode == 1 && document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size())
+        waveEd.setSampleView(&sampleSlots, document.selection().sampleSlot);
     else
         waveEd.setSampleView(nullptr, -1);
 }
@@ -1840,8 +1840,8 @@ void MainComponent::updateSampleView()
 // v1.19: the Reverse button follows the selected slot.
 void MainComponent::updateRevButton()
 {
-    const bool on = selSlot >= 0 && selSlot < (int) sampleSlots.size()
-                    && sampleSlots[(size_t) selSlot].reversed;
+    const bool on = document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size()
+                    && sampleSlots[(size_t) document.selection().sampleSlot].reversed;
     revBtn.setToggleState(on, juce::dontSendNotification);
     revBtn.setButtonText(on ? "Rev ON" : "Rev");
     revBtn.setTooltip(on ? "The slot plays backwards (click to play it forward)"
@@ -1853,8 +1853,8 @@ void MainComponent::updateRevButton()
 // it, and every arc that plays the slot shares it.
 void MainComponent::syncRefToSlot()
 {
-    if (drawMatMode != 1 || selSlot < 0 || selSlot >= (int) sampleSlots.size()) return;
-    const double slotRef = sampleSlots[(size_t) selSlot].refFreq;
+    if (drawMatMode != 1 || document.selection().sampleSlot < 0 || document.selection().sampleSlot >= (int) sampleSlots.size()) return;
+    const double slotRef = sampleSlots[(size_t) document.selection().sampleSlot].refFreq;
     if (! (slotRef > 0.0)) return;
     drawRef = slotRef;
     refSlider.setValue (drawRef, juce::dontSendNotification);
@@ -1864,8 +1864,8 @@ void MainComponent::syncRefToSlot()
 // the slot has no material to edit.
 void MainComponent::updateMaterialButtons()
 {
-    const bool has = selSlot >= 0 && selSlot < (int) sampleSlots.size()
-                     && sampleSlots[(size_t) selSlot].loaded();
+    const bool has = document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size()
+                     && sampleSlots[(size_t) document.selection().sampleSlot].loaded();
     normMatBtn.setEnabled (has);
     fadeMatBtn.setEnabled (has);
     resetMatBtn.setEnabled (has);
@@ -1878,8 +1878,8 @@ void MainComponent::updateMaterialButtons()
 // step over them, and the Reset button can take them back.
 void MainComponent::editMaterial (int what)
 {
-    if (selSlot < 0 || selSlot >= (int) sampleSlots.size()) return;
-    auto& slot = sampleSlots[(size_t) selSlot];
+    if (document.selection().sampleSlot < 0 || document.selection().sampleSlot >= (int) sampleSlots.size()) return;
+    auto& slot = sampleSlots[(size_t) document.selection().sampleSlot];
     if (! slot.loaded()) { flash ("The slot has no material"); return; }
 
     beginEdit (what == 1 ? "Normalize the material"
@@ -1991,8 +1991,8 @@ void MainComponent::runGenerator(int kind)
             // arcs that the loader would drop on the next open.
             if ((int) pg.arcs.size() >= upic::limits::kMaxArcsPerPage) { ++skipped; continue; }
             a.id = pg.nextArcId++;
-            a.waveformId = selWave;
-            a.envelopeId = selEnv;
+            a.waveformId = document.selection().wave;
+            a.envelopeId = document.selection().envelope;
             a.intensity = drawIntensity;
             a.mode = drawMatMode; // live arcs for the live tab, etc.
             a.sampleId = drawSampleId;
@@ -2141,8 +2141,8 @@ bool MainComponent::waveFromSelectedSlot()
     upic::SampleSlot material;
     {
         const juce::ScopedLock l (dataLock);
-        if (selSlot >= 0 && selSlot < (int) sampleSlots.size())
-            material = sampleSlots[(size_t) selSlot];
+        if (document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size())
+            material = sampleSlots[(size_t) document.selection().sampleSlot];
     }
 
     if (! material.loaded())
@@ -2207,7 +2207,7 @@ bool MainComponent::waveFromSelectedSlot()
 
                 wave = upic::waveFromTake (region, newId, name);
                 waveforms.push_back (wave);
-                selWave = newId;
+                document.selection().wave = newId;
                 ok = true;
             }
         }
@@ -2215,7 +2215,7 @@ bool MainComponent::waveFromSelectedSlot()
 
     if (ok)
     {
-        waveEd.bind (&waveforms, &selWave, [this]{ markModelChanged(); });
+        waveEd.bind (&waveforms, &document.selection().wave, [this]{ markModelChanged(); });
         afterLibraryChange();
         flash ("Wave page digitised: \"" + wave.name + "\" (one loop)");
     }
@@ -2233,8 +2233,8 @@ void MainComponent::clearCurrentPage()
         curPage().arcs.clear();
     }
     score.setSelectedArc(-1);
-    selectedArcId = -1;
-    lastArcSelection.clear();
+    document.selection().arc = -1;
+    document.selection().arcSelection.clear();
     arcListPanel.setSelectedArcs(currentPage, {});
     refreshBoxes();
     markModelChanged(); // clearing while playing fades instead of clicking

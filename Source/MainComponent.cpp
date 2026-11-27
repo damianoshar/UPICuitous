@@ -855,7 +855,7 @@ void MainComponent::buildToolbarControls()
         int idx = waveEditBox.getSelectedId() - 1;
         // v1.33.4 (M22): bind() replaces the change callback, so the mark
         // has to be passed here too
-        if (idx >= 0 && idx < (int)waveforms.size()) { selWave = waveforms[(size_t)idx].id; waveEd.bind(&waveforms, &selWave, [this]{ markModelChanged(); }); waveBox.setSelectedId(idx + 1, juce::dontSendNotification); pushVoice(); }
+        if (idx >= 0 && idx < (int)waveforms.size()) { document.selection().wave = waveforms[(size_t)idx].id; waveEd.bind(&waveforms, &document.selection().wave, [this]{ markModelChanged(); }); waveBox.setSelectedId(idx + 1, juce::dontSendNotification); pushVoice(); }
         updateWaveButtonColours();
     };
     envEditBox.onChange = [this]{
@@ -864,7 +864,7 @@ void MainComponent::buildToolbarControls()
         // piece-envelope selection.
         if (envLib.source() != LibraryManager::Source::Piece) return;
         int idx = envEditBox.getSelectedId() - 1;
-        if (idx >= 0 && idx < (int)envelopes.size()) { selEnv = envelopes[(size_t)idx].id; envEd.bind(&envelopes, &selEnv, [this]{ markModelChanged(); }); envBox.setSelectedId(idx + 1, juce::dontSendNotification); pushVoice(); }
+        if (idx >= 0 && idx < (int)envelopes.size()) { document.selection().envelope = envelopes[(size_t)idx].id; envEd.bind(&envelopes, &document.selection().envelope, [this]{ markModelChanged(); }); envBox.setSelectedId(idx + 1, juce::dontSendNotification); pushVoice(); }
     };
 
     // --- sliders ---
@@ -996,10 +996,10 @@ void MainComponent::timerCallback()
     // the panel's selection follows the canvas's (multi-selection included)
     {
         const auto sel = score.getSelectedArcs();
-        if (sel != lastArcSelection)
+        if (sel != document.selection().arcSelection)
         {
-            lastArcSelection = sel;
-            selectedArcId = sel.empty() ? -1 : sel.front();
+            document.selection().arcSelection = sel;
+            document.selection().arc = sel.empty() ? -1 : sel.front();
             arcListPanel.setSelectedArcs (currentPage, sel);
         }
     }

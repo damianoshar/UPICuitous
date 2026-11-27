@@ -117,11 +117,11 @@ bool MainComponent::restorePieceModel (const upic::PieceModel& model)
 {
     // the selection and the transport are read before the piece is replaced
     // (the loader puts the selection on the first item of the bank it loads)
-    const int waveId = selWave;
-    const int envelopeId = selEnv;
-    const int ampTableId = selAmpTableId;
-    const int sequenceId = selSeqId;
-    const int sampleSlotIndex = selSlot;
+    const int waveId = document.selection().wave;
+    const int envelopeId = document.selection().envelope;
+    const int ampTableId = document.selection().ampTable;
+    const int sequenceId = document.selection().sequence;
+    const int sampleSlotIndex = document.selection().sampleSlot;
     const bool wasPlaying = transportActive();
 
     if (! loadFromVar (upic::pieceToVar (model)))
@@ -163,19 +163,19 @@ void MainComponent::restoreHistorySelections (int waveId, int envelopeId,
         return false;
     };
 
-    if (hasWave() && ! waveforms.empty()) selWave = waveId;
-    else if (! waveforms.empty()) selWave = waveforms.front().id;
-    if (hasEnvelope() && ! envelopes.empty()) selEnv = envelopeId;
-    else if (! envelopes.empty()) selEnv = envelopes.front().id;
+    if (hasWave() && ! waveforms.empty()) document.selection().wave = waveId;
+    else if (! waveforms.empty()) document.selection().wave = waveforms.front().id;
+    if (hasEnvelope() && ! envelopes.empty()) document.selection().envelope = envelopeId;
+    else if (! envelopes.empty()) document.selection().envelope = envelopes.front().id;
 
-    if (hasAmpTable()) selAmpTableId = ampTableId;
-    else selAmpTableId = ampTables.empty() ? -1 : ampTables.front().id;
+    if (hasAmpTable()) document.selection().ampTable = ampTableId;
+    else document.selection().ampTable = ampTables.empty() ? -1 : ampTables.front().id;
 
-    if (hasSequence()) selSeqId = sequenceId;
-    else selSeqId = sequences.empty() ? -1 : sequences.front().id;
+    if (hasSequence()) document.selection().sequence = sequenceId;
+    else document.selection().sequence = sequences.empty() ? -1 : sequences.front().id;
 
-    selSlot = juce::jlimit (0, juce::jmax (0, (int) sampleSlots.size() - 1),
-                            sampleSlotIndex);
+    document.selection().sampleSlot = juce::jlimit (0, juce::jmax (0, (int) sampleSlots.size() - 1),
+                                                sampleSlotIndex);
     refreshBoxes();
     refreshAmpTableEditor();
 }

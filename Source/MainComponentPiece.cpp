@@ -455,8 +455,8 @@ bool MainComponent::loadFromVar(const juce::var& v)
         for (auto& c : channels) nextChannelId = juce::jmax (nextChannelId, c.id + 1);
         if (fileNextChannelId > nextChannelId && fileNextChannelId <= upic::limits::kMaxItemId)
             nextChannelId = fileNextChannelId;
-        selChannelId = channels.empty() ? -1 : channels.front().id;
-        selSeqId = sequences.empty() ? -1 : sequences.front().id;
+        document.selection().channel = channels.empty() ? -1 : channels.front().id;
+        document.selection().sequence = sequences.empty() ? -1 : sequences.front().id;
         pages = std::move (newPages);
         sampleSlots = std::move (newSlots);
     }
@@ -579,8 +579,8 @@ bool MainComponent::loadFromVar(const juce::var& v)
         gridBox.setSelectedId(gi + 1, juce::dontSendNotification);
         score.setTimeGrid(timeGrid);
     }
-    selWave = waveforms.front().id; selEnv = envelopes.front().id;
-    selSlot = 0;
+    document.selection().wave = waveforms.front().id; document.selection().envelope = envelopes.front().id;
+    document.selection().sampleSlot = 0;
     drawMatMode = score.getLayer(); // the tab stays where it is across a load
     syncMaterialTabs();
     drawRef = upic::kDefaultRefFreq;
@@ -968,7 +968,7 @@ bool MainComponent::setSampleSlotForTest (int slotIndex,
         slot.resetEdits();
     }
 
-    selSlot = slotIndex;
+    document.selection().sampleSlot = slotIndex;
     score.sampleDurations[sampleSlots[(size_t) slotIndex].id] =
         sampleSlots[(size_t) slotIndex].durationSec();
     markModelChanged();
@@ -1006,7 +1006,7 @@ void MainComponent::installSample (int slotIndex, SampleImport&& import)
         publishModelSnapshot(); // the next block must see it (no timer needed)
     }
     score.sampleDurations[sampleSlots[(size_t) slotIndex].id] = sampleSlots[(size_t) slotIndex].durationSec();
-    selSlot = slotIndex;
+    document.selection().sampleSlot = slotIndex;
     refreshBoxes();
     updateSampleView();
     pushVoice();
