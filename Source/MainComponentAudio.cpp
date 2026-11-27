@@ -474,7 +474,7 @@ void MainComponent::publishModelSnapshot()
         snap->arcOverrides.push_back (page.resolveArcOverrides());
 
     // v1.33.4 (M22): the revision this snapshot was built from
-    snap->revision = modelRevision.load(std::memory_order_relaxed);
+    snap->revision = document.revision();
     snapshots.publish(snap); // frees the snapshots the reader retired
     lastPublishedRevision = snap->revision;
     lastModelPublishMs = (uint64_t) juce::Time::getMillisecondCounter();
@@ -1089,7 +1089,7 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             renderSampleExtractPreview (*snap, block, extractionRoute ? 1.0 : 0.0);
 
             // Absorb model edits while stopped (no sound to fade).
-            const int epoch = modelEpoch.load(std::memory_order_relaxed);
+            const auto epoch = document.epoch();
             modelChanged = (epoch != seenModelEpoch);
             seenModelEpoch = epoch;
 

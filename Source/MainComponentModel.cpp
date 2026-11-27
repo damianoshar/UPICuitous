@@ -896,9 +896,9 @@ bool MainComponent::libraryMakeWaveUnique()
         return false;
     }
 
-    const auto rev = modelRevision.load (std::memory_order_relaxed);
+    const auto rev = document.revision();
     if (! prepareWaveEdit()) return false;
-    if (modelRevision.load (std::memory_order_relaxed) == rev)
+    if (document.revision() == rev)
     {
         flash ("The selected arcs already have their own wavetable");
         return false;

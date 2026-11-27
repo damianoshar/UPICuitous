@@ -53,7 +53,7 @@ void MainComponent::beginEdit (const juce::String& label)
     channelGainEditing = false;
 
     pendingEdit = std::make_unique<upic::PieceModel> (capturePieceModel());
-    pendingRevision = modelRevision.load (std::memory_order_relaxed);
+    pendingRevision = document.revision();
     pendingLabel = label;
 }
 
@@ -66,7 +66,7 @@ void MainComponent::endEdit()
 
     // nothing moved? then the snapshot is not worth keeping (a click that
     // changed nothing is not an undo step).
-    if (modelRevision.load (std::memory_order_relaxed) == pendingRevision)
+    if (document.revision() == pendingRevision)
     {
         pendingEdit.reset();
         return;

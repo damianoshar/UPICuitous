@@ -10,6 +10,7 @@
 #include <utility>
 #include "UpicModel.h"
 #include "UpicEngine.h"
+#include "DocumentSession.h"
 #include "ModelSnapshot.h"
 #include "ScoreEditor.h"
 #include "ScoreViewBar.h"
@@ -154,24 +155,21 @@ public:
     // (the loop toggle), so they do not make the app ask to save.
     void markModelChanged (bool affectsPiece = true)
     {
-        modelEpoch.fetch_add(1, std::memory_order_relaxed);
-        modelRevision.fetch_add(1, std::memory_order_relaxed);
-        if (affectsPiece)
-            pieceDirty.store (true, std::memory_order_relaxed);
+        document.markChanged (affectsPiece);
     }
 
     // v1.33.4 (L15): the unsaved-changes flag. The standalone window asks
     // before it closes when the piece has unsaved changes (the review:
     // "application close directly calls quit() - an accidental closing needs
     // a recovery path").
-    bool pieceHasUnsavedChanges() const { return pieceDirty.load (std::memory_order_relaxed); }
-    void markPieceSaved() { pieceDirty.store (false, std::memory_order_relaxed); }
+    bool pieceHasUnsavedChanges() const { return document.isDirty(); }
+    void markPieceSaved() { document.markSaved(); }
 
     // R3.1: the document's own counters, for the suite that pins the
     // document session's contract. The production code does not read them
     // through these - it reads the session itself.
-    std::uint64_t modelRevisionForTest() const { return modelRevision.load (std::memory_order_relaxed); }
-    std::uint64_t modelEpochForTest() const { return modelEpoch.load (std::memory_order_relaxed); }
+    std::uint64_t modelRevisionForTest() const { return document.revision(); }
+    std::uint64_t modelEpochForTest() const { return document.epoch(); }
 
     // --- v1.33.4 (H3): the host transport follow ---
     //
@@ -1869,8 +1867,6 @@ private:
     // The compare-exchange in the audio thread means a Play that cancels a
     // stop is never overwritten by the fade's completion.
     std::atomic<int> transportState { (int) TransportState::stopped };
-    // v1.33.4 (L15): the piece differs from what was last written
-    std::atomic<bool> pieceDirty { false };
     // --- v1.33.4 (L15, part 2): the undo stack (the message thread only) ---
     struct UndoEntry
     {
@@ -2249,18 +2245,22 @@ private:
     static constexpr double kScrubHysteresis  = 0.05;
     static constexpr float kGainSmooth = 0.001f;  // ~17 ms time constant
 
+    // R3.1: the document session - the one owner of the document's own
+    // state: the revision (it moves when the model moves), the epoch (the
+    // audio thread's "the model moved") and the unsaved flag (the piece
+    // differs from what is on the disk).
+    upic::DocumentSession document;
+
     // The model can change under the audio thread (a page change, a loaded
     // sample, a pitch-mode switch). Those changes replace the sound that is
-    // playing, which is a step - a click - so the message thread bumps this
-    // counter and the audio thread fades across the change.
-    std::atomic<int> modelEpoch { 0 };
-    int seenModelEpoch = 0;   // audio thread
+    // playing, which is a step - a click - so the message thread bumps the
+    // session's epoch and the audio thread fades across the change.
+    std::uint64_t seenModelEpoch = 0;   // audio thread
 
     // v1.33.4 (M22): the model revision. It moves whenever the model
     // changes (markModelChanged), and the status timer publishes a snapshot
     // only when it moved - the timer used to deep-copy the whole model 30
     // times a second, even while nothing changed.
-    std::atomic<uint64_t> modelRevision { 0 };
     uint64_t lastPublishedRevision = 0;   // message thread
     uint64_t lastModelPublishMs = 0;      // message thread: the safety-net publish
     std::atomic<int> snapshotPublishCount { 0 };

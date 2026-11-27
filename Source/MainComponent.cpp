@@ -1016,7 +1016,7 @@ void MainComponent::timerCallback()
     // for at most 2 s instead of forever.
     if (!(muteWhileDragging && arcEditing.load(std::memory_order_relaxed)))
     {
-        const auto rev = modelRevision.load(std::memory_order_relaxed);
+        const auto rev = document.revision();
         const auto nowMs = (uint64_t) juce::Time::getMillisecondCounter();
         const bool changed = (rev != lastPublishedRevision);
         const bool safetyNet = (nowMs - lastModelPublishMs) >= 2000;

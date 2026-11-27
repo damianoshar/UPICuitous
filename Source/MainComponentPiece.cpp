@@ -654,7 +654,7 @@ void MainComponent::saveFile (std::function<void (bool)> onDone)
             // model moved on while the worker was writing, the piece on the
             // disk is already older than what is on the screen - the app
             // must still ask to save.
-            const juce::uint64 savedRevision = sp->modelRevision.load (std::memory_order_relaxed);
+            const juce::uint64 savedRevision = sp->document.revision();
             sp->startJob ("Saving the piece",
                 [model, url, maxBytes] (Job& job)
                 {
@@ -685,7 +685,7 @@ void MainComponent::saveFile (std::function<void (bool)> onDone)
                     // v1.33.4 (L15): the piece is on the disk now, so there
                     // is nothing to ask about when the app closes - unless
                     // the model moved on while the worker was writing.
-                    if (job.ok && sp->modelRevision.load (std::memory_order_relaxed) == savedRevision)
+                    if (job.ok && sp->document.revision() == savedRevision)
                         sp->markPieceSaved();
                     if (onDone) onDone (job.ok);
                 });

@@ -236,7 +236,7 @@ void MainComponent::maybeWriteRecoverySnapshot()
     if (jobRunning()) return;   // the disk is busy with the user's job
 
     const auto now = (juce::uint64) juce::Time::getMillisecondCounter();
-    const auto rev = modelRevision.load (std::memory_order_relaxed);
+    const auto rev = document.revision();
     if (now < lastRecoveryMs || now - lastRecoveryMs < 30000) return;   // at most every 30 s
     if (rev == lastRecoveryRevision) return;                            // nothing changed
 
