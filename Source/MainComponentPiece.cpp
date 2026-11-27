@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "PageCodec.h"
+#include "EnvelopeCodec.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -170,7 +171,7 @@ bool MainComponent::loadFromVar(const juce::var& v)
         for (auto& ev : *arr)
         {
             if ((int) newEnvelopes.size() >= upic::limits::kMaxEnvelopes) break;
-            newEnvelopes.push_back(upic::Envelope::fromVar(ev, i++));
+            newEnvelopes.push_back(upic::envelopeFromVar (ev, i++));
         }
         noteDrop ("envelope", "envelopes", (int) arr->size() - (int) newEnvelopes.size());
         // the envelope's own points are capped too
@@ -187,7 +188,7 @@ bool MainComponent::loadFromVar(const juce::var& v)
         for (auto& tv : *arr)
         {
             if ((int) newAmpTables.size() >= upic::limits::kMaxAmplitudeTables) break;
-            newAmpTables.push_back (upic::AmplitudeTable::fromVar (tv, i++));
+            newAmpTables.push_back (upic::envelopeFromVar (tv, i++));
         }
         noteDrop ("amplitude table", "amplitude tables",
                   (int) arr->size() - (int) newAmpTables.size());

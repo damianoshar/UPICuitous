@@ -101,6 +101,7 @@
       <FILE id="mdThm32" name="UpicTheme.h" compile="0" resource="0" file="Source/UpicTheme.h"/>
       <FILE id="mdWav33" name="Waveform.h" compile="0" resource="0" file="Source/Waveform.h"/>
       <FILE id="mdEnv34" name="Envelope.h" compile="0" resource="0" file="Source/Envelope.h"/>
+      <FILE id="mdEnv48" name="EnvelopeCodec.h" compile="0" resource="0" file="Source/EnvelopeCodec.h"/>
       <FILE id="mdArc35" name="Arc.h" compile="0" resource="0" file="Source/Arc.h"/>
       <FILE id="mdArc45" name="ArcCodec.h" compile="0" resource="0" file="Source/ArcCodec.h"/>
       <FILE id="mdArc47" name="ArcGroupCodec.h" compile="0" resource="0" file="Source/ArcGroupCodec.h"/>

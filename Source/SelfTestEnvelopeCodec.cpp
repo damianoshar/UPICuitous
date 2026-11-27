@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Envelope.h"
+#include "EnvelopeCodec.h"
 #include "PieceLimits.h"
 
 //==============================================================================
@@ -35,8 +36,8 @@
 namespace
 {
     // The envelope's codec, reached through one door.
-    juce::var encode (const upic::Envelope& e) { return e.toVar(); }
-    upic::Envelope decode (const juce::var& v, int fallbackId = 0) { return upic::Envelope::fromVar (v, fallbackId); }
+    juce::var encode (const upic::Envelope& e) { return upic::envelopeToVar (e); }
+    upic::Envelope decode (const juce::var& v, int fallbackId = 0) { return upic::envelopeFromVar (v, fallbackId); }
 
     // The envelope's name as text, and its colour as a colour - whatever the
     // domain holds.

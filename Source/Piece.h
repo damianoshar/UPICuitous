@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <vector>
 
+#include "EnvelopeCodec.h"
 #include "Page.h"
 #include "PageCodec.h"
 #include "PieceLimits.h"
@@ -104,7 +105,7 @@ namespace upic
             o->setProperty("tuning", m.tuning.toVar());
         juce::Array<juce::var> wa, ea, pa, sa;
         for (auto& w : m.waveforms) wa.add (w.toVar());
-        for (auto& e : m.envelopes) ea.add (e.toVar());
+        for (auto& e : m.envelopes) ea.add (upic::envelopeToVar (e));
         for (auto& s : m.sampleSlots) if (s.loaded()) sa.add (s.toVar (includeSampleAudio));
         for (auto& p : m.pages) pa.add (pageToVar (p));
         o->setProperty("waveforms", wa);
@@ -120,7 +121,7 @@ namespace upic
         if (! m.amplitudeTables.empty())
         {
             juce::Array<juce::var> ta;
-            for (auto& t : m.amplitudeTables) ta.add (t.toVar());
+            for (auto& t : m.amplitudeTables) ta.add (upic::envelopeToVar (t));
             o->setProperty ("ampTables", ta);
         }
         // WP6: the channels (omitted when the piece has none).

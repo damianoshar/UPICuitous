@@ -18,6 +18,7 @@
 #include "SampleAnalysis.h"
 #include "UserLibrary.h"
 #include "Ids.h"
+#include "EnvelopeCodec.h"
 
 #if JUCE_WINDOWS
 namespace juce
@@ -119,14 +120,14 @@ namespace
     {
         upic::Envelope e (id, name, juce::Colours::cyan);
         e.points = { { 0.0f, 0.0f }, { 0.5f, 1.0f }, { 1.0f, 0.0f } };
-        return e.toVar();
+        return upic::envelopeToVar (e);
     }
 
     juce::var amplitudePayload (int id, const juce::String& name)
     {
         auto table = upic::makeAmplitudeTable (id, name, juce::Colours::green,
                                                upic::ampSquare);
-        return table.toVar();
+        return upic::envelopeToVar (table);
     }
 
     upic::FreqSpaceDef frequencyDef()
@@ -378,7 +379,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 upic::UserAsset asset;
                 const bool ok = upic::UserLibrary::read (upic::UserAssetKind::Envelope,
                                                          file, asset, error);
-                const auto e = upic::Envelope::fromVar (asset.payload, 0);
+                const auto e = upic::envelopeFromVar (asset.payload, 0);
                 check (ok && asset.id == 7 && e.points.size() == 3
                        && std::abs (e.points[1].y - 1.0f) < 1.0e-6f,
                        "wp7 library: the envelope reads back exactly", error);
@@ -391,7 +392,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 upic::UserAsset asset;
                 const bool ok = upic::UserLibrary::read (upic::UserAssetKind::AmpTable,
                                                          file, asset, error);
-                const auto a = upic::Envelope::fromVar (asset.payload, 0);
+                const auto a = upic::envelopeFromVar (asset.payload, 0);
                 check (ok && asset.id == 4 && a.points.size() >= 3,
                        "wp7 library: the amplitude table reads back", error);
             }

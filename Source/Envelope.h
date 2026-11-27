@@ -54,33 +54,8 @@ namespace upic
         void presetGate()      { points = { {0,1}, {0.45f,1}, {0.5f,0}, {1,0} }; }
         void presetStrings()   { points = { {0,0}, {0.15f,1}, {0.8f,0.9f}, {1,0} }; }
 
-        juce::var toVar() const
-        {
-            auto* o = new juce::DynamicObject();
-            o->setProperty("id", id);
-            o->setProperty("name", name);
-            o->setProperty("colour", (int) colour.getARGB());
-            juce::Array<juce::var> arr;
-            for (auto& p : points) { auto* po = new juce::DynamicObject(); po->setProperty("x", p.x); po->setProperty("y", p.y); arr.add(juce::var(po)); }
-            o->setProperty("points", arr);
-            return juce::var(o);
-        }
-        static Envelope fromVar(const juce::var& v, int fallbackId)
-        {
-            Envelope e; e.id = (int) v.getProperty("id", fallbackId);
-            e.name = v.getProperty("name", "Env").toString();
-            e.colour = juce::Colour((juce::uint32)(int) v.getProperty("colour", (int)0xffff9f0a));
-            e.points.clear();
-            if (auto* arr = v.getProperty("points", juce::var()).getArray())
-                for (auto& pv : *arr)
-                {
-                    if ((int) e.points.size() >= limits::kMaxPointsPerEnvelope) break;
-                    e.points.push_back({ limits::clampFinite((float)(double)pv.getProperty("x", 0), 0.0f, 1.0f),
-                                         limits::clampFinite((float)(double)pv.getProperty("y", 1), 0.0f, 1.0f) });
-                }
-            if (e.points.empty()) e.presetFlat();
-            std::sort(e.points.begin(), e.points.end(), [](auto& a, auto& b){ return a.x < b.x; });
-            return e;
-        }
+        // R2.6: the file format of an envelope is a different thing from what
+        // an envelope is. It lives at the edge (Source/EnvelopeCodec.h),
+        // where the JUCE value types are kept.
     };
 }

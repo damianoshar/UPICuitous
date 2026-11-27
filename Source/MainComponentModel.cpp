@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "UserLibrary.h"
 #include "GraphicalCurve.h"
+#include "EnvelopeCodec.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -1250,7 +1251,7 @@ bool MainComponent::libraryPublishEnvelope()
 
     juce::String error;
     if (! upic::UserLibrary::publish (upic::UserAssetKind::Envelope, envelope.id,
-                                      envelope.name, envelope.colour, envelope.toVar(), error))
+                                      envelope.name, envelope.colour, upic::envelopeToVar (envelope), error))
     {
         flash (error);
         return false;
@@ -1302,7 +1303,7 @@ bool MainComponent::libraryImportEnvelope()
             return false;
         }
 
-        upic::Envelope imported = upic::Envelope::fromVar (asset.payload, newId);
+        upic::Envelope imported = upic::envelopeFromVar (asset.payload, newId);
         imported.id = newId; // the library's id never becomes a local id
         imported.name = uniqueBankName (envelopes, asset.name);
         imported.colour = asset.colour;
@@ -1352,7 +1353,7 @@ bool MainComponent::libraryPublishAmpTable()
 
     juce::String error;
     if (! upic::UserLibrary::publish (upic::UserAssetKind::AmpTable, table.id,
-                                      table.name, table.colour, table.toVar(), error))
+                                      table.name, table.colour, upic::envelopeToVar (table), error))
     {
         flash (error);
         return false;
@@ -1403,7 +1404,7 @@ bool MainComponent::libraryImportAmpTable()
             return false;
         }
 
-        upic::AmplitudeTable imported = upic::Envelope::fromVar (asset.payload, newId);
+        upic::AmplitudeTable imported = upic::envelopeFromVar (asset.payload, newId);
         imported.id = newId; // the library's id never becomes a local id
         imported.name = uniqueBankName (ampTables, asset.name);
         imported.colour = asset.colour;
