@@ -2905,6 +2905,10 @@ private:
     // it: it only closes when the save happened (a cancelled chooser must
     // not throw the work away).
     void saveFile (std::function<void (bool saved)> onDone = {}), loadFile();
+    // R4.2: the load's file adapter - the shell's half. The adapter itself
+    // is the edge's (Source/DocumentRepository.h): this is the wording the
+    // user is told and the commit that puts the document in force.
+    bool loadFromURL (const juce::URL& url);
     void ensureLiveInputFor(std::function<void(bool)> done);
     void requestLiveInput(std::function<void(bool)> done);
     bool enableDeviceInputs();
@@ -2953,6 +2957,11 @@ public:
     // R4.1: the codec reads the document (Source/PieceCodec.h) and hands the
     // candidate over; the commit below puts it in force.
     bool loadFromVar(const juce::var& v);
+
+    // R4.2: the load's door for the selftest - the file adapter's result is
+    // read and put in force, without a chooser. The production code does
+    // not call it.
+    bool loadFromURLForTest (const juce::URL& url) { return loadFromURL (url); }
 
     // M4: the Scala tuning import. The file is read through the chooser
     // (a document provider on Android too), and the scale it holds becomes

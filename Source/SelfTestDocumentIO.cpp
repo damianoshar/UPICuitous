@@ -1,4 +1,5 @@
 #include <JuceHeader.h>
+#include "DocumentRepository.h"
 #include "MainComponent.h"
 #include "PickedFile.h"
 #include "PieceCodec.h"
@@ -26,15 +27,11 @@
 //   file that was never chosen, and it reads a local file in place.
 //
 // The writer is reached through the shell's own door
-// (MainComponent::savePieceToFile) and the reader through the file layer's
-// door (upic::readPickedFile). The move turns the reader's door into the
-// edge's, and the checks that are here do not change.
-//
-// The sentences the shell words for the user when a file is not a piece at
-// all ("Not a UPIC piece (the JSON is broken) - the current piece was
-// kept") live in the chooser's callback today, where no test can reach
-// them: the read gets its door with the move, and the sentences are pinned
-// there - the R3.5 precedent, where the doors come with the move.
+// (MainComponent::savePieceToFile) and the reader through the edge's
+// (upic::readDocument). The load itself - the wording the user is told and
+// the commit - is reached through the shell's door
+// (MainComponent::loadFromURLForTest): the sentences live in the shell, and
+// the edge says what happened.
 
 namespace
 {
@@ -178,8 +175,8 @@ void upic::runDocumentIOChecks (SelfTest& t)
 
     // --- the reader ---------------------------------------------------------
     //
-    // The reader is the file layer's door today: it takes the URL the
-    // chooser handed over and refuses the files it cannot use.
+    // The reader is the edge's door: it takes the URL the chooser handed
+    // over and refuses the files it cannot use.
     {
         const auto work = juce::File::getSpecialLocation (juce::File::tempDirectory)
                               .getChildFile ("upic_document_io_test");
@@ -191,31 +188,28 @@ void upic::runDocumentIOChecks (SelfTest& t)
         {
             const auto missing = work.getChildFile ("not_here.upic.json");
             missing.deleteFile();
-            upic::PickedFile picked;
-            juce::String error;
-            const bool ok = upic::readPickedFile (juce::URL (missing), picked, cap, error);
-            check (! ok && error == "The file does not exist: not_here.upic.json",
-                   "R4.2 a file that is not there is refused", error);
+            const auto read = upic::readDocument (juce::URL (missing), cap);
+            check (! read.ok && read.failure == upic::DocumentReadFailure::missing
+                   && read.error == "The file does not exist: not_here.upic.json",
+                   "R4.2 a file that is not there is refused", read.error);
         }
 
         // a file over the cap
         {
             const auto big = work.getChildFile ("big.upic.json");
             big.replaceWithText (juce::String::repeatedString ("x", 2000));
-            upic::PickedFile picked;
-            juce::String error;
-            const bool ok = upic::readPickedFile (juce::URL (big), picked, 1024, error);
-            check (! ok && error == "The file is too large: big.upic.json",
-                   "R4.2 a file over the cap is refused", error);
+            const auto read = upic::readDocument (juce::URL (big), 1024);
+            check (! read.ok && read.failure == upic::DocumentReadFailure::tooLarge
+                   && read.error == "The file is too large: big.upic.json",
+                   "R4.2 a file over the cap is refused", read.error);
         }
 
         // no file was chosen
         {
-            upic::PickedFile picked;
-            juce::String error;
-            const bool ok = upic::readPickedFile (juce::URL(), picked, cap, error);
-            check (! ok && error == "No file was chosen",
-                   "R4.2 a file that was never chosen is refused", error);
+            const auto read = upic::readDocument (juce::URL(), cap);
+            check (! read.ok && read.failure == upic::DocumentReadFailure::noFile
+                   && read.error == "No file was chosen",
+                   "R4.2 a file that was never chosen is refused", read.error);
         }
 
         // a local file is read in place - nothing is copied
@@ -237,5 +231,68 @@ void upic::runDocumentIOChecks (SelfTest& t)
     {
         check (juce::JSON::parse ("not json at all").isVoid(),
                "R4.2 a file that is not JSON does not parse into a document");
+    }
+
+    // --- the load, through the shell ----------------------------------------
+    //
+    // The edge says what happened; the shell words it for the user and
+    // puts the document in force. A file that is not a piece leaves the
+    // current piece alone - the unsaved work stays.
+    {
+        auto holder = componentWithAPiece();
+        auto& mc = *holder;
+        const auto before = juce::JSON::toString (mc.pieceToVar(), false);
+
+        const auto work = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                              .getChildFile ("upic_document_io_test");
+        work.deleteRecursively();
+        work.createDirectory();
+
+        // a file that is not there
+        {
+            const auto missing = work.getChildFile ("not_here.upic.json");
+            missing.deleteFile();
+            const bool loaded = mc.loadFromURLForTest (juce::URL (missing));
+            check (! loaded && mc.flashMessageForTest() == "The file does not exist: not_here.upic.json",
+                   "R4.2 the load says that the file is not there",
+                   mc.flashMessageForTest());
+        }
+
+        // a file that is not JSON at all
+        {
+            const auto broken = work.getChildFile ("broken.upic.json");
+            broken.replaceWithText ("{ this is not json");
+            const bool loaded = mc.loadFromURLForTest (juce::URL (broken));
+            check (! loaded && mc.flashMessageForTest()
+                   == "Not a UPIC piece (the JSON is broken) - the current piece was kept",
+                   "R4.2 the load says that the JSON is broken",
+                   mc.flashMessageForTest());
+        }
+
+        // a file that is JSON but not a piece
+        {
+            const auto other = work.getChildFile ("other.upic.json");
+            other.replaceWithText ("{\"pages\":[]}");
+            const bool loaded = mc.loadFromURLForTest (juce::URL (other));
+            check (! loaded && mc.flashMessageForTest()
+                   == "This file is not a UPIC piece - the current piece was kept",
+                   "R4.2 the load says that the file is not a piece",
+                   mc.flashMessageForTest());
+        }
+
+        // ...and none of that touched the piece that was there
+        check (juce::JSON::toString (mc.pieceToVar(), false) == before,
+               "R4.2 a refused load leaves the piece alone");
+
+        // a file that is a piece is loaded
+        {
+            const auto good = work.getChildFile ("good.upic.json");
+            good.replaceWithText ("{\"pages\":[{\"duration\":42,\"nextArcId\":2,\"arcs\":["
+                                  "{\"id\":1,\"mode\":0,\"waveformId\":1,\"envelopeId\":1,"
+                                  "\"intensity\":0.8,\"points\":[{\"t\":0,\"f\":220},{\"t\":21,\"f\":440}]}]}]}");
+            const bool loaded = mc.loadFromURLForTest (juce::URL (good));
+            check (loaded && juce::JSON::toString (mc.pieceToVar(), false) != before,
+                   "R4.2 a piece file is loaded");
+        }
     }
 }

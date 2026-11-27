@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "DocumentRepository.h"
 #include "PageCodec.h"
 #include "EnvelopeCodec.h"
 #include "WaveformCodec.h"
@@ -15,15 +16,6 @@
 //==============================================================================
 // The piece: the model it is saved as, the load, the save, the
 // samples and the PM presets.
-namespace
-{
-    // The size of a piece, in words a person can read ("12 MB").
-    juce::String humanPieceSize (juce::int64 bytes)
-    {
-        return bytes >= 1024 * 1024 ? (juce::String ((int) (bytes / (1024 * 1024))) + " MB")
-                                    : (juce::String ((int) (bytes / 1024)) + " KB");
-    }
-}
 
 //==============================================================================
 // v1.33.4 (M28): the piece as a self-contained model.
@@ -322,26 +314,15 @@ void MainComponent::saveFile (std::function<void (bool)> onDone)
             sp->startJob ("Saving the piece",
                 [model, url, maxBytes] (Job& job)
                 {
-                    const juce::String json = juce::JSON::toString (upic::pieceToVar (*model), true);
-                    const juce::int64 bytes = (juce::int64) json.getNumBytesAsUTF8();
-                    if (bytes > maxBytes)
-                    {
-                        job.ok = false;
-                        job.message = "Piece too large to save ("
-                                    + humanPieceSize (bytes) + ", the limit is "
-                                    + humanPieceSize (maxBytes) + ") - shorten the capture or the sample, "
-                                    + "or export the audio to a WAV instead";
-                        return;
-                    }
-                    juce::String error;
-                    if (! upic::writePickedBytes (url, json.toRawUTF8(), (size_t) bytes, error))
-                    {
-                        job.ok = false;
-                        job.message = error;
-                        return;
-                    }
-                    job.ok = true;
-                    job.message = "Saved " + upic::pickedFileName (url);
+                    // R4.2: the file adapter writes the piece (Source/
+                    // DocumentRepository.h) - the JSON is built from the
+                    // captured model on this worker thread, the size is
+                    // measured, and the destination is only touched when
+                    // the whole piece is on disk.
+                    const auto written = upic::writeDocument (url, *model, maxBytes);
+                    job.ok = written.ok;
+                    job.message = written.ok ? ("Saved " + upic::pickedFileName (url))
+                                             : written.error;
                 },
                 [sp, onDone, savedEpoch] (Job& job)
                 {
@@ -379,32 +360,16 @@ bool MainComponent::savePieceToURL (const juce::URL& url, juce::int64 maxBytes)
 {
     if (! url.isWellFormed()) return false;
 
-    // v1.33.4 (M28): the model is captured under the lock and the JSON is
-    // built from the copy - the samples become base64, and that is the heavy
-    // part. The window's own save path runs this on a worker thread; this
-    // one is the synchronous form the selftest drives.
+    // R4.2: the file adapter writes the piece (Source/DocumentRepository.h).
+    // The model is captured under the lock and the JSON is built from the
+    // copy - the samples become base64, and that is the heavy part. The
+    // window's own save path runs this on a worker thread; this one is the
+    // synchronous form the selftest drives.
     const auto model = capturePieceModel();
-    const juce::String json = juce::JSON::toString (upic::pieceToVar (model), true);
-
-    const juce::int64 bytes = (juce::int64) json.getNumBytesAsUTF8();
-    auto humanSize = [] (juce::int64 b) -> juce::String
+    const auto written = upic::writeDocument (url, model, maxBytes);
+    if (! written.ok)
     {
-        return b >= 1024 * 1024 ? (juce::String ((int) (b / (1024 * 1024))) + " MB")
-                                : (juce::String ((int) (b / 1024)) + " KB");
-    };
-
-    if (bytes > maxBytes)
-    {
-        flash ("Piece too large to save (" + humanSize (bytes) + ", the limit is "
-               + humanSize (maxBytes) + ") - shorten the capture or the sample, "
-               "or export the audio to a WAV instead");
-        return false;
-    }
-
-    juce::String error;
-    if (! upic::writePickedBytes (url, json.toRawUTF8(), (size_t) bytes, error))
-    {
-        flash (error);
+        flash (written.error);
         return false;
     }
 
@@ -433,58 +398,68 @@ void MainComponent::loadFile()
             // so the load did nothing at all. The URL is read instead, and a
             // provider document is copied into a local file first (the copy
             // is bounded by the piece cap).
-            upic::PickedFile picked;
-            juce::String error;
-            if (! upic::readPickedFile (c.getURLResult(), picked,
-                                        (juce::int64) upic::limits::kMaxPieceBytes, error))
-            {
-                sp->flash (error);
-                return;
-            }
-            const auto f = picked.file;
-            if (!f.existsAsFile()) return;
-            // SECURITY (S-03): a piece is untrusted input. Refuse to read a
-            // file that is far bigger than any real piece, so a huge or
-            // hostile file cannot exhaust memory before it is even parsed.
-            if (f.getSize() > (juce::int64) upic::limits::kMaxPieceBytes)
-            {
-                // v1.33.4 (H6): the limit is derived from the sample budget
-                // now, so the message states the real number.
-                flash ("Piece too large (max "
-                       + juce::String ((int) (upic::limits::kMaxPieceBytes / (1024 * 1024))) + " MB)");
-                return;
-            }
-            // SECURITY (S-03): the whole load is wrapped, so a piece that
-            // exhausts the memory or trips an assertion in the parser takes
-            // the app down with a message instead of taking the app down.
-            try
-            {
-                auto txt = f.loadFileAsString();
-                if (txt.getNumBytesAsUTF8() > upic::limits::kMaxPieceBytes) return;
-                auto v = juce::JSON::parse(txt);
-                if (v.isVoid())
-                {
-                    // v1.33.4 (M25): the file is not a piece at all - the
-                    // current piece is kept, so a bad file cannot wipe the
-                    // unsaved work.
-                    flash ("Not a UPIC piece (the JSON is broken) - the current piece was kept");
-                    return;
-                }
-                if (! loadFromVar(v))
-                {
-                    flash ("This file is not a UPIC piece - the current piece was kept");
-                    return;
-                }
-            }
-            catch (const std::exception& e)
-            {
-                flash (std::string ("Could not load the piece: ") + e.what());
-            }
-            catch (...)
-            {
-                flash ("Could not load the piece");
-            }
+            sp->loadFromURL (c.getURLResult());
         });
+}
+
+//==============================================================================
+// R4.2: the load's file adapter - the shell's half.
+//
+// The adapter itself is the edge's (Source/DocumentRepository.h): it reads
+// the file, checks the cap and parses the JSON. What is left here is the
+// shell's work: the wording the user is told, and the commit - the codec
+// decodes the document (Source/PieceCodec.h) and the commit puts it in
+// force. A document that is not a piece leaves the current piece alone.
+bool MainComponent::loadFromURL (const juce::URL& url)
+{
+    const auto read = upic::readDocument (url, (juce::int64) upic::limits::kMaxPieceBytes);
+    if (! read.ok)
+    {
+        // The edge says what happened; the shell words it for the user.
+        switch (read.failure)
+        {
+            case upic::DocumentReadFailure::brokenJson:
+                // v1.33.4 (M25): the file is not a piece at all - the
+                // current piece is kept, so a bad file cannot wipe the
+                // unsaved work.
+                flash ("Not a UPIC piece (the JSON is broken) - the current piece was kept");
+                break;
+
+            case upic::DocumentReadFailure::tooLargeText:
+                // the file's text is over the cap: the piece is kept and
+                // nothing is said (the old behaviour).
+                break;
+
+            default:
+                if (read.error.isNotEmpty())
+                    flash (read.error);
+                break;
+        }
+        return false;
+    }
+
+    // SECURITY (S-03): the commit is guarded too, so a piece that exhausts
+    // the memory or trips an assertion in the commit takes the app down
+    // with a message instead of taking the app down.
+    try
+    {
+        if (! loadFromVar (read.document))
+        {
+            flash ("This file is not a UPIC piece - the current piece was kept");
+            return false;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        flash (std::string ("Could not load the piece: ") + e.what());
+        return false;
+    }
+    catch (...)
+    {
+        flash ("Could not load the piece");
+        return false;
+    }
+    return true;
 }
 
 //==============================================================================
