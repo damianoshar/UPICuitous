@@ -650,11 +650,17 @@ void MainComponent::saveFile (std::function<void (bool)> onDone)
             // lock.
             auto model = std::make_shared<upic::PieceModel> (sp->capturePieceModel());
             const juce::int64 maxBytes = (juce::int64) upic::limits::kMaxPieceBytes;
-            // v1.33.4 (L15): the revision the saved piece came from. If the
+            // v1.33.4 (L15): the epoch the saved piece came from. If the
             // model moved on while the worker was writing, the piece on the
             // disk is already older than what is on the screen - the app
             // must still ask to save.
-            const juce::uint64 savedRevision = sp->document.revision();
+            //
+            // R3.4: the epoch, not the revision. The epoch moves with every
+            // change (a drag in progress moves it with every mouse-move),
+            // while the revision moves once per command - a drag that is
+            // still open would not be seen, and the app would forget that
+            // the piece on the disk is older than the one on the screen.
+            const juce::uint64 savedEpoch = sp->document.epoch();
             sp->startJob ("Saving the piece",
                 [model, url, maxBytes] (Job& job)
                 {
@@ -679,13 +685,13 @@ void MainComponent::saveFile (std::function<void (bool)> onDone)
                     job.ok = true;
                     job.message = "Saved " + upic::pickedFileName (url);
                 },
-                [sp, onDone, savedRevision] (Job& job)
+                [sp, onDone, savedEpoch] (Job& job)
                 {
                     sp->flash (job.message);
                     // v1.33.4 (L15): the piece is on the disk now, so there
                     // is nothing to ask about when the app closes - unless
                     // the model moved on while the worker was writing.
-                    if (job.ok && sp->document.revision() == savedRevision)
+                    if (job.ok && sp->document.epoch() == savedEpoch)
                         sp->markPieceSaved();
                     if (onDone) onDone (job.ok);
                 });

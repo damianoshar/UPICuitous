@@ -10,14 +10,14 @@
 //
 // What lives here is the document's own state:
 //
-//   - the revision: it moves when the model moves. The status timer uses it
-//     to publish a snapshot only when there is something new to copy, the
-//     recovery snapshot uses it to notice a change, and "make unique" uses
-//     it to notice that its own work changed something.
+//   - the revision: it moves when a command ends - the document changed
+//     once. It is the document's own counter: one command is one step in
+//     it.
 //   - the epoch: the audio thread's "the model moved" signal. It moves with
-//     the revision, but it is a separate counter because the audio thread
-//     asks a different question ("did it move since I looked?") and must
-//     not have to know about the revision's other users.
+//     every change (a drag moves it with every mouse-move, so the audio
+//     follows the gesture while it happens), because the audio thread asks
+//     a different question ("did it move since I looked?") and must not
+//     have to know about the revision's other users.
 //   - the unsaved flag: the piece differs from what is on the disk. The
 //     window asks before it closes, and the recovery snapshot is written
 //     only when there is something to recover.
@@ -33,8 +33,14 @@
 // R006). The selection is plain data (the ids the piece's banks use), so it
 // lives in its own class and the session owns it.
 //
-// The command dispatcher (R008) comes behind this class; so does one command
-// = one transaction = one revision.
+// and - since R3.4 - the command dispatcher (the review's R008): the one
+// place a model change is reported and the one place a transaction is
+// opened. The dispatcher owns the command (the label, the transaction and
+// the change report), the session owns it.
+//
+// One command = one labelled transaction = one revision. The epoch still
+// moves with every change (the audio follows a drag while it happens); the
+// revision moves once, when the command ends.
 //
 // The class needs JUCE now: the steps are labelled with strings and the
 // snapshots are pieces. It is an application-level class, not a part of the
@@ -48,6 +54,7 @@
 #include <utility>
 #include <vector>
 
+#include "CommandDispatcher.h"
 #include "Piece.h"
 #include "SelectionModel.h"
 
@@ -81,13 +88,30 @@ namespace upic
         {
             capture_ = std::move (capture);
             restore_ = std::move (restore);
+
+            // The dispatcher asks the document through its own doors: the
+            // capture (the state from before the command), the commit (the
+            // undo step) and the two halves of the change report (the epoch
+            // and the revision).
+            dispatcher_.install (
+                [this]
+                {
+                    if (! capture_) return std::unique_ptr<upic::PieceModel>();
+                    return std::make_unique<upic::PieceModel> (capture_());
+                },
+                [this] (upic::PieceModel&& model, const juce::String& label)
+                {
+                    commitStep (std::move (model), label);
+                },
+                [this] (bool affectsPiece) { modelMoved (affectsPiece); },
+                [this] { documentChanged(); });
         }
 
         // The bounds of the history. The production code never changes them.
         void setLimits (const Limits& limits) { limits_ = limits; }
         const Limits& limits() const { return limits_; }
 
-        // --- the revision: it moves when the model moves ---
+        // --- the revision: it moves when a command ends ---
         std::uint64_t revision() const noexcept
         {
             return revision_.load (std::memory_order_relaxed);
@@ -110,17 +134,35 @@ namespace upic
             dirty_.store (false, std::memory_order_relaxed);
         }
 
+        // =====================================================================
+        // The command dispatcher (R3.4)
+        // =====================================================================
+
+        // The dispatcher: the document's mutation entry point. One command
+        // is one labelled undo transaction, and the revision advances once
+        // when the command ends.
+        CommandDispatcher& dispatcher() noexcept { return dispatcher_; }
+        const CommandDispatcher& dispatcher() const noexcept { return dispatcher_; }
+
+        // The command's doors (the shell asks the session).
+        void beginCommand (const juce::String& label) { dispatcher_.beginCommand (label); }
+        void endCommand() { dispatcher_.endCommand(); }
+        bool isCommandOpen() const { return dispatcher_.isCommandOpen(); }
+
         // --- one model change ---
         //
         // `affectsPiece` is false for the changes that are not part of the
         // piece (the loop toggle), so they do not make the app ask to
         // save. They still move the counters: the model did move.
-        void markChanged (bool affectsPiece = true) noexcept
+        //
+        // Inside a command the epoch moves now (the audio follows the
+        // change) and the revision moves when the command ends (the
+        // document changed once). Outside a command the change is a change
+        // of its own: there is no transaction to put it in, so the revision
+        // moves straight away.
+        void reportChange (bool affectsPiece = true)
         {
-            epoch_.fetch_add (1, std::memory_order_relaxed);
-            revision_.fetch_add (1, std::memory_order_relaxed);
-            if (affectsPiece)
-                dirty_.store (true, std::memory_order_relaxed);
+            dispatcher_.reportChange (affectsPiece);
         }
 
         // =====================================================================
@@ -141,61 +183,12 @@ namespace upic
         // after it, and it becomes one step. A gesture that was never
         // finished (a mouse-up that was missed) must not block the next one,
         // so opening a transaction closes the one that is still open.
-        void beginEdit (const juce::String& label)
-        {
-            if (! capture_) return;
-
-            // A transaction that is still running is closed first: a gesture
-            // that was never finished (a mouse-up that was missed) must not
-            // block the next one.
-            if (pendingEdit_ != nullptr)
-                endEdit();
-
-            // the state from before the change
-            pendingEdit_ = std::make_unique<upic::PieceModel> (capture_());
-            pendingRevision_ = revision();
-            pendingLabel_ = label;
-        }
-
-        // The gesture is over. A gesture that changed nothing is not a step.
-        void endEdit()
-        {
-            if (pendingEdit_ == nullptr) return;
-
-            // nothing moved? then the snapshot is not worth keeping (a click
-            // that changed nothing is not an undo step).
-            if (revision() == pendingRevision_)
-            {
-                pendingEdit_.reset();
-                return;
-            }
-
-            Entry e;
-            e.model = std::move (*pendingEdit_);
-            e.label = pendingLabel_;
-            e.bytes = estimateModelBytes (e.model);
-            pendingEdit_.reset();
-
-            undoStack_.push_back (std::move (e));
-            undoBytes_ += undoStack_.back().bytes;
-
-            // a new edit after an undo starts a new branch: the redo stack is gone
-            redoStack_.clear();
-            redoBytes_ = 0;
-
-            // the bounds: the oldest steps go first
-            while ((int) undoStack_.size() > limits_.steps || undoBytes_ > limits_.bytes)
-            {
-                undoBytes_ -= undoStack_.front().bytes;
-                undoStack_.erase (undoStack_.begin());
-            }
-        }
-
-        // Is a transaction open right now?
-        bool hasOpenEdit() const noexcept
-        {
-            return pendingEdit_ != nullptr;
-        }
+        //
+        // R3.4: the transaction itself is the command dispatcher's now. The
+        // dispatcher holds the label, the snapshot of the state from before
+        // the change and the flag that says whether the command changed
+        // anything; the session keeps the history (the steps and the two
+        // bounds) and asks the dispatcher when a step is due.
 
         // --- the steps ---
         bool canUndo() const noexcept { return ! undoStack_.empty(); }
@@ -230,7 +223,7 @@ namespace upic
             // An open gesture (a slider drag) owns a transaction. Closing it
             // first keeps the undo stack honest: the gesture's step is
             // closed and undone like any other.
-            endEdit();
+            dispatcher_.endCommand();
             if (undoStack_.empty()) return StepResult::nothing;
 
             // the state we are leaving goes onto the redo stack
@@ -268,7 +261,7 @@ namespace upic
             if (! capture_ || ! restore_) return StepResult::nothing;
 
             // an open gesture transaction is closed first (see undo())
-            endEdit();
+            dispatcher_.endCommand();
             if (redoStack_.empty()) return StepResult::nothing;
 
             Entry current;
@@ -319,6 +312,45 @@ namespace upic
             juce::String label;
         };
 
+        // The undo step: the state from before the command goes onto the
+        // undo stack, and the redo stack is gone (a new branch).
+        void commitStep (upic::PieceModel&& model, const juce::String& label)
+        {
+            Entry e;
+            e.model = std::move (model);
+            e.label = label;
+            e.bytes = estimateModelBytes (e.model);
+
+            undoStack_.push_back (std::move (e));
+            undoBytes_ += undoStack_.back().bytes;
+
+            // a new edit after an undo starts a new branch: the redo stack is gone
+            redoStack_.clear();
+            redoBytes_ = 0;
+
+            // the bounds: the oldest steps go first
+            while ((int) undoStack_.size() > limits_.steps || undoBytes_ > limits_.bytes)
+            {
+                undoBytes_ -= undoStack_.front().bytes;
+                undoStack_.erase (undoStack_.begin());
+            }
+        }
+
+        // The model moved: the epoch (the audio follows the change now) and
+        // the unsaved flag.
+        void modelMoved (bool affectsPiece) noexcept
+        {
+            epoch_.fetch_add (1, std::memory_order_relaxed);
+            if (affectsPiece)
+                dirty_.store (true, std::memory_order_relaxed);
+        }
+
+        // The document changed once: the revision.
+        void documentChanged() noexcept
+        {
+            revision_.fetch_add (1, std::memory_order_relaxed);
+        }
+
         // The size of a piece, in the words the memory bound counts.
         static juce::int64 estimateModelBytes (const upic::PieceModel& m)
         {
@@ -344,10 +376,9 @@ namespace upic
         std::vector<Entry> undoStack_, redoStack_;
         juce::int64 undoBytes_ = 0, redoBytes_ = 0;
 
-        // the snapshot of the edit that is in progress (empty when there is none)
-        std::unique_ptr<upic::PieceModel> pendingEdit_;
-        std::uint64_t pendingRevision_ = 0;
-        juce::String pendingLabel_;
+        // the command dispatcher (R3.4): the open command, its label, its
+        // snapshot and the flag that says whether it changed anything
+        CommandDispatcher dispatcher_;
 
         // what is selected (R3.3)
         SelectionModel selection_;

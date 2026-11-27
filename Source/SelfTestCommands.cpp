@@ -6,9 +6,11 @@
 // R3.4: the command dispatcher - the document's mutation entry point.
 //
 // A command is one edit: it has a label (what the undo menu calls it), it
-// changes the document, and the document's revision advances once. R3.4
-// introduces the dispatcher (the review's R008) and makes the command the
-// unit of change; this suite is its contract.
+// changes the document, and the document's revision advances once - when
+// the command ends. The epoch moves with every change, so the audio
+// follows a drag while it is drawn. R3.4 introduces the dispatcher (the
+// review's R008) and makes the command the unit of change; this suite is
+// its contract.
 //
 // The suite reads the document through the component's own doors (the
 // revision, the epoch, the unsaved flag, the undo stack), so the move does
@@ -105,6 +107,18 @@ void upic::runCommandChecks (SelfTest& t)
         check (mc.commandOpenForTest(),
                "a command is open between its begin and its end");
         mc.markModelChanged();
+
+        // R3.4: the epoch follows the change at once (the audio follows the
+        // gesture while it happens), the revision waits for the command to
+        // end (the document changed once).
+        const auto during = state (mc);
+        check (during.epoch == before.epoch + 1,
+               "the epoch follows the change inside the command",
+               juce::String (before.epoch) + " -> " + juce::String (during.epoch));
+        check (during.revision == before.revision,
+               "the revision waits for the command to end",
+               juce::String (before.revision) + " -> " + juce::String (during.revision));
+
         mc.endEdit();
 
         const auto after = state (mc);
@@ -144,8 +158,8 @@ void upic::runCommandChecks (SelfTest& t)
         check (after.epoch == before.epoch + 2,
                "the epoch follows every change in the command",
                juce::String (before.epoch) + " -> " + juce::String (after.epoch));
-        check (after.revision == before.revision + 2,
-               "a command advances the revision once per change",
+        check (after.revision == before.revision + 1,
+               "a command advances the revision once, however many changes it has",
                juce::String (before.revision) + " -> " + juce::String (after.revision));
     }
 

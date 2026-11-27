@@ -236,12 +236,15 @@ void MainComponent::maybeWriteRecoverySnapshot()
     if (jobRunning()) return;   // the disk is busy with the user's job
 
     const auto now = (juce::uint64) juce::Time::getMillisecondCounter();
-    const auto rev = document.revision();
+    // R3.4: the epoch, not the revision. The epoch is the "the model moved"
+    // signal - it moves with every change, so a long gesture is recovered
+    // while it is still going on. The revision moves once per command.
+    const auto ep = document.epoch();
     if (now < lastRecoveryMs || now - lastRecoveryMs < 30000) return;   // at most every 30 s
-    if (rev == lastRecoveryRevision) return;                            // nothing changed
+    if (ep == lastRecoveryEpoch) return;                                // nothing changed
 
     lastRecoveryMs = now;
-    lastRecoveryRevision = rev;
+    lastRecoveryEpoch = ep;
 
     // the model is captured on the message thread (under the lock); the
     // worker only writes the files

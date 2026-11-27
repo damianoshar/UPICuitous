@@ -476,7 +476,10 @@ void MainComponent::publishModelSnapshot()
     // v1.33.4 (M22): the revision this snapshot was built from
     snap->revision = document.revision();
     snapshots.publish(snap); // frees the snapshots the reader retired
-    lastPublishedRevision = snap->revision;
+    // R3.4: the epoch is what the status timer watches - it moves with
+    // every change, so a drag is published while it is drawn. The revision
+    // moves once per command.
+    lastPublishedEpoch = document.epoch();
     lastModelPublishMs = (uint64_t) juce::Time::getMillisecondCounter();
     snapshotPublishCount.fetch_add(1, std::memory_order_relaxed);
 }

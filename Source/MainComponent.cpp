@@ -1016,18 +1016,24 @@ void MainComponent::timerCallback()
     // v1.33.4 (M22): only when the model actually changed. The timer used
     // to deep-copy every page, arc, waveform and envelope on EVERY tick -
     // 30 times a second, even while nothing changed and even with the
-    // plugin editor closed. The revision moves when the model changes
+    // plugin editor closed. The epoch moves when the model changes
     // (markModelChanged), so the copy happens when there is something new
     // to copy.
     //
-    // The safety net: a publish every 2 s even when the revision did not
+    // R3.4: the epoch is the signal here, not the revision. The revision
+    // moves once per command now, and a drag is one command - so the
+    // revision would not move until the drag ended, and the audio would
+    // follow the gesture only when the mouse came up. The epoch moves
+    // with every change, so the drag is heard while it is drawn.
+    //
+    // The safety net: a publish every 2 s even when the epoch did not
     // move. A change path that forgets to mark itself would then be silent
     // for at most 2 s instead of forever.
     if (!(muteWhileDragging && arcEditing.load(std::memory_order_relaxed)))
     {
-        const auto rev = document.revision();
+        const auto ep = document.epoch();
         const auto nowMs = (uint64_t) juce::Time::getMillisecondCounter();
-        const bool changed = (rev != lastPublishedRevision);
+        const bool changed = (ep != lastPublishedEpoch);
         const bool safetyNet = (nowMs - lastModelPublishMs) >= 2000;
         if (changed || safetyNet)
     publishModelSnapshot();

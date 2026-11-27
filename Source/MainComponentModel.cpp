@@ -896,9 +896,12 @@ bool MainComponent::libraryMakeWaveUnique()
         return false;
     }
 
-    const auto rev = document.revision();
+    // R3.4: the epoch, not the revision. The question is "did my own work
+    // change the model?", and the epoch is the "the model moved" signal -
+    // it moves with every change. The revision moves once per command.
+    const auto ep = document.epoch();
     if (! prepareWaveEdit()) return false;
-    if (document.revision() == rev)
+    if (document.epoch() == ep)
     {
         flash ("The selected arcs already have their own wavetable");
         return false;

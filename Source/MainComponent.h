@@ -153,9 +153,14 @@ public:
     // before it closes when the piece differs from what was last written.
     // `affectsPiece` is false for the changes that are not part of the piece
     // (the loop toggle), so they do not make the app ask to save.
+    //
+    // R3.4: this is the shell's way of asking the command dispatcher. The
+    // dispatcher decides what the change means: inside a command the epoch
+    // moves now and the revision moves when the command ends; outside a
+    // command the change is a change of its own.
     void markModelChanged (bool affectsPiece = true)
     {
-        document.markChanged (affectsPiece);
+        document.reportChange (affectsPiece);
     }
 
     // v1.33.4 (L15): the unsaved-changes flag. The standalone window asks
@@ -217,11 +222,16 @@ public:
     // the steps, their labels, the open transaction and the two bounds. The
     // component asks the session and keeps the shell's own work: the
     // selection, the transport and the messages.
+    //
+    // R3.4: the transaction is the command dispatcher's now. beginEdit and
+    // endEdit are the shell's way of asking it: one command is one labelled
+    // undo transaction, and the document's revision advances once when the
+    // command ends.
     void beginEdit (const juce::String& label);
     void endEdit();
     // R3.4: the command dispatcher's state, for the suite that pins the
     // command's contract. The production code never reads it through this.
-    bool commandOpenForTest() const { return document.hasOpenEdit(); }
+    bool commandOpenForTest() const { return document.isCommandOpen(); }
     bool canUndo() const { return document.canUndo(); }
     bool canRedo() const { return document.canRedo(); }
     juce::String undoLabel() const;
@@ -1906,11 +1916,11 @@ private:
     // is left here is the shell's own work: the selection and the transport
     // that go with a restored piece.
     // --- v1.33.4 (L15, part 3): the crash recovery ---
-    // when the last recovery snapshot was written, and the model revision it
+    // when the last recovery snapshot was written, and the model epoch it
     // was written from (a snapshot is only worth writing when something
     // changed since the last one)
     juce::uint64 lastRecoveryMs = 0;
-    juce::uint64 lastRecoveryRevision = 0;
+    juce::uint64 lastRecoveryEpoch = 0;
     inline static std::atomic<bool> recoveryAllowed { true };
     std::atomic<double> playRate { 1.0 };   // +1 forward, -1 backward
     std::atomic<double> prevPlayRate { 1.0 };
@@ -2267,10 +2277,11 @@ private:
     static constexpr float kGainSmooth = 0.001f;  // ~17 ms time constant
 
     // R3.1: the document session - the one owner of the document's own
-    // state: the revision (it moves when the model moves), the epoch (the
+    // state: the revision (it moves when a command ends), the epoch (the
     // audio thread's "the model moved") and the unsaved flag (the piece
     // differs from what is on the disk). Since R3.2 it owns the history,
-    // and since R3.3 the selection (what is selected).
+    // since R3.3 the selection (what is selected), and since R3.4 the
+    // command dispatcher (how the document changes).
     upic::DocumentSession document;
 
     // The model can change under the audio thread (a page change, a loaded
@@ -2279,11 +2290,15 @@ private:
     // session's epoch and the audio thread fades across the change.
     std::uint64_t seenModelEpoch = 0;   // audio thread
 
-    // v1.33.4 (M22): the model revision. It moves whenever the model
-    // changes (markModelChanged), and the status timer publishes a snapshot
-    // only when it moved - the timer used to deep-copy the whole model 30
-    // times a second, even while nothing changed.
-    uint64_t lastPublishedRevision = 0;   // message thread
+    // The model epoch. It moves whenever the model changes
+    // (markModelChanged), and the status timer publishes a snapshot only
+    // when it moved - the timer used to deep-copy the whole model 30 times
+    // a second, even while nothing changed.
+    //
+    // R3.4: the epoch is the "the model moved" signal (it moves with every
+    // change, so a drag follows the audio while it happens). The revision
+    // is the document's own counter now: it moves once per command.
+    uint64_t lastPublishedEpoch = 0;       // message thread
     uint64_t lastModelPublishMs = 0;      // message thread: the safety-net publish
     std::atomic<int> snapshotPublishCount { 0 };
 

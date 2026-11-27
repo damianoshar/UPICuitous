@@ -34,17 +34,17 @@ void MainComponent::beginEdit (const juce::String& label)
     // the next gain change look like part of a drag).
     channelGainEditing = false;
 
-    document.beginEdit (label);
+    document.beginCommand (label);
 }
 
 void MainComponent::endEdit()
 {
-    if (! document.hasOpenEdit()) return;
+    if (! document.isCommandOpen()) return;
 
     // the gesture is over: the flag cannot outlive the transaction
     channelGainEditing = false;
 
-    document.endEdit();
+    document.endCommand();
 }
 
 juce::String MainComponent::undoLabel() const
