@@ -631,6 +631,42 @@ points and the rule that an absent id takes the fallback.
 untouched, the golden render and the legacy fixture are unchanged, and the
 full gate is green.
 
+### 6.17 R2.13 - the frequency space definition's codec edge
+
+**What moves.** The frequency space definition's file format moves out of
+`FreqSpace.h` into the new `Source/FreqSpaceCodec.h`: `static juce::var
+pointsToVar()`, `juce::var toVar (int index) const` and `static FreqSpaceDef
+fromVar()` become `upic::freqSpacePointsToVar (const std::vector<TablePoint>&)`,
+`upic::freqSpaceDefToVar (const FreqSpaceDef&, int index)` and
+`upic::freqSpaceDefFromVar (const juce::var&)`. The bodies are the old
+members, body for body.
+
+**What stays.** The definition's data and behaviour in `FreqSpace.h`: the
+preset, the editable flag, the table, the staircase and the inversion, plus
+`isDefault`, `log2At`, the presets, the range of a space and the
+render-time lookup table.
+
+**The points helper came along.** `pointsToVar` is how the table's points
+are written - it is the format, and the writer's only use of it was the
+table.
+
+**The contract.** A suite of the definition's own, written before the move:
+`Source/SelfTestFreqSpaceCodec.cpp`, 47 checks that reach the definition
+through the domain's headers alone. It pins the keys and their order (and
+the ones that come only when they carry something), the point's own two
+keys, the Hz the points carry, the clamps, the rules a table has to follow
+(two points, the points in order) and the rule that the space index is
+written but not read.
+
+**The end of the sweep.** This is the last of the domain headers that
+carried a file format: a sweep of `Source/` for `toVar` and `fromVar` now
+finds only two comments in the codec headers. The whole piece format lives
+at the edge.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, and the
+full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -659,13 +695,13 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121` | app selftest 2,659/2,659, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
-| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,659/2,659, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R9 Integration and cleanup | not started | - | - |
 
 Baseline commit: `b5368b1` (0.38.0), app selftest 1,785/1,785, legacy fixture
@@ -1781,5 +1817,96 @@ suites run inside the app's selftest binary, which is a JUCE application
 [`performance-codec-edge.md`](performance-codec-edge.md).
 
 Gate: app selftest 2,659/2,659, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
+
+### R2.13 record (2026-11-27)
+
+The frequency space definition's data and the frequency space definition's
+file format are separate now - the eleventh codec edge, and the last of
+them: after the arc's (R2.2), the page's (R2.4), the arc group's (R2.5),
+the envelope's (R2.6), the wave's (R2.7), the channel's (R2.8), the sample
+slot's (R2.9), the tuning's (R2.10), the sieve zone's (R2.11) and the
+performance sequence's (R2.12).
+
+| Measure | Before | After |
+|---|---|---|
+| the frequency space definition | `Source/FreqSpace.h`: the data, the behaviour and the file format | `Source/FreqSpace.h`: the data and the behaviour |
+| the definition's codec | three members of the class | `Source/FreqSpaceCodec.h`: `freqSpacePointsToVar`, `freqSpaceDefToVar` and `freqSpaceDefFromVar` |
+| the definition's own suite | - | `Source/SelfTestFreqSpaceCodec.cpp`, 47 checks |
+| the gate's JUCE-free groups | 5 | 5 |
+
+The three members became three free functions:
+
+| before | after |
+|---|---|
+| `FreqSpaceDef::pointsToVar (const std::vector<TablePoint>&)` | `upic::freqSpacePointsToVar (const std::vector<TablePoint>&)` |
+| `FreqSpaceDef::toVar (int index) const` | `upic::freqSpaceDefToVar (const FreqSpaceDef&, int index)` |
+| `FreqSpaceDef::fromVar (const juce::var&)` | `upic::freqSpaceDefFromVar (const juce::var&)` |
+
+The bodies are the old members, body for body - the comparison is
+mechanical, line for line, modulo the `d.` the free function needs and the
+whitespace: 9 lines for the points, 9 for the writer, 31 for the reader.
+The property names, their order, the optional keys a default definition
+does not write, the Hz the points carry, the clamps a crafted file gets, the
+rules a table has to follow and the fact that the space index is written but
+not read are the file format itself, and they did not change by a character.
+
+**The points helper came along.** `pointsToVar` is how the table's points
+are written - it is the format, and the writer's only use of it was the
+table.
+
+**The behaviour stayed too.** `isDefault` and `log2At` are the definition's
+behaviour, not its file format, so they stayed in `FreqSpace.h`.
+
+**The suite came first.** `Source/SelfTestFreqSpaceCodec.cpp` (47 checks)
+was written against the codec where it was, and it passes unchanged after
+the move. It reaches the codec through one door (the `encode` / `decode`
+helpers at the top of the file), so the move touched the suite in one place
+and the checks themselves did not change.
+
+What the suite pins, and what is worth knowing:
+
+- **The file carries the table's frequency in Hz, not in log2.** The data
+  holds `log2Hz`; the writer converts back with `exp2` and the reader
+  converts forward with `log2`. The file is therefore in the same units a
+  person reads - and it is a *float* on the way in, so a pitch comes back
+  to within a hundredth of a Hz, not exactly.
+- **A table of fewer than two points is dropped whole.** The editable flag
+  is turned off *and* the points are cleared: one point is not a curve, and
+  a constant pitch is not what the composer asked for.
+- **A table on a space that is not editable is dropped too** - the points
+  are cleared whatever they are. The editable flag is what decides whether
+  the table means anything.
+- **The `editable` flag is always written**, even when it is false. Every
+  other flag is written only when it carries something; the editable flag
+  is the one key that is always there.
+- **The space index is written but never read.** The definition's reader
+  ignores the `space` key: the *page's* codec is what puts a table in the
+  right slot (and what clamps the index to the four spaces).
+- **A point with nothing in it is at `x = 0` at 440 Hz.** The `x` default is
+  zero and the `hz` default is middle A.
+
+The clamps, for the record: the preset 0..6 (the seven presets), the
+divisions 0..99 (`kMaxStepDivisions`), the point's `x` 0..1, the point's
+frequency 0.01..22050 Hz (the app's range), and the points at most 16384
+(`kMaxTablePoints`). A value that is not a number falls to the lower bound.
+
+**The end of the sweep.** This is the last of the domain headers that
+carried a file format: a sweep of `Source/` for `toVar` and `fromVar` now
+finds only two comments in the codec headers. The whole piece format lives
+at the edge.
+
+What is still open: the domain's data still holds JUCE values (the
+`juce::String name` and the `juce::Colour` of the groups, the envelopes,
+the waves and the channels, the `juce::String name` of the sample slots,
+the sequences and the tunings) - that is the deferred type migration; the
+file readers are still in the domain (the Scala importer in
+`Source/Tuning.h` and the sample's `loadSampleFile`); and there is no
+headless domain target yet - the suites run inside the app's selftest
+binary, which is a JUCE application (the review's R089). See
+[`freqspace-codec-edge.md`](freqspace-codec-edge.md).
+
+Gate: app selftest 2,706/2,706, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
