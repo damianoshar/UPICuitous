@@ -122,8 +122,9 @@ $juceFreeGroups = @(
         # they are where the JUCE value types live.
         #
         # The JUCE the page still sees comes from the types it holds (the
-        # group's name and colour), not from its own code. That is the
-        # next step of the wave.
+        # envelope's and the wave's name and colour, the sieve's presets and
+        # the tuning), not from its own code. That is the next step of the
+        # wave.
         Allowed = @(
             "Arc.h",
             "ArcGeometry.h",
@@ -137,6 +138,18 @@ $juceFreeGroups = @(
             "UpicTheme.h",
             "Waveform.h"
         )
+    },
+    @{
+        Name    = "the arc's group"
+        Message = "B1/B2 the arc's group stays JUCE-free and knows nothing but the standard library"
+        Files   = @(
+            "Source/ArcGroup.h"
+        )
+        # The group is a leaf: it holds text and a number, and nothing of the
+        # project's own - so no project header is allowed at all. The codec
+        # (Source/ArcGroupCodec.h) is the edge, and it is not in the group:
+        # it is where the JUCE value types live.
+        Allowed = @()
     }
 )
 
@@ -190,7 +203,9 @@ function Find-IncludeViolations([string[]] $files, [hashtable] $contents, $rule)
             }
             if ($inc.Quote -eq '"' -and -not $isJuce) {
                 $leaf = [IO.Path]::GetFileName($inc.Path)
-                if ($rule.AllowedProject -and ($rule.AllowedProject -notcontains $leaf)) {
+                # An empty allowed list is a list: it forbids every project
+                # header, so the check must not be skipped by it.
+                if ($rule.ContainsKey('AllowedProject') -and ($rule.AllowedProject -notcontains $leaf)) {
                     $violations += "$($rule.Name): $rel($($inc.Line)) includes '$($inc.Path)', which is outside the boundary"
                 }
             }
@@ -365,6 +380,20 @@ function Invoke-SelfTest {
     $standard = @{ "Source/TestEngine.h" = "#include <cmath>`n#include <algorithm>`n" }
     $v = @(Find-IncludeViolations @("Source/TestEngine.h") $standard $rule)
     $results += @{ Name = "the standard library is allowed"; Ok = ($v.Count -eq 0) }
+
+    # a group that may include no project header at all
+    $leafRule = @{
+        Name           = "the leaf rule"
+        ForbidJuce     = $true
+        AllowedProject = @()
+    }
+    $leaf = @{ "Source/TestLeaf.h" = "#include `"Arc.h`"`n" }
+    $v = @(Find-IncludeViolations @("Source/TestLeaf.h") $leaf $leafRule)
+    $results += @{ Name = "a group that allows no project header forbids them all"; Ok = ($v.Count -eq 1) }
+
+    $leaf = @{ "Source/TestLeaf.h" = "#include <cstdint>`n#include <string>`n" }
+    $v = @(Find-IncludeViolations @("Source/TestLeaf.h") $leaf $leafRule)
+    $results += @{ Name = "a group that allows no project header may use the standard library"; Ok = ($v.Count -eq 0) }
 
     $v = @(Find-IncludeViolations @("Source/TestEngine.h") @{} $rule)
     $results += @{ Name = "a rule file that is not in the tree is a violation"; Ok = ($v.Count -eq 1) }

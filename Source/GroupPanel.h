@@ -169,7 +169,7 @@ public:
         if (on)
         {
             const upic::ArcGroup& g = shownGroups[(size_t) sel];
-            nameEd.setText (g.name, false);
+            nameEd.setText (juce::String (g.name), false);
             muteBtn.setToggleState (g.muted, juce::dontSendNotification);
             soloBtn.setToggleState (g.solo, juce::dontSendNotification);
             gainSl.setValue (g.gain, juce::dontSendNotification);
@@ -251,11 +251,11 @@ public:
                 g.setColour (juce::Colour (0xff2c3e58));
                 g.fillRect (row);
             }
-            g.setColour (grp.colour);
+            g.setColour (juce::Colour (grp.colour));
             g.fillRect (row.removeFromLeft (10).reduced (2, 5));
             g.setColour (juce::Colour (0xffd0d0d8));
             g.setFont (juce::Font (juce::FontOptions (12.0f)));
-            juce::String t = grp.name;
+            juce::String t (grp.name);
             const int n = (i < (int) counts.size()) ? counts[(size_t) i] : 0;
             t += "  (" + juce::String (n) + ")";
             if (grp.muted) t += " M";

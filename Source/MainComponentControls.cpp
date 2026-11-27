@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 #include <iterator>
+#include <string>
 
 //==============================================================================
 // The controls of the material tabs: the sieve, the step sequencer, the
@@ -1056,8 +1057,8 @@ void MainComponent::showGroupPanel()
             page.nextGroupId = juce::jmin (upic::limits::kMaxItemId, newId + 1);
             upic::ArcGroup g;
             g.id = newId;
-            g.name = "Group " + juce::String (newId);
-            g.colour = colourFor (newId);
+            g.name = "Group " + std::to_string (newId);
+            g.colour = colourFor (newId).getARGB();
             page.groups.push_back (g);
         }
         selGroupId = newId;
@@ -1091,7 +1092,7 @@ void MainComponent::showGroupPanel()
         beginEdit ("Rename group");
         {
             const juce::ScopedLock l (dataLock);
-            curPage().groups[(size_t) i].name = name.substring (0, 64);
+            curPage().groups[(size_t) i].name = name.substring (0, 64).toStdString();
         }
         markModelChanged();
         endEdit();
@@ -1351,7 +1352,7 @@ void MainComponent::refreshPerformanceView()
         for (const auto& g : curPage().groups)
         {
             PerformanceView::GroupRow r;
-            r.name = g.name;
+            r.name = juce::String (g.name);
             r.muted = g.muted;
             r.solo = g.solo;
             r.gain = g.gain;

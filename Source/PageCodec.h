@@ -30,6 +30,7 @@
 
 #include "ArcCodec.h"
 #include "ArcGroup.h"
+#include "ArcGroupCodec.h"
 #include "FreqSpace.h"
 #include "Ids.h"
 #include "Page.h"
@@ -91,7 +92,7 @@ namespace upic
         if (! p.groups.empty())
         {
             juce::Array<juce::var> garr;
-            for (auto& g : p.groups) garr.add (g.toVar());
+            for (auto& g : p.groups) garr.add (arcGroupToVar (g));
             o->setProperty ("groups", garr);
             o->setProperty ("nextGroupId", p.nextGroupId);
         }
@@ -183,7 +184,7 @@ namespace upic
             for (auto& gv : *garr)
             {
                 if ((int) p.groups.size() >= limits::kMaxGroupsPerPage) break;
-                p.groups.push_back (ArcGroup::fromVar (gv, (int) p.groups.size() + 1));
+                p.groups.push_back (arcGroupFromVar (gv, (int) p.groups.size() + 1));
             }
         renamed += uniquifyIds (p.groups, 1);
         p.nextGroupId = 1;

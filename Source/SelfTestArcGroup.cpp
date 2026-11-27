@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "ArcGroup.h"
+#include "ArcGroupCodec.h"
 #include "PieceLimits.h"
 
 //==============================================================================
@@ -39,8 +40,8 @@
 namespace
 {
     // The group's codec, reached through one door.
-    juce::var encode (const upic::ArcGroup& g) { return g.toVar(); }
-    upic::ArcGroup decode (const juce::var& v, int fallbackId = 1) { return upic::ArcGroup::fromVar (v, fallbackId); }
+    juce::var encode (const upic::ArcGroup& g) { return upic::arcGroupToVar (g); }
+    upic::ArcGroup decode (const juce::var& v, int fallbackId = 1) { return upic::arcGroupFromVar (v, fallbackId); }
 
     // The group's name as text, and its colour as a colour - whatever the
     // domain holds.
