@@ -173,6 +173,8 @@ int upic::runSelfTest()
     upic::runDocumentSessionChecks (t);
     // R3.2: the undo history - the document's steps.
     upic::runUndoHistoryChecks (t);
+    // R3.3: the selection model - what is selected.
+    upic::runSelectionChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

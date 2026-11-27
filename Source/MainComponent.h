@@ -633,6 +633,14 @@ public:
     void groupOverrideForTest (int kind, int id) { groupPanel.setOverrideForTest (kind, id); }
     void groupRenameForTest (const juce::String& n) { groupPanel.renameForTest (n); }
     int selectedGroupIdForTest() const { return selGroupId; }
+    // R3.3: the rest of the selection - the amplitude table, the sample
+    // slot, the mixer channel and the arc the canvas points at. The suite
+    // that pins the selection model's contract reads them here.
+    int selectedAmpTableIdForTest() const { return selAmpTableId; }
+    int selectedSampleSlotForTest() const { return selSlot; }
+    int selectedChannelIdForTest() const { return selChannelId; }
+    int selectedArcIdForTest() const { return selectedArcId; }
+    int selectedArcIdsCountForTest() const { return (int) lastArcSelection.size(); }
     // WP4: the sequences.
     int seqCountForTest() const { return (int) sequences.size(); }
     int seqIdAtForTest (int i) const

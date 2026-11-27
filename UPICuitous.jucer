@@ -33,6 +33,7 @@
       <FILE id="sTf35" name="SelfTestFreqSpaceCodec.cpp" compile="1" resource="0" file="Source/SelfTestFreqSpaceCodec.cpp"/>
       <FILE id="sDs36" name="SelfTestDocumentSession.cpp" compile="1" resource="0" file="Source/SelfTestDocumentSession.cpp"/>
       <FILE id="sUh37" name="SelfTestUndoHistory.cpp" compile="1" resource="0" file="Source/SelfTestUndoHistory.cpp"/>
+      <FILE id="sSe38" name="SelfTestSelection.cpp" compile="1" resource="0" file="Source/SelfTestSelection.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>
