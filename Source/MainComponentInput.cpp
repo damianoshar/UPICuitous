@@ -284,31 +284,33 @@ void MainComponent::finalizeCapture()
     const int sid = sampleSlots[(size_t) slotIndex].id;
     auto slot = upic::slotFromCapture(sid, takeName(), take, capRate);
 
-    // WP7: the panel's captured take is now stale. Invalidate it before
-    // the replacement is published, so no preview or save can mix the old
-    // analysis with the new material.
-    invalidateSampleExtractSource();
+    runEdit ("Capture the material", [this, slotIndex, &slot]{
+        // WP7: the panel's captured take is now stale. Invalidate it before
+        // the replacement is published, so no preview or save can mix the old
+        // analysis with the new material.
+        invalidateSampleExtractSource();
 
-    {
-        // model is read by the audio thread -> mutate under the lock
-        juce::ScopedLock l(dataLock);
-        // the capture replaces the material, not the slot: the reverse flag
-        // (v1.19), the Ref (M5) and the level (M5) belong to the slot, so
-        // they survive
-        const bool wasReversed = sampleSlots[(size_t) slotIndex].reversed;
-        const double wasRef = sampleSlots[(size_t) slotIndex].refFreq;
-        const float wasLevel = sampleSlots[(size_t) slotIndex].level;
-        sampleSlots[(size_t) slotIndex] = slot;
-        sampleSlots[(size_t) slotIndex].reversed = wasReversed;
-        sampleSlots[(size_t) slotIndex].refFreq = wasRef;
-        sampleSlots[(size_t) slotIndex].level = wasLevel;
-        // M5: the material's edits (the trim, the fades, the normalise
-        // gain) belong to the material that was there - the new take has
-        // none of them.
-        sampleSlots[(size_t) slotIndex].resetEdits();
-        markModelChanged(); // v1.15: new material -> fade across it
-        publishModelSnapshot(); // v1.18: the next block renders the take
-    }
+        {
+            // model is read by the audio thread -> mutate under the lock
+            juce::ScopedLock l(dataLock);
+            // the capture replaces the material, not the slot: the reverse flag
+            // (v1.19), the Ref (M5) and the level (M5) belong to the slot, so
+            // they survive
+            const bool wasReversed = sampleSlots[(size_t) slotIndex].reversed;
+            const double wasRef = sampleSlots[(size_t) slotIndex].refFreq;
+            const float wasLevel = sampleSlots[(size_t) slotIndex].level;
+            sampleSlots[(size_t) slotIndex] = slot;
+            sampleSlots[(size_t) slotIndex].reversed = wasReversed;
+            sampleSlots[(size_t) slotIndex].refFreq = wasRef;
+            sampleSlots[(size_t) slotIndex].level = wasLevel;
+            // M5: the material's edits (the trim, the fades, the normalise
+            // gain) belong to the material that was there - the new take has
+            // none of them.
+            sampleSlots[(size_t) slotIndex].resetEdits();
+            markModelChanged(); // v1.15: new material -> fade across it
+            publishModelSnapshot(); // v1.18: the next block renders the take
+        }
+    });
     refreshBoxes();
     updateSampleView();
     pushVoice();

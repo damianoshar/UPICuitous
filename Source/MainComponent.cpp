@@ -200,7 +200,10 @@ void MainComponent::buildTransportControls()
     // the audio thread renders from, so they have to mark it as changed -
     // the status timer publishes the snapshot only when the revision moved.
     loopBtn.onClick = [this]{ loopPage = loopBtn.getToggleState(); markModelChanged (false); };
-    seqBtn.onClick = [this]{ seqPages = seqBtn.getToggleState(); markModelChanged(); };
+    seqBtn.onClick = [this]{ runEdit ("Sequence the pages", [this]{
+        seqPages = seqBtn.getToggleState();
+        markModelChanged();
+    }); };
     revPlayBtn.onClick = [this]{
         const bool rev = revPlayBtn.getToggleState();
         const double now = playRate.load(std::memory_order_relaxed);
@@ -344,11 +347,13 @@ void MainComponent::buildViewToggles()
     // split, and the split travels with the piece.
     addAndMakeVisible (workspaceSplitter);
     workspaceSplitter.setVisible (false);
+    workspaceSplitter.onSplitStart = [this]{ beginEdit ("Resize the workspace"); };
     workspaceSplitter.onSplit = [this](double f){
         workspace.setSplit (f);
         markModelChanged();   // the layout is part of the piece
         resized();
     };
+    workspaceSplitter.onSplitEnd = [this]{ endEdit(); };
 }
 
 void MainComponent::buildAudioOverlay()
@@ -480,11 +485,13 @@ void MainComponent::buildLiveControls()
                             "than it arrives, so it keeps an octave up/down.");
     livePitchBox.onChange = [this]{
         const int pm = livePitchBox.getSelectedId() - 1;
-        // v1.33.4 (M21): the vocoder's working memory is prepared BEFORE the
-        // audio thread can see the new mode
-        prepareVocodersIfNeeded (engine.getSamplePitchMode(), pm);
-        engine.setLivePitchMode(pm);
-        markModelChanged(); // v1.15: the live voices re-anchor -> fade across it
+        runEdit ("Live pitch", [this, pm]{
+            // v1.33.4 (M21): the vocoder's working memory is prepared BEFORE the
+            // audio thread can see the new mode
+            prepareVocodersIfNeeded (engine.getSamplePitchMode(), pm);
+            engine.setLivePitchMode(pm);
+            markModelChanged(); // v1.15: the live voices re-anchor -> fade across it
+        });
         flash("Live pitch: " + livePitchBox.getText());
     };
     // v1.21: the live pitch algorithm moved out of the audio settings
@@ -519,27 +526,29 @@ void MainComponent::buildLiveControls()
     liveRevBtn.setTooltip("Play the microphone's last seconds backwards");
     liveRevBtn.onClick = [this]{
         const bool on = liveRevBtn.getToggleState();
-        revLiveOn.store(on, std::memory_order_relaxed);
-        {
-            // v1.21: the global Rev is a bulk edit - it sets the direction on
-            // every live arc (the arc list's Rev box is the per-arc control)
-            juce::ScopedLock l(dataLock);
-            for (auto& pg : pages)
-                for (auto& a : pg.arcs)
-                    if (a.mode == 2) a.reversed = on;
-            markModelChanged();
-    publishModelSnapshot();
-            arcListDirty = true;
-        }
-        if (on)
-        {
-            // start a fresh capture, so the first segment is not a mix of the
-            // old content and the new input
-            revCapIdx = 0; revPlayIdx = 1;
-            revCapHead = 0; revCapCount = 0; revPlayHead = 0;
-            updateRevBuffers();
-        }
-        markModelChanged(); // the live voices re-anchor -> fade across it
+        runEdit ("Live reverse", [this, on]{
+            revLiveOn.store(on, std::memory_order_relaxed);
+            {
+                // v1.21: the global Rev is a bulk edit - it sets the direction on
+                // every live arc (the arc list's Rev box is the per-arc control)
+                juce::ScopedLock l(dataLock);
+                for (auto& pg : pages)
+                    for (auto& a : pg.arcs)
+                        if (a.mode == 2) a.reversed = on;
+                markModelChanged();
+                publishModelSnapshot();
+                arcListDirty = true;
+            }
+            if (on)
+            {
+                // start a fresh capture, so the first segment is not a mix of the
+                // old content and the new input
+                revCapIdx = 0; revPlayIdx = 1;
+                revCapHead = 0; revCapCount = 0; revPlayHead = 0;
+                updateRevBuffers();
+            }
+            markModelChanged(); // the live voices re-anchor -> fade across it
+        });
         engine.resetLiveVoices();
         scrubEngine.resetLiveVoices();
         flash(on ? "Live reverse: " + juce::String (revBufSec, 1) + " s buffer"

@@ -882,12 +882,14 @@ void MainComponent::importScalaTuning()
 // piece carries it when it is saved.
 void MainComponent::applyTuning (const upic::Tuning& t)
 {
-    tuning = t;
-    score.setTuning (tuning);
-    // the arcs keep their frequencies - the tuning is not part of the audio
-    // model, so no snapshot is published. The piece itself has changed, so
-    // the app asks to save it.
-    markModelChanged();
+    runEdit ("Tuning", [this, &t]{
+        tuning = t;
+        score.setTuning (tuning);
+        // the arcs keep their frequencies - the tuning is not part of the audio
+        // model, so no snapshot is published. The piece itself has changed, so
+        // the app asks to save it.
+        markModelChanged();
+    });
     flash (tuning.custom
                ? ("Tuning: " + tuning.describe() + " (the sieve now counts the scale's degrees)")
                : "Tuning: 12-tone equal temperament");

@@ -166,6 +166,10 @@ class WorkspaceSplitter : public juce::Component
 {
 public:
     std::function<void(double)> onSplit;   // the new fraction (0.2..0.8)
+    // R3.5: the drag's edges. The split is a continuous gesture, so the
+    // caller opens one command at the start and closes it at the end; the
+    // onSplit calls in between join it.
+    std::function<void()> onSplitStart, onSplitEnd;
 
     WorkspaceSplitter()
     {
@@ -191,11 +195,13 @@ public:
     void mouseDown (const juce::MouseEvent&) override
     {
         dragging = true;
+        if (onSplitStart) onSplitStart();
     }
 
     void mouseUp (const juce::MouseEvent&) override
     {
         dragging = false;
+        if (onSplitEnd) onSplitEnd();
     }
 
     void mouseDrag (const juce::MouseEvent&) override

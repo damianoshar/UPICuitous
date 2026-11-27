@@ -229,6 +229,12 @@ public:
     // command ends.
     void beginEdit (const juce::String& label);
     void endEdit();
+    // R3.5: one edit is one command. A one-shot opens and closes it here; a
+    // gesture opens it at its drag start and closes it at its drag end, and
+    // the value changes in between join it. A call made while a command is
+    // already open (a caller grouping edits, or a gesture's own change)
+    // just runs, so the edit belongs to the command that is already there.
+    void runEdit (const juce::String& label, const std::function<void()>& fn);
     // R3.4: the command dispatcher's state, for the suite that pins the
     // command's contract. The production code never reads it through this.
     bool commandOpenForTest() const { return document.isCommandOpen(); }
@@ -1251,6 +1257,15 @@ public:
     int workspacePageForCanvasForTest (int i) const { return workspace.pageForCanvas (i); }
     double workspaceSplitForTest() const { return workspace.getSplit(); }
     void setWorkspaceSplitForTest (double f) { workspace.setSplit (f); }
+    // R3.5: the split is a drag - the command opens at the drag's start and
+    // closes at its end, and the moves in between join it. The door drives
+    // the whole drag, the way the mouse does.
+    void workspaceSplitDragForTest (double f)
+    {
+        if (workspaceSplitter.onSplitStart) workspaceSplitter.onSplitStart();
+        if (workspaceSplitter.onSplit) workspaceSplitter.onSplit (f);
+        if (workspaceSplitter.onSplitEnd) workspaceSplitter.onSplitEnd();
+    }
     int workspaceActiveCanvasForTest() const { return workspace.activeCanvas(); }
     int workspaceActivePageForTest() const { return workspace.getActivePage(); }
     // A canvas of the workspace (0 is the app's own canvas).
@@ -1396,6 +1411,18 @@ public:
     }
     juce::Rectangle<int> arcListPanelBoundsForTest() const { return arcListPanel.getBounds(); }
     bool arcListPanelVisibleForTest() const { return arcListPanel.isVisible(); }
+    // R3.5: the arc list's per-arc controls (the reverse and the mode).
+    // The panel's own callbacks are the doors the rows use.
+    void arcListReverseForTest (int page, int arcId, bool reversed)
+    {
+        if (arcListPanel.onReverseToggled)
+            arcListPanel.onReverseToggled (page, arcId, reversed);
+    }
+    void arcListModeForTest (int page, int arcId, int mode)
+    {
+        if (arcListPanel.onModeChosen)
+            arcListPanel.onModeChosen (page, arcId, mode);
+    }
     juce::Rectangle<int> workspaceBoundsForTest() const { return workspace.getBounds(); }
     juce::Rectangle<int> workspaceSplitterBoundsForTest() const { return workspaceSplitter.getBounds(); }
     bool workspaceSplitterVisibleForTest() const { return workspaceSplitter.isVisible(); }

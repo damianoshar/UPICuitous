@@ -113,29 +113,35 @@ void MainComponent::buildSieveControls()
     modDepthSlider.setTooltip ("How deep the modulation goes: 1 is an octave\n"
                               "of pitch, or a full swing of the amplitude.");
     // the three controls edit the selected arcs, like the other live editors
-    auto applyModToSelection = [this]{
-        const auto ids = score.getSelectedArcs();
-        if (ids.empty()) return;
-        {
-            const juce::ScopedLock l(dataLock);
-            for (auto& a : curPage().arcs)
-                if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
-                {
-                    a.waveUse = modUseBox.getSelectedId() - 1;
-                    a.modRate = modRateSlider.getValue();
-                    a.modDepth = modDepthSlider.getValue();
-                }
-        }
-        publishModelSnapshot();
-        markModelChanged();
-        score.repaint();
+    auto applyModToSelection = [this](const juce::String& label){
+        runEdit (label, [this]{
+            const auto ids = score.getSelectedArcs();
+            if (ids.empty()) return;
+            {
+                const juce::ScopedLock l(dataLock);
+                for (auto& a : curPage().arcs)
+                    if (std::find (ids.begin(), ids.end(), a.id) != ids.end())
+                    {
+                        a.waveUse = modUseBox.getSelectedId() - 1;
+                        a.modRate = modRateSlider.getValue();
+                        a.modDepth = modDepthSlider.getValue();
+                    }
+            }
+            publishModelSnapshot();
+            markModelChanged();
+            score.repaint();
+        });
     };
     modUseBox.onChange = [this, applyModToSelection]{
-        applyModToSelection();
+        applyModToSelection ("Wave use");
         flash ("Wave as: " + modUseBox.getText());
     };
-    modRateSlider.onValueChange = [this, applyModToSelection]{ applyModToSelection(); };
-    modDepthSlider.onValueChange = [this, applyModToSelection]{ applyModToSelection(); };
+    modRateSlider.onValueChange = [this, applyModToSelection]{ applyModToSelection ("Modulation rate"); };
+    modDepthSlider.onValueChange = [this, applyModToSelection]{ applyModToSelection ("Modulation depth"); };
+    modRateSlider.onDragStart = [this]{ beginEdit ("Modulation rate"); };
+    modRateSlider.onDragEnd = [this]{ endEdit(); };
+    modDepthSlider.onDragStart = [this]{ beginEdit ("Modulation depth"); };
+    modDepthSlider.onDragEnd = [this]{ endEdit(); };
 
     // --- v1.2 magnetic-sieve row: preset library, stickiness, time grid,
     //     procedural arc generators + persistent shortcut/wheel hint ---
@@ -257,13 +263,17 @@ void MainComponent::buildStepControls()
                               "ones, 7 the diatonic one.");
     stepDivLab.setTooltip ("Equal divisions per octave.");
     stepBtn.onClick = [this]{
-        applyStepToSelection();
+        runEdit ("Step the pitch", [this]{ applyStepToSelection(); });
         flash (stepBtn.getToggleState()
                  ? juce::String ("Stepped: ") + juce::String ((int) stepDivSlider.getValue())
                    + " divisions per octave"
                  : juce::String ("The continuum: the pitch glides again"));
     };
-    stepDivSlider.onValueChange = [this]{ applyStepToSelection(); };
+    stepDivSlider.onValueChange = [this]{
+        runEdit ("Step divisions", [this]{ applyStepToSelection(); });
+    };
+    stepDivSlider.onDragStart = [this]{ beginEdit ("Step divisions"); };
+    stepDivSlider.onDragEnd = [this]{ endEdit(); };
 }
 
 // The controls edit the selected arcs, like the other live editors.
@@ -330,6 +340,8 @@ void MainComponent::buildFrequencyControls()
                             "up, negative starts fast and slows down.");
     warpLab.setTooltip ("The page's acceleration.");
     warpSlider.onValueChange = [this]{ pushWarp(); };
+    warpSlider.onDragStart = [this]{ beginEdit ("Page acceleration"); };
+    warpSlider.onDragEnd = [this]{ endEdit(); };
 
     // ---- the page's four frequency spaces ----
     addAndMakeVisible(spaceBox); addAndMakeVisible(spaceLab);
@@ -630,16 +642,18 @@ void MainComponent::buildFrequencyControls()
 // The page's four spaces -> the model.
 void MainComponent::pushSpaceDefs()
 {
-    {
-        const juce::ScopedLock l(dataLock);
-        auto& pg = curPage();
-        for (int i = 0; i < 4; ++i)
-            pg.spaces[(size_t) i] = juce::jlimit (0,
-                (int) upic::freqSpacePresets().size() - 1,
-                spaceDefBox[i].getSelectedId() - 1);
-    }
-    publishModelSnapshot();
-    markModelChanged();
+    runEdit ("Frequency space", [this]{
+        {
+            const juce::ScopedLock l(dataLock);
+            auto& pg = curPage();
+            for (int i = 0; i < 4; ++i)
+                pg.spaces[(size_t) i] = juce::jlimit (0,
+                    (int) upic::freqSpacePresets().size() - 1,
+                    spaceDefBox[i].getSelectedId() - 1);
+        }
+        publishModelSnapshot();
+        markModelChanged();
+    });
     refreshSpaceBox();
     score.repaint();
     // say what changed, and whether anything is in that space - a space
@@ -1979,9 +1993,9 @@ void MainComponent::setModOnSelection (int modId, int target, double depth)
 void MainComponent::applySpaceToSelection()
 {
     const int s = juce::jlimit (0, 3, spaceBox.getSelectedId() - 1);
-    const auto ids = score.getSelectedArcs();
-    if (! ids.empty())
-    {
+    runEdit ("Arc frequency space", [this, s]{
+        const auto ids = score.getSelectedArcs();
+        if (ids.empty()) return;
         {
             const juce::ScopedLock l(dataLock);
             for (auto& a : curPage().arcs)
@@ -1991,7 +2005,7 @@ void MainComponent::applySpaceToSelection()
         publishModelSnapshot();
         markModelChanged();
         score.repaint();
-    }
+    });
     // a new arc is born in the space on show
     score.setCurrentSpace (s);
 }
@@ -2040,27 +2054,31 @@ void MainComponent::pushAmbitus()
     const auto& presets = upic::ambitusPresets();
     const int id = ambitusBox.getSelectedId() - 1;
     if (id < 0 || id >= (int) presets.size()) return;   // "Custom": nothing to do
-    {
-        const juce::ScopedLock l(dataLock);
-        auto& pg = curPage();
-        pg.pitchLo = presets[(size_t) id].lo;
-        pg.pitchHi = presets[(size_t) id].hi;
-    }
-    publishModelSnapshot();
-    markModelChanged();
-    score.repaint();
+    runEdit ("Page ambitus", [this, id, &presets]{
+        {
+            const juce::ScopedLock l(dataLock);
+            auto& pg = curPage();
+            pg.pitchLo = presets[(size_t) id].lo;
+            pg.pitchHi = presets[(size_t) id].hi;
+        }
+        publishModelSnapshot();
+        markModelChanged();
+        score.repaint();
+    });
     flash (juce::String (presets[(size_t) id].name));
 }
 
 // The page's acceleration -> the model.
 void MainComponent::pushWarp()
 {
-    {
-        const juce::ScopedLock l(dataLock);
-        curPage().warp = juce::jlimit (-0.9, 0.9, warpSlider.getValue());
-    }
-    publishModelSnapshot();
-    markModelChanged();
+    runEdit ("Page acceleration", [this]{
+        {
+            const juce::ScopedLock l(dataLock);
+            curPage().warp = juce::jlimit (-0.9, 0.9, warpSlider.getValue());
+        }
+        publishModelSnapshot();
+        markModelChanged();
+    });
 }
 
 void MainComponent::buildArcListPanel()
@@ -2125,23 +2143,27 @@ void MainComponent::buildArcListPanel()
     };
     // the Rev box: a live arc plays the microphone backwards
     arcListPanel.onReverseToggled = [this](int page, int arcId, bool reversed){
-        juce::ScopedLock l(dataLock);
-        if (page < 0 || page >= (int) pages.size()) return;
-        for (auto& a : pages[(size_t) page].arcs)
-            if (a.id == arcId) a.reversed = reversed;
-        markModelChanged();
-        publishModelSnapshot();
-        arcListDirty = true;
+        runEdit ("Arc reverse", [this, page, arcId, reversed]{
+            juce::ScopedLock l(dataLock);
+            if (page < 0 || page >= (int) pages.size()) return;
+            for (auto& a : pages[(size_t) page].arcs)
+                if (a.id == arcId) a.reversed = reversed;
+            markModelChanged();
+            publishModelSnapshot();
+            arcListDirty = true;
+        });
     };
     // the mode dropdown: this arc's algorithm (-1 = follow the tab)
     arcListPanel.onModeChosen = [this](int page, int arcId, int mode){
-        juce::ScopedLock l(dataLock);
-        if (page < 0 || page >= (int) pages.size()) return;
-        for (auto& a : pages[(size_t) page].arcs)
-            if (a.id == arcId) a.pitchMode = mode;
-        markModelChanged();
-        publishModelSnapshot();
-        arcListDirty = true;
+        runEdit ("Arc pitch mode", [this, page, arcId, mode]{
+            juce::ScopedLock l(dataLock);
+            if (page < 0 || page >= (int) pages.size()) return;
+            for (auto& a : pages[(size_t) page].arcs)
+                if (a.id == arcId) a.pitchMode = mode;
+            markModelChanged();
+            publishModelSnapshot();
+            arcListDirty = true;
+        });
     };
     arcListPanel.onPageClicked = [this](int page){
         {
@@ -2527,31 +2549,33 @@ void MainComponent::buildSampleControls()
     revBtn.onClick = [this]{
         if (document.selection().sampleSlot < 0 || document.selection().sampleSlot >= (int) sampleSlots.size()) return;
         const bool on = revBtn.getToggleState();
-        // v1.26: the slot direction applies to the selected sample arcs too
-        // (a multi-selection may use more than one slot). The selected slot
-        // and the arcs' slots change under one model lock.
-        const auto ids = score.getSelectedArcs();
-        {
-            const juce::ScopedLock sl (dataLock);
-            sampleSlots[(size_t) document.selection().sampleSlot].reversed = on;
-            if (! ids.empty())
+        runEdit ("Reverse the material", [this, on]{
+            // v1.26: the slot direction applies to the selected sample arcs too
+            // (a multi-selection may use more than one slot). The selected slot
+            // and the arcs' slots change under one model lock.
+            const auto ids = score.getSelectedArcs();
             {
-                for (auto& a : curPage().arcs)
+                const juce::ScopedLock sl (dataLock);
+                sampleSlots[(size_t) document.selection().sampleSlot].reversed = on;
+                if (! ids.empty())
                 {
-                    if (a.mode != 1
-                        || std::find (ids.begin(), ids.end(), a.id) == ids.end())
-                        continue;
-                    for (auto& s : sampleSlots)
-                        if (s.id == a.sampleId) { s.reversed = on; break; }
+                    for (auto& a : curPage().arcs)
+                    {
+                        if (a.mode != 1
+                            || std::find (ids.begin(), ids.end(), a.id) == ids.end())
+                            continue;
+                        for (auto& s : sampleSlots)
+                            if (s.id == a.sampleId) { s.reversed = on; break; }
+                    }
                 }
             }
-        }
-        updateRevButton();
-        // WP7: reversing the material changes the captured audio. The
-        // extraction source is stale until the user captures it again.
-        invalidateSampleExtractSource();
-        markModelChanged();  // v1.15: the material changes -> fade across it
-        publishModelSnapshot(); // v1.18: the audio thread must see it now
+            updateRevButton();
+            // WP7: reversing the material changes the captured audio. The
+            // extraction source is stale until the user captures it again.
+            invalidateSampleExtractSource();
+            markModelChanged();  // v1.15: the material changes -> fade across it
+            publishModelSnapshot(); // v1.18: the audio thread must see it now
+        });
         flash(on ? "Selected slot(s): reversed" : "Selected slot(s): forward");
     };
     updateRevButton();
@@ -2568,16 +2592,20 @@ void MainComponent::buildSampleControls()
     levelSlider.onValueChange = [this]{
         if (document.selection().sampleSlot < 0 || document.selection().sampleSlot >= (int) sampleSlots.size()) return;
         const float v = (float) levelSlider.getValue();
-        {
-            juce::ScopedLock l (dataLock);
-            sampleSlots[(size_t) document.selection().sampleSlot].level = v;
-        }
-        // WP7: the level is part of the captured material's identity. Do
-        // not leave an extraction preview pointing at the old take.
-        invalidateSampleExtractSource();
-        markModelChanged();       // the level changes the sound
-        publishModelSnapshot();   // the audio thread must see it now
+        runEdit ("Slot level", [this, v]{
+            {
+                juce::ScopedLock l (dataLock);
+                sampleSlots[(size_t) document.selection().sampleSlot].level = v;
+            }
+            // WP7: the level is part of the captured material's identity. Do
+            // not leave an extraction preview pointing at the old take.
+            invalidateSampleExtractSource();
+            markModelChanged();       // the level changes the sound
+            publishModelSnapshot();   // the audio thread must see it now
+        });
     };
+    levelSlider.onDragStart = [this]{ beginEdit ("Slot level"); };
+    levelSlider.onDragEnd = [this]{ endEdit(); };
 
     // The material's edits. They are not a rewrite of the audio: the
     // normalise is a gain, the fades and the trim are read parameters, so
@@ -2618,13 +2646,15 @@ void MainComponent::buildSampleControls()
                               "slot's length and shifts pitch only.");
     samplePitchBox.onChange = [this]{
         const int pm = samplePitchBox.getSelectedId() - 1;
-        // v1.33.4 (M21): the vocoder's working memory is prepared BEFORE the
-        // audio thread can see the new mode
-        prepareVocodersIfNeeded (pm, engine.getLivePitchMode());
-        engine.setSamplePitchMode(pm);
-        scrubEngine.setSamplePitchMode(pm);
-        score.sampleGranularTab = (samplePitchBox.getSelectedId() == 2);
-        markModelChanged(); // v1.15: the sample voices re-anchor -> fade across it
+        runEdit ("Sample pitch", [this, pm]{
+            // v1.33.4 (M21): the vocoder's working memory is prepared BEFORE the
+            // audio thread can see the new mode
+            prepareVocodersIfNeeded (pm, engine.getLivePitchMode());
+            engine.setSamplePitchMode(pm);
+            scrubEngine.setSamplePitchMode(pm);
+            score.sampleGranularTab = (samplePitchBox.getSelectedId() == 2);
+            markModelChanged(); // v1.15: the sample voices re-anchor -> fade across it
+        });
         flash("Sample pitch: " + samplePitchBox.getText());
     };
 }

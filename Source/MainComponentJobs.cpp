@@ -47,6 +47,22 @@ void MainComponent::endEdit()
     document.endCommand();
 }
 
+void MainComponent::runEdit (const juce::String& label,
+                             const std::function<void()>& fn)
+{
+    // A gesture already owns the transaction: its value changes are part of
+    // the one command, not steps of their own.
+    if (document.isCommandOpen())
+    {
+        fn();
+        return;
+    }
+
+    beginEdit (label);
+    fn();
+    endEdit();
+}
+
 juce::String MainComponent::undoLabel() const
 {
     return document.undoLabel();
