@@ -159,6 +159,8 @@ int upic::runSelfTest()
     upic::runWaveCodecChecks (t);
     // R2.8: the channel's codec - the file format of a mixer channel.
     upic::runChannelCodecChecks (t);
+    // R2.9: the sample slot's codec - the file format of a sample slot.
+    upic::runSampleCodecChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
