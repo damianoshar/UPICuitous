@@ -9,6 +9,7 @@
 #include "PageCodec.h"
 #include "PieceLimits.h"
 #include "Sample.h"
+#include "SampleCodec.h"
 #include "Tuning.h"
 #include "WaveformCodec.h"
 
@@ -108,7 +109,7 @@ namespace upic
         juce::Array<juce::var> wa, ea, pa, sa;
         for (auto& w : m.waveforms) wa.add (upic::waveformToVar (w));
         for (auto& e : m.envelopes) ea.add (upic::envelopeToVar (e));
-        for (auto& s : m.sampleSlots) if (s.loaded()) sa.add (s.toVar (includeSampleAudio));
+        for (auto& s : m.sampleSlots) if (s.loaded()) sa.add (upic::sampleSlotToVar (s, includeSampleAudio));
         for (auto& p : m.pages) pa.add (pageToVar (p));
         o->setProperty("waveforms", wa);
         o->setProperty("envelopes", ea);

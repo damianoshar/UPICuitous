@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "Sample.h"
+#include "SampleCodec.h"
 #include "PieceLimits.h"
 #include "UpicConstants.h"
 
@@ -43,8 +44,8 @@
 namespace
 {
     // The slot's codec, reached through one door.
-    juce::var encode (const upic::SampleSlot& s) { return s.toVar(); }
-    upic::SampleSlot decode (const juce::var& v, int fallbackId = 0) { return upic::SampleSlot::fromVar (v, fallbackId); }
+    juce::var encode (const upic::SampleSlot& s) { return upic::sampleSlotToVar (s); }
+    upic::SampleSlot decode (const juce::var& v, int fallbackId = 0) { return upic::sampleSlotFromVar (v, fallbackId); }
 
     // The slot's name as text - whatever the domain holds.
     juce::String textOf (const upic::SampleSlot& s) { return juce::String (s.name); }
@@ -162,7 +163,7 @@ void upic::runSampleCodecChecks (upic::SelfTest& t)
     {
         // ... and left out when the file is asked to carry no audio (the
         // recovery snapshot keeps it in a sidecar instead)
-        const auto v = withAudio().toVar (false);
+        const auto v = upic::sampleSlotToVar (withAudio(), false);
         check (v.getProperty ("data", juce::var()).isVoid(),
                "the audio can be left out of the file");
         check ((int) v.getProperty ("frames", -1) == 8,

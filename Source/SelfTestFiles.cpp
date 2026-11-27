@@ -4,6 +4,7 @@
 #include "AllocCounter.h"
 #include "ArcCodec.h"
 #include "PageCodec.h"
+#include "SampleCodec.h"
 
 #if JUCE_WINDOWS
  #ifndef NOMINMAX
@@ -468,7 +469,7 @@ void upic::runPieceStateChecks (upic::SelfTest& t)
             check (arcs != nullptr && arcs->size() == 1,
                    "the recovered piece has its arc");
             // the audio comes back exactly as it was
-            const auto pcm = model.sampleSlots[0].toPcm16();
+            const auto pcm = upic::sampleSlotToPcm16 (model.sampleSlots[0]);
             auto* recSamples = recovered.getProperty ("samples", juce::var()).getArray();
             const auto recData = recSamples != nullptr && recSamples->size() == 1
                                     ? (*recSamples)[0].getDynamicObject()
@@ -568,7 +569,7 @@ void upic::runUntrustedPieceChecks (upic::SelfTest& t)
 
         // a huge declared frame count is capped before anything is allocated
         {
-            const auto slot = upic::SampleSlot::fromVar (juce::JSON::parse (
+            const auto slot = upic::sampleSlotFromVar (juce::JSON::parse (
                 "{\"id\":1,\"frames\":2000000000,\"channels\":2,\"sampleRate\":48000,"
                 "\"data\":\"AAAA\"}"), 1);
             check (slot.data == nullptr,

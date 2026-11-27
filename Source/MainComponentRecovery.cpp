@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "SampleCodec.h"
 #include <atomic>
 
 //==============================================================================
@@ -60,7 +61,7 @@ bool MainComponent::writeRecoverySnapshot (const juce::File& dir, const upic::Pi
     {
         if (! slot.loaded()) continue;
 
-        const auto pcm = slot.toPcm16();
+        const auto pcm = upic::sampleSlotToPcm16 (slot);
         if (pcm.getSize() == 0) continue;
 
         // the name carries the hash of the audio: a sidecar that is already

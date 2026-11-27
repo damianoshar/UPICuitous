@@ -5,6 +5,7 @@
 #include "SelfTest.h"
 #include "AllocCounter.h"
 #include "PageCodec.h"
+#include "SampleCodec.h"
 
 //==============================================================================
 // The audio path: the lock-free snapshot, the audio thread (no allocation),
@@ -125,8 +126,8 @@ void upic::runAudioThreadChecks (upic::SelfTest& t)
 
         // the slot's own JSON round-trip must survive the shared buffer
         {
-            const auto var = slots[0].toVar();
-            const auto back = upic::SampleSlot::fromVar(var, 1);
+            const auto var = upic::sampleSlotToVar (slots[0]);
+            const auto back = upic::sampleSlotFromVar (var, 1);
             bool same = back.loaded() && back.data != nullptr
                 && back.data->getNumSamples() == 44100
                 && back.data->getNumChannels() == 1
@@ -1112,10 +1113,10 @@ void upic::runLivePathChecks (upic::SelfTest& t)
         // v1.33.4 (H7): the flag changes the sound, so it travels with
         // the piece - it used to be dropped on save, so a reopened piece
         // played the material forwards
-        check((bool) rampSlot(true).toVar().getProperty("reversed", false),
+        check((bool) upic::sampleSlotToVar (rampSlot(true)).getProperty("reversed", false),
               "sample reverse: the flag travels with the piece",
-              rampSlot(true).toVar().getProperty("reversed", "absent").toString());
-        check(!(bool) rampSlot(false).toVar().getProperty("reversed", false),
+              upic::sampleSlotToVar (rampSlot(true)).getProperty("reversed", "absent").toString());
+        check(!(bool) upic::sampleSlotToVar (rampSlot(false)).getProperty("reversed", false),
               "sample reverse: a forward slot is not marked reversed");
     }
 
@@ -1435,7 +1436,7 @@ void upic::runRealtimeChecks (upic::SelfTest& t)
 
         auto* root = new juce::DynamicObject();
         juce::Array<juce::var> samples;
-        samples.add(slot.toVar());
+        samples.add(upic::sampleSlotToVar (slot));
         root->setProperty("samples", samples);
 
         upic::Page pg; pg.durationSec = 4.0;
@@ -2370,7 +2371,7 @@ void upic::runMaterialChecks (upic::SelfTest& t)
         for (int i = 0; i < 10000; ++i) buf.setSample (0, i, 0.25f);
         s.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
 
-        const auto back = upic::SampleSlot::fromVar (s.toVar(), 1);
+        const auto back = upic::sampleSlotFromVar (upic::sampleSlotToVar (s), 1);
         check (std::abs (back.refFreq - 330.0) < 1.0e-9
                && std::abs (back.level - 0.75f) < 1.0e-6f
                && std::abs (back.gain - 2.5f) < 1.0e-6f
@@ -2386,7 +2387,7 @@ void upic::runMaterialChecks (upic::SelfTest& t)
                    + juce::String (back.fadeOutSec, 3));
 
         // a piece without the new fields loads with the old defaults
-        const auto old = upic::SampleSlot::fromVar (juce::JSON::parse (
+        const auto old = upic::sampleSlotFromVar (juce::JSON::parse (
             "{\"id\":1,\"name\":\"old\",\"sampleRate\":44100,\"channels\":1,\"frames\":0}"), 1);
         check (old.refFreq == 0.0 && old.level == 1.0f && old.gain == 1.0f
                && old.loopStart == 0 && old.loopEnd == 0
@@ -2410,7 +2411,7 @@ void upic::runMaterialChecks (upic::SelfTest& t)
             buf.setSample (0, i, 0.8f * (float) std::sin (
                 juce::MathConstants<double>::pi * 2.0 * 220.0 * i / sr));
         s.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
-        auto slotVar = s.toVar();
+        auto slotVar = upic::sampleSlotToVar (s);
         if (auto* o = slotVar.getDynamicObject())
         {
             o->removeProperty ("ref"); o->removeProperty ("level");
@@ -2459,7 +2460,7 @@ void upic::runMaterialChecks (upic::SelfTest& t)
             juce::AudioBuffer<float> buf (1, sr);
             for (int i = 0; i < sr; ++i) buf.setSample (0, i, 0.25f);
             s.data = std::make_shared<const juce::AudioBuffer<float>> (std::move (buf));
-            samples.add (s.toVar());
+            samples.add (upic::sampleSlotToVar (s));
         }
         root->setProperty ("samples", samples);
         upic::Page pg; pg.durationSec = 4.0;

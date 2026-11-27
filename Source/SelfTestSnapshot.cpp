@@ -5,6 +5,7 @@
 #include "PageCodec.h"
 #include "EnvelopeCodec.h"
 #include "WaveformCodec.h"
+#include "SampleCodec.h"
 
 //==============================================================================
 // The offscreen snapshot of the whole window: the layout at every size, the
@@ -1188,7 +1189,7 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                         for (auto& e : *arr) envs.push_back (upic::envelopeFromVar (e, 0));
                     const auto slotsVar = pv.getProperty ("samples", juce::var());
                     if (auto* arr = slotsVar.getArray(); arr != nullptr)
-                        for (auto& s : *arr) slots.push_back (upic::SampleSlot::fromVar (s, 1));
+                        for (auto& s : *arr) slots.push_back (upic::sampleSlotFromVar (s, 1));
 
                     const double sr = 44100.0;
                     juce::AudioBuffer<float> buf (2, (int) (sr * 5.0));
@@ -1718,7 +1719,7 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                     slot.name = "take";
                     slot.sampleRate = 192000.0;
                     slot.data = std::make_shared<const juce::AudioBuffer<float>>(buf);
-                    const auto loadedSlot = upic::SampleSlot::fromVar (slot.toVar(), 1);
+                    const auto loadedSlot = upic::sampleSlotFromVar (upic::sampleSlotToVar (slot), 1);
                     check (loadedSlot.sampleRate == 192000.0 && loadedSlot.loaded(),
                            "a piece keeps the rate of the material it carries",
                            juce::String (loadedSlot.sampleRate, 0) + " Hz, "
@@ -1800,7 +1801,7 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                     first = x;
                     for (int cycle = 0; cycle < cycles; ++cycle)
                     {
-                        const auto loaded = upic::SampleSlot::fromVar (slot.toVar(), 1);
+                        const auto loaded = upic::sampleSlotFromVar (upic::sampleSlotToVar (slot), 1);
                         if (loaded.data == nullptr) return false;
                         v = loaded.data->getSample (0, 0);
                         slot.data = loaded.data;

@@ -3,6 +3,7 @@
 #include "EnvelopeCodec.h"
 #include "WaveformCodec.h"
 #include "ChannelCodec.h"
+#include "SampleCodec.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -133,7 +134,7 @@ bool MainComponent::loadFromVar(const juce::var& v)
         int droppedFrames = 0;
         for (auto& sv : *arr)
         {
-            auto slot = upic::SampleSlot::fromVar(sv, 1);
+            auto slot = upic::sampleSlotFromVar (sv, 1);
             // v1.33.4 (M19): the frames the slot lost to the caps (the
             // duration at the material's own rate, the budget) are counted
             // too, so the user hears about the cut material.
