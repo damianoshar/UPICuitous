@@ -161,6 +161,8 @@ int upic::runSelfTest()
     upic::runChannelCodecChecks (t);
     // R2.9: the sample slot's codec - the file format of a sample slot.
     upic::runSampleCodecChecks (t);
+    // R2.10: the tuning's codec - the file format of a tuning.
+    upic::runTuningCodecChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
