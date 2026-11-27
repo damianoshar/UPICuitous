@@ -770,6 +770,92 @@ session that owns it.
 untouched, the golden render and the legacy fixture are unchanged, and the
 full gate is green.
 
+### 6.21 R3.4 - the command dispatcher
+
+**What moves.** The way the model changes moves behind a new class,
+`Source/CommandDispatcher.h`. `upic::CommandDispatcher` owns the command:
+its label, the snapshot of the state from before the change, the flag
+that says whether the command changed anything, and the rule that says
+what a change means. The session owns the dispatcher and installs its
+four doors - the capture (the piece from before the command), the commit
+(the undo step) and the two halves of the change report (the epoch and
+the revision).
+
+`DocumentSession::pendingEdit_`, `pendingLabel_` and `pendingRevision_`
+become the dispatcher's; `DocumentSession::beginEdit()`, `endEdit()` and
+`hasOpenEdit()` become `CommandDispatcher::beginCommand()`,
+`endCommand()` and `isCommandOpen()`; and the session's `markChanged()`
+becomes `reportChange()` - the shell's way of asking for the change
+report. The history's bookkeeping (the step, the redo stack, the bounds)
+stays with the session, in `commitStep()`.
+
+**What stays.** The call sites. The about eighty `markModelChanged()`
+sites and the twenty-odd `beginEdit()` / `endEdit()` pairs keep their
+names and their places, and the component's methods keep their names
+too: `beginEdit` and `endEdit` are the shell's way of asking the session
+for a command, `markModelChanged` is the shell's way of asking for the
+change report.
+
+**The semantics.** One command = one labelled undo transaction = one
+revision:
+
+- a change inside a command moves the **epoch** at once (the audio
+  follows the gesture while it is drawn) and moves the **revision** when
+  the command ends (the document changed once);
+- a change outside a command is a change of its own: there is no
+  transaction to put it in, so the epoch and the revision move straight
+  away;
+- a command that changes nothing is not an undo step and moves no
+  counter.
+
+**What changes for the user.** Nothing: the revision is an internal
+counter. The five places that asked "did the model move?" ask the epoch
+now - the status timer, the snapshot publisher, the saver, the recovery
+snapshot and "make unique" - because the epoch is the signal that moves
+with every change and the revision is the document's own counter (it
+moves once per command). With the revision as the trigger, a drag's
+snapshot would be published only when the mouse came up: the audio would
+follow the gesture at the end of it, not while it is drawn. The saver
+needs the same signal - a change that is still inside a command has to
+be noticed, or the app would forget that the piece on the disk is older
+than the one on the screen.
+
+**The contract.** A suite of the command's own, written before the move:
+`Source/SelfTestCommands.cpp`, 29 checks. It pins a change outside a
+command, a change that does not affect the piece, one command, a command
+with two changes, a command that changes nothing, two commands, a
+command that was never closed, two documents and the undo.
+
+One expectation changes with the move, and the plan says so here, before
+the move: a command with two changes advances the revision by two before
+the move and by one after it - that is the wave's exit criterion. Two
+checks are added: the epoch follows the change inside the command, and
+the revision waits for the command to end.
+
+**The class needs JUCE.** The label is a string and the snapshot it
+holds is a piece, so the dispatcher asks for `<JuceHeader.h>` and
+`Piece.h`. It is the application layer's own, like the session that owns
+it, and it stays out of the boundary check's JUCE-free groups.
+
+**The mechanical check.** `upic_check_r34_dispatcher.ps1` proves that
+the move changed the owner of the change report and nothing else: 120
+source files identical, the history's bookkeeping identical (12 lines)
+after the renames the move needs, the session's old transaction doors gone,
+the five readers asking the epoch, the 109 mentions of
+`markModelChanged` in the `.cpp` files untouched, and the production
+code not calling the test-only door.
+
+**What is still open.** The model still changes through
+`markModelChanged()` at the end of about eighty call sites: each of them
+is a change of its own, not a command with a label. The mechanism is
+there - the dispatcher is the only way into the document - but the call
+sites are not commands yet. That is R3.5, and the wave's exit criterion
+is reached there.
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -799,7 +885,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R3 Document and commands | **R3.3 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576` | app selftest 2,822/2,822, the document's revision, the epoch, the unsaved flag, the undo history and the selection have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59 and the selection's own suite 27/27, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R3 Document and commands | **R3.4 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05` | app selftest 2,853/2,853, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27 and the command's own suite 29/29, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
@@ -2268,3 +2354,112 @@ is R3's exit criterion, and it is not reached yet. See
 Gate: app selftest 2,822/2,822, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
+
+### R3.4 record (2026-11-27)
+
+The document's changes go through one owner now: the command dispatcher.
+The review's R008 ("Introduce CommandDispatcher") is answered - the
+mechanism is there; the call sites become commands in R3.5.
+
+The characterization commit is `9b4e6f7`, the move `ab32a05`.
+
+| Measure | Before | After |
+|---|---|---|
+| the open transaction | `DocumentSession::pendingEdit_`, `pendingLabel_`, `pendingRevision_` | `Source/CommandDispatcher.h`, owned by `DocumentSession` |
+| the transaction's doors | `DocumentSession::beginEdit()` / `endEdit()` / `hasOpenEdit()` | `CommandDispatcher::beginCommand()` / `endCommand()` / `isCommandOpen()` |
+| the change report | `DocumentSession::markChanged()` | `CommandDispatcher::reportChange()` (the session's `reportChange()`) |
+| "did anything change?" | compare the revision at the end (`pendingRevision_`) | the dispatcher's `changed_` flag, set by the change report |
+| the undo step | made by the session at `endEdit()` | still made by the session, asked by the dispatcher's commit door |
+| the epoch | moves once per change | moves once per change; the five readers ask it |
+| the revision | moves once per change | moves once per command |
+| the session's own suite | 30 checks | 30 checks |
+| the history's own suite | 59 checks | 59 checks |
+| the selection's own suite | 27 checks | 27 checks |
+| the command's own suite | - | `Source/SelfTestCommands.cpp`, 29 checks |
+
+**What the dispatcher owns.** The label, the snapshot of the state from
+before the change, the flag that says whether the command changed anything,
+and the rule that says what a change means. The session installs four
+doors: the capture (the piece from before the command), the commit (the
+undo step), the model-moved half of the change report (the epoch and the
+unsaved flag) and the document-changed half (the revision). The history's
+own bookkeeping - the steps, the redo stack, the two bounds - stays with
+the session, in `commitStep()`.
+
+**The semantics.** One command = one labelled undo transaction = one
+revision:
+
+- a change inside a command moves the **epoch** at once and the
+  **revision** when the command ends - however many changes it has;
+- a change outside a command is a change of its own: no transaction to
+  put it in, so the epoch and the revision move straight away;
+- a command that changes nothing is not an undo step and moves no
+  counter;
+- a command that is still open when the next one begins is closed first.
+
+**The suite came first.** `Source/SelfTestCommands.cpp` (29 checks) was
+written against the old session and passes after the move with exactly one
+expectation changed: a command with two changes advanced the revision by
+two and advances it by one now. That is the wave's exit criterion, and the
+plan said so before the move (§6.21). Two checks were added: the epoch
+follows the change inside the command, and the revision waits for the
+command to end.
+
+What the suite pins:
+
+- **A change outside a command** moves the revision and the epoch by one,
+  marks the piece unsaved, and leaves no undo step.
+- **A change that is not part of the piece** (the loop toggle) moves the
+  counters but not the unsaved flag.
+- **One command** is one undo step with its label.
+- **Two changes in one command** are one step, epoch +2, revision +1.
+- **A command that changes nothing** is no step and moves no counter.
+- **Two commands** are two steps.
+- **An unclosed command** is closed by the next one.
+- **Two documents** are independent.
+- **An undo** is a change that leaves the piece unsaved.
+
+**What changes for the readers.** The five places that asked "did the
+model move?" ask the epoch now - the status timer (`MainComponent.cpp`),
+the snapshot publisher (`MainComponentAudio.cpp`), the saver
+(`MainComponentPiece.cpp`), the recovery snapshot
+(`MainComponentRecovery.cpp`) and "make unique"
+(`MainComponentModel.cpp`). The epoch moves with every change; the
+revision moves once per command. With the revision as the trigger, a
+drag's snapshot would be published only on mouse-up - the audio would
+follow the gesture at its end, not while it is drawn - and the saver
+would miss a change still inside a command, losing the "the disk is older
+than the screen" warning.
+
+**The revision has no production reader now.** Only the snapshot field and
+the test accessor. This is deliberate: the revision is the document's own
+counter (one command, one revision), not the signal the audio, the saver or
+the recovery follow. R3.5 will turn the call sites into the commands that
+move it.
+
+**The mechanical check.** The move changed the owner of the change report
+and nothing else: 120 source files identical, the history's bookkeeping
+identical (12 lines) after the renames the move needs, the session's old
+transaction doors gone, the five readers asking the epoch, the 109 mentions of
+`markModelChanged` in the `.cpp` files untouched, and the production code
+not calling the test-only door `commandOpenForTest()`.
+
+**The class needs JUCE.** The label is a string and the snapshot it holds
+is a piece, so the dispatcher asks for `<JuceHeader.h>` and `Piece.h`. It
+is the application layer's own, like the session that owns it, and it is
+not in the boundary check's JUCE-free groups; the check still counts 51
+source files, because a header does not add one.
+
+What is still open: the model still changes through `markModelChanged()`
+at the end of about eighty call sites, and each of them is a change of its
+own, not a command with a label. The mechanism is there - the dispatcher
+is the only way into the document - but the call sites are not commands
+yet. That is **R3.5**, and it is where one command = one labelled
+transaction = one revision is reached.
+
+Gate: app selftest 2,853/2,853, the session's own suite 30/30, the
+history's own suite 59/59, the selection's own suite 27/27 and the
+command's own suite 29/29, golden render `0x6d7571bdd80e3cd9` unchanged,
+legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22,
+pluginval strictness 5 SUCCESS, boundaries 5 rules / 0 violations (51
+source files).

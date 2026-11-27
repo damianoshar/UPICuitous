@@ -1,31 +1,37 @@
 # The document session
 
 The architecture note for R3. It describes the boundary R3 introduced - the
-document's state, the document's history and the document's selection - as
-it is after R3.3, not as it is meant to be at the end of the refactoring.
+document's state, the document's history, the document's selection and the
+command dispatcher - as it is after R3.4, not as it is meant to be at the
+end of the refactoring.
 
 ## The boundary
 
 ```
 Source/DocumentSession.h   the document's own state: the revision, the epoch
                            and the unsaved flag - the document's history:
-                           the steps, their labels, the open transaction and
-                           the two bounds - and the document's selection.
+                           the steps, their labels and the two bounds - the
+                           document's selection and the command dispatcher.
                            It is the one owner of them.
         |
-        |  the session owns the state, the history and the selection; the
-        |  shell asks it
-        v
-Source/SelectionModel.h    what is selected: the wavetable, the envelope,
-                           the amplitude table, the sequence, the group, the
-                           mixer channel, the sample slot and the arc.
+        |  the session owns the selection and the dispatcher; the shell asks
+        |  it for both
+        +--> Source/SelectionModel.h
+        |    what is selected: the wavetable, the envelope, the amplitude
+        |    table, the sequence, the group, the mixer channel, the sample
+        |    slot and the arc.
         |
-        |  the session owns it; the shell asks it
+        +--> Source/CommandDispatcher.h
+        |    the open command: its label, the state from before it, the flag
+        |    that says whether it changed anything, and the rule that says
+        |    what a change means.
+        |
         v
-Source/MainComponent.h      the shell: it tells the session when the model
-                            moved, it reads the session when it needs to know
-                            what the document is doing, and it keeps the
-                            shell's own work: the transport and the messages.
+Source/MainComponent.h      the shell: it opens a command and closes it, it
+                            reports a change through the dispatcher, it reads
+                            the session when it needs to know what the
+                            document is doing, and it keeps the shell's own
+                            work: the transport and the messages.
 ```
 
 The review asked for one authoritative owner of the document (its R005,
@@ -33,8 +39,9 @@ The review asked for one authoritative owner of the document (its R005,
 in the component's members - and moving it is a much bigger job than a
 phase. What R3 moves is the document's own *state* (R3.1: the three
 counters that say what the document is doing), the document's own *history*
-(R3.2: the steps the user can undo) and the document's own *selection*
-(R3.3: what the user is working on).
+(R3.2: the steps the user can undo), the document's own *selection*
+(R3.3: what the user is working on) and the document's own *command*
+(R3.4: the transaction a change belongs to).
 
 ## What moved
 
@@ -48,7 +55,7 @@ about them.
 | `MainComponent::modelEpoch` (`std::atomic<int>`) | `DocumentSession::epoch()` |
 | `MainComponent::modelRevision` (`std::atomic<uint64_t>`) | `DocumentSession::revision()` |
 | `MainComponent::pieceDirty` (`std::atomic<bool>`) | `DocumentSession::isDirty()` |
-| `MainComponent::markModelChanged (bool affectsPiece)` | the same method, now a one-liner over `DocumentSession::markChanged (bool affectsPiece)` |
+| `MainComponent::markModelChanged (bool affectsPiece)` | the same method, now a one-liner over the session's `reportChange (bool affectsPiece)` |
 | `MainComponent::pieceHasUnsavedChanges()` | the same method, now `DocumentSession::isDirty()` |
 | `MainComponent::markPieceSaved()` | the same method, now `DocumentSession::markSaved()` |
 
@@ -56,7 +63,9 @@ The ten read sites now ask the session instead of the component's own
 members: the status timer (the revision), the snapshot publisher (the
 revision), the audio thread (the epoch), the recovery snapshot (the
 revision), the saver (the revision, twice), "make unique" (the revision,
-twice) and the undo transaction (the revision, twice).
+twice) and the undo transaction (the revision, twice). R3.4 moved five of
+them to the epoch and took the undo transaction off the counters (see
+below); the audio thread already read the epoch.
 
 The component's methods did not change their names or their meaning: the
 shell still says `markModelChanged()`, and the app still asks
@@ -79,6 +88,10 @@ pending snapshot of the open transaction and two bounds.
 | `estimateModelBytes()` (a free function in `MainComponentJobs.cpp`) | `DocumentSession::estimateModelBytes()` |
 | `MainComponent::canUndo()`, `canRedo()`, `undoDepth()`, `redoDepth()` | the same methods, one-liners over the session |
 | `MainComponent::undoLabel()`, `redoLabel()` | the same methods, over the session |
+
+R3.4 moved the open transaction's three members out again - they are the
+command dispatcher's now; the steps, their labels and the bounds stayed with
+the session.
 
 The session asks the document for the state to snapshot and for the state to
 put back through two doors, which the component installs in its constructor:
@@ -137,25 +150,88 @@ The canvas's own multi-selection stays with the canvas: the `ScoreEditor`
 owns it. What the model carries is the arc the panel points at and the
 mirror of the canvas selection the panel last showed.
 
+### R3.4 - the command
+
+The open transaction used to be the session's: the snapshot from before the
+change, the label, and the revision from before it (to notice at the end
+whether anything had changed at all).
+
+| before | after |
+|---|---|
+| `DocumentSession::pendingEdit_` | `CommandDispatcher::pending_` |
+| `DocumentSession::pendingLabel_` | `CommandDispatcher::label_` |
+| `DocumentSession::pendingRevision_` (compare the counters at the end) | `CommandDispatcher::changed_` (the change report) |
+| `DocumentSession::beginEdit()`, `endEdit()`, `hasOpenEdit()` | `CommandDispatcher::beginCommand()`, `endCommand()`, `isCommandOpen()` |
+| `DocumentSession::markChanged()` | `CommandDispatcher::reportChange()` |
+
+The new class is in `Source/CommandDispatcher.h`, and the session owns it
+and installs its four doors:
+
+```cpp
+dispatcher_.install (
+    [this]
+    {
+        if (! capture_) return std::unique_ptr<upic::PieceModel>();
+        return std::make_unique<upic::PieceModel> (capture_());
+    },                                                     // before the command
+    [this] (upic::PieceModel&& model, const juce::String& label)
+    {
+        commitStep (std::move (model), label);
+    },                                                     // the undo step
+    [this] (bool affectsPiece) { modelMoved (affectsPiece); },  // epoch + dirty
+    [this] { documentChanged(); });                        // the revision
+```
+
+The history's bookkeeping - the steps, the redo stack and the two bounds -
+stays with the session, in `commitStep()`; the dispatcher decides *when* a
+step is due. The shell keeps its own names: `MainComponent::beginEdit()` and
+`endEdit()` are still how the shell opens and closes a command (they call
+the session's `beginCommand()` and `endCommand()`), and `markModelChanged()`
+is still how it reports a change (it calls the session's `reportChange()`).
+
+**The rule.** One command = one labelled undo transaction = one revision:
+
+- a change inside a command moves the **epoch** at once (the audio follows
+  the gesture while it is drawn) and the **revision** when the command ends;
+- a change outside a command is a change of its own: no transaction to put
+  it in, so the epoch and the revision move straight away;
+- a command that changes nothing is not an undo step and moves no counter;
+- a command that is still open when the next one begins is closed first.
+
+The suite that pins the rule is `Source/SelfTestCommands.cpp`; see below.
+
 ## Why the revision and the epoch are two counters
 
-They move together - one model change moves both - but they answer
-different questions and are read by different threads:
+They no longer move together: the epoch moves with every model change, the
+revision moves once, when the command that contains the change ends. They
+answer different questions:
 
-- **The revision** is the document's own counter. The status timer uses it
-  to publish a snapshot only when there is something new to copy (the
-  timer used to deep-copy the whole model 30 times a second, even while
-  nothing changed), the recovery snapshot uses it to notice a change, the
-  saver uses it to notice that the piece on the disk is already older than
-  the one on the screen, "make unique" uses it to notice that its own work
-  changed something, and the undo transaction uses it to notice that a
-  gesture changed something at all.
-- **The epoch** is the audio thread's signal. The audio thread asks "did
-  the model move since I looked?", and it must not have to know about the
-  revision's other users - and the revision's users must not have to know
-  that the audio thread reads a counter of its own.
+- **The epoch** is "the model moved" - the signal the audio follows. It
+  moves on every change, inside a command or outside one, and the five
+  readers that ask "did the model move since I looked?" read it now: the
+  status timer, the snapshot publisher, the saver, the recovery snapshot
+  and "make unique". The status timer uses it to publish a snapshot only
+  when there is something new to copy (the timer used to deep-copy the
+  whole model 30 times a second, even while nothing changed), the saver
+  uses it to notice that the piece on the disk is already older than the
+  one on the screen, and "make unique" uses it to notice that its own work
+  changed something.
+- **The revision** is the document's own counter: one command, one
+  revision, however many changes the command has. It is the document's own
+  count, and the command's label is what makes it meaningful. It has no
+  production reader now - only the snapshot field and the test accessor -
+  and that is deliberate. Using it as the "did it move?" signal would tie the audio
+  and the saver to the command's end: a drag's snapshot would be published
+  only on the mouse-up, and a change still inside a command would not make
+  the saver warn that the disk is older than the screen.
 
-The suite pins that they count the same changes.
+The command dispatcher keeps the two apart: it reports every change through
+`modelMoved` (the epoch and the unsaved flag) and holds the revision back
+until `endCommand()`. A command that changed nothing moves neither.
+
+The suite pins both rules: the epoch follows the change inside the command,
+the revision waits for the command to end, and a change outside a command
+moves both at once.
 
 ## The session needs JUCE
 
@@ -173,6 +249,12 @@ and a vector of ids - but it is out of the groups too: it is the
 application layer's own, and a group for it would be a rule that has to be
 taken back when the piece's data moves.
 
+The command dispatcher (`Source/CommandDispatcher.h`) needs JUCE as well:
+the label is a string and the snapshot it holds is a piece. It is the
+application layer's own, like the session that owns it, and it is out of
+the boundary check's JUCE-free groups for the same reason. It is a header,
+so the check still counts 51 source files.
+
 ## The suites
 
 `Source/SelfTestDocumentSession.cpp` is the document session's own
@@ -187,9 +269,9 @@ contract for the state: 30 checks. It pins:
 - saving the piece: the unsaved flag clears, and neither counter moves;
 - saving twice: nothing changes;
 - a change after saving marks the piece unsaved again;
-- the undo rule the revision backs: a gesture that changed nothing is not
-  an undo step, a gesture that changed something is, and a change that does
-  not affect the piece still counts as a change;
+- the undo rule: a gesture that changed nothing is not an undo step, a
+  gesture that changed something is, and a change that does not affect the
+  piece still counts as a change;
 - an undo and a redo are model changes: they advance the revision and the
   epoch, and they leave the piece unsaved;
 - two documents do not share a state.
@@ -230,13 +312,34 @@ It pins:
 - two documents keep their own selection;
 - a load leaves no arc selected.
 
-All three suites came first: they were written against the code where it
-was, and they pass unchanged after the moves. The state suite reads the
-document through one door (the `state` helper at the top of the file); the
-history suite reads the history through the component's own doors (canUndo,
+`Source/SelfTestCommands.cpp` is the command dispatcher's own contract: 29
+checks. It pins:
+
+- a change outside a command: the revision and the epoch move by one, the
+  piece is marked unsaved, and there is no undo step;
+- a change that does not affect the piece (the loop toggle): the counters
+  move, the unsaved flag does not;
+- one command: one undo step with its label;
+- two changes in one command: one step, the epoch +2, the revision +1;
+- a command that changes nothing: no step and no counter;
+- two commands: two steps;
+- a command that was never closed: closed by the next one;
+- two documents: independent;
+- an undo: a change that leaves the piece unsaved.
+
+All four suites came first: they were written against the code where it
+was, and they pass after the moves. The state suite reads the document
+through one door (the `state` helper at the top of the file); the history
+suite reads the history through the component's own doors (canUndo,
 undoLabel, undoDepth, ...); the selection suite reads the selection through
-the component's own doors (the `selected*ForTest` accessors). The move
-touched each suite in one place and the checks themselves did not change.
+the component's own doors (the `selected*ForTest` accessors); the command
+suite reads the command through the component's own doors
+(`modelRevisionForTest`, `modelEpochForTest`, `pieceHasUnsavedChanges`,
+`undoDepth`, `undoLabel` and `commandOpenForTest`). The move touched each
+suite in one place and the checks themselves did not change - except one
+expectation in the command suite: a command with two changes used to
+advance the revision by two and advances it by one now. That is the wave's
+exit criterion, and the plan said so before the move.
 
 The components in the suites are made in plugin mode: the document does not
 depend on the window, and the plugin mode does not open an audio device.
@@ -246,12 +349,14 @@ depend on the window, and the plugin mode does not open an audio device.
 - **The piece's data has not moved.** The component still holds the
   waveforms, the envelopes, the pages, the arcs, the channels, the sample
   slots, the tuning and the sieve as its own members. The session owns the
-  document's *state*, its *history* and its *selection*, not its *data*;
-  moving the data is a much bigger job and it comes later in R3.
-- **There is no command dispatcher.** The model still changes through
-  `markModelChanged()` at the end of a hundred call sites, not through a
-  command that says what it did (the review's R008). One command = one
-  labelled transaction = one revision is R3's exit criterion, and it is
-  not reached yet.
+  document's *state*, its *history*, its *selection* and its *command
+  dispatcher*, not its *data*; moving the data is a much bigger job and it
+  comes later in R3.
+- **The call sites are not commands yet.** The dispatcher is there and it
+  is the only way into the document, but the model still changes through
+  `markModelChanged()` at the end of about eighty call sites: each of them
+  is a change of its own, not a command with a label (the review's R008).
+  Converting the call sites is R3.5, and that is where one command = one
+  labelled transaction = one revision is reached.
 - **The document's data still holds JUCE values** - that is the deferred
   type migration (the plan's section 2), not this wave.

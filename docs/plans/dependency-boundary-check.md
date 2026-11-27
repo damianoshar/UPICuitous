@@ -62,6 +62,12 @@ application layer's own, and the piece's data is still in the component's
 members, so a rule about it would have to be taken back when the data
 moves.
 
+The command dispatcher (`Source/CommandDispatcher.h`, R3.4) needs JUCE too
+- the label is a string and the snapshot it holds is a piece - and it is
+out of the groups for the same reason the session is: it is the application
+layer's mutation entry point. It is a header, so the 51 source files the
+check counts do not change.
+
 An empty permitted list is a list: it forbids every project header. No group
 uses one yet - the leaf rule is for the day the domain's value types move
 (the plan defers that migration, section 2) - but the rule is now correct:
