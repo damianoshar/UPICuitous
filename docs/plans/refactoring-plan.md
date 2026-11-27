@@ -80,7 +80,7 @@ Other structural facts the review depends on, verified here:
 | `getNextAudioBlock()` is ~750 lines | 385 lines | Adopt the goal, correct the size: the audio wave is justified by **ownership** (transport, snapshot, preview, device, render), not by that one function. |
 | `resized()` is ~1,500 lines | 1,400 lines | Adopt - it is the single best first extraction: pure geometry, no audio, no document. |
 | Move the tree into `Source/Domain/…` etc. | the Projucer project lists every file explicitly | **Adapt.** No bulk move. A file moves only when it is extracted, and each move updates the `.vcxproj` in the same commit. |
-| Replace `juce::String` / `juce::var` in the domain | the piece codec *is* JSON (`juce::var`) | **Defer.** Keep JUCE value types at the codec edge. Enforce *no new* GUI dependencies instead of a type migration. The domain's data keeps its `juce::String` and `juce::Colour`; what the wave moves is the *file format* out of the data (R2.2, R2.4, R2.5, …), type by type. |
+| Replace `juce::String` / `juce::var` in the domain | the piece codec *is* JSON (`juce::var`) | **Defer.** Keep JUCE value types at the codec edge. Enforce *no new* GUI dependencies instead of a type migration. The domain's data keeps its `juce::String` and `juce::Colour`; what the wave moves is the *file format* out of the data (R2.2, R2.4, R2.5, R2.6, …), type by type. |
 | Enforce dependency rules with CMake targets | the gate builds through MSBuild, not CMake | **Adapt.** Enforce with a source-level dependency check in the gate first; CMake targets come later and must keep both build paths green. |
 | Typed IDs (`ArcId`, `PageId`, …) | ids are plain ints in the file format | **Defer** until a specific confusion is demonstrated; if adopted, the serialized values stay ints. |
 | `MainComponent.h` should reach 100–250 lines | — | **Not a quota.** The target is ownership, not a line count. |
@@ -416,6 +416,42 @@ the id, the name, the colour, the membership, the clamps and the round trip.
 untouched, the golden render and the legacy fixture are unchanged, and the
 full gate is green.
 
+### 6.10 R2.6 - the envelope's codec edge
+
+**What moves.** The envelope's file format moves out of `Envelope.h` into the
+new `Source/EnvelopeCodec.h`: `juce::var toVar()` and `static Envelope
+fromVar()` become `upic::envelopeToVar (const Envelope&)` and
+`upic::envelopeFromVar (const juce::var&, int fallbackId)`. The bodies are
+the old members, body for body.
+
+**What stays.** The envelope's data in `Envelope.h`: the id, the name, the
+colour, the points, the lookup the render walks and the five presets. The
+name and the colour stay JUCE's: the plan defers replacing the domain's
+value types (§2), so `Envelope.h` still asks for the JUCE header and the
+envelope is not one of the gate's JUCE-free groups.
+
+**The amplitude table comes along.** `AmplitudeTable` is an alias for
+`Envelope` - the two banks share the type, the editor and the format - so
+the table's file format *is* the envelope's, and the table's four call sites
+move with it.
+
+**The contract.** A suite of the envelope's own, written before the move:
+`Source/SelfTestEnvelopeCodec.cpp`, 31 checks that reach the envelope
+through the domain's headers alone. It pins the keys and their order, the
+defaults the file uses (which are not the defaults the data uses), the id
+(which is not clamped at all), the points and their clamps, the cap and the
+round trip.
+
+**One fix comes with it.** `Envelope.h` used `SegmentCursor` and
+`followSegment` without including the header that declares them
+(`Source/UpicMath.h`), so it only compiled when something else had included
+it first. The header now says what it uses - the same include `Arc.h` and
+`Channel.h` already have.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, and the
+full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -444,13 +480,13 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5` | app selftest 2,315/2,315, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1` | app selftest 2,346/2,346, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
-| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,315/2,315, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,346/2,346, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R9 Integration and cleanup | not started | - | - |
 
 Baseline commit: `b5368b1` (0.38.0), app selftest 1,785/1,785, legacy fixture
@@ -961,5 +997,91 @@ inside the app's selftest binary, which is a JUCE application (the review's
 R089). See [`arc-group-data.md`](arc-group-data.md).
 
 Gate: app selftest 2,315/2,315, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
+
+### R2.6 record (2026-11-27)
+
+The envelope's data and the envelope's file format are separate now - the
+fourth codec edge, after the arc's (R2.2), the page's (R2.4) and the arc
+group's (R2.5).
+
+| Measure | Before | After |
+|---|---|---|
+| the envelope | `Source/Envelope.h`, 86 lines: the data and the file format | `Source/Envelope.h`, 61 lines: the data only |
+| the envelope's codec | two members of the class | `Source/EnvelopeCodec.h`, 56 lines: `envelopeToVar` and `envelopeFromVar` |
+| the envelope's own suite | - | `Source/SelfTestEnvelopeCodec.cpp`, 31 checks |
+| the gate's JUCE-free groups | 5 | 5 (the envelope is not one of them - its value types are deferred, §2) |
+
+The two members became two free functions:
+
+| before | after |
+|---|---|
+| `Envelope::toVar()` | `upic::envelopeToVar (const Envelope&)` |
+| `Envelope::fromVar (const juce::var&, int)` | `upic::envelopeFromVar (const juce::var&, int fallbackId)` |
+
+The bodies are the old members, body for body - the comparison is
+mechanical, line for line, modulo the `e.` the free function needs and the
+whitespace: 8 lines for the writer, 14 for the reader. The property names,
+their order, the defaults a file without them falls back to and the clamps
+a crafted file gets are the file format itself, and they did not change by
+a character.
+
+**The amplitude table comes along.** `AmplitudeTable` is an alias for
+`Envelope` - the two banks share the type, the editor and the format - so
+the table's file format *is* the envelope's, and the table's four call sites
+(the piece's writer and reader, the library's publish and import) moved
+with it.
+
+**The value types stay.** The envelope holds `juce::String name` and
+`juce::Colour colour`. The plan defers replacing the domain's value types
+(§2), so `Source/Envelope.h` still asks for the JUCE header and the
+envelope is not one of the gate's JUCE-free groups. The gate's groups are
+the same five as before this phase.
+
+**One fix came with the phase.** `Envelope.h` used `SegmentCursor` and
+`followSegment` without including the header that declares them
+(`Source/UpicMath.h`), so it only compiled when something else had included
+it first. The suite reaches the envelope on its own, so the header now says
+what it uses - the same include `Arc.h` and `Channel.h` already have. No
+behaviour changes.
+
+**The suite came first.** `Source/SelfTestEnvelopeCodec.cpp` (31 checks) was
+written against the codec where it was, and it passes unchanged after the
+move. It reaches the codec through one door (the `encode` / `decode` helpers
+at the top of the file) and reads the name and the colour through two more
+helpers, so the move touched the suite in one place and the checks
+themselves did not change.
+
+What the suite pins, and what is worth knowing:
+
+- **The file's defaults are not the data's defaults.** A new envelope is
+  called *Flat* and has the palette's orange (`0xffffa500`); a file without
+  a name gives *Env*, and a file without a colour gives the file's own
+  orange (`0xffff9f0a`). Two different colours, and the file's default is
+  the one a crafted or old file gets.
+- **The id is not clamped at all.** A negative id stays negative, a huge one
+  stays huge, and a fractional one is cut towards zero. The other banks
+  clamp their ids; the envelope's does not.
+- **A value that is not a number falls to the lower bound.** The domain's
+  `clampFinite` returns the lower bound for a value that is not finite, so a
+  NaN x falls to 0 and a NaN y falls to 0 as well - not to the y default of
+  1, which is what a *missing* y gets.
+- **The cap is applied in the file's order, before the sort.** A file with
+  more than a thousand points keeps the first thousand *as the file wrote
+  them*, and only then are the points sorted in time order.
+
+What is still open: the other domain headers still carry their own
+`toVar` / `fromVar` members (`Piece.h`, `Sample.h`, `Tuning.h`, `Sieve.h`,
+`Waveform.h`, `Channel.h`, `Performance.h`, `FreqSpace.h`), and the domain's
+data still holds JUCE values (the `juce::String name` and the
+`juce::Colour` of the groups, the envelopes, the waves and the channels) -
+that is the deferred type migration; the sample's file reading is still in
+the domain (`Source/Sample.h` reads `juce::File`s); and there is no headless
+domain target yet - the suites run inside the app's selftest binary, which
+is a JUCE application (the review's R089). See
+[`envelope-codec-edge.md`](envelope-codec-edge.md).
+
+Gate: app selftest 2,346/2,346, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
