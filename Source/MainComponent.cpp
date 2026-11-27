@@ -47,6 +47,15 @@ MainComponent::MainComponent(bool pluginMode)
         sampleSlots.push_back(std::move(s));
     }
 
+    // R3.2: the document session's two doors. The history takes a snapshot
+    // of the piece and puts it back; the restore goes through the normal
+    // loader, so an undone piece gets the same checks and the same limits
+    // as a loaded one - and the selection and the transport are put back
+    // with it.
+    document.setDocumentSource (
+        [this] { return capturePieceModel(); },
+        [this] (const upic::PieceModel& model) { return restorePieceModel (model); });
+
     // v1.33.3: the app's own LookAndFeel - the toolbar's fonts follow the
     // layout's scale, so a control's text is never wrapped or cut off.
     setLookAndFeel (&appLaf);

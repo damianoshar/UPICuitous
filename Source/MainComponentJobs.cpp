@@ -16,133 +16,116 @@
 // (the piece): the sample audio is shared, so a snapshot costs only the
 // pages - the audio is never copied again and again.
 //
+// R3.2: the stack itself is the document session's now (Source/
+// DocumentSession.h): the steps, their labels, the open transaction, the
+// two bounds and the size of a snapshot. What is left here is the shell's
+// own work: the gain slider's flag, the selection, the transport and the
+// messages.
+//
 // An edit captures the state from before it; the snapshot is kept only if
 // the model really moved (a click that changed nothing is not an undo
 // step). The restore goes through the normal loader, so the same checks
 // and the same limits apply to an undone piece as to a loaded one.
-static juce::int64 estimateModelBytes (const upic::PieceModel& m)
-{
-    juce::int64 bytes = 0;
-    for (const auto& p : m.pages)
-    {
-        bytes += (juce::int64) p.arcs.size() * 64;
-        for (const auto& a : p.arcs)
-            bytes += (juce::int64) a.points.size() * (juce::int64) sizeof (upic::ArcPoint);
-        bytes += (juce::int64) p.zones.size() * 64;
-    }
-    for (const auto& w : m.waveforms)
-        bytes += (juce::int64) w.samples.size() * (juce::int64) sizeof (float);
-    for (const auto& e : m.envelopes)
-        bytes += (juce::int64) e.points.size() * (juce::int64) sizeof (upic::EnvPoint);
-    return bytes;
-}
 
 void MainComponent::beginEdit (const juce::String& label)
 {
-    // v1.33.4 (L15, part 2): the state from before the change.
-    //
-    // A transaction that is still running is closed first: a gesture that
-    // was never finished (a mouse-up that was missed) must not block the
-    // next one.
-    if (pendingEdit != nullptr)
-        endEdit();
-
     // A new command owns the transaction from here, so an open gesture's
     // flag cannot outlive it (the gain slider's flag would otherwise make
     // the next gain change look like part of a drag).
     channelGainEditing = false;
 
-    pendingEdit = std::make_unique<upic::PieceModel> (capturePieceModel());
-    pendingRevision = document.revision();
-    pendingLabel = label;
+    document.beginEdit (label);
 }
 
 void MainComponent::endEdit()
 {
-    if (pendingEdit == nullptr) return;
+    if (! document.hasOpenEdit()) return;
 
     // the gesture is over: the flag cannot outlive the transaction
     channelGainEditing = false;
 
-    // nothing moved? then the snapshot is not worth keeping (a click that
-    // changed nothing is not an undo step).
-    if (document.revision() == pendingRevision)
-    {
-        pendingEdit.reset();
-        return;
-    }
-
-    UndoEntry e;
-    e.model = std::move (*pendingEdit);
-    e.label = pendingLabel;
-    e.bytes = estimateModelBytes (e.model);
-    pendingEdit.reset();
-
-    undoStack.push_back (std::move (e));
-    undoBytes += undoStack.back().bytes;
-
-    // a new edit after an undo starts a new branch: the redo stack is gone
-    redoStack.clear();
-    redoBytes = 0;
-
-    // the bounds: the oldest steps go first
-    while ((int) undoStack.size() > kMaxUndoSteps || undoBytes > kMaxUndoBytes)
-    {
-        undoBytes -= undoStack.front().bytes;
-        undoStack.erase (undoStack.begin());
-    }
+    document.endEdit();
 }
 
 juce::String MainComponent::undoLabel() const
 {
-    return undoStack.empty() ? juce::String() : undoStack.back().label;
+    return document.undoLabel();
 }
 
 juce::String MainComponent::redoLabel() const
 {
-    return redoStack.empty() ? juce::String() : redoStack.back().label;
+    return document.redoLabel();
 }
 
 void MainComponent::undo()
 {
-    if (undoStack.empty()) return;
+    // nothing to undo: an open gesture stays open (its step is pushed when
+    // the gesture ends, not before)
+    if (! document.canUndo()) return;
 
     // An open gesture (a slider drag) owns a transaction. Closing it first
     // keeps the undo stack honest: the gesture's step is closed and undone
     // like any other.
     endEdit();
-    if (undoStack.empty()) return;
 
-    // the state we are leaving goes onto the redo stack
-    UndoEntry current;
-    current.model = capturePieceModel();
-    current.label = undoLabel();
-    current.bytes = estimateModelBytes (current.model);
-    redoStack.push_back (std::move (current));
-    redoBytes += redoStack.back().bytes;
-    while ((int) redoStack.size() > kMaxUndoSteps || redoBytes > kMaxUndoBytes)
+    juce::String label;
+    switch (document.undo (label))
     {
-        redoBytes -= redoStack.front().bytes;
-        redoStack.erase (redoStack.begin());
+        case upic::DocumentSession::StepResult::failed:
+            flash ("The undo could not be applied");
+            break;
+
+        case upic::DocumentSession::StepResult::applied:
+            flash ("Undo: " + label);
+            break;
+
+        case upic::DocumentSession::StepResult::nothing:
+        default:
+            break;
     }
+}
 
-    UndoEntry entry = std::move (undoStack.back());
-    undoStack.pop_back();
-    undoBytes -= entry.bytes;
+void MainComponent::redo()
+{
+    // nothing to redo: an open gesture stays open
+    if (! document.canRedo()) return;
 
-    // the piece is replaced through the normal loader, so the same checks
-    // and the same limits apply as to a loaded piece
+    // an open gesture transaction is closed first (see undo())
+    endEdit();
+
+    juce::String label;
+    switch (document.redo (label))
+    {
+        case upic::DocumentSession::StepResult::failed:
+            flash ("The redo could not be applied");
+            break;
+
+        case upic::DocumentSession::StepResult::applied:
+            flash ("Redo: " + label);
+            break;
+
+        case upic::DocumentSession::StepResult::nothing:
+        default:
+            break;
+    }
+}
+
+// R3.2: the document session's restore door: the shell's half of the undo.
+// The piece is replaced through the normal loader, so the same checks and
+// the same limits apply as to a loaded piece.
+bool MainComponent::restorePieceModel (const upic::PieceModel& model)
+{
+    // the selection and the transport are read before the piece is replaced
+    // (the loader puts the selection on the first item of the bank it loads)
     const int waveId = selWave;
     const int envelopeId = selEnv;
     const int ampTableId = selAmpTableId;
     const int sequenceId = selSeqId;
     const int sampleSlotIndex = selSlot;
     const bool wasPlaying = transportActive();
-    if (! loadFromVar (upic::pieceToVar (entry.model)))
-    {
-        flash ("The undo could not be applied");
-        return;
-    }
+
+    if (! loadFromVar (upic::pieceToVar (model)))
+        return false;
 
     restoreHistorySelections (waveId, envelopeId, ampTableId, sequenceId,
                               sampleSlotIndex);
@@ -152,50 +135,7 @@ void MainComponent::undo()
     // the transport was running: it starts again, so the undo does not
     // silence the app
     if (wasPlaying) startPlayback();
-    flash ("Undo: " + entry.label);
-}
-
-void MainComponent::redo()
-{
-    if (redoStack.empty()) return;
-
-    // an open gesture transaction is closed first (see undo())
-    endEdit();
-    if (redoStack.empty()) return;
-
-    UndoEntry current;
-    current.model = capturePieceModel();
-    current.label = redoLabel();
-    current.bytes = estimateModelBytes (current.model);
-    undoStack.push_back (std::move (current));
-    undoBytes += undoStack.back().bytes;
-    while ((int) undoStack.size() > kMaxUndoSteps || undoBytes > kMaxUndoBytes)
-    {
-        undoBytes -= undoStack.front().bytes;
-        undoStack.erase (undoStack.begin());
-    }
-
-    UndoEntry entry = std::move (redoStack.back());
-    redoStack.pop_back();
-    redoBytes -= entry.bytes;
-
-    const int waveId = selWave;
-    const int envelopeId = selEnv;
-    const int ampTableId = selAmpTableId;
-    const int sequenceId = selSeqId;
-    const int sampleSlotIndex = selSlot;
-    const bool wasPlaying = transportActive();
-    if (! loadFromVar (upic::pieceToVar (entry.model)))
-    {
-        flash ("The redo could not be applied");
-        return;
-    }
-
-    restoreHistorySelections (waveId, envelopeId, ampTableId, sequenceId,
-                              sampleSlotIndex);
-    markModelChanged();
-    if (wasPlaying) startPlayback();
-    flash ("Redo: " + entry.label);
+    return true;
 }
 
 void MainComponent::restoreHistorySelections (int waveId, int envelopeId,

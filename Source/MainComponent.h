@@ -212,14 +212,19 @@ public:
     // copied again and again. An edit pushes one snapshot: the state from
     // before it. A pointer drag is one transaction, so a drag is one undo
     // step (the pointer moves do not push anything).
+    //
+    // R3.2: the history itself is the document session's - the session owns
+    // the steps, their labels, the open transaction and the two bounds. The
+    // component asks the session and keeps the shell's own work: the
+    // selection, the transport and the messages.
     void beginEdit (const juce::String& label);
     void endEdit();
-    bool canUndo() const { return ! undoStack.empty(); }
-    bool canRedo() const { return ! redoStack.empty(); }
+    bool canUndo() const { return document.canUndo(); }
+    bool canRedo() const { return document.canRedo(); }
     juce::String undoLabel() const;
     juce::String redoLabel() const;
-    int undoDepth() const { return (int) undoStack.size(); }
-    int redoDepth() const { return (int) redoStack.size(); }
+    int undoDepth() const { return document.undoDepth(); }
+    int redoDepth() const { return document.redoDepth(); }
     void undo();
     void redo();
 
@@ -228,13 +233,12 @@ public:
     // the stack keeps at most 50 steps and at most 64 MB of snapshots.
     void setUndoLimitsForTest (int steps, juce::int64 bytes)
     {
-        kMaxUndoSteps = steps;
-        kMaxUndoBytes = bytes;
+        document.setLimits ({ steps, bytes });
     }
 
     juce::int64 undoStepBytesForTest() const
     {
-        return undoStack.empty() ? 0 : undoStack.back().bytes;
+        return document.undoStepBytes();
     }
 
     // --- WP8: the geometric transforms of the drawn curve ---
@@ -1449,6 +1453,13 @@ private:
     void restoreHistorySelections (int waveId, int envelopeId, int ampTableId,
                                    int sequenceId, int sampleSlotIndex);
 
+    // R3.2: the document session's restore door. The piece is replaced
+    // through the normal loader, so the same checks and the same limits
+    // apply to an undone piece as to a loaded one - and the selection and
+    // the transport are read before the piece is replaced and put back with
+    // it. It is the shell's half of the undo: the session owns the steps.
+    bool restorePieceModel (const upic::PieceModel& model);
+
     // WP7: publish the one route token that arbitrates the ordinary
     // scrub/freeze routes and the extraction A/B route. The message thread
     // calls this; the audio thread only reads the atomic token.
@@ -1882,22 +1893,10 @@ private:
     // stop is never overwritten by the fade's completion.
     std::atomic<int> transportState { (int) TransportState::stopped };
     // --- v1.33.4 (L15, part 2): the undo stack (the message thread only) ---
-    struct UndoEntry
-    {
-        upic::PieceModel model;
-        juce::int64 bytes = 0;      // the size of the snapshot (the audio is shared)
-        juce::String label;
-    };
-    std::vector<UndoEntry> undoStack, redoStack;
-    juce::int64 undoBytes = 0, redoBytes = 0;
-    // the snapshot of the edit that is in progress (empty when there is none)
-    std::unique_ptr<upic::PieceModel> pendingEdit;
-    juce::uint64 pendingRevision = 0;
-    juce::String pendingLabel;
-    // the bounds: the stack is bounded by the number of steps and by the
-    // memory it holds (the oldest steps go first).
-    int kMaxUndoSteps = 50;
-    juce::int64 kMaxUndoBytes = 64ll * 1024 * 1024;
+    // R3.2: the stack, the redo stack, the open transaction and the two
+    // bounds are the document session's now (Source/DocumentSession.h). What
+    // is left here is the shell's own work: the selection and the transport
+    // that go with a restored piece.
     // --- v1.33.4 (L15, part 3): the crash recovery ---
     // when the last recovery snapshot was written, and the model revision it
     // was written from (a snapshot is only worth writing when something
