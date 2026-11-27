@@ -94,6 +94,7 @@ namespace upic
     void runUndoHistoryChecks (SelfTest& t);      // R3.2: the undo history - the document's steps
     void runSelectionChecks (SelfTest& t);        // R3.3: the selection model - what is selected
     void runCommandChecks (SelfTest& t);          // R3.4: the command dispatcher - the unit of change
+    void runModelCommandChecks (SelfTest& t);     // R3.5: the edits that become commands
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);

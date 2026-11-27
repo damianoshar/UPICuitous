@@ -177,6 +177,8 @@ int upic::runSelfTest()
     upic::runSelectionChecks (t);
     // R3.4: the command dispatcher - the unit of change.
     upic::runCommandChecks (t);
+    // R3.5: the edits that become commands.
+    upic::runModelCommandChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
