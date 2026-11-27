@@ -2,6 +2,7 @@
 #include "PageCodec.h"
 #include "EnvelopeCodec.h"
 #include "WaveformCodec.h"
+#include "ChannelCodec.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -214,7 +215,7 @@ bool MainComponent::loadFromVar(const juce::var& v)
         for (auto& cv : *carr)
         {
             if ((int) newChannels.size() >= upic::limits::kMaxChannels) break;
-            newChannels.push_back (upic::Channel::fromVar (cv, ci++));
+            newChannels.push_back (upic::channelFromVar (cv, ci++));
         }
         noteDrop ("channel", "channels", (int) carr->size() - (int) newChannels.size());
     }

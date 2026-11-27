@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "EnvelopeCodec.h"
+#include "ChannelCodec.h"
 #include "Page.h"
 #include "PageCodec.h"
 #include "PieceLimits.h"
@@ -129,7 +130,7 @@ namespace upic
         if (! m.channels.empty())
         {
             juce::Array<juce::var> ca;
-            for (auto& c : m.channels) ca.add (c.toVar());
+            for (auto& c : m.channels) ca.add (upic::channelToVar (c));
             o->setProperty ("channels", ca);
             o->setProperty ("nextChannelId", m.nextChannelId);
         }

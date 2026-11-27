@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Channel.h"
+#include "ChannelCodec.h"
 #include "PieceLimits.h"
 
 //==============================================================================
@@ -37,8 +38,8 @@
 namespace
 {
     // The channel's codec, reached through one door.
-    juce::var encode (const upic::Channel& c) { return c.toVar(); }
-    upic::Channel decode (const juce::var& v, int fallbackId = 0) { return upic::Channel::fromVar (v, fallbackId); }
+    juce::var encode (const upic::Channel& c) { return upic::channelToVar (c); }
+    upic::Channel decode (const juce::var& v, int fallbackId = 0) { return upic::channelFromVar (v, fallbackId); }
 
     // The channel's name as text, and its colour as a colour - whatever the
     // domain holds.
