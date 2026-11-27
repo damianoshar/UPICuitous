@@ -477,6 +477,36 @@ values are not clamped) and the round trip.
 untouched, the golden render and the legacy fixture are unchanged, and the
 full gate is green.
 
+### 6.12 R2.8 - the channel's codec edge
+
+**What moves.** The channel's file format moves out of `Channel.h` into the
+new `Source/ChannelCodec.h`: `juce::var toVar()` and `static Channel
+fromVar()` become `upic::channelToVar (const Channel&)` and
+`upic::channelFromVar (const juce::var&, int fallbackId)`. The bodies are
+the old members, body for body.
+
+**What stays.** The channel's data in `Channel.h`: the id, the name, the
+colour, the gain, the mute, the solo, the gain curve, the allocation-free
+lookup, the resolved mixer (`ChannelMix`) and the build of it. The name and
+the colour stay JUCE's: the plan defers replacing the domain's value types
+(§2), so `Channel.h` still asks for the JUCE header and the channel is not
+one of the gate's JUCE-free groups.
+
+**The contract.** A suite of the channel's own, written before the move:
+`Source/SelfTestChannelCodec.cpp`, 54 checks that reach the channel through
+the domain's headers alone. It pins the keys and their order (and the ones
+that are left out when they are at their default), the clamps (the id is
+clamped, unlike the envelope's and the wave's), the name and its 64-character
+cut, the gain, the curve and the round trip.
+
+**One fix comes with it.** `Piece.h` holds a `std::vector<Channel>` but did
+not include `Channel.h` - it got the type because `UpicModel.h` includes
+`Channel.h` before it includes `Piece.h`. The header now says what it uses.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, and the
+full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -505,13 +535,13 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295` | app selftest 2,375/2,375, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1` | app selftest 2,429/2,429, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
-| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,375/2,375, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,429/2,429, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R9 Integration and cleanup | not started | - | - |
 
 Baseline commit: `b5368b1` (0.38.0), app selftest 1,785/1,785, legacy fixture
@@ -1185,6 +1215,96 @@ target yet - the suites run inside the app's selftest binary, which is a
 JUCE application (the review's R089). See
 [`wave-codec-edge.md`](wave-codec-edge.md).
 
-Gate: app selftest 2,375/2,375, golden render `0x6d7571bdd80e3cd9`
+### R2.8 record (2026-11-27)
+
+The channel's data and the channel's file format are separate now - the
+sixth codec edge, after the arc's (R2.2), the page's (R2.4), the arc
+group's (R2.5), the envelope's (R2.6) and the wave's (R2.7).
+
+| Measure | Before | After |
+|---|---|---|
+| the channel | `Source/Channel.h`, 168 lines: the data and the file format | `Source/Channel.h`, 123 lines: the data only |
+| the channel's codec | two members of the class | `Source/ChannelCodec.h`, 77 lines: `channelToVar` and `channelFromVar` |
+| the channel's own suite | - | `Source/SelfTestChannelCodec.cpp`, 54 checks |
+| the gate's JUCE-free groups | 5 | 5 (the channel is not one of them - its value types are deferred, §2) |
+
+The two members became two free functions:
+
+| before | after |
+|---|---|
+| `Channel::toVar()` | `upic::channelToVar (const Channel&)` |
+| `Channel::fromVar (const juce::var&, int)` | `upic::channelFromVar (const juce::var&, int fallbackId)` |
+
+The bodies are the old members, body for body - the comparison is
+mechanical, line for line, modulo the `c.` the free function needs and the
+whitespace: 20 lines for the writer, 21 for the reader. The property names
+(id, name, colour, gain, mute, solo, env), their order, the keys that are
+left out when they are at their default, the clamps a crafted file gets and
+the cap a curve over the limit gets are the file format itself, and they
+did not change by a character.
+
+**The value types stay.** The channel holds `juce::String name` and
+`juce::Colour colour`. The plan defers replacing the domain's value types
+(§2), so `Source/Channel.h` still asks for the JUCE header and the channel
+is not one of the gate's JUCE-free groups. The gate's groups are the same
+five as before this phase.
+
+**The behaviour stayed too.** The allocation-free `envelopeAt` lookup, the
+resolved mixer (`ChannelMix`, with its 64-point LUT) and the build of it
+(`buildChannelMix`) are the channel's behaviour, not its file format, so
+they stayed in `Channel.h`.
+
+**One fix came with the phase.** `Piece.h` holds a `std::vector<Channel>`
+but did not include `Channel.h` - it got the type because `UpicModel.h`
+includes `Channel.h` *before* it includes `Piece.h`. The header now says
+what it uses (`#include "ChannelCodec.h"`, which carries `Channel.h` with
+it), so it stands on its own. No behaviour changes.
+
+**The suite came first.** `Source/SelfTestChannelCodec.cpp` (54 checks) was
+written against the codec where it was, and it passes unchanged after the
+move. It reaches the codec through one door (the `encode` / `decode` helpers
+at the top of the file) and reads the name and the colour through two more
+helpers, so the move touched the suite in one place and the checks
+themselves did not change.
+
+What the suite pins, and what is worth knowing:
+
+- **The channel's id is clamped.** It is pulled into `1..1000000`, so a
+  negative id becomes one and a huge one becomes the last id. The
+  envelope's and the wave's ids are not clamped at all.
+- **An id of zero becomes one - it does not take the fallback.** The
+  fallback is used only when the file has no `id` at all; a file that says
+  `0` gets the clamp, not the fallback. (The second line of the reader -
+  `if (c.id <= 0) c.id = jmax (1, fallbackId);` - cannot run, because the
+  clamp above already left the id at one or above. It is the format as it
+  was, and the move kept it.)
+- **The keys are conditional.** Only `id`, `name` and `colour` are always
+  written. `gain`, `mute`, `solo` and `env` come only when they carry
+  something: a gain of exactly 1.0 is not written, a mute of false is not
+  written, and a channel with no curve has no `env` key at all. The file is
+  smaller, and a file read back gives the same channel.
+- **An empty name falls back to "Channel".** The envelope's and the wave's
+  empty names stay empty; the channel's does not. A name longer than 64
+  characters is cut to the first 64.
+- **The file's colour default is the data's colour default.** The channel is
+  the first bank where the two agree: a file without a colour gets the same
+  blue (`0xff5ac8fa`) a new channel has.
+- **A point without a `y` gets 1, not 0.** The reader's default for a
+  missing `y` is 1 - the flat curve - while a fresh `EnvPoint` has `y` 0.
+  The channel's curve is read with the envelope's defaults, not with the
+  point's own.
+
+What is still open: the other domain headers still carry their own
+`toVar` / `fromVar` members (`Piece.h`, `Sample.h`, `Tuning.h`, `Sieve.h`,
+`Performance.h`, `FreqSpace.h`), and the domain's data still holds JUCE
+values (the `juce::String name` and the `juce::Colour` of the groups, the
+envelopes, the waves and the channels) - that is the deferred type
+migration; the sample's file reading is still in the domain
+(`Source/Sample.h` reads `juce::File`s); and there is no headless domain
+target yet - the suites run inside the app's selftest binary, which is a
+JUCE application (the review's R089). See
+[`channel-codec-edge.md`](channel-codec-edge.md).
+
+Gate: app selftest 2,429/2,429, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
