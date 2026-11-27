@@ -135,6 +135,7 @@
       <FILE id="mdPge42" name="Page.h" compile="0" resource="0" file="Source/Page.h"/>
       <FILE id="mdPge43" name="PageCodec.h" compile="0" resource="0" file="Source/PageCodec.h"/>
       <FILE id="mdPce43" name="Piece.h" compile="0" resource="0" file="Source/Piece.h"/>
+      <FILE id="mdPce44" name="PieceCodec.h" compile="0" resource="0" file="Source/PieceCodec.h"/>
       <FILE id="mdTun44" name="Tuning.h" compile="0" resource="0" file="Source/Tuning.h"/>
       <FILE id="uFvbxi" name="LivePitch.h" compile="0" resource="0" file="Source/LivePitch.h"/>
       <FILE id="qySKM1" name="AndroidBars.h" compile="0" resource="0" file="Source/AndroidBars.h"/>

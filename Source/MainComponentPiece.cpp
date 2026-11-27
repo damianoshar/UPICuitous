@@ -84,352 +84,29 @@ juce::var MainComponent::pieceToVar() const
 
 bool MainComponent::loadFromVar(const juce::var& v)
 {
-    // v1.33.4 (M25): the piece is parsed into a temporary model first, and it
-    // replaces the current one only when it really is a piece. The old code
-    // cleared the model before it parsed, so a file that was not a piece (or
-    // a host state that was rubbish) left an empty default page behind and
-    // the unsaved work was gone.
-    if (v.isVoid())
-        return false;
-    auto* pagesVar = v.getProperty("pages", juce::var()).getArray();
-    if (pagesVar == nullptr || pagesVar->isEmpty())
+    // R4.1: the codec reads the document (Source/PieceCodec.h) - it decodes
+    // it, migrates it, validates it and repairs what it has to repair - and
+    // hands the candidate over. A document that is not a piece is refused
+    // here, and the active piece is not touched: the unsaved work stays.
+    upic::PieceModel candidate;
+    upic::PieceDiagnostics diag;
+    if (! upic::pieceFromVar (v, candidate, diag))
         return false;
 
-    // --- the piece is parsed into temporary containers (the model is not
-    //     touched yet, so a parse that fails leaves the piece alone) ---
-    std::vector<upic::Waveform> newWaves;
-    std::vector<upic::Envelope> newEnvelopes;
-    std::vector<upic::AmplitudeTable> newAmpTables;
-    std::vector<upic::PerformanceSequence> newSequences;
-    std::vector<upic::Channel> newChannels;
-    std::vector<upic::Page> newPages;
-    std::vector<upic::SampleSlot> newSlots;
-    for (int i = 0; i < upic::kMaxSampleSlots; ++i)
-    {
-        upic::SampleSlot s;
-        s.id = i + 1;
-        newSlots.push_back(std::move(s));
-    }
-    // v1.33.4 (H13): the piece format caps the page, arc, zone and point
-    // counts. A piece over a cap used to lose the extra music silently on
-    // the next open; the user is told what did not make it in.
-    juce::String droppedMsg;
-    // M5: the piece was adjusted, not truncated (the arcs' own Refs gave
-    // way to the material's Ref). It gets its own message.
-    juce::String adjustedMsg;
-    // v1.33.4 (L13): how many ids had to be changed (a duplicate or an
-    // impossible one) and how many material references pointed at nothing.
-    int renamed = 0;
-    int fixedRefs = 0;
-    auto noteDrop = [&droppedMsg] (const juce::String& one, const juce::String& many, int n)
-    {
-        if (n > 0)
-            droppedMsg += (droppedMsg.isEmpty() ? "" : ", ") + juce::String(n) + " "
-                            + (n == 1 ? one : many);
-    };
-    if (auto* arr = v.getProperty("samples", juce::var()).getArray())
-    {
-        // SECURITY (S-03): the decoded sample data of all the slots together
-        // is capped, so a piece with many huge slots cannot exhaust memory.
-        size_t totalSampleBytes = 0;
-        int stored = 0;
-        int droppedFrames = 0;
-        for (auto& sv : *arr)
-        {
-            auto slot = upic::sampleSlotFromVar (sv, 1);
-            // v1.33.4 (M19): the frames the slot lost to the caps (the
-            // duration at the material's own rate, the budget) are counted
-            // too, so the user hears about the cut material.
-            const int rawFrames = (int) sv.getProperty("frames", 0);
-            const int keptFrames = slot.data != nullptr ? slot.data->getNumSamples() : 0;
-            droppedFrames += juce::jmax (0, rawFrames - keptFrames);
-            if (slot.data != nullptr)
-                totalSampleBytes += (size_t) slot.data->getNumSamples()
-                                  * (size_t) slot.data->getNumChannels() * sizeof(float);
-            if (totalSampleBytes > upic::limits::kMaxTotalSampleBytes) break;
-            for (auto& s : newSlots)
-                if (s.id == slot.id)
-                {
-                    // the first entry for a slot id wins (a file that
-                    // carries the same slot twice must not overwrite the
-                    // first one)
-                    if (s.data == nullptr) { s = std::move(slot); ++stored; }
-                    break;
-                }
-        }
-        noteDrop ("sample", "samples", (int) arr->size() - stored);
-        noteDrop ("sample frame", "sample frames", droppedFrames);
-    }
-    if (auto* arr = v.getProperty("waveforms", juce::var()).getArray())
-    {
-        int i = 0;
-        for (auto& wv : *arr)
-        {
-            if ((int) newWaves.size() >= upic::limits::kMaxWaveforms) break;
-            newWaves.push_back(upic::waveformFromVar (wv, i++));
-        }
-        noteDrop ("wavetable", "wavetables", (int) arr->size() - (int) newWaves.size());
-    }
-    if (auto* arr = v.getProperty("envelopes", juce::var()).getArray())
-    {
-        int i = 0;
-        for (auto& ev : *arr)
-        {
-            if ((int) newEnvelopes.size() >= upic::limits::kMaxEnvelopes) break;
-            newEnvelopes.push_back(upic::envelopeFromVar (ev, i++));
-        }
-        noteDrop ("envelope", "envelopes", (int) arr->size() - (int) newEnvelopes.size());
-        // the envelope's own points are capped too
-        for (int ei = 0; ei < (int) newEnvelopes.size() && ei < (int) arr->size(); ++ei)
-            if (auto* ptsArr = arr->getReference(ei).getProperty("points", juce::var()).getArray())
-                noteDrop ("envelope point", "envelope points",
-                          (int) ptsArr->size() - (int) newEnvelopes[(size_t) ei].points.size());
-    }
-    // WP2: the amplitude conversion tables. Absent in older pieces, and an
-    // arc that names one must get its reference checked like any other.
-    if (auto* arr = v.getProperty("ampTables", juce::var()).getArray())
-    {
-        int i = 0;
-        for (auto& tv : *arr)
-        {
-            if ((int) newAmpTables.size() >= upic::limits::kMaxAmplitudeTables) break;
-            newAmpTables.push_back (upic::envelopeFromVar (tv, i++));
-        }
-        noteDrop ("amplitude table", "amplitude tables",
-                  (int) arr->size() - (int) newAmpTables.size());
-    }
-    // WP4: the performance sequences (absent in older pieces).
-    if (auto* sarr = v.getProperty("sequences", juce::var()).getArray())
-    {
-        int si = 0;
-        for (auto& sv : *sarr)
-        {
-            if ((int) newSequences.size() >= upic::limits::kMaxSequences) break;
-            newSequences.push_back (upic::performanceSequenceFromVar (sv, si++));
-        }
-        noteDrop ("performance sequence", "performance sequences",
-                  (int) sarr->size() - (int) newSequences.size());
-    }
-    // WP6: the mixer channels (absent in older pieces -> the legacy path).
-    const int fileNextChannelId = (int) v.getProperty ("nextChannelId", 1);
-    if (auto* carr = v.getProperty ("channels", juce::var()).getArray())
-    {
-        int ci = 0;
-        for (auto& cv : *carr)
-        {
-            if ((int) newChannels.size() >= upic::limits::kMaxChannels) break;
-            newChannels.push_back (upic::channelFromVar (cv, ci++));
-        }
-        noteDrop ("channel", "channels", (int) carr->size() - (int) newChannels.size());
-    }
-    renamed += upic::uniquifyIds (newChannels);
-    if (auto* arr = v.getProperty("pages", juce::var()).getArray())
-    {
-        for (auto& pv : *arr)
-        {
-            if ((int) newPages.size() >= upic::limits::kMaxPages) break;
-            // v1.33.4 (L13): the page's parser checks the arc and zone ids
-            // (a duplicate id made the selection and the delete hit the
-            // wrong arc) and derives the next id from the arcs that are
-            // there. `renamed` counts what it had to change.
-            newPages.push_back(upic::pageFromVar(pv, &renamed));
-        }
-        noteDrop ("page", "pages", (int) arr->size() - (int) newPages.size());
-        // the arcs, the sieve zones and the arc points of the pages that
-        // were loaded (the page's own parser caps them)
-        for (int pi = 0; pi < (int) newPages.size(); ++pi)
-        {
-            const juce::var pageVar = arr->getReference(pi);
-            if (auto* arcsArr = pageVar.getProperty("arcs", juce::var()).getArray())
-            {
-                noteDrop ("arc", "arcs", (int) arcsArr->size() - (int) newPages[(size_t) pi].arcs.size());
-                for (int ai = 0; ai < (int) newPages[(size_t) pi].arcs.size(); ++ai)
-                    if (auto* ptsArr = arcsArr->getReference(ai).getProperty("points", juce::var()).getArray())
-                        noteDrop ("arc point", "arc points",
-                                  (int) ptsArr->size() - (int) newPages[(size_t) pi].arcs[(size_t) ai].points.size());
-            }
-            if (auto* zonesArr = pageVar.getProperty("zones", juce::var()).getArray())
-                noteDrop ("sieve zone", "sieve zones",
-                          (int) zonesArr->size() - (int) newPages[(size_t) pi].zones.size());
-        }
-    }
-    if (newWaves.empty()) newWaves = upic::defaultWaveforms();
-    if (newEnvelopes.empty()) newEnvelopes = upic::defaultEnvelopes();
-    if (newPages.empty()) newPages.push_back(upic::Page());
+    commitPieceModel (candidate, diag);
+    return true;
+}
 
-    // M5: the material's Ref is the SLOT's (the UPIC's per-slot REF). A
-    // piece written before M5 carries no Ref on the slot - the Ref lived
-    // on the arc - so the slot inherits the Ref of the first arc that
-    // uses it. The piece then sounds exactly as it did, unless an arc
-    // carried a Ref of its own (a different one) - the material's Ref
-    // decides now, and the user is told.
-    int ownRefArcs = 0;
-    for (auto& s : newSlots)
-    {
-        if (s.refFreq > 0.0) continue;
-        double ref = 0.0;
-        for (const auto& pg : newPages)
-        {
-            for (const auto& a : pg.arcs)
-            {
-                if (a.mode != 1 || a.sampleId != s.id) continue;
-                ref = a.refFreq;
-                break;
-            }
-            if (ref > 0.0) break;
-        }
-        s.refFreq = (ref > 0.0) ? upic::limits::clampFinite (ref, 20.0, 20000.0)
-                                : upic::kDefaultRefFreq;
-    }
-    // an arc whose Ref differs from its material's is now played with the
-    // material's Ref - say so, so the change is never silent.
-    for (const auto& pg : newPages)
-        for (const auto& a : pg.arcs)
-        {
-            if (a.mode != 1) continue;
-            for (const auto& s : newSlots)
-                if (s.id == a.sampleId && s.refFreq > 0.0
-                    && std::abs (1200.0 * std::log2 (a.refFreq / s.refFreq)) > 1.0)
-                { ++ownRefArcs; break; }
-        }
-    if (ownRefArcs > 0)
-        adjustedMsg = juce::String (ownRefArcs) + (ownRefArcs == 1 ? " arc had a Ref of its own"
-                                                                   : " arcs had Refs of their own")
-                    + " - the material's Ref decides now";
-
-    // v1.33.4 (L13): the wavetables and the envelopes are keyed by their id
-    // too - two wavetables with the same id made the arc list show the
-    // wrong name, and the editor's controls edited the wrong one. The first
-    // item of an id keeps it (so the arcs that point at the material keep
-    // pointing at the same thing), a duplicate gets a free id.
-    renamed += upic::uniquifyIds (newWaves);
-    renamed += upic::uniquifyIds (newEnvelopes);
-    renamed += upic::uniquifyIds (newAmpTables);
-    renamed += upic::uniquifyIds (newSequences);
-
-    // and the arcs' references to the material are checked: a piece can
-    // point at a wavetable or an envelope that is not there (the arc then
-    // showed an empty material and played the wrong thing), so the
-    // reference is put back onto material that exists.
-    for (auto& pg : newPages)
-        for (auto& a : pg.arcs)
-        {
-            if (! newWaves.empty() && ! upic::hasId (newWaves, a.waveformId))
-            { a.waveformId = newWaves.front().id; ++fixedRefs; }
-            if (! newEnvelopes.empty() && ! upic::hasId (newEnvelopes, a.envelopeId))
-            { a.envelopeId = newEnvelopes.front().id; ++fixedRefs; }
-            // a table is optional: a missing one falls back to none
-            if (a.amplitudeTableId >= 0 && ! upic::hasId (newAmpTables, a.amplitudeTableId))
-            { a.amplitudeTableId = -1; ++fixedRefs; }
-            // 0 is the "no envelope of its own" marker for the PM index
-            if (a.pmIndexEnv != 0 && ! upic::hasId (newEnvelopes, a.pmIndexEnv))
-            { a.pmIndexEnv = 0; ++fixedRefs; }
-        }
-    // WP4: the sequences' pages and positions are checked against the
-    // pages that actually loaded.
-    for (auto& sq : newSequences)
-    {
-        std::vector<upic::PerformancePoint> kept;
-        double lastT = -1.0;
-        for (auto p : sq.points)
-        {
-            if (newPages.empty()) break;
-            p.page = juce::jlimit (0, (int) newPages.size() - 1, p.page);
-            p.pos = upic::limits::clampFinite (p.pos, 0.0,
-                                               newPages[(size_t) p.page].durationSec);
-            if (p.t <= lastT) continue;
-            lastT = p.t;
-            kept.push_back (p);
-        }
-        sq.points = std::move (kept);
-    }
-
-    // WP3: the groups' overrides point into the same banks; a missing one
-    // falls back to "the arc's own" rather than switching the timbre to
-    // unrelated material.
-    for (auto& pg : newPages)
-        for (auto& g : pg.groups)
-        {
-            if (g.waveformId >= 0 && ! upic::hasId (newWaves, g.waveformId))
-            { g.waveformId = -1; ++fixedRefs; }
-            if (g.envelopeId >= 0 && ! upic::hasId (newEnvelopes, g.envelopeId))
-            { g.envelopeId = -1; ++fixedRefs; }
-            if (g.amplitudeTableId >= 0 && ! upic::hasId (newAmpTables, g.amplitudeTableId))
-            { g.amplitudeTableId = -1; ++fixedRefs; }
-        }
-    // WP5: a modulator must exist on its own page and the chain must not
-    // loop back to the carrier.
-    for (auto& pg : newPages)
-    {
-        auto findArc = [&pg] (int id) -> const upic::Arc*
-        {
-            for (auto& a : pg.arcs) if (a.id == id) return &a;
-            return nullptr;
-        };
-        for (auto& a : pg.arcs)
-        {
-            if (a.modulatorArcId < 0) continue;
-            if (a.modulatorArcId == a.id || findArc (a.modulatorArcId) == nullptr)
-            { a.modulatorArcId = -1; ++fixedRefs; continue; }
-            bool cycle = false;
-            std::vector<int> chain;
-            int cur = a.modulatorArcId;
-            for (int guard = 0; guard < 64 && cur >= 0; ++guard)
-            {
-                if (cur == a.id) { cycle = true; break; }
-                chain.push_back (cur);
-                const upic::Arc* m = findArc (cur);
-                cur = (m != nullptr) ? m->modulatorArcId : -1;
-            }
-            if (cycle)
-            {
-                // break every edge of the loop, not just this arc's
-                a.modulatorArcId = -1;
-                for (int id : chain)
-                    for (auto& other : pg.arcs)
-                        if (other.id == id) other.modulatorArcId = -1;
-                ++fixedRefs;
-            }
-        }
-    }
-    // WP6: a channel reference must exist in the bank (0 = main).
-    for (auto& pg : newPages)
-    {
-        for (auto& a : pg.arcs)
-            if (a.channelId > 0 && ! upic::hasId (newChannels, a.channelId))
-            { a.channelId = 0; ++fixedRefs; }
-        for (auto& g : pg.groups)
-            if (g.channelId > 0 && ! upic::hasId (newChannels, g.channelId))
-            { g.channelId = -1; ++fixedRefs; }
-    }
-    if (renamed > 0)
-        droppedMsg += (droppedMsg.isEmpty() ? "" : ", ") + juce::String(renamed)
-                    + (renamed == 1 ? " item had a duplicate id and has been renumbered"
-                                    : " items had duplicate ids and have been renumbered");
-    if (fixedRefs > 0)
-        droppedMsg += (droppedMsg.isEmpty() ? "" : ", ") + juce::String(fixedRefs)
-                    + (fixedRefs == 1 ? " arc pointed at material that was not there"
-                                      : " arcs pointed at material that was not there");
-
-    // WP9: the workspace layout comes back with the piece. The pages are
-    // checked against the pages that actually loaded (a piece can name a
-    // page that is not there).
-    std::vector<int> workspacePageList;
-    double workspaceSplit = 0.5;
-    const auto w = v.getProperty ("workspace", juce::var());
-    if (w.isObject())
-    {
-        if (auto* arr = w.getProperty ("pages", juce::var()).getArray())
-            for (const auto& p : *arr)
-            {
-                const int index = (int) p;
-                if (index >= 0 && index < (int) newPages.size())
-                    workspacePageList.push_back (index);
-            }
-        workspaceSplit = juce::jlimit (0.2, 0.8,
-                                       (double) w.getProperty ("split", 0.5));
-    }
-
+//==============================================================================
+// R4.1: the commit - the candidate is put in force.
+//
+// Everything below is the shell's work: the swap under the model lock, the
+// selection, the controls, the engine, the snapshot the audio thread reads
+// and the messages the user is told. The document's *format* is the codec's
+// (Source/PieceCodec.h); this is where the format becomes the app.
+void MainComponent::commitPieceModel (const upic::PieceModel& m,
+                                      const upic::PieceDiagnostics& diag)
+{
     // --- the piece is good: swap it in ---
     // An ordinary scrub/freeze request belongs to the piece that is about
     // to be replaced. End it before the swap so the next model snapshot
@@ -446,19 +123,16 @@ bool MainComponent::loadFromVar(const juce::var& v)
         // stopPlayback only starts a fade while playing: make the stop immediate
         // here, since the piece (and possibly its pages) is about to be replaced
         transportState.store ((int) TransportState::stopped, std::memory_order_relaxed);
-        waveforms = std::move (newWaves);
-        envelopes = std::move (newEnvelopes);
-        ampTables = std::move (newAmpTables);
-        sequences = std::move (newSequences);
-        channels = std::move (newChannels);
-        nextChannelId = 1;
-        for (auto& c : channels) nextChannelId = juce::jmax (nextChannelId, c.id + 1);
-        if (fileNextChannelId > nextChannelId && fileNextChannelId <= upic::limits::kMaxItemId)
-            nextChannelId = fileNextChannelId;
+        waveforms = m.waveforms;
+        envelopes = m.envelopes;
+        ampTables = m.amplitudeTables;
+        sequences = m.sequences;
+        channels = m.channels;
+        nextChannelId = m.nextChannelId;
         document.selection().channel = channels.empty() ? -1 : channels.front().id;
         document.selection().sequence = sequences.empty() ? -1 : sequences.front().id;
-        pages = std::move (newPages);
-        sampleSlots = std::move (newSlots);
+        pages = m.pages;
+        sampleSlots = m.sampleSlots;
     }
     // The frequency-table editor captured a page/space in the piece that was
     // just replaced. Close it before any stale callback can use that
@@ -472,41 +146,27 @@ bool MainComponent::loadFromVar(const juce::var& v)
     {
         juce::ScopedLock l(dataLock);
         // clamp ids
-        currentPage = juce::jlimit(0, (int)pages.size() - 1, (int) v.getProperty("currentPage", 0));
+        currentPage = juce::jlimit(0, (int)pages.size() - 1, m.currentPage);
         // WP9: the workspace's first canvas is the live page, so the page
         // the piece was playing takes the first place in the workspace
         // (the list rotates when it does not). The piece's own current
         // page wins - it is the page the musician left the piece on.
     // SECURITY (S-03): the master gain is clamped to the slider's range, so a
     // piece cannot push the mix into clipping or silence.
-    masterGain.store(upic::limits::clampGain((float)(double) v.getProperty("master", 0.8)));
+    masterGain.store (m.masterGain);
     markModelChanged(); // v1.15: the whole piece was replaced -> fade across it
     // v1.1 state (defaults keep old / Python-written files working unchanged)
-    seqPages = (bool) v.getProperty("seqPages", false);
-    recordPressure = (bool) v.getProperty("recordPressure", false);
-    scrubAudition = (bool) v.getProperty("scrubAudition", true);
-    muteWhileDragging.store((bool) v.getProperty("muteWhileDragging", true), std::memory_order_relaxed);
-    dragSmoothMs.store(juce::jlimit(0, 1000, (int) v.getProperty("dragSmoothMs", 20)), std::memory_order_relaxed);
-    scrubGrainMs = juce::jlimit(5, 500, (int) v.getProperty("scrubGrainMs", 40));
-    sampleGrainMs = juce::jlimit(5, 500, (int) v.getProperty("sampleGrainMs", 40));
-    liveGrainMs = juce::jlimit(5, 500, (int) v.getProperty("liveGrainMs", 40));
-    sieveOn = (bool) v.getProperty("sieveOn", false);
-    sieveM = juce::jlimit(2, 120, (int) v.getProperty("sieveM", 12));
-    sieveR.clear();
-    if (auto* arr = v.getProperty("sieveR", juce::var()).getArray())
-    {
-        for (auto& rv : *arr)
-        {
-            if ((int) sieveR.size() >= upic::limits::kMaxSieveRemainders) break;
-            sieveR.push_back((((int) rv % sieveM) + sieveM) % sieveM);
-        }
-        noteDrop ("sieve remainder", "sieve remainders", (int) arr->size() - (int) sieveR.size());
-    }
-    // v1.33.2: an old settings file can carry an empty sieveR (the field was
-    // allowed to be empty, and the placeholder made it look like 0,7). That
-    // restored a sieve with no remainders, which is inert - the Sieve
-    // checkbox then did nothing. Fall back to the octave sieve.
-    if (sieveR.empty()) sieveR = { 0 };
+    seqPages = m.seqPages;
+    recordPressure = m.recordPressure;
+    scrubAudition = m.scrubAudition;
+    muteWhileDragging.store (m.muteWhileDragging, std::memory_order_relaxed);
+    dragSmoothMs.store (m.dragSmoothMs, std::memory_order_relaxed);
+    scrubGrainMs = m.scrubGrainMs;
+    sampleGrainMs = m.sampleGrainMs;
+    liveGrainMs = m.liveGrainMs;
+    sieveOn = m.sieveOn;
+    sieveM = m.sieveM;
+    sieveR = m.sieveR;
     seqBtn.setToggleState(seqPages, juce::dontSendNotification);
     pressBtn.setToggleState(recordPressure, juce::dontSendNotification);
     scrubBtn.setToggleState(scrubAudition, juce::dontSendNotification);
@@ -523,15 +183,14 @@ bool MainComponent::loadFromVar(const juce::var& v)
     scrubEngine.setLiveGrainMs(liveGrainMs);
     // v1.33.4 (H7): the global pitch modes come back with the piece. Absent
     // in an older piece -> the session keeps what it had (backward
-    // compatible), present -> the piece's mode wins.
+    // compatible), present -> the piece's mode wins. A negative mode says
+    // "the document carried none".
     {
         bool changed = false;
-        const int samplePm = (int) v.getProperty("samplePitchMode", -1);
-        const int livePm = (int) v.getProperty("livePitchMode", -1);
-        const int sampleMode = samplePm >= 0 ? juce::jlimit(0, 3, samplePm)
-                                             : engine.getSamplePitchMode();
-        const int liveMode = livePm >= 0 ? juce::jlimit(0, 2, livePm)
-                                         : engine.getLivePitchMode();
+        const int samplePm = m.samplePitchMode;
+        const int livePm = m.livePitchMode;
+        const int sampleMode = samplePm >= 0 ? samplePm : engine.getSamplePitchMode();
+        const int liveMode = livePm >= 0 ? livePm : engine.getLivePitchMode();
         // v1.33.4 (M21): the vocoder's working memory is prepared BEFORE the
         // audio thread can see the new modes
         prepareVocodersIfNeeded (sampleMode, liveMode);
@@ -565,11 +224,11 @@ bool MainComponent::loadFromVar(const juce::var& v)
     score.setSieve(sieveOn, sieveM, sieveR);
     // M4: the tuning the piece was drawn in. An old piece carries none ->
     // 12-tone equal temperament, which is what it was drawn in.
-    tuning = upic::tuningFromVar (v.getProperty ("tuning", juce::var()));
+    tuning = m.tuning;
     score.setTuning (tuning);
     // v1.2 state (defaults: full stickiness, no time grid = v1.1 behaviour)
-    stickiness = upic::limits::clampFinite((double) v.getProperty("stickiness", 1.0), 0.0, 1.0);
-    timeGrid = upic::limits::clampFinite((double) v.getProperty("timeGrid", 0.0), 0.0, 64.0);
+    stickiness = m.stickiness;
+    timeGrid = m.timeGrid;
     stickSlider.setValue(stickiness, juce::dontSendNotification);
     score.setStickiness(stickiness);
     {
@@ -595,25 +254,24 @@ bool MainComponent::loadFromVar(const juce::var& v)
     // read the model, so it must never run inside that lock.
     refreshBoxes(); refreshScoreBinding();
     // WP9: the workspace opens with the layout the piece carried.
-    if (workspacePageList.size() >= 2)
-        setWorkspaceOpen (true, workspacePageList, workspaceSplit);
+    if (m.workspacePages.size() >= 2)
+        setWorkspaceOpen (true, m.workspacePages, m.workspaceSplit);
     // v1.18: the next audio block must already render the loaded piece (the
     // timer alone would be up to 33 ms late - and a host may not run it).
     publishModelSnapshot();
     // v1.33.4 (H13): the piece was over one of the format's caps, so part of
     // it did not make it in. Say so instead of losing the music silently.
-    if (! droppedMsg.isEmpty())
-        flash ("This piece is bigger than the app supports - not loaded: " + droppedMsg);
-    else if (! adjustedMsg.isEmpty())
-        flash ("This piece was adjusted: " + adjustedMsg);
+    if (! diag.notLoaded.isEmpty())
+        flash (diag.notLoaded);
+    else if (! diag.adjusted.isEmpty())
+        flash (diag.adjusted);
 
     // v1.33.4 (L15): the loaded piece is what the file holds, so there is
     // nothing to save yet (the app must not ask to save a piece that was
     // just opened).
     markPieceSaved();
-
-    return true;
 }
+
 
 juce::String MainComponent::pieceStateText()
 {

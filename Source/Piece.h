@@ -3,17 +3,14 @@
 #include <JuceHeader.h>
 #include <vector>
 
-#include "EnvelopeCodec.h"
-#include "ChannelCodec.h"
+#include "AmplitudeTable.h"
+#include "Channel.h"
+#include "Envelope.h"
 #include "Page.h"
-#include "PageCodec.h"
-#include "PerformanceCodec.h"
-#include "PieceLimits.h"
+#include "Performance.h"
 #include "Sample.h"
-#include "SampleCodec.h"
 #include "Tuning.h"
-#include "TuningCodec.h"
-#include "WaveformCodec.h"
+#include "Waveform.h"
 
 namespace upic
 {
@@ -25,6 +22,10 @@ namespace upic
     // for the lock. The model is captured on the message thread instead (a
     // copy: the sample audio is shared, so the copy is eight pointers), and
     // the worker builds the JSON from the copy.
+    //
+    // R4.1: this is the piece as *data*. How it reaches a file, and how it
+    // comes back, is the edge's business (Source/PieceCodec.h) - the same
+    // split every other type in the app got in R2.
     struct PieceModel
     {
         std::vector<Waveform>   waveforms;
@@ -55,6 +56,9 @@ namespace upic
         double stickiness = 1.0;
         double timeGrid = 0.0;
         float masterGain = 0.8f;
+        // R4.1: a negative mode means "the document did not carry one" - an
+        // old piece has no mode field, and the session keeps the mode it
+        // has. A piece that is saved always has a mode (the engine's).
         int  samplePitchMode = 0;
         int  livePitchMode = 0;
         // M4: the tuning the piece is drawn in. The arcs hold frequencies,
@@ -68,94 +72,4 @@ namespace upic
         std::vector<int> workspacePages;
         double workspaceSplit = 0.5;
     };
-
-    // The piece as a var. The samples become base64 here, and that is the
-    // heavy part of a save - so the caller can run this on a worker thread
-    // (v1.33.4 / M28).
-    //
-    // v1.33.4 (L15, part 3): the piece without the sample audio. The
-    // recovery snapshot keeps the audio in a sidecar file, so the piece JSON
-    // stays small and the unchanged audio is not embedded again and again.
-    inline juce::var pieceToVar (const PieceModel& m, bool includeSampleAudio)
-    {
-        auto* o = new juce::DynamicObject();
-        o->setProperty("app", "UPICuitous");
-        o->setProperty("version", 1);
-        o->setProperty("master", m.masterGain);
-        o->setProperty("currentPage", m.currentPage);
-        // v1.1 (absent in older / Python-written files -> defaults applied)
-        o->setProperty("seqPages", m.seqPages);
-        o->setProperty("recordPressure", m.recordPressure);
-        o->setProperty("scrubAudition", m.scrubAudition);
-        o->setProperty("muteWhileDragging", m.muteWhileDragging);
-        o->setProperty("dragSmoothMs", m.dragSmoothMs);
-        o->setProperty("scrubGrainMs", m.scrubGrainMs);
-        o->setProperty("sampleGrainMs", m.sampleGrainMs);
-        o->setProperty("liveGrainMs", m.liveGrainMs);
-        o->setProperty("sieveOn", m.sieveOn);
-        o->setProperty("sieveM", m.sieveM);
-        // v1.33.4 (H7): the global pitch modes change the sound, so they
-        // travel with the piece (and with the host state)
-        o->setProperty("samplePitchMode", m.samplePitchMode);
-        o->setProperty("livePitchMode", m.livePitchMode);
-        juce::Array<juce::var> srArr;
-        for (int r : m.sieveR) srArr.add (r);
-        o->setProperty("sieveR", srArr);
-        // v1.2 (same rule: defaults keep old files working unchanged)
-        o->setProperty("stickiness", m.stickiness);
-        o->setProperty("timeGrid", m.timeGrid);
-        // M4: the tuning. An old piece has none -> 12-tone equal
-        // temperament, which is what it was drawn in.
-        if (m.tuning.custom)
-            o->setProperty("tuning", upic::tuningToVar (m.tuning));
-        juce::Array<juce::var> wa, ea, pa, sa;
-        for (auto& w : m.waveforms) wa.add (upic::waveformToVar (w));
-        for (auto& e : m.envelopes) ea.add (upic::envelopeToVar (e));
-        for (auto& s : m.sampleSlots) if (s.loaded()) sa.add (upic::sampleSlotToVar (s, includeSampleAudio));
-        for (auto& p : m.pages) pa.add (pageToVar (p));
-        o->setProperty("waveforms", wa);
-        o->setProperty("envelopes", ea);
-        // WP2: omitted for a piece that never made a table, so old files and
-        // old hash comparisons are unchanged.
-        if (! m.sequences.empty())
-        {
-            juce::Array<juce::var> sa;
-            for (auto& s : m.sequences) sa.add (upic::performanceSequenceToVar (s));
-            o->setProperty ("sequences", sa);
-        }
-        if (! m.amplitudeTables.empty())
-        {
-            juce::Array<juce::var> ta;
-            for (auto& t : m.amplitudeTables) ta.add (upic::envelopeToVar (t));
-            o->setProperty ("ampTables", ta);
-        }
-        // WP6: the channels (omitted when the piece has none).
-        if (! m.channels.empty())
-        {
-            juce::Array<juce::var> ca;
-            for (auto& c : m.channels) ca.add (upic::channelToVar (c));
-            o->setProperty ("channels", ca);
-            o->setProperty ("nextChannelId", m.nextChannelId);
-        }
-        o->setProperty("samples", sa);
-        o->setProperty("pages", pa);
-        // WP9: the workspace layout (omitted when there is none, so an old
-        // piece is written exactly as it was).
-        if (m.workspacePages.size() >= 2)
-        {
-            auto* w = new juce::DynamicObject();
-            juce::Array<juce::var> wpa;
-            for (int p : m.workspacePages) wpa.add (p);
-            w->setProperty ("pages", wpa);
-            w->setProperty ("split", m.workspaceSplit);
-            o->setProperty ("workspace", juce::var (w));
-        }
-        return juce::var (o);
-    }
-
-    // The piece with the audio in it (the normal one).
-    inline juce::var pieceToVar (const PieceModel& m)
-    {
-        return pieceToVar (m, true);
-    }
 }

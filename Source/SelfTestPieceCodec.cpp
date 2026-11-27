@@ -1,7 +1,6 @@
 #include <JuceHeader.h>
-#include "MainComponent.h"
+#include "PieceCodec.h"
 #include "SelfTest.h"
-#include "UpicModel.h"
 
 //==============================================================================
 // R4.1: the document's file format - the load.
@@ -21,6 +20,11 @@
 // The suite reaches the loader through one door (the `load` helper at the
 // top of the file), so the move touches the suite in one place and the
 // checks themselves do not change.
+//
+// After the move the door is the codec itself: the suite reaches the
+// document's format without a window, a component tree or an audio
+// device. The component-level check that a rejected document leaves the
+// piece alone lives in Source/SelfTestDocument.cpp.
 
 namespace
 {
@@ -37,20 +41,23 @@ namespace
     };
 
     // The loader, reached through one door.
-    Loaded load (MainComponent& mc, const juce::var& v)
+    Loaded load (const juce::var& v)
     {
         Loaded out;
-        out.ok = mc.loadFromVar (v);
-        out.message = mc.flashMessageForTest();
-        out.document = mc.pieceToVar();
+        upic::PieceModel candidate;
+        upic::PieceDiagnostics diag;
+        out.ok = upic::pieceFromVar (v, candidate, diag);
+        if (! out.ok)
+            return out;
+        // what the user is told: the parts that did not make it in win over
+        // the parts that were adjusted (the same order the shell flashes
+        // them in).
+        out.message = diag.notLoaded.isNotEmpty() ? diag.notLoaded : diag.adjusted;
+        out.document = upic::pieceToVar (candidate);
         // a document that carries a pitch mode puts it in force; a document
         // that carries none leaves the session's mode alone.
-        out.samplePitchMode = (v.hasProperty ("samplePitchMode")
-                               && (int) v.getProperty ("samplePitchMode", -1) >= 0)
-                              ? mc.samplePitchModeForTest() : -1;
-        out.livePitchMode = (v.hasProperty ("livePitchMode")
-                             && (int) v.getProperty ("livePitchMode", -1) >= 0)
-                            ? mc.livePitchModeForTest() : -1;
+        out.samplePitchMode = candidate.samplePitchMode;
+        out.livePitchMode = candidate.livePitchMode;
         return out;
     }
 
@@ -141,24 +148,33 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
             { "rubbish pages",   juce::JSON::parse ("{\"pages\":\"nonsense\"}") }
         };
 
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-        const auto before = juce::JSON::toString (mc.pieceToVar(), false);
+        // a piece that is there, and that a refused document must not touch
+        upic::PieceModel piece;
+        piece.currentPage = 3;
+        const auto before = juce::JSON::toString (upic::pieceToVar (piece), false);
 
         bool allRefused = true;
-        juce::String detail;
+        bool pieceUnchanged = true;
+        juce::String refusedDetail;
+        juce::String changedDetail;
         for (const auto& c : cases)
         {
-            if (load (mc, c.value).ok)
+            upic::PieceModel candidate = piece;
+            upic::PieceDiagnostics diag;
+            if (upic::pieceFromVar (c.value, candidate, diag))
             {
                 allRefused = false;
-                detail << c.label << " was accepted  ";
+                refusedDetail << c.label << " was accepted  ";
+            }
+            else if (juce::JSON::toString (upic::pieceToVar (candidate), false) != before)
+            {
+                pieceUnchanged = false;
+                changedDetail << c.label << " changed the piece  ";
             }
         }
 
-        check (allRefused, "a document that is not a piece is refused", detail.trim());
-        check (juce::JSON::toString (mc.pieceToVar(), false) == before,
-               "a refused document leaves the piece alone");
+        check (allRefused, "a document that is not a piece is refused", refusedDetail.trim());
+        check (pieceUnchanged, "a refused document leaves the piece alone", changedDetail.trim());
     }
 
     // --- the defaults of an old document -----------------------------------
@@ -166,10 +182,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
     // defaults for everything else - that is what makes an old file open
     // the way it did.
     {
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto loaded = load (mc, document());
+        const auto loaded = load (document());
         check (loaded.ok, "a document with only pages loads");
         const auto& doc = loaded.document;
 
@@ -225,10 +238,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
 
     // --- the numbers of a document are clamped -----------------------------
     {
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto high = load (mc, document (
+        const auto high = load (document (
             property ("master", "5.0") + "," +
             property ("stickiness", "5.0") + "," +
             property ("timeGrid", "100.0") + "," +
@@ -261,7 +271,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
         check ((int) doc.getProperty ("currentPage", -1) == 0,
                "the page over the range is pulled back to the first");
 
-        const auto low = load (mc, document (
+        const auto low = load (document (
             property ("master", "-1.0") + "," +
             property ("stickiness", "-2.0") + "," +
             property ("timeGrid", "-5.0")));
@@ -277,10 +287,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
 
     // --- the sieve's remainders are folded into the sieve -------------------
     {
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto loaded = load (mc, document (
+        const auto loaded = load (document (
             property ("sieveM", "12") + "," +
             property ("sieveR", "[0,7,13,-1]")));
         check (loaded.ok, "a document with sieve remainders loads");
@@ -293,7 +300,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
         check (folded, "the sieve remainders are folded into the sieve",
                juce::String (remainders != nullptr ? remainders->size() : -1));
 
-        const auto empty = load (mc, document (property ("sieveR", "[]")));
+        const auto empty = load (document (property ("sieveR", "[]")));
         check (empty.ok, "a document with no sieve remainder loads");
         check (countOf (empty.document, "sieveR") == 1,
                "a document with no sieve remainder gets the octave sieve");
@@ -301,9 +308,6 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
 
     // --- what does not fit is dropped, and the user is told -----------------
     {
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
         // 101 pages: the piece format holds 100.
         juce::String pages = "{\"pages\":[";
         for (int i = 0; i < 101; ++i)
@@ -313,7 +317,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
         }
         pages += "]}";
 
-        const auto loaded = load (mc, juce::JSON::parse (pages));
+        const auto loaded = load (juce::JSON::parse (pages));
         check (loaded.ok, "a document with more pages than the format holds loads");
         check (countOf (loaded.document, "pages") == upic::limits::kMaxPages,
                "the pages over the cap are dropped",
@@ -357,10 +361,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
                 "{\"id\":1,\"mode\":0,\"waveformId\":1,\"envelopeId\":1,"
                 "\"intensity\":0.8,\"points\":[{\"t\":0,\"f\":220}]}]}]}";
 
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto loaded = load (mc, juce::JSON::parse (json));
+        const auto loaded = load (juce::JSON::parse (json));
         check (loaded.ok, "a document with banks over their caps loads");
         check (countOf (loaded.document, "waveforms") == upic::limits::kMaxWaveforms
                && countOf (loaded.document, "envelopes") == upic::limits::kMaxEnvelopes
@@ -385,10 +386,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
             "{\"id\":1,\"mode\":0,\"waveformId\":1,\"envelopeId\":1,\"intensity\":0.5,"
             "\"points\":[{\"t\":0,\"f\":330}]}]}]}");
 
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto loaded = load (mc, doc);
+        const auto loaded = load (doc);
         check (loaded.ok, "a document with a duplicate arc id loads");
         auto* arcs = arcsOfPage (loaded.document, 0);
         check (arcs != nullptr && arcs->size() == 2
@@ -414,10 +412,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
             "\"groups\":[{\"id\":1,\"name\":\"G\",\"wave\":999,\"env\":999,"
             "\"ampTable\":99,\"channel\":99}]}]}");
 
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto loaded = load (mc, doc);
+        const auto loaded = load (doc);
         check (loaded.ok, "a document with references to nothing loads");
         auto* arcs = arcsOfPage (loaded.document, 0);
         check (arcs != nullptr && arcs->size() == 1
@@ -460,10 +455,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
             "{\"id\":2,\"mode\":0,\"waveformId\":1,\"envelopeId\":1,\"mod\":1,"
             "\"intensity\":0.8,\"points\":[{\"t\":0,\"f\":330}]}]}]}");
 
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto loaded = load (mc, doc);
+        const auto loaded = load (doc);
         check (loaded.ok, "a document with a modulator loop loads");
         auto* arcs = arcsOfPage (loaded.document, 0);
         check (arcs != nullptr && arcs->size() == 2
@@ -490,10 +482,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
             "{\"id\":2,\"mode\":1,\"sampleId\":1,\"waveformId\":1,\"envelopeId\":1,"
             "\"refFreq\":440,\"intensity\":0.8,\"points\":[{\"t\":0,\"f\":330}]}]}]}");
 
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto loaded = load (mc, doc);
+        const auto loaded = load (doc);
         check (loaded.ok, "a document with a sample loads");
         auto* samples = arrayOf (loaded.document, "samples");
         check (samples != nullptr && samples->size() == 1
@@ -513,10 +502,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
             "\"pages\":[{\"duration\":30,\"nextArcId\":2,\"arcs\":[]},"
             "{\"duration\":30,\"nextArcId\":2,\"arcs\":[]}]}");
 
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto loaded = load (mc, twoPages);
+        const auto loaded = load (twoPages);
         check (loaded.ok, "a document with a workspace loads");
         const auto workspace = loaded.document.getProperty ("workspace", juce::var());
         check (workspace.isObject(), "the workspace comes back with the document");
@@ -528,10 +514,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
                juce::String (numberOf (workspace, "split"), 2));
     }
     {
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto clamped = load (mc, juce::JSON::parse (
+        const auto clamped = load (juce::JSON::parse (
             "{\"workspace\":{\"pages\":[0,1],\"split\":0.9},"
             "\"pages\":[{\"duration\":30,\"nextArcId\":2,\"arcs\":[]},"
             "{\"duration\":30,\"nextArcId\":2,\"arcs\":[]}]}"));
@@ -539,7 +522,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
         check (closeTo (numberOf (clamped.document.getProperty ("workspace", juce::var()), "split"), 0.8),
                "the split over the range is pulled back to the edge");
 
-        const auto missing = load (mc, juce::JSON::parse (
+        const auto missing = load (juce::JSON::parse (
             "{\"workspace\":{\"pages\":[0,99],\"split\":0.5},"
             "\"pages\":[{\"duration\":30,\"nextArcId\":2,\"arcs\":[]}]}"));
         check (missing.ok, "a document with a workspace over a missing page loads");
@@ -549,10 +532,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
 
     // --- the pitch modes ---------------------------------------------------
     {
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto modes = load (mc, document (
+        const auto modes = load (document (
             property ("samplePitchMode", "2") + "," +
             property ("livePitchMode", "1")));
         check (modes.ok, "a document with the pitch modes loads");
@@ -563,7 +543,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
                "the live pitch mode of the document is put in force",
                juce::String (modes.livePitchMode));
 
-        const auto clamped = load (mc, document (
+        const auto clamped = load (document (
             property ("samplePitchMode", "9") + "," +
             property ("livePitchMode", "9")));
         check (clamped.ok, "a document with pitch modes over the range loads");
@@ -574,7 +554,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
                "the live pitch mode over the range is pulled down to the last",
                juce::String (clamped.livePitchMode));
 
-        const auto none = load (mc, document());
+        const auto none = load (document());
         check (none.ok, "a document without the pitch modes loads");
         check (none.samplePitchMode == -1 && none.livePitchMode == -1,
                "a document without the pitch modes leaves the session's modes alone",
@@ -583,17 +563,14 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
 
     // --- the document that comes back is the document that went in ---------
     {
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto first = load (mc, document (
+        const auto first = load (document (
             property ("master", "0.6") + "," +
             property ("sieveM", "7") + "," +
             property ("sieveR", "[1,3]")));
         check (first.ok, "a document loads");
 
         const auto text = juce::JSON::toString (first.document, false);
-        const auto second = load (mc, first.document);
+        const auto second = load (first.document);
         check (second.ok, "the document the load produced loads again");
         check (juce::JSON::toString (second.document, false) == text,
                "the document that comes back is the document that went in");
@@ -601,10 +578,7 @@ void upic::runPieceCodecChecks (upic::SelfTest& t)
 
     // --- a document may carry keys the app does not know -------------------
     {
-        auto mcHolder = std::make_unique<MainComponent> (true);
-        auto& mc = *mcHolder;
-
-        const auto loaded = load (mc, document (
+        const auto loaded = load (document (
             property ("app", "\"something else\"") + "," +
             property ("version", "99") + "," +
             property ("wibble", "{\"a\":1}")));

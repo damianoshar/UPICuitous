@@ -37,3 +37,4 @@
 #include "Ids.h"
 #include "Page.h"
 #include "Piece.h"
+#include "PieceCodec.h"

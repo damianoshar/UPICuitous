@@ -2949,6 +2949,9 @@ public:
     // replaces the current one only when it really is a piece. Returns false
     // when the var is not a piece - the current piece is then kept, so a
     // broken file cannot wipe the unsaved work.
+    //
+    // R4.1: the codec reads the document (Source/PieceCodec.h) and hands the
+    // candidate over; the commit below puts it in force.
     bool loadFromVar(const juce::var& v);
 
     // M4: the Scala tuning import. The file is read through the chooser
@@ -2978,6 +2981,12 @@ public:
     // file and applies it to the selected PM arcs.
     juce::String buildPmPresetText();
     void applyPmPresetFile (const juce::File& f);
+
+    // R4.1: the commit - the candidate the codec read is put in force.
+    // The swap, the selection, the controls, the engine, the snapshot and
+    // the messages are the shell's work; the document's format is the
+    // codec's.
+    void commitPieceModel (const upic::PieceModel& m, const upic::PieceDiagnostics& diag);
 
     // --- v1.11 VST3 plugin mode ---------------------------------------------
     bool isPluginMode() const noexcept { return pluginMode_; }
