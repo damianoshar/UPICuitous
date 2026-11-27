@@ -544,6 +544,35 @@ gets and the duration cap.
 untouched, the golden render and the legacy fixture are unchanged, and the
 full gate is green.
 
+### 6.14 R2.10 - the tuning's codec edge
+
+**What moves.** The tuning's file format moves out of `Tuning.h` into the
+new `Source/TuningCodec.h`: `juce::var toVar()` and `static Tuning
+fromVar()` become `upic::tuningToVar (const Tuning&)` and `upic::tuningFromVar
+(const juce::var&)`. The bodies are the old members, body for body.
+
+**What stays.** The tuning's data and behaviour in `Tuning.h`: the name, the
+degrees, the base note and the custom flag, the degree-to-cents and
+cents-to-degree mappings, the step and MIDI conversions, the snap, the range
+test, the axis steps and the description. The name stays JUCE's: the plan
+defers replacing the domain's value types (§2), so `Tuning.h` still asks for
+the JUCE header and the tuning is not one of the gate's JUCE-free groups.
+
+**The Scala importer is still in the domain.** `parseScalaTuning` and its
+helpers read a Scala file. Reading a file is an edge of its own - the same
+way the sample's file reading is.
+
+**The contract.** A suite of the tuning's own, written before the move:
+`Source/SelfTestTuningCodec.cpp`, 46 checks that reach the tuning through the
+domain's headers alone. It pins the keys and their order, the clamps, the
+rules a scale has to follow (the base is 0 cents, the degrees must rise,
+they live in one octave, there are at most 256 of them) and the rule that a
+broken tuning falls back to the default WHOLE.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, and the
+full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -572,13 +601,13 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51` | app selftest 2,500/2,500, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985` | app selftest 2,546/2,546, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
-| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,500/2,500, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,546/2,546, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R9 Integration and cleanup | not started | - | - |
 
 Baseline commit: `b5368b1` (0.38.0), app selftest 1,785/1,785, legacy fixture
@@ -1435,6 +1464,83 @@ target yet - the suites run inside the app's selftest binary, which is a
 JUCE application (the review's R089). See
 [`sample-codec-edge.md`](sample-codec-edge.md).
 
-Gate: app selftest 2,500/2,500, golden render `0x6d7571bdd80e3cd9`
+### R2.10 record (2026-11-27)
+
+The tuning's data and the tuning's file format are separate now - the
+eighth codec edge, after the arc's (R2.2), the page's (R2.4), the arc
+group's (R2.5), the envelope's (R2.6), the wave's (R2.7), the channel's
+(R2.8) and the sample slot's (R2.9).
+
+| Measure | Before | After |
+|---|---|---|
+| the tuning | `Source/Tuning.h`, 505 lines: the data, the behaviour and the file format | `Source/Tuning.h`, 468 lines: the data and the behaviour |
+| the tuning's codec | two members of the class | `Source/TuningCodec.h`, 65 lines: `tuningToVar` and `tuningFromVar` |
+| the tuning's own suite | - | `Source/SelfTestTuningCodec.cpp`, 46 checks |
+| the gate's JUCE-free groups | 5 | 5 (the tuning is not one of them - its value types are deferred, §2) |
+
+The two members became two free functions:
+
+| before | after |
+|---|---|
+| `Tuning::toVar()` | `upic::tuningToVar (const Tuning&)` |
+| `Tuning::fromVar (const juce::var&)` | `upic::tuningFromVar (const juce::var&)` |
+
+The bodies are the old members, body for body - the comparison is
+mechanical, line for line, modulo the `t.` the free function needs and the
+whitespace: 7 lines for the writer, 23 for the reader. The property names
+(name, base, cents), their order, the clamps a crafted file gets, the rules
+a scale has to follow and the rule that a broken tuning falls back to the
+default WHOLE are the file format itself, and they did not change by a
+character.
+
+**The value types stay.** The tuning holds `juce::String name`. The plan
+defers replacing the domain's value types (§2), so `Source/Tuning.h` still
+asks for the JUCE header and the tuning is not one of the gate's JUCE-free
+groups. The gate's groups are the same five as before this phase.
+
+**The behaviour stayed too.** `isDefault`, `degrees`, `baseFreq`,
+`degreeToCents`, `centsToDegree`, `stepToFreq`, `freqToStep`, `midiToFreq`,
+`freqToMidi`, `snapToStep`, `stepInRange`, `axisStepsInRange`,
+`stepFreqsInRange` and `describe` are the tuning's behaviour, not its file
+format, so they stayed in `Tuning.h`.
+
+**The Scala importer is still in the domain.** `parseScalaTuning` and its
+helpers read a Scala file. Reading a file is an edge of its own - the same
+way the sample's file reading is.
+
+**The suite came first.** `Source/SelfTestTuningCodec.cpp` (46 checks) was
+written against the codec where it was, and it passes unchanged after the
+move. It reaches the codec through one door (the `encode` / `decode` helpers
+at the top of the file) and reads the name through one more helper, so the
+move touched the suite in one place and the checks themselves did not
+change.
+
+What the suite pins, and what is worth knowing:
+
+- **A broken scale discards the whole tuning.** The fallback is a fresh
+  `Tuning{}`, not a tuning with a bad scale: the name and the base note go
+  with the degrees. A piece must always load, and the rule is "the tuning
+  is good or it is the default one".
+- **The scale must start at the base.** The first degree has to be 0 cents,
+  within a hundredth of a cent: 0.01 is accepted, 0.02 is not.
+- **The degrees must strictly rise.** Two degrees the same are refused as
+  firmly as one that falls.
+- **The degrees live in one octave.** A degree at 1200 cents is refused -
+  the octave repeats the base, so it is not a degree.
+- **The base note is clamped to MIDI 0..127**, and the name is *not* length
+  cut (the channel's name is).
+
+What is still open: the other domain headers still carry their own
+`toVar` / `fromVar` members (`Piece.h`, `Sieve.h`, `Performance.h`,
+`FreqSpace.h`), and the domain's data still holds JUCE values (the
+`juce::String name` and the `juce::Colour` of the groups, the envelopes,
+the waves and the channels) - that is the deferred type migration; the file
+readers are still in the domain (the Scala importer in `Source/Tuning.h` and
+the sample's `loadSampleFile`); and there is no headless domain target yet
+- the suites run inside the app's selftest binary, which is a JUCE
+application (the review's R089). See
+[`tuning-codec-edge.md`](tuning-codec-edge.md).
+
+Gate: app selftest 2,546/2,546, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
