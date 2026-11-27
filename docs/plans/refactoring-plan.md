@@ -452,6 +452,31 @@ it first. The header now says what it uses - the same include `Arc.h` and
 untouched, the golden render and the legacy fixture are unchanged, and the
 full gate is green.
 
+### 6.11 R2.7 - the wave's codec edge
+
+**What moves.** The wave's file format moves out of `Waveform.h` into the
+new `Source/WaveformCodec.h`: `juce::var toVar()` and `static Waveform
+fromVar()` become `upic::waveformToVar (const Waveform&)` and
+`upic::waveformFromVar (const juce::var&, int fallbackId)`. The bodies are
+the old members, body for body.
+
+**What stays.** The wave's data in `Waveform.h`: the id, the name, the
+colour, the table of samples, the generators and the lookup the oscillator
+reads. The name and the colour stay JUCE's: the plan defers replacing the
+domain's value types (§2), so `Waveform.h` still asks for the JUCE header
+and the wave is not one of the gate's JUCE-free groups.
+
+**The contract.** A suite of the wave's own, written before the move:
+`Source/SelfTestWaveCodec.cpp`, 29 checks that reach the wave through the
+domain's headers alone. It pins the keys and their order, the defaults the
+file uses (which are not the defaults the data uses), the id (which is not
+clamped at all), the table (its length, its cap, and the fact that its
+values are not clamped) and the round trip.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, and the
+full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -480,13 +505,13 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1` | app selftest 2,346/2,346, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295` | app selftest 2,375/2,375, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
-| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,346/2,346, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,375/2,375, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R9 Integration and cleanup | not started | - | - |
 
 Baseline commit: `b5368b1` (0.38.0), app selftest 1,785/1,785, legacy fixture
@@ -1082,6 +1107,84 @@ domain target yet - the suites run inside the app's selftest binary, which
 is a JUCE application (the review's R089). See
 [`envelope-codec-edge.md`](envelope-codec-edge.md).
 
-Gate: app selftest 2,346/2,346, golden render `0x6d7571bdd80e3cd9`
+### R2.7 record (2026-11-27)
+
+The wave's data and the wave's file format are separate now - the fifth
+codec edge, after the arc's (R2.2), the page's (R2.4), the arc group's
+(R2.5) and the envelope's (R2.6).
+
+| Measure | Before | After |
+|---|---|---|
+| the wave | `Source/Waveform.h`, 139 lines: the data and the file format | `Source/Waveform.h`, 108 lines: the data only |
+| the wave's codec | two members of the class | `Source/WaveformCodec.h`, 61 lines: `waveformToVar` and `waveformFromVar` |
+| the wave's own suite | - | `Source/SelfTestWaveCodec.cpp`, 29 checks |
+| the gate's JUCE-free groups | 5 | 5 (the wave is not one of them - its value types are deferred, §2) |
+
+The two members became two free functions:
+
+| before | after |
+|---|---|
+| `Waveform::toVar()` | `upic::waveformToVar (const Waveform&)` |
+| `Waveform::fromVar (const juce::var&, int)` | `upic::waveformFromVar (const juce::var&, int fallbackId)` |
+
+The bodies are the old members, body for body - the comparison is
+mechanical, line for line, modulo the `w.` the free function needs and the
+whitespace: 9 lines for the writer, 19 for the reader. The property names
+(id, name, colour, samples), their order, the defaults a file without them
+falls back to ("Wave", `0xff5ac8fa`) and the cap a table over the limit gets
+(4096) are the file format itself, and they did not change by a character.
+
+**The value types stay.** The wave holds `juce::String name` and
+`juce::Colour colour`. The plan defers replacing the domain's value types
+(§2), so `Source/Waveform.h` still asks for the JUCE header and the wave is
+not one of the gate's JUCE-free groups. The gate's groups are the same five
+as before this phase.
+
+**The behaviour stayed too.** The wave's generators (`makeSine`, `makeSaw`,
+`makeSquare`, `makeTriangle`, `makeNoise`, `makeRandomSmooth`), its
+`normalize`, its `smooth`, its `valueAt` lookup and `waveFromTake` - the
+digitising of a recording - are the wave's behaviour, not its file format,
+so they stayed in `Waveform.h`.
+
+**The suite came first.** `Source/SelfTestWaveCodec.cpp` (29 checks) was
+written against the codec where it was, and it passes unchanged after the
+move. It reaches the codec through one door (the `encode` / `decode` helpers
+at the top of the file) and reads the name and the colour through two more
+helpers, so the move touched the suite in one place and the checks
+themselves did not change.
+
+What the suite pins, and what is worth knowing:
+
+- **The file's defaults are not the data's defaults.** A new wave is called
+  *Sine* and has the palette's cyan (`0xff00ffff`); a file without a name
+  gives *Wave*, and a file without a colour gives the file's own blue
+  (`0xff5ac8fa`). The file's defaults are the ones a crafted or old file
+  gets, and they are not the ones a new wave has.
+- **The id is not clamped at all.** A negative id stays negative, a huge one
+  stays huge, and a fractional one is cut towards zero. The other banks
+  clamp their ids; the wave's does not.
+- **The samples are not clamped either.** A file may carry a value outside
+  -1..1 and it survives the read untouched - and so does a value that is not
+  a number at all. The table is the wave's, not the engine's.
+- **The table keeps the length the file gave it.** The piece carries the
+  samples, so a wave imported with 4096 samples stays a 4096-sample wave;
+  the table is not padded to the default size. Two exceptions, both pinned:
+  an **empty** table and a file with **no** table leave the default table of
+  1024 zeros in place.
+- **A sample is a double in the file**, not a float: the writer adds
+  `(double) s`, and the reader reads it back as `(float) (double)`.
+
+What is still open: the other domain headers still carry their own
+`toVar` / `fromVar` members (`Piece.h`, `Sample.h`, `Tuning.h`, `Sieve.h`,
+`Channel.h`, `Performance.h`, `FreqSpace.h`), and the domain's data still
+holds JUCE values (the `juce::String name` and the `juce::Colour` of the
+groups, the envelopes, the waves and the channels) - that is the deferred
+type migration; the sample's file reading is still in the domain
+(`Source/Sample.h` reads `juce::File`s); and there is no headless domain
+target yet - the suites run inside the app's selftest binary, which is a
+JUCE application (the review's R089). See
+[`wave-codec-edge.md`](wave-codec-edge.md).
+
+Gate: app selftest 2,375/2,375, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
