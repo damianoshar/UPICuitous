@@ -49,11 +49,12 @@ edge where the JUCE value types live. The plan keeps them there (R2), and
 the check says so by leaving the edge out.
 
 The document session (`Source/DocumentSession.h`, R3.1) is not in a group
-either. It asks for no JUCE header today - the state it owns is three
-counters - but it is the application layer's owner of the document, and the
-undo history comes behind it (with JUCE, because the labels are strings
-and the snapshots are pieces). A group for it would be a rule that has to
-be taken back in a later phase.
+either. It was JUCE-free while it owned only the document's state (three
+counters), and it asks for JUCE now that it owns the history too (R3.2:
+the labels are strings and the snapshots are pieces). Either way it is the
+application layer's owner of the document, so a group for it would be a
+rule that has to be taken back in a later phase. It is left out, as the
+codecs are.
 
 An empty permitted list is a list: it forbids every project header. No group
 uses one yet - the leaf rule is for the day the domain's value types move
@@ -108,9 +109,9 @@ build. The gate's step is:
     B1/B2 the arc (1 file): no JUCE header, no header outside the group
     B1/B2 the arc's geometry (1 file): no JUCE header, no header outside the group
     B1/B2 the page (1 file): no JUCE header, no header outside the group
-    B3 the Projucer project lists all 49 source files
+    B3 the Projucer project lists all 50 source files
     B4 the plugin's two targets carry the same 19 source files
-    B5 the generated Visual Studio project lists all 49 source files
+    B5 the generated Visual Studio project lists all 50 source files
     dependency boundaries: 5 rules, 0 violations
 ```
 

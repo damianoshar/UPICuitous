@@ -708,6 +708,36 @@ The undo history will bring JUCE with it.
 untouched, the golden render and the legacy fixture are unchanged, and the
 full gate is green.
 
+### 6.19 R3.2 - the undo history
+
+**What moves.** The document's history leaves `MainComponent` and moves into
+`Source/DocumentSession.h`: the undo stack, the redo stack, the pending
+snapshot of the open transaction and the two bounds (50 steps, 64 MB)
+become the session's own. `MainComponent`'s `UndoEntry` becomes the session's
+private `Entry`, and `estimateModelBytes()` - the size of a snapshot, which
+the memory bound counts - moves with it.
+
+**What stays.** The shell's half of the undo: the gain slider's flag, the
+selection (the selected wave, envelope, amplitude table, sequence and sample
+slot), the transport (an undo does not silence the app) and the messages
+("Undo: <label>", "The undo could not be applied"). The component installs
+the session's two doors in its constructor - `capturePieceModel()` and
+`restorePieceModel()` - and the restore goes through the normal loader, so an
+undone piece gets the same checks and the same limits as a loaded one.
+
+**The contract.** A suite of the history's own, written before the move:
+`Source/SelfTestUndoHistory.cpp`, 59 checks. It pins the fresh document, one
+edit, the undo, the redo, an undo with nothing to undo, the new branch, the
+open transaction, the two bounds, the selection and the transport.
+
+**The class needs JUCE now.** The labels are strings and the snapshots are
+pieces, so the session asks for `<JuceHeader.h>` and `Piece.h`. It stays out
+of the boundary check's JUCE-free groups, as it already did.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, and the
+full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -737,7 +767,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R3 Document and commands | **R3.1 shipped** | `5e0c897`, `5836337` | app selftest 2,736/2,736, the document's revision, the epoch and the unsaved flag have one owner - the document session, the session's own suite 30/30, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R3 Document and commands | **R3.2 shipped** | `27f2a62`, `4f8be2a` | app selftest 2,795/2,795, the document's revision, the epoch, the unsaved flag and the undo history have one owner - the document session, the session's own suite 30/30 and the history's own suite 59/59, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
@@ -2036,5 +2066,96 @@ is not reached yet. See
 [`document-session.md`](document-session.md).
 
 Gate: app selftest 2,736/2,736, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
+
+### R3.2 record (2026-11-27)
+
+The document's history has one owner now: the document session. The
+review's R007 ("the undo history lives outside the document session") is
+answered.
+
+| Measure | Before | After |
+|---|---|---|
+| the history's owner | `MainComponent` | `Source/DocumentSession.h`: the session owns the steps |
+| the steps | `MainComponent::undoStack`, `redoStack` (`std::vector<UndoEntry>`) | `DocumentSession::undoStack_`, `redoStack_` (`std::vector<Entry>`) |
+| one step | `MainComponent::UndoEntry` | `DocumentSession::Entry` |
+| the open transaction | `pendingEdit`, `pendingRevision`, `pendingLabel` | `pendingEdit_`, `pendingRevision_`, `pendingLabel_` |
+| the memory the steps take | `undoBytes`, `redoBytes` | `undoBytes_`, `redoBytes_` |
+| the bounds | `kMaxUndoSteps`, `kMaxUndoBytes` | `DocumentSession::Limits` (50 steps, 64 MB) |
+| the size of a snapshot | `estimateModelBytes()` in `MainComponentJobs.cpp` | `DocumentSession::estimateModelBytes()` |
+| the history's own suite | - | `Source/SelfTestUndoHistory.cpp`, 59 checks |
+| the gate's JUCE-free groups | 5 | 5 |
+
+The state moved:
+
+| before | after |
+|---|---|
+| `MainComponent::UndoEntry` | `DocumentSession::Entry` |
+| `MainComponent::undoStack`, `redoStack` | `DocumentSession::undoStack_`, `redoStack_` |
+| `MainComponent::undoBytes`, `redoBytes` | `DocumentSession::undoBytes_`, `redoBytes_` |
+| `MainComponent::pendingEdit` | `DocumentSession::pendingEdit_` |
+| `MainComponent::pendingRevision` | `DocumentSession::pendingRevision_` |
+| `MainComponent::pendingLabel` | `DocumentSession::pendingLabel_` |
+| `MainComponent::kMaxUndoSteps`, `kMaxUndoBytes` | `DocumentSession::Limits::steps`, `Limits::bytes` |
+| `estimateModelBytes()` (a free function) | `DocumentSession::estimateModelBytes()` |
+| `canUndo()`, `canRedo()`, `undoDepth()`, `redoDepth()` | the same methods, one-liners over the session |
+| `undoLabel()`, `redoLabel()` | the same methods, over the session |
+
+**The suite came first.** `Source/SelfTestUndoHistory.cpp` (59 checks) was
+written against the history where it was, and it passes unchanged after the
+move. It reads the history through the component's own doors (canUndo,
+undoLabel, undoDepth, ...), so the move touched the suite in one place and
+the checks themselves did not change.
+
+What the suite pins, and what is worth knowing:
+
+- **A fresh app already has the demo page.** Five arcs, not none: the suite
+  had to learn that before it could count the arcs.
+- **The loader puts the selection on the first item of the bank it loads.**
+  The undo's own restore puts the selection back when the material is still
+  there, and falls back to the first wave when it is gone.
+- **An undo with nothing to undo leaves an open gesture open.** The gesture's
+  step is pushed when the gesture ends, not before - so an undo that has
+  nothing to undo does not close a slider drag behind the user's back.
+- **An undo closes an open gesture and undoes its step.** The gesture's step
+  is closed and undone like any other.
+- **A new edit after an undo clears the redo stack.** A new branch.
+- **Both bounds evict the oldest first.** 50 steps, and 64 MB of snapshots;
+  a step that does not fit the memory bound at all is not kept.
+- **The failed restore loses the entry.** The step is popped before the
+  restore, so a piece that cannot be put back is gone from the stack. That
+  is the existing behaviour and it is kept as it is; it is not reachable
+  through the public API (the loader only refuses a piece that is not a
+  piece, and a snapshot is always one).
+
+**The shell keeps its half.** The gain slider's flag, the selection, the
+transport and the messages stay with the component: they are the shell's
+work, not the document's. The component installs the session's two doors in
+its constructor - `capturePieceModel()` and `restorePieceModel()` - and the
+restore goes through the normal loader, so an undone piece gets the same
+checks and the same limits as a loaded one. The undo's failure path moved to
+the caller: the session says "failed", the component says "The undo could
+not be applied".
+
+**The mechanical check.** The bodies moved line for line, after the renames
+the move needs: `estimateModelBytes` (15 lines), `beginEdit` (7), `endEdit`
+(22), `undoLabel` (3), `redoLabel` (3), the undo's stacks (14), the redo's
+stacks (14), the undo's selection (6) and restore (4), the redo's selection
+(6) and restore (4), the loader call and the four messages. All identical.
+
+**The class needs JUCE now.** The labels are strings and the snapshots are
+pieces, so the session asks for `<JuceHeader.h>` and `Piece.h`. It stays
+out of the boundary check's JUCE-free groups - as it already did, and for
+the reason the note gives.
+
+What is still open: the selection (the review's R006) is still the
+component's own, and the model still changes through `markModelChanged()`
+at the end of a hundred call sites rather than through a command that says
+what it did (R008) - one command = one labelled transaction = one revision
+is R3's exit criterion, and it is not reached yet. See
+[`document-session.md`](document-session.md).
+
+Gate: app selftest 2,795/2,795, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
