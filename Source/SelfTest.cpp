@@ -151,6 +151,8 @@ int upic::runSelfTest()
     upic::runArcGeometryChecks (t);
     // R2.4: the page's codec - the file format of a page.
     upic::runPageCodecChecks (t);
+    // R2.5: the arc group's data and its file format.
+    upic::runArcGroupCodecChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

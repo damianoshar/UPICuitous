@@ -22,6 +22,7 @@
       <FILE id="sTa24" name="SelfTestArc.cpp" compile="1" resource="0" file="Source/SelfTestArc.cpp"/>
       <FILE id="sTg25" name="SelfTestArcGeometry.cpp" compile="1" resource="0" file="Source/SelfTestArcGeometry.cpp"/>
       <FILE id="sTp26" name="SelfTestPageCodec.cpp" compile="1" resource="0" file="Source/SelfTestPageCodec.cpp"/>
+      <FILE id="sTg27" name="SelfTestArcGroup.cpp" compile="1" resource="0" file="Source/SelfTestArcGroup.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>
