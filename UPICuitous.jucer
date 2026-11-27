@@ -37,6 +37,7 @@
       <FILE id="sCm39" name="SelfTestCommands.cpp" compile="1" resource="0" file="Source/SelfTestCommands.cpp"/>
       <FILE id="sMc40" name="SelfTestModelCommands.cpp" compile="1" resource="0" file="Source/SelfTestModelCommands.cpp"/>
       <FILE id="sPc41" name="SelfTestPieceCodec.cpp" compile="1" resource="0" file="Source/SelfTestPieceCodec.cpp"/>
+      <FILE id="sDo45" name="SelfTestDocumentIO.cpp" compile="1" resource="0" file="Source/SelfTestDocumentIO.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>

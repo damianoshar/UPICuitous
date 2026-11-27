@@ -96,6 +96,7 @@ namespace upic
     void runCommandChecks (SelfTest& t);          // R3.4: the command dispatcher - the unit of change
     void runModelCommandChecks (SelfTest& t);     // R3.5: the edits that become commands
     void runPieceCodecChecks (SelfTest& t);       // R4.1: the document's codec - the file format
+    void runDocumentIOChecks (SelfTest& t);       // R4.2: the document's file adapter - the read and the write
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);

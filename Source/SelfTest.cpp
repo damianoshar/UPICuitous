@@ -181,6 +181,8 @@ int upic::runSelfTest()
     upic::runModelCommandChecks (t);
     // R4.1: the document's codec - the file format of a piece.
     upic::runPieceCodecChecks (t);
+    // R4.2: the document's file adapter - the read and the write.
+    upic::runDocumentIOChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
