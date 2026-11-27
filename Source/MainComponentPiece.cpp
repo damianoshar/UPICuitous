@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "PageCodec.h"
 #include "EnvelopeCodec.h"
+#include "WaveformCodec.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -161,7 +162,7 @@ bool MainComponent::loadFromVar(const juce::var& v)
         for (auto& wv : *arr)
         {
             if ((int) newWaves.size() >= upic::limits::kMaxWaveforms) break;
-            newWaves.push_back(upic::Waveform::fromVar(wv, i++));
+            newWaves.push_back(upic::waveformFromVar (wv, i++));
         }
         noteDrop ("wavetable", "wavetables", (int) arr->size() - (int) newWaves.size());
     }

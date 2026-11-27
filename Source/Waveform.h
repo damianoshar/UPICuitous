@@ -71,40 +71,9 @@ namespace upic
             return samples[(size_t)i0] * (1.0f - f) + samples[(size_t)i1] * f;
         }
 
-        juce::var toVar() const
-        {
-            auto* o = new juce::DynamicObject();
-            o->setProperty("id", id);
-            o->setProperty("name", name);
-            o->setProperty("colour", (int) colour.getARGB());
-            juce::Array<juce::var> arr;
-            arr.ensureStorageAllocated((int) samples.size());
-            for (auto s : samples) arr.add((double) s);
-            o->setProperty("samples", arr);
-            return juce::var(o);
-        }
-        static Waveform fromVar(const juce::var& v, int fallbackId)
-        {
-            Waveform w;
-            w.id = (int) v.getProperty("id", fallbackId);
-            w.name = v.getProperty("name", "Wave").toString();
-            w.colour = juce::Colour((juce::uint32)(int) v.getProperty("colour", (int)0xff5ac8fa));
-            if (auto* arr = v.getProperty("samples", juce::var()).getArray())
-            {
-                // WP10: the length is the wave's own. The piece carries the
-                // samples, so the table keeps the length it was written
-                // with - up to the cap. A piece with no samples keeps the
-                // default size.
-                const int n = juce::jmin (kMaxWaveSize, (int) arr->size());
-                if (n > 0)
-                {
-                    w.samples.assign ((size_t) n, 0.0f);
-                    for (int i = 0; i < n; ++i)
-                        w.samples[(size_t)i] = (float)(double)(*arr)[i];
-                }
-            }
-            return w;
-        }
+        // R2.7: the file format of a wave is a different thing from what a
+        // wave is. It lives at the edge (Source/WaveformCodec.h), where the
+        // JUCE value types are kept.
     };
     //---------------- the digitised wave page (U4) ----------------
     // The real UPIC could fill the wave page from a recording: the wavetable

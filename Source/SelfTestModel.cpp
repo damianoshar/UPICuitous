@@ -6,6 +6,7 @@
 #include "ArcGeometry.h"
 #include "GraphicalCurve.h"
 #include "PageCodec.h"
+#include "WaveformCodec.h"
 
 //==============================================================================
 // The model: the pitch transformations, the frequency spaces, the staircase,
@@ -4603,17 +4604,17 @@ void upic::runWP10WaveChecks (upic::SelfTest& t)
 
     // --- a table over the cap is cut when it is read ------------------------
     {
-        auto payload = makeRamp (0, upic::kMaxWaveSize).toVar();
+        auto payload = upic::waveformToVar (makeRamp (0, upic::kMaxWaveSize));
         if (auto* obj = payload.getDynamicObject())
             if (auto* arr = obj->getProperty ("samples").getArray())
                 arr->add (0.5);
-        const auto clamped = upic::Waveform::fromVar (payload, 0);
+        const auto clamped = upic::waveformFromVar (payload, 0);
         check ((int) clamped.samples.size() == upic::kMaxWaveSize,
                "WP10 a wavetable over the cap is cut when it is read",
                juce::String (clamped.samples.size()));
 
         auto* empty = new juce::DynamicObject();
-        const auto fallback = upic::Waveform::fromVar (juce::var (empty), 3);
+        const auto fallback = upic::waveformFromVar (juce::var (empty), 3);
         check ((int) fallback.samples.size() == upic::kWaveSize && fallback.id == 3,
                "WP10 a wavetable without samples keeps the default size",
                juce::String ((int) fallback.samples.size()));

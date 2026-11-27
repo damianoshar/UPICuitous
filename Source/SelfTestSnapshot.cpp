@@ -4,6 +4,7 @@
 #include "AllocCounter.h"
 #include "PageCodec.h"
 #include "EnvelopeCodec.h"
+#include "WaveformCodec.h"
 
 //==============================================================================
 // The offscreen snapshot of the whole window: the layout at every size, the
@@ -1181,7 +1182,7 @@ void upic::runSnapshotChecks (upic::SelfTest& t)
                         page = upic::pageFromVar (pages->getReference (0));
                     const auto wavesVar = pv.getProperty ("waveforms", juce::var());
                     if (auto* arr = wavesVar.getArray(); arr != nullptr)
-                        for (auto& w : *arr) waves.push_back (upic::Waveform::fromVar (w, 0));
+                        for (auto& w : *arr) waves.push_back (upic::waveformFromVar (w, 0));
                     const auto envsVar = pv.getProperty ("envelopes", juce::var());
                     if (auto* arr = envsVar.getArray(); arr != nullptr)
                         for (auto& e : *arr) envs.push_back (upic::envelopeFromVar (e, 0));

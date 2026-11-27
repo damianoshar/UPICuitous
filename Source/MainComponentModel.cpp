@@ -2,6 +2,7 @@
 #include "UserLibrary.h"
 #include "GraphicalCurve.h"
 #include "EnvelopeCodec.h"
+#include "WaveformCodec.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -1151,7 +1152,7 @@ bool MainComponent::libraryPublishWave()
 
     juce::String error;
     if (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, wave.id,
-                                      wave.name, wave.colour, wave.toVar(), error))
+                                      wave.name, wave.colour, upic::waveformToVar (wave), error))
     {
         flash (error);
         return false;
@@ -1204,7 +1205,7 @@ bool MainComponent::libraryImportWave()
             return false;
         }
 
-        upic::Waveform imported = upic::Waveform::fromVar (asset.payload, newId);
+        upic::Waveform imported = upic::waveformFromVar (asset.payload, newId);
         imported.id = newId; // the library's id never becomes a local id
         imported.name = uniqueBankName (waveforms, asset.name);
         imported.colour = asset.colour;

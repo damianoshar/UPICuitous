@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Waveform.h"
+#include "WaveformCodec.h"
 #include "UpicConstants.h"
 
 //==============================================================================
@@ -34,8 +35,8 @@
 namespace
 {
     // The wave's codec, reached through one door.
-    juce::var encode (const upic::Waveform& w) { return w.toVar(); }
-    upic::Waveform decode (const juce::var& v, int fallbackId = 0) { return upic::Waveform::fromVar (v, fallbackId); }
+    juce::var encode (const upic::Waveform& w) { return upic::waveformToVar (w); }
+    upic::Waveform decode (const juce::var& v, int fallbackId = 0) { return upic::waveformFromVar (v, fallbackId); }
 
     // The wave's name as text, and its colour as a colour - whatever the
     // domain holds.

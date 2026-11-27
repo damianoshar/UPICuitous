@@ -9,6 +9,7 @@
 #include "PieceLimits.h"
 #include "Sample.h"
 #include "Tuning.h"
+#include "WaveformCodec.h"
 
 namespace upic
 {
@@ -104,7 +105,7 @@ namespace upic
         if (m.tuning.custom)
             o->setProperty("tuning", m.tuning.toVar());
         juce::Array<juce::var> wa, ea, pa, sa;
-        for (auto& w : m.waveforms) wa.add (w.toVar());
+        for (auto& w : m.waveforms) wa.add (upic::waveformToVar (w));
         for (auto& e : m.envelopes) ea.add (upic::envelopeToVar (e));
         for (auto& s : m.sampleSlots) if (s.loaded()) sa.add (s.toVar (includeSampleAudio));
         for (auto& p : m.pages) pa.add (pageToVar (p));

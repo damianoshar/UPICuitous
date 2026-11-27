@@ -19,6 +19,7 @@
 #include "UserLibrary.h"
 #include "Ids.h"
 #include "EnvelopeCodec.h"
+#include "WaveformCodec.h"
 
 #if JUCE_WINDOWS
 namespace juce
@@ -113,7 +114,7 @@ namespace
     {
         upic::Waveform w (id, name, juce::Colours::orange);
         w.makeSine();
-        return w.toVar();
+        return upic::waveformToVar (w);
     }
 
     juce::var envelopePayload (int id, const juce::String& name)
@@ -358,11 +359,11 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 upic::UserAsset asset;
                 const bool ok = upic::UserLibrary::read (upic::UserAssetKind::Wave, file,
                                                          asset, error);
-                const auto w = upic::Waveform::fromVar (asset.payload, 0);
+                const auto w = upic::waveformFromVar (asset.payload, 0);
                 bool sameSamples = ok && w.samples.size() == (size_t) upic::kWaveSize;
                 if (sameSamples)
                 {
-                    const auto expected = upic::Waveform::fromVar (
+                    const auto expected = upic::waveformFromVar (
                         wavePayload (5, "Round Wave"), 0);
                     for (size_t i = 0; i < w.samples.size(); ++i)
                         if (w.samples[i] != expected.samples[i]) { sameSamples = false; break; }
