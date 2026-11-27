@@ -573,6 +573,32 @@ broken tuning falls back to the default WHOLE.
 untouched, the golden render and the legacy fixture are unchanged, and the
 full gate is green.
 
+### 6.15 R2.11 - the sieve zone's codec edge
+
+**What moves.** The sieve zone's file format moves out of `Sieve.h` into the
+new `Source/SieveCodec.h`: `juce::var toVar()` and `static SieveZone
+fromVar()` become `upic::sieveZoneToVar (const SieveZone&)` and
+`upic::sieveZoneFromVar (const juce::var&)`. The bodies are the old
+members, body for body.
+
+**What stays.** The zone's data and behaviour in `Sieve.h`: the id, the time,
+the frequency range, the modulus, the remainders, the time grid and the
+stickiness, plus the containment test, the effective stickiness, the preset
+library, the quantisation that uses the zones and the freehand curve
+simplification.
+
+**The contract.** A suite of the sieve zone's own, written before the move:
+`Source/SelfTestSieveCodec.cpp`, 65 checks that reach the zone through the
+domain's headers alone. It pins the keys and their order (and the two that
+come only when they carry something), the order independence of the times
+and the frequencies, the clamps, the defaults the file uses (which are not
+the defaults the data uses), the folding of the remainders into the modulus
+and the rule that the codec does not touch the id.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, and the
+full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -601,13 +627,13 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985` | app selftest 2,546/2,546, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5` | app selftest 2,611/2,611, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
-| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,546/2,546, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,611/2,611, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R9 Integration and cleanup | not started | - | - |
 
 Baseline commit: `b5368b1` (0.38.0), app selftest 1,785/1,785, legacy fixture
@@ -1542,5 +1568,93 @@ application (the review's R089). See
 [`tuning-codec-edge.md`](tuning-codec-edge.md).
 
 Gate: app selftest 2,546/2,546, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
+
+### R2.11 record (2026-11-27)
+
+The sieve zone's data and the sieve zone's file format are separate now - the
+ninth codec edge, after the arc's (R2.2), the page's (R2.4), the arc
+group's (R2.5), the envelope's (R2.6), the wave's (R2.7), the channel's
+(R2.8), the sample slot's (R2.9) and the tuning's (R2.10).
+
+| Measure | Before | After |
+|---|---|---|
+| the sieve zone | `Source/Sieve.h`, 198 lines: the data, the behaviour and the file format | `Source/Sieve.h`, 161 lines: the data and the behaviour |
+| the sieve zone's codec | two members of the class | `Source/SieveCodec.h`, 79 lines: `sieveZoneToVar` and `sieveZoneFromVar` |
+| the sieve zone's own suite | - | `Source/SelfTestSieveCodec.cpp`, 65 checks |
+| the gate's JUCE-free groups | 5 | 5 (the zone is not one of them - its neighbours' value types are deferred, §2) |
+
+The two members became two free functions:
+
+| before | after |
+|---|---|
+| `SieveZone::toVar()` | `upic::sieveZoneToVar (const SieveZone&)` |
+| `SieveZone::fromVar (const juce::var&)` | `upic::sieveZoneFromVar (const juce::var&)` |
+
+The bodies are the old members, body for body - the comparison is
+mechanical, line for line, modulo the `z.` the free function needs and the
+whitespace: 13 lines for the writer, 21 for the reader. The property names
+(id, t0, t1, f0, f1, m, r), their order, the optional keys a default zone
+does not write (timeGrid, stick), the order independence of the times and
+the frequencies, the clamps a crafted file gets, the folding of the
+remainders into the modulus and the 5000 remainder cap are the file format
+itself, and they did not change by a character.
+
+**The behaviour stayed too.** `contains`, `effectiveStickiness`, `zoneAt`,
+`quantizePoint`, `sievePresets` and `simplifyArcPoints` are the zone's
+behaviour, not its file format, so they stayed in `Sieve.h`.
+
+**The suite came first.** `Source/SelfTestSieveCodec.cpp` (65 checks) was
+written against the codec where it was, and it passes unchanged after the
+move. It reaches the codec through one door (the `encode` / `decode` helpers
+at the top of the file), so the move touched the suite in one place and the
+checks themselves did not change.
+
+What the suite pins, and what is worth knowing:
+
+- **The file's default frequencies are the whole range, not 20 Hz.** A zone
+  with no `f0` and no `f1` comes back spanning 0.01 Hz to 22050 Hz. A
+  *fresh* zone is a point at 20 Hz. The two defaults are not the same: the
+  file's default is the safe one (a zone that covers everything), the
+  data's is the useful one (a zone you can see).
+- **A zone with no remainders allows nothing.** The data's default is the
+  C's (`{0}`); the file's default is an empty list. An empty remainder list
+  is not the chromatic set - it is no set at all.
+- **The times and the frequencies are written in order.** A zone drawn
+  "backwards" is written forwards, and the containment test is
+  order-independent anyway - so the file never carries a zone that reads
+  the wrong way round.
+- **The remainders are folded into the modulus, and the modulus is clamped
+  first.** A zone whose file says `m: 1` comes back with `m: 2`, and its
+  remainder 5 comes back as 1. A negative remainder wraps (a `-1` in a
+  12-tone sieve is the 11), a fractional one is cut to a whole one, and the
+  order and the duplicates are kept - the file's list is the zone's list.
+- **A stick of zero is a stick.** It is written, because it means "this zone
+  does not stick" - not "follow the global". A negative stick is not
+  written, and it means "follow the global"; that is how a zone written
+  before the per-zone stick (v1.33.2) keeps behaving the way it did.
+- **The codec does not touch the id.** A zero, a negative and a huge id
+  all survive the codec. The *page's* loader is what makes a piece's ids
+  unique (`uniquifyIds` in `Source/Ids.h`) - the zone's codec is not where
+  that happens.
+
+The clamps, for the record: the time 0..3600 s (the page's length), the
+frequency 0.01..22050 Hz (the app's range), the modulus 2..120, the time
+grid 0..64 divisions per second, the stickiness 0..1, and the remainders
+at most 5000. A value that is not a number falls to the lower bound - and
+a stickiness that is not a number means "follow the global", because a NaN
+is not "greater than or equal to zero".
+
+What is still open: the other domain headers still carry their own
+`toVar` / `fromVar` members (`Piece.h`, `Performance.h`, `FreqSpace.h`), and
+the domain's data still holds JUCE values (the `juce::String name` and the
+`juce::Colour` of the groups, the envelopes, the waves and the channels) -
+that is the deferred type migration; and there is no headless domain target
+yet - the suites run inside the app's selftest binary, which is a JUCE
+application (the review's R089). See
+[`sieve-codec-edge.md`](sieve-codec-edge.md).
+
+Gate: app selftest 2,611/2,611, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
