@@ -175,6 +175,8 @@ int upic::runSelfTest()
     upic::runUndoHistoryChecks (t);
     // R3.3: the selection model - what is selected.
     upic::runSelectionChecks (t);
+    // R3.4: the command dispatcher - the unit of change.
+    upic::runCommandChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

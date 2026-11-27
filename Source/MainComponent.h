@@ -219,6 +219,9 @@ public:
     // selection, the transport and the messages.
     void beginEdit (const juce::String& label);
     void endEdit();
+    // R3.4: the command dispatcher's state, for the suite that pins the
+    // command's contract. The production code never reads it through this.
+    bool commandOpenForTest() const { return document.hasOpenEdit(); }
     bool canUndo() const { return document.canUndo(); }
     bool canRedo() const { return document.canRedo(); }
     juce::String undoLabel() const;
