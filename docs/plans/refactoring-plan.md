@@ -80,7 +80,7 @@ Other structural facts the review depends on, verified here:
 | `getNextAudioBlock()` is ~750 lines | 385 lines | Adopt the goal, correct the size: the audio wave is justified by **ownership** (transport, snapshot, preview, device, render), not by that one function. |
 | `resized()` is ~1,500 lines | 1,400 lines | Adopt - it is the single best first extraction: pure geometry, no audio, no document. |
 | Move the tree into `Source/Domain/…` etc. | the Projucer project lists every file explicitly | **Adapt.** No bulk move. A file moves only when it is extracted, and each move updates the `.vcxproj` in the same commit. |
-| Replace `juce::String` / `juce::var` in the domain | the piece codec *is* JSON (`juce::var`) | **Defer.** Keep JUCE value types at the codec edge. Enforce *no new* GUI dependencies instead of a type migration. |
+| Replace `juce::String` / `juce::var` in the domain | the piece codec *is* JSON (`juce::var`) | **Defer, then narrow (R2.5).** The codec edge keeps the JUCE value types - the piece format is JSON, so `juce::var` stays there. But the domain's *data* gives up its JUCE value types one type at a time, each in its own phase, with the gate enforcing the result: R2.5 did the arc group (text, and an ARGB number). No wholesale migration, no change to the file format. |
 | Enforce dependency rules with CMake targets | the gate builds through MSBuild, not CMake | **Adapt.** Enforce with a source-level dependency check in the gate first; CMake targets come later and must keep both build paths green. |
 | Typed IDs (`ArcId`, `PageId`, …) | ids are plain ints in the file format | **Defer** until a specific confusion is demonstrated; if adopted, the serialized values stay ints. |
 | `MainComponent.h` should reach 100–250 lines | — | **Not a quota.** The target is ownership, not a line count. |
@@ -392,6 +392,29 @@ trip.
 untouched, the golden render and the legacy fixture are unchanged, the full
 gate is green, and the gate's fifth group is the page.
 
+### 6.9 R2.5 - the arc group's data and its file format
+
+**What moves.** The group's file format moves out of `ArcGroup.h` into the
+new `Source/ArcGroupCodec.h`: `juce::var toVar()` and `static ArcGroup
+fromVar()` become `upic::arcGroupToVar (const ArcGroup&)` and
+`upic::arcGroupFromVar (const juce::var&, int fallbackId)`. The group's two
+JUCE value types go with them: the name becomes text and the colour becomes
+the ARGB number the file already carried.
+
+**What stays.** The group's data in `ArcGroup.h`: the id, the name, the
+colour, the membership, the mute, the solo, the gain, the transpose and the
+four bank ids - and the render-time override beside it. `ArcGroup.h` asks
+for no JUCE header.
+
+**The contract.** A suite of the group's own, written before the move:
+`Source/SelfTestArcGroup.cpp`, 43 checks that reach the group through the
+domain's headers alone. It pins the keys and their order, the optional keys,
+the id, the name, the colour, the membership, the clamps and the round trip.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, the full
+gate is green, and the gate's sixth group is the group.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -399,8 +422,11 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 
 - **No bulk file move.** No `Source/Domain/…` tree until a module is actually
   extracted into it.
-- **No JUCE type migration** in the domain. `juce::String` and `juce::var`
-  stay at the edges; the piece format is JSON and the codec is `juce::var`.
+- **No wholesale JUCE type migration.** The codec edge keeps the JUCE value
+  types: the piece format is JSON and the codec is `juce::var`. The domain's
+  *data* gives them up one type at a time - R2.5 did the arc group, whose
+  name is now text and whose colour is the ARGB number the file carried
+  anyway - each in its own phase, each with the gate behind it.
 - **No CMake target split before the boundary check.** The Windows gate does
   not use the root CMake file, so a CMake-only restructuring would be
   unverified by the gate.
@@ -418,13 +444,13 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977` | app selftest 2,272/2,272, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5` | app selftest 2,315/2,315, the domain's numeric core, the arc, the arc's geometry, the page and the arc's group are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
-| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 18 self-tests, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 1,993/1,993, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over six JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,315/2,315, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R9 Integration and cleanup | not started | - | - |
 
 Baseline commit: `b5368b1` (0.38.0), app selftest 1,785/1,785, legacy fixture
@@ -862,5 +888,95 @@ binary, which is a JUCE application (the review's R089). See
 [`page-codec-edge.md`](page-codec-edge.md).
 
 Gate: app selftest 2,272/2,272, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
+
+### R2.5 record (2026-11-27)
+
+The arc group's data and the arc group's file format are separate now, and
+the group itself no longer holds a JUCE value type.
+
+| Measure | Before | After |
+|---|---|---|
+| the group | `Source/ArcGroup.h`, 112 lines: the data, the file format and two JUCE value types | `Source/ArcGroup.h`, 66 lines: the data only, no JUCE header |
+| the group's codec | two members of the class | `Source/ArcGroupCodec.h`, 79 lines: `arcGroupToVar` and `arcGroupFromVar` |
+| the group's own suite | - | `Source/SelfTestArcGroup.cpp`, 43 checks |
+| the gate's JUCE-free groups | 5 (the layout engines, the domain's numeric core, the arc, the arc's geometry, the page) | 6 (the same, plus the arc's group) |
+| the checker's self-tests | 18 | 20 |
+
+The two members became two free functions:
+
+| before | after |
+|---|---|
+| `ArcGroup::toVar()` | `upic::arcGroupToVar (const ArcGroup&)` |
+| `ArcGroup::fromVar (const juce::var&)` | `upic::arcGroupFromVar (const juce::var&, int fallbackId)` |
+
+The bodies are the old members, body for body - the comparison is
+mechanical, line for line, modulo the `g.` the free function needs and the
+two lines where the name and the colour changed their type. The property
+names, their order, the optional keys a default group does not write and the
+clamps a crafted file gets are the file format itself, and they did not
+change by a character.
+
+**The name and the colour.** The group held `juce::String name` and
+`juce::Colour colour`. The file already carried the colour as an integer -
+`(int) colour.getARGB()` - so the domain now holds that number itself
+(`std::uint32_t`) and the file is byte for byte what it was. The name is
+now text (`std::string`); the 64-character cut stays at the edge, where the
+JUCE string can count characters, so a name is cut exactly as it was.
+
+This is the first domain type whose JUCE value types leave its data. The
+deferral in §2 (and §7) is narrowed, not lifted: the codec edge keeps the
+JUCE value types - the piece format is JSON, so `juce::var` stays there -
+and the domain's data gives them up one type at a time, each in its own
+phase, with the gate behind it. The envelopes, the waves and the channels
+still hold theirs.
+
+**The group is the gate's sixth group.** It is a leaf: it holds text and a
+number, and nothing of the project's own, so its allowed list is empty. Two
+negative tests were run on the tree:
+
+- `#include <JuceHeader.h>` in `Source/ArcGroup.h` fails the gate with the
+  file and the line named;
+- `#include "PieceLimits.h"` in `Source/ArcGroup.h` fails the gate too -
+  the group may include no project header at all.
+
+That second test needed the checker to learn one thing: an empty allowed
+list is a list, and it forbids every project header. The old test skipped
+the check when the list was empty (an empty array is falsy in PowerShell),
+which would have left the group's boundary unenforced. Two self-tests cover
+the new behaviour - the checker's own tests are 20 now.
+
+**The suite came first.** `Source/SelfTestArcGroup.cpp` (43 checks) was
+written against the codec where it was, and it passes unchanged after the
+move. It reaches the codec through one door (the `encode` / `decode` helpers
+at the top of the file) and reads the name and the colour through two more
+helpers, so the move touched the suite in one place and the checks
+themselves did not change.
+
+What the suite pins, and what is worth knowing:
+
+- **A value that is not a number falls to the lower bound.** The domain's
+  `clampFinite` returns the lower bound for a value that is not finite, so a
+  NaN gain becomes 0 and a NaN transpose becomes -48. That is what the file
+  has always done, and the suite says so.
+- **An id of zero is 1, not the fallback.** The clamp runs first, so the
+  fallback only matters when the file carries no id at all.
+- **The colour is an ARGB number, and it stays one.** The file wrote
+  `(int) colour.getARGB()` and reads `(uint32) (int) value` - a negative
+  number in the file, and the same colour back.
+
+What is still open: the envelopes, the waves and the channels still hold
+`juce::String name` and `juce::Colour colour`, and the page still sees
+JUCE through them (and through the sieve's presets, the tuning and the
+theme); the other domain headers still carry their own `toVar` / `fromVar`
+members (`Envelope.h`, `Piece.h`, `Sample.h`, `Tuning.h`, `Sieve.h`,
+`Waveform.h`, `Channel.h`, `Performance.h`, `FreqSpace.h`); the sample's
+file reading is still in the domain (`Source/Sample.h` reads `juce::File`s);
+and there is no headless domain target yet - the suites run inside the app's
+selftest binary, which is a JUCE application (the review's R089). See
+[`arc-group-data.md`](arc-group-data.md).
+
+Gate: app selftest 2,315/2,315, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
