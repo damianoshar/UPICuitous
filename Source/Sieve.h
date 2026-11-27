@@ -63,46 +63,9 @@ namespace upic
                 && f >= juce::jmin(f0, f1) && f <= juce::jmax(f0, f1);
         }
 
-        juce::var toVar() const
-        {
-            auto* o = new juce::DynamicObject();
-            o->setProperty("id", id);
-            o->setProperty("t0", juce::jmin(t0, t1));
-            o->setProperty("t1", juce::jmax(t0, t1));
-            o->setProperty("f0", juce::jmin(f0, f1));
-            o->setProperty("f1", juce::jmax(f0, f1));
-            o->setProperty("m", m);
-            juce::Array<juce::var> ra;
-            for (int r : remainders) ra.add(r);
-            o->setProperty("r", ra);
-            if (timeGrid > 0) o->setProperty("timeGrid", timeGrid);
-            if (stickiness >= 0.0) o->setProperty("stick", stickiness);
-            return juce::var(o);
-        }
-        static SieveZone fromVar(const juce::var& v)
-        {
-            SieveZone z;
-            z.id = (int) v.getProperty("id", 1);
-            z.t0 = limits::clampFinite((double) v.getProperty("t0", 0.0), 0.0, kMaxPageSeconds);
-            z.t1 = limits::clampFinite((double) v.getProperty("t1", 0.0), 0.0, kMaxPageSeconds);
-            z.f0 = limits::clampFinite((double) v.getProperty("f0", kMinFreq), kMinFreq, kMaxFreq);
-            z.f1 = limits::clampFinite((double) v.getProperty("f1", kMaxFreq), kMinFreq, kMaxFreq);
-            z.m = juce::jlimit(2, 120, (int) v.getProperty("m", 12));
-            z.timeGrid = limits::clampFinite((double) v.getProperty("timeGrid", 0.0), 0.0, 64.0);
-            {
-                const double st = (double) v.getProperty("stick", -1.0);
-                z.stickiness = (st >= 0.0) ? limits::clampFinite(st, 0.0, 1.0) : -1.0;
-            }
-            std::vector<int> rs;
-            if (auto* arr = v.getProperty("r", juce::var()).getArray())
-                for (auto& rv : *arr)
-                {
-                    if ((int) rs.size() >= limits::kMaxSieveRemainders) break;
-                    rs.push_back((((int) rv % z.m) + z.m) % z.m);
-                }
-            z.remainders = std::move(rs);
-            return z;
-        }
+        // R2.11: the file format of a sieve zone is a different thing from
+        // what a zone is. It lives at the edge (Source/SieveCodec.h), where
+        // the JUCE value types are kept.
     };
 
     // Topmost zone wins (later zones paint on top), so magnetism matches what

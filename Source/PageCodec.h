@@ -35,6 +35,7 @@
 #include "Ids.h"
 #include "Page.h"
 #include "Sieve.h"
+#include "SieveCodec.h"
 
 namespace upic
 {
@@ -55,7 +56,7 @@ namespace upic
         if (! p.zones.empty())
         {
             juce::Array<juce::var> zarr;
-            for (auto& z : p.zones) zarr.add(z.toVar());
+            for (auto& z : p.zones) zarr.add(sieveZoneToVar (z));
             o->setProperty("zones", zarr);
             o->setProperty("nextZoneId", p.nextZoneId);
         }
@@ -142,7 +143,7 @@ namespace upic
             for (auto& zv : *zarr)
             {
                 if ((int) p.zones.size() >= limits::kMaxSieveZones) break;
-                p.zones.push_back(SieveZone::fromVar(zv));
+                p.zones.push_back(sieveZoneFromVar (zv));
             }
         renamed += uniquifyIds (p.zones, 1);
         p.nextZoneId = 1;

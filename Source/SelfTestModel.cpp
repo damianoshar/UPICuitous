@@ -6,6 +6,7 @@
 #include "ArcGeometry.h"
 #include "GraphicalCurve.h"
 #include "PageCodec.h"
+#include "SieveCodec.h"
 #include "WaveformCodec.h"
 
 //==============================================================================
@@ -749,14 +750,14 @@ void upic::runSieveChecks (upic::SelfTest& t)
         check(upic::zoneAt(zones, 1.0, 500.0) == nullptr, "zoneAt misses outside");
 
         z.stickiness = 0.4;
-        auto zj = upic::SieveZone::fromVar(juce::JSON::parse(juce::JSON::toString(z.toVar(), false)));
+        auto zj = upic::sieveZoneFromVar (juce::JSON::parse (juce::JSON::toString (upic::sieveZoneToVar (z), false)));
         check(zj.id == 7 && std::abs(zj.t0 - 5.0) < 1e-9 && std::abs(zj.f1 - 800.0) < 1e-9
               && zj.m == 12 && zj.remainders == z.remainders
               && std::abs(zj.timeGrid - 8.0) < 1e-9
               && std::abs(zj.stickiness - 0.4) < 1e-9, "zone JSON round-trip");
         {
             // a zone written before per-zone stickiness follows the global
-            auto legacy = upic::SieveZone::fromVar(juce::JSON::parse(
+            auto legacy = upic::sieveZoneFromVar (juce::JSON::parse(
                 "{\"id\":9,\"t0\":0,\"t1\":1,\"f0\":100,\"f1\":200,\"m\":12,\"r\":[0]}"));
             check(std::abs(legacy.stickiness + 1.0) < 1e-9,
                   "a legacy zone follows the global stick");

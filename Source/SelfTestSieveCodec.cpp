@@ -7,6 +7,7 @@
 
 #include "PieceLimits.h"
 #include "Sieve.h"
+#include "SieveCodec.h"
 #include "UpicConstants.h"
 
 //==============================================================================
@@ -38,8 +39,8 @@
 namespace
 {
     // The sieve zone's codec, reached through one door.
-    juce::var encode (const upic::SieveZone& z) { return z.toVar(); }
-    upic::SieveZone decode (const juce::var& v) { return upic::SieveZone::fromVar (v); }
+    juce::var encode (const upic::SieveZone& z) { return upic::sieveZoneToVar (z); }
+    upic::SieveZone decode (const juce::var& v) { return upic::sieveZoneFromVar (v); }
 
     // The property names of an object, in the order they were written.
     juce::StringArray names (const juce::var& v)
