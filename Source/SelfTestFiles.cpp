@@ -5,6 +5,7 @@
 #include "ArcCodec.h"
 #include "PageCodec.h"
 #include "SampleCodec.h"
+#include "TuningCodec.h"
 
 #if JUCE_WINDOWS
  #ifndef NOMINMAX
@@ -192,7 +193,7 @@ void upic::runLoadedPieceChecks (upic::SelfTest& t)
         const auto saved = mc.pieceToVar();
         auto* tuningVar = saved.getProperty ("tuning", juce::var()).getDynamicObject();
         check (tuningVar != nullptr, "the piece carries the tuning");
-        const auto back = upic::Tuning::fromVar (saved.getProperty ("tuning", juce::var()));
+        const auto back = upic::tuningFromVar (saved.getProperty ("tuning", juce::var()));
         check (back.custom && back.degrees() == 12 && back.name == "a test scale"
                && std::abs (back.cents[2] - 203.9099) < 1e-6,
                "the tuning survives the piece round trip");

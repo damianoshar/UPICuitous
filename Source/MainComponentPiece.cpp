@@ -4,6 +4,7 @@
 #include "WaveformCodec.h"
 #include "ChannelCodec.h"
 #include "SampleCodec.h"
+#include "TuningCodec.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -563,7 +564,7 @@ bool MainComponent::loadFromVar(const juce::var& v)
     score.setSieve(sieveOn, sieveM, sieveR);
     // M4: the tuning the piece was drawn in. An old piece carries none ->
     // 12-tone equal temperament, which is what it was drawn in.
-    tuning = upic::Tuning::fromVar (v.getProperty ("tuning", juce::var()));
+    tuning = upic::tuningFromVar (v.getProperty ("tuning", juce::var()));
     score.setTuning (tuning);
     // v1.2 state (defaults: full stickiness, no time grid = v1.1 behaviour)
     stickiness = upic::limits::clampFinite((double) v.getProperty("stickiness", 1.0), 0.0, 1.0);

@@ -11,6 +11,7 @@
 #include "Sample.h"
 #include "SampleCodec.h"
 #include "Tuning.h"
+#include "TuningCodec.h"
 #include "WaveformCodec.h"
 
 namespace upic
@@ -105,7 +106,7 @@ namespace upic
         // M4: the tuning. An old piece has none -> 12-tone equal
         // temperament, which is what it was drawn in.
         if (m.tuning.custom)
-            o->setProperty("tuning", m.tuning.toVar());
+            o->setProperty("tuning", upic::tuningToVar (m.tuning));
         juce::Array<juce::var> wa, ea, pa, sa;
         for (auto& w : m.waveforms) wa.add (upic::waveformToVar (w));
         for (auto& e : m.envelopes) ea.add (upic::envelopeToVar (e));

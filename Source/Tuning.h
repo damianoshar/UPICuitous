@@ -222,46 +222,9 @@ namespace upic
             return n.isNotEmpty() ? n : juce::String ("a tuning of ") + juce::String (degrees()) + " notes";
         }
 
-        // The tuning in a piece: the name, the base note and the degrees.
-        juce::var toVar() const
-        {
-            auto* o = new juce::DynamicObject();
-            o->setProperty ("name", name);
-            o->setProperty ("base", baseNote);
-            juce::Array<juce::var> c;
-            for (double x : cents) c.add (x);
-            o->setProperty ("cents", c);
-            return juce::var (o);
-        }
-
-        // A tuning read from a piece. A broken one falls back to the
-        // default: a piece must always load.
-        static Tuning fromVar (const juce::var& v)
-        {
-            Tuning t;
-            if (v.getDynamicObject() == nullptr) return t;
-
-            t.name = v.getProperty ("name", juce::var()).toString();
-            t.baseNote = juce::jlimit (0, 127, (int) v.getProperty ("base", 60));
-
-            if (auto* arr = v.getProperty ("cents", juce::var()).getArray())
-                for (auto& cv : *arr)
-                {
-                    const double c = (double) cv;
-                    if (! limits::isFinite (c) || c < 0.0 || c >= 1200.0) return Tuning{};
-                    if (t.cents.empty())
-                    {
-                        if (std::abs (c) > 0.01) return Tuning{};   // the base is 0 cents
-                    }
-                    else if (c <= t.cents.back()) return Tuning{};   // the degrees must rise
-                    if ((int) t.cents.size() >= limits::kMaxTuningDegrees) return Tuning{};
-                    t.cents.push_back (c);
-                }
-
-            if (t.cents.empty()) return Tuning{};   // no scale -> the default
-            t.custom = true;
-            return t;
-        }
+        // R2.10: the file format of a tuning is a different thing from what
+        // a tuning is. It lives at the edge (Source/TuningCodec.h), where
+        // the JUCE value types are kept.
     };
 
     // The app's default: 12-tone equal temperament with A440.

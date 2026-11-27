@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Tuning.h"
+#include "TuningCodec.h"
 #include "PieceLimits.h"
 
 //==============================================================================
@@ -33,8 +34,8 @@
 namespace
 {
     // The tuning's codec, reached through one door.
-    juce::var encode (const upic::Tuning& t) { return t.toVar(); }
-    upic::Tuning decode (const juce::var& v) { return upic::Tuning::fromVar (v); }
+    juce::var encode (const upic::Tuning& t) { return upic::tuningToVar (t); }
+    upic::Tuning decode (const juce::var& v) { return upic::tuningFromVar (v); }
 
     // The tuning's name as text - whatever the domain holds.
     juce::String textOf (const upic::Tuning& t) { return juce::String (t.name); }
