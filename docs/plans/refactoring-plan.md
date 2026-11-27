@@ -949,6 +949,70 @@ the converted callbacks is empty.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.23 R4.1 - the document's codec
+
+**What moves.** The document's read side moves out of
+`MainComponent::loadFromVar()` into the new `Source/PieceCodec.h`: the
+decode, the migration and the validation of a piece file, and the repairs
+the loader makes when a document is not quite right. The codec hands back
+a *candidate* - a `PieceModel` - and what it found out about the document
+(the parts that did not make it in, the ids that were renumbered, the
+references that were put back), and the caller puts the candidate in
+force.
+
+`Source/Piece.h` keeps the piece as data (`PieceModel`) and loses the
+file format: `pieceToVar()` moves to `PieceCodec.h`, body for body, so
+the piece's format lives in one file - the same place every other format
+in the app lives (`PageCodec.h`, `ArcCodec.h` and their neighbours).
+
+**What stays.** `MainComponent::loadFromVar()` keeps the *commit*: the
+swap under the model lock, the selection, the controls, the engine, the
+snapshot publication, the messages and the unsaved flag. And `loadFile()`
+keeps the file adapter (the size cap, the JSON parse and the guard
+around the parse). The load is transactional today and stays so: the
+document is read into temporaries first, and the active piece is touched
+only when the document really is a piece.
+
+**The one change.** `pieceToVar()` writes the two pitch modes only when
+the piece carries one. A document that carries none (an old piece)
+leaves the session's mode alone - which is what the loader already did,
+and what the old writer happened to lose on the way out. A live piece
+always carries its modes, so the golden render and the v0.29 fixture do
+not move.
+
+**The diagnostics.** The review asks for structured load errors rather
+than a single success flag (§32). The plan defers the type migration
+(§2), so the diagnostics carry the JUCE types the edge already uses:
+`PieceDiagnostics` holds the two messages the user is told (the parts
+that did not make it in, the parts that were adjusted) and the counts
+behind them. The wording of the messages does not change by a character.
+
+**The contract.** `Source/SelfTestPieceCodec.cpp`, written before the
+move. It pins what the loader does to a document today: what it refuses
+(a document that is not a piece is refused, and the piece is left alone),
+the defaults an old document gets, the clamps the numbers get, the sieve
+remainders that are folded into the sieve, the caps (what does not fit
+is dropped, and the user is told), the ids that are renumbered, the
+references that are put back, the modulator loop that is broken, the
+material's Ref that moves from the arc to the slot (M5), the workspace
+layout that comes back with the document, the pitch modes, the round trip
+and the unknown keys a document may carry.
+
+The suite reaches the loader through one door, so the move touches the
+suite in one place and the checks themselves do not change. After the
+move the door is the codec, and the suite reaches the document's format
+without a window, a component tree or an audio device.
+
+**The mechanical check.** The codec holds the parse, the repairs and the
+defaults, and the component holds the commit: the diff outside
+`loadFromVar()`'s two halves is empty, the production code does not call
+a test-only door, and the format's output is unchanged - the golden
+render and the v0.29 fixture say so.
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -979,7 +1043,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R4 Persistence | not started | - | - |
+| R4 Persistence | **R4.1 shipped** | `479d99b`, `6691a55` | app selftest 3,076/3,076, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
@@ -2673,3 +2737,93 @@ Gate: app selftest 2,993/2,993, the edits' own suite 140/140, golden
 render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975`
 unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS,
 boundaries 5 rules / 0 violations (53 source files).
+
+### R4.1 record (2026-11-27)
+
+The document's file format is an edge now, and the shell keeps only the
+commit.
+
+The characterization commit is `479d99b`, the move `6691a55`.
+
+| Measure | Before | After |
+|---|---|---|
+| the document's read side | 345 lines in `MainComponentPiece.cpp` | 433 lines in `Source/PieceCodec.h` |
+| `MainComponent::loadFromVar()` | 532 lines (decode + commit) | 14 lines: decode, hand over, commit |
+| the shell's commit | the tail of `loadFromVar()` | `MainComponent::commitPieceModel (m, diag)` |
+| `Source/Piece.h` | the data **and** the file format | the data only (75 lines) |
+| the load's diagnostics | a `bool` and two local strings | `upic::PieceDiagnostics` (the two messages and the counts) |
+| the codec's own suite | - | `Source/SelfTestPieceCodec.cpp`, 82 checks |
+| the source files | 53 | 54 (the suite) |
+
+**The suite came first.** `Source/SelfTestPieceCodec.cpp` was written
+against the old code and drove the loader through `MainComponent`: 82
+checks that pin what the loader refuses, what it repairs, what it drops,
+what it tells the user and what the document looks like afterwards. The
+move turned the door from the component to the codec, and the checks
+themselves did not change - the suite now reaches the document's format
+without a window, a component tree or an audio device.
+
+**The codec.** `Source/PieceCodec.h` holds the piece's format, the same
+place every other format in the app lives (`PageCodec.h`, `ArcCodec.h`
+and their neighbours):
+
+```cpp
+namespace upic
+{
+    struct PieceDiagnostics
+    {
+        bool ok = false;
+        juce::String notLoaded;   // "This piece is bigger than the app supports - not loaded: ..."
+        juce::String adjusted;    // "This piece was adjusted: ..."
+        int renamedIds = 0;
+        int fixedRefs = 0;
+        int droppedItems = 0;
+        int droppedFrames = 0;
+    };
+
+    bool pieceFromVar (const juce::var& v, PieceModel& out, PieceDiagnostics& diag);
+    juce::var pieceToVar (const PieceModel& m, bool includeSampleAudio);
+}
+```
+
+`pieceFromVar()` decodes, migrates, validates and repairs the document
+into a *candidate* and hands it over. It touches nothing of the running
+app, and a document that is not a piece is refused with the caller's
+candidate left exactly as it was - the transaction the loader already
+had, now at the edge.
+
+**The commit.** `MainComponent::commitPieceModel()` puts the candidate
+in force: the swap under the model lock, the selection, the controls,
+the engine, the snapshot the audio thread reads, the messages and the
+unsaved flag. The diff outside the two halves is empty - the commit is
+the old tail of `loadFromVar()`, with the values read from the candidate
+instead of from the document.
+
+**The diagnostics.** The review asks for structured load errors rather
+than a single success flag (§32). The plan defers the type migration
+(§2), so the diagnostics carry the JUCE types the edge already uses,
+and the wording of the two messages does not change by a character. The
+counts behind them are new: the ids that were renumbered, the references
+that were put back, the items and the sample frames that did not make
+it in.
+
+**The one change.** `pieceToVar()` writes the two pitch modes only when
+the piece carries one. Before, a piece that was saved without a mode
+came back with a mode of zero - the session's mode was lost on the way
+out and back. Now a document that carries none (an old piece) leaves
+the session's mode alone, which is what the loader already did. A live
+piece always carries its modes, so the golden render and the v0.29
+fixture do not move.
+
+**The mechanical check.** The production code does not call a test-only
+door, the diff outside `loadFromVar()`'s two halves is empty, and the
+format's output is unchanged - the golden render and the v0.29 fixture
+say so.
+
+The boundary, the diagnostics and the one change are described in
+[`piece-codec-edge.md`](piece-codec-edge.md).
+
+Gate: app selftest 3,076/3,076, the codec's own suite 82/82, golden
+render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975`
+unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS,
+boundaries 5 rules / 0 violations (54 source files).
