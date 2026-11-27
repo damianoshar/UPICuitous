@@ -165,6 +165,8 @@ int upic::runSelfTest()
     upic::runTuningCodecChecks (t);
     // R2.11: the sieve zone's codec - the file format of a sieve zone.
     upic::runSieveCodecChecks (t);
+    // R2.12: the performance sequence's codec - the file format of a sequence.
+    upic::runPerformanceCodecChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

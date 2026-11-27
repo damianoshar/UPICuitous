@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 #include "PieceLimits.h"
+#include "UpicConstants.h"
 
 //==============================================================================
 // WP4: editable performance sequences.
