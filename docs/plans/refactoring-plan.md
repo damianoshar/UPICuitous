@@ -507,6 +507,43 @@ not include `Channel.h` - it got the type because `UpicModel.h` includes
 untouched, the golden render and the legacy fixture are unchanged, and the
 full gate is green.
 
+### 6.13 R2.9 - the sample slot's codec edge
+
+**What moves.** The sample slot's file format moves out of `Sample.h` into
+the new `Source/SampleCodec.h`: `juce::var toVar()`, `juce::var toVar (bool
+includeAudio)`, `static SampleSlot fromVar()` and `juce::MemoryBlock
+toPcm16()` become `upic::sampleSlotToVar (const SampleSlot&)`,
+`upic::sampleSlotToVar (const SampleSlot&, bool includeAudio)`,
+`upic::sampleSlotFromVar (const juce::var&, int fallbackId)` and
+`upic::sampleSlotToPcm16 (const SampleSlot&)`. The bodies are the old
+members, body for body.
+
+**What stays.** The slot's data and behaviour in `Sample.h`: the id, the
+name, the rate, the shared audio buffer, the direction, the base pitch, the
+level, the gain, the trim, the fades, the region's lookup and the material's
+edits. The name stays JUCE's: the plan defers replacing the domain's value
+types (§2), so `Sample.h` still asks for the JUCE header and the sample slot
+is not one of the gate's JUCE-free groups.
+
+**The PCM conversion comes along.** `toPcm16` *is* the format - it is the
+PCM16 encoding the file's base64 carries, and the recovery snapshot writes
+the same bytes to its sidecar. Leaving it in the data header would have
+left half the format behind.
+
+**The file reading is still in the domain.** `loadSampleFile` reads a
+`juce::File` and decodes it. Reading a file is an edge of its own.
+
+**The contract.** A suite of the sample slot's own, written before the move:
+`Source/SelfTestSampleCodec.cpp`, 71 checks that reach the slot through the
+domain's headers alone. It pins the keys and their order (and the ones that
+come only when they carry something), the clamps, the defaults the file uses
+(which are not the defaults the data uses), the two size checks the payload
+gets and the duration cap.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, and the
+full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -535,13 +572,13 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1` | app selftest 2,429/2,429, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51` | app selftest 2,500/2,500, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
-| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,429/2,429, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,500/2,500, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R9 Integration and cleanup | not started | - | - |
 
 Baseline commit: `b5368b1` (0.38.0), app selftest 1,785/1,785, legacy fixture
@@ -1305,6 +1342,99 @@ target yet - the suites run inside the app's selftest binary, which is a
 JUCE application (the review's R089). See
 [`channel-codec-edge.md`](channel-codec-edge.md).
 
-Gate: app selftest 2,429/2,429, golden render `0x6d7571bdd80e3cd9`
+### R2.9 record (2026-11-27)
+
+The sample slot's data and the sample slot's file format are separate now -
+the seventh codec edge, after the arc's (R2.2), the page's (R2.4), the arc
+group's (R2.5), the envelope's (R2.6), the wave's (R2.7) and the channel's
+(R2.8).
+
+| Measure | Before | After |
+|---|---|---|
+| the sample slot | `Source/Sample.h`, 411 lines: the data, the behaviour and the file format | `Source/Sample.h`, 286 lines: the data and the behaviour |
+| the sample slot's codec | four members of the class | `Source/SampleCodec.h`, 156 lines: `sampleSlotToPcm16`, `sampleSlotToVar` (twice) and `sampleSlotFromVar` |
+| the sample slot's own suite | - | `Source/SelfTestSampleCodec.cpp`, 71 checks |
+| the gate's JUCE-free groups | 5 | 5 (the sample slot is not one of them - its value types are deferred, §2) |
+
+The members became free functions:
+
+| before | after |
+|---|---|
+| `SampleSlot::toVar()` | `upic::sampleSlotToVar (const SampleSlot&)` |
+| `SampleSlot::toVar (bool includeAudio)` | `upic::sampleSlotToVar (const SampleSlot&, bool includeAudio)` |
+| `SampleSlot::fromVar (const juce::var&, int)` | `upic::sampleSlotFromVar (const juce::var&, int fallbackId)` |
+| `SampleSlot::toPcm16()` | `upic::sampleSlotToPcm16 (const SampleSlot&)` |
+
+The bodies are the old members, body for body - the comparison is
+mechanical, line for line, modulo the `s.` the free functions need and the
+whitespace: 29 lines for the writer, 57 for the reader, 18 for the PCM16
+conversion, 1 for the one-argument writer. The property names, their order,
+the keys that come only when they carry something, the clamps a crafted file
+gets, the size checks the payload gets and the PCM conversion are the file
+format itself, and they did not change by a character.
+
+**The PCM conversion came along.** `toPcm16` *is* the format - it is the
+PCM16 encoding the file's base64 carries, and the recovery snapshot writes
+the same bytes to its sidecar. Leaving it in the data header would have
+left half the format behind.
+
+**The value types stay.** The slot holds `juce::String name` and a
+`juce::AudioBuffer`. The plan defers replacing the domain's value types
+(§2), so `Source/Sample.h` still asks for the JUCE header and the sample
+slot is not one of the gate's JUCE-free groups. The gate's groups are the
+same five as before this phase.
+
+**The behaviour stayed too.** `loaded`, the region's lookup, the peak,
+`normalise`, `applyFade` and `resetEdits` are the material's behaviour, not
+its file format, so they stayed in `Sample.h`.
+
+**The file reading is still in the domain.** `loadSampleFile` reads a
+`juce::File` and decodes it. Reading a file is an edge of its own.
+
+**The suite came first.** `Source/SelfTestSampleCodec.cpp` (71 checks) was
+written against the codec where it was, and it passes unchanged after the
+move. It reaches the codec through one door (the `encode` / `decode` helpers
+at the top of the file) and reads the name through one more helper, so the
+move touched the suite in one place and the checks themselves did not
+change.
+
+What the suite pins, and what is worth knowing:
+
+- **The id is clamped to the bank's size.** The slot's id is pulled into
+  `1..8` (`kMaxSampleSlots`) - the tightest id range of any bank. The
+  envelope's and the wave's ids are not clamped at all.
+- **The file's default base pitch is 0, not the data's 261.63.** A file
+  without a `ref` means "not set": a piece written before M5 carries no Ref
+  on the slot, and the loader then gives the slot the Ref of the first arc
+  that uses it - so such a piece sounds exactly as it did. A fresh slot
+  starts at the app's default. The two defaults are not the same, and the
+  file's is the one an old piece gets.
+- **The name is not cut.** The channel's name is cut to 64 characters; the
+  slot's is not cut at all.
+- **The gain has a floor of 0.01, not 0.** A file that says `gain: 0` gets
+  0.01 - the material is never silenced by the file. The level, on the
+  other hand, may be 0.
+- **The audio is guarded twice.** The base64's length is checked against
+  the size the file claims *before* it is decoded, so an oversized payload
+  is rejected without ever being expanded; and the decoded size must cover
+  the claimed frames, so a payload shorter than it claims is refused too.
+  Either way the slot comes back without audio.
+- **The frame count is clamped before anything is allocated.** The cap is
+  the duration - 60 s at the material's *own* rate - and the memory budget.
+  A frame count over the cap is *cut*, not refused: the slot comes back with
+  the capped number of frames.
+
+What is still open: the other domain headers still carry their own
+`toVar` / `fromVar` members (`Piece.h`, `Tuning.h`, `Sieve.h`,
+`Performance.h`, `FreqSpace.h`), and the domain's data still holds JUCE
+values (the `juce::String name` and the `juce::Colour` of the groups, the
+envelopes, the waves and the channels) - that is the deferred type
+migration; the sample's file reading is still in the domain
+(`Source/Sample.h` reads `juce::File`s); and there is no headless domain
+target yet - the suites run inside the app's selftest binary, which is a
+JUCE application (the review's R089). See
+[`sample-codec-edge.md`](sample-codec-edge.md).
+
+Gate: app selftest 2,500/2,500, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.

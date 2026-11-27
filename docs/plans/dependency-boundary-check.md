@@ -41,10 +41,10 @@ B1 and B2 cover five groups, each with its own permitted project headers:
 | the page | `Page.h` | the domain's headers it holds: the arc, the geometry, the group, the envelope, the frequency space, the ids, the limits, the sieve, the units, the theme and the waveform |
 
 The codecs (`Source/ArcCodec.h`, `Source/PageCodec.h`,
-`Source/ArcGroupCodec.h`, `Source/EnvelopeCodec.h`, `Source/WaveformCodec.h`
-and `Source/ChannelCodec.h`) are deliberately **not** in a group: they are
-the edge where the JUCE value types live. The plan keeps them there (R2),
-and the check says so by leaving the edge out.
+`Source/ArcGroupCodec.h`, `Source/EnvelopeCodec.h`, `Source/WaveformCodec.h`,
+`Source/ChannelCodec.h` and `Source/SampleCodec.h`) are deliberately **not**
+in a group: they are the edge where the JUCE value types live. The plan
+keeps them there (R2), and the check says so by leaving the edge out.
 
 An empty permitted list is a list: it forbids every project header. No group
 uses one yet - the leaf rule is for the day the domain's value types move
