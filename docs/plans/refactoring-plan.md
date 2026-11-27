@@ -599,6 +599,38 @@ and the rule that the codec does not touch the id.
 untouched, the golden render and the legacy fixture are unchanged, and the
 full gate is green.
 
+### 6.16 R2.12 - the performance sequence's codec edge
+
+**What moves.** The performance sequence's file format moves out of
+`Performance.h` into the new `Source/PerformanceCodec.h`: `juce::var
+toVar()` and `static PerformanceSequence fromVar()` become
+`upic::performanceSequenceToVar (const PerformanceSequence&)` and
+`upic::performanceSequenceFromVar (const juce::var&, int fallbackId)`. The
+bodies are the old members, body for body.
+
+**What stays.** The sequence's data and behaviour in `Performance.h`: the
+point, the id, the name, the points and the loop flag, plus the length of
+the sequence, the position the performance is at, the loop time and the
+modulation factor. The name stays JUCE's: the plan defers replacing the
+domain's value types (§2), so `Performance.h` still asks for the JUCE header
+and the performance sequence is not one of the gate's JUCE-free groups.
+
+**The header now stands on its own.** `Performance.h` uses
+`kMaxPageSeconds` but used to ask for `UpicConstants.h` only through the
+include order of the files that happened to include it first. It now asks
+for it itself - a fix the phase's suite found.
+
+**The contract.** A suite of the performance sequence's own, written before
+the move: `Source/SelfTestPerformanceCodec.cpp`, 48 checks that reach the
+sequence through the domain's headers alone. It pins the keys and their
+order (and the one that comes only when the sequence does not loop), the
+point's own three keys, the clamps, the cut of the name, the sort of the
+points and the rule that an absent id takes the fallback.
+
+**Gate.** The suite passes unchanged, the rest of the selftest is
+untouched, the golden render and the legacy fixture are unchanged, and the
+full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -627,13 +659,13 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 |---|---|---|---|
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5` | app selftest 2,611/2,611, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121` | app selftest 2,659/2,659, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | not started | - | - |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
-| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,611/2,611, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,659/2,659, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R9 Integration and cleanup | not started | - | - |
 
 Baseline commit: `b5368b1` (0.38.0), app selftest 1,785/1,785, legacy fixture
@@ -1557,10 +1589,10 @@ What the suite pins, and what is worth knowing:
   cut (the channel's name is).
 
 What is still open: the other domain headers still carry their own
-`toVar` / `fromVar` members (`Piece.h`, `Sieve.h`, `Performance.h`,
-`FreqSpace.h`), and the domain's data still holds JUCE values (the
-`juce::String name` and the `juce::Colour` of the groups, the envelopes,
-the waves and the channels) - that is the deferred type migration; the file
+`toVar` / `fromVar` members (`Piece.h`, `Performance.h`, `FreqSpace.h`), and
+the domain's data still holds JUCE values (the `juce::String name` and the
+`juce::Colour` of the groups, the envelopes, the waves and the channels) -
+that is the deferred type migration; the file
 readers are still in the domain (the Scala importer in `Source/Tuning.h` and
 the sample's `loadSampleFile`); and there is no headless domain target yet
 - the suites run inside the app's selftest binary, which is a JUCE
@@ -1656,5 +1688,98 @@ application (the review's R089). See
 [`sieve-codec-edge.md`](sieve-codec-edge.md).
 
 Gate: app selftest 2,611/2,611, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS.
+
+### R2.12 record (2026-11-27)
+
+The performance sequence's data and the performance sequence's file format
+are separate now - the tenth codec edge, after the arc's (R2.2), the page's
+(R2.4), the arc group's (R2.5), the envelope's (R2.6), the wave's (R2.7),
+the channel's (R2.8), the sample slot's (R2.9), the tuning's (R2.10) and
+the sieve zone's (R2.11).
+
+| Measure | Before | After |
+|---|---|---|
+| the performance sequence | `Source/Performance.h`, 153 lines: the data, the behaviour and the file format | `Source/Performance.h`, 111 lines: the data and the behaviour |
+| the performance sequence's codec | two members of the class | `Source/PerformanceCodec.h`, 82 lines: `performanceSequenceToVar` and `performanceSequenceFromVar` |
+| the performance sequence's own suite | - | `Source/SelfTestPerformanceCodec.cpp`, 48 checks |
+| the gate's JUCE-free groups | 5 | 5 (the sequence is not one of them - its value types are deferred, §2) |
+
+The two members became two free functions:
+
+| before | after |
+|---|---|
+| `PerformanceSequence::toVar()` | `upic::performanceSequenceToVar (const PerformanceSequence&)` |
+| `PerformanceSequence::fromVar (const juce::var&, int)` | `upic::performanceSequenceFromVar (const juce::var&, int fallbackId)` |
+
+The bodies are the old members, body for body - the comparison is
+mechanical, line for line, modulo the `s.` the free function needs and the
+whitespace: 15 lines for the writer, 23 for the reader. The property names
+(id, name, points), their order, the optional key a looping sequence does
+not write (loop), the point's own three keys (t, page, pos), the clamps a
+crafted file gets, the cut of the name and the sort of the points are the
+file format itself, and they did not change by a character.
+
+**The value types stay.** The sequence holds `juce::String name`. The plan
+defers replacing the domain's value types (§2), so `Source/Performance.h`
+still asks for the JUCE header and the performance sequence is not one of
+the gate's JUCE-free groups. The gate's groups are the same five as before
+this phase.
+
+**The behaviour stayed too.** `lengthSec`, `sequencePositionAt`,
+`sequenceLoopTime` and `modulationFactor` are the sequence's behaviour, not
+its file format, so they stayed in `Performance.h`.
+
+**The header now stands on its own.** `Performance.h` uses
+`kMaxPageSeconds` but used to ask for `UpicConstants.h` only through the
+include order of the files that happened to include it first. It now asks
+for it itself - a fix the phase's suite found.
+
+**The suite came first.** `Source/SelfTestPerformanceCodec.cpp` (48 checks)
+was written against the codec where it was, and it passes unchanged after
+the move. It reaches the codec through one door (the `encode` / `decode`
+helpers at the top of the file) and reads the name through one more helper,
+so the move touched the suite in one place and the checks themselves did
+not change.
+
+What the suite pins, and what is worth knowing:
+
+- **The name is cut to 64 characters**, and an empty name becomes
+  `"Sequence"`. The sample slot's and the tuning's names are not cut at all;
+  this one is.
+- **The id is clamped to 1..1000000.** An explicit `id: 0` becomes **1** and
+  does *not* take the fallback - the fallback applies only when `id` is
+  absent. (The reader's `if (s.id <= 0)` line is unreachable, because the
+  clamp's lower bound is already 1; it was kept as it is.)
+- **The loop flag is written only when the sequence does not loop.** A
+  looping sequence carries no flag at all - the flag's absence *is* "it
+  loops".
+- **The points come back in time order.** The file's order is not kept: the
+  points are sorted by their time (with `std::sort`, so points that share a
+  time may swap places).
+- **The point's time and the point's position have different caps, both
+  3600 s.** The time is capped by `kMaxSequenceSeconds` (an hour of
+  performance) and the position by `kMaxPageSeconds` (the length of a
+  page). They happen to be the same number today, and they are two different
+  limits.
+- **A point with nothing in it is at the start of the first page**, and a
+  point whose time or position is not a number is there too (a NaN falls to
+  the lower bound).
+
+The clamps, for the record: the time 0..3600 s, the position 0..3600 s, the
+page 0..99 (`kMaxPages - 1`), and the points at most 20000
+(`kMaxSequencePoints` - an eleven-minute gesture at the 30 Hz recorder).
+
+What is still open: the other domain headers still carry their own
+`toVar` / `fromVar` members (`Piece.h`, `FreqSpace.h`), and the domain's
+data still holds JUCE values (the `juce::String name` and the `juce::Colour`
+of the groups, the envelopes, the waves and the channels) - that is the
+deferred type migration; and there is no headless domain target yet - the
+suites run inside the app's selftest binary, which is a JUCE application
+(the review's R089). See
+[`performance-codec-edge.md`](performance-codec-edge.md).
+
+Gate: app selftest 2,659/2,659, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS.
