@@ -84,6 +84,7 @@ namespace upic
     void runArcGroupCodecChecks (SelfTest& t); // R2.5: the arc group's data and its file format
     void runEnvelopeCodecChecks (SelfTest& t);  // R2.6: the envelope's codec - the file format
     void runWaveCodecChecks (SelfTest& t);      // R2.7: the wave's codec - the file format
+    void runChannelCodecChecks (SelfTest& t);  // R2.8: the channel's codec - the file format
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);

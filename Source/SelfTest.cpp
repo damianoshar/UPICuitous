@@ -157,6 +157,8 @@ int upic::runSelfTest()
     upic::runEnvelopeCodecChecks (t);
     // R2.7: the wave's codec - the file format of a wave.
     upic::runWaveCodecChecks (t);
+    // R2.8: the channel's codec - the file format of a mixer channel.
+    upic::runChannelCodecChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
