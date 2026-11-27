@@ -56,6 +56,12 @@ application layer's owner of the document, so a group for it would be a
 rule that has to be taken back in a later phase. It is left out, as the
 codecs are.
 
+The selection model it owns (`Source/SelectionModel.h`, R3.3) is JUCE-free
+- ids and a vector of ids - and it is out of the groups too: it is the
+application layer's own, and the piece's data is still in the component's
+members, so a rule about it would have to be taken back when the data
+moves.
+
 An empty permitted list is a list: it forbids every project header. No group
 uses one yet - the leaf rule is for the day the domain's value types move
 (the plan defers that migration, section 2) - but the rule is now correct:
@@ -109,9 +115,9 @@ build. The gate's step is:
     B1/B2 the arc (1 file): no JUCE header, no header outside the group
     B1/B2 the arc's geometry (1 file): no JUCE header, no header outside the group
     B1/B2 the page (1 file): no JUCE header, no header outside the group
-    B3 the Projucer project lists all 50 source files
+    B3 the Projucer project lists all 51 source files
     B4 the plugin's two targets carry the same 19 source files
-    B5 the generated Visual Studio project lists all 50 source files
+    B5 the generated Visual Studio project lists all 51 source files
     dependency boundaries: 5 rules, 0 violations
 ```
 

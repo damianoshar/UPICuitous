@@ -1,32 +1,40 @@
 # The document session
 
 The architecture note for R3. It describes the boundary R3 introduced - the
-document's state, the document's history and the document's owner - as it is
-after R3.2, not as it is meant to be at the end of the refactoring.
+document's state, the document's history and the document's selection - as
+it is after R3.3, not as it is meant to be at the end of the refactoring.
 
 ## The boundary
 
 ```
 Source/DocumentSession.h   the document's own state: the revision, the epoch
-                           and the unsaved flag - and the document's history:
+                           and the unsaved flag - the document's history:
                            the steps, their labels, the open transaction and
-                           the two bounds. It is the one owner of them.
+                           the two bounds - and the document's selection.
+                           It is the one owner of them.
         |
-        |  the session owns the state and the history; the shell asks it
+        |  the session owns the state, the history and the selection; the
+        |  shell asks it
+        v
+Source/SelectionModel.h    what is selected: the wavetable, the envelope,
+                           the amplitude table, the sequence, the group, the
+                           mixer channel, the sample slot and the arc.
+        |
+        |  the session owns it; the shell asks it
         v
 Source/MainComponent.h      the shell: it tells the session when the model
                             moved, it reads the session when it needs to know
                             what the document is doing, and it keeps the
-                            shell's own work: the selection, the transport
-                            and the messages.
+                            shell's own work: the transport and the messages.
 ```
 
 The review asked for one authoritative owner of the document (its R005,
 "Extract DocumentSession"). The piece's *data* still lives where it lived -
 in the component's members - and moving it is a much bigger job than a
 phase. What R3 moves is the document's own *state* (R3.1: the three
-counters that say what the document is doing) and the document's own
-*history* (R3.2: the steps the user can undo).
+counters that say what the document is doing), the document's own *history*
+(R3.2: the steps the user can undo) and the document's own *selection*
+(R3.3: what the user is working on).
 
 ## What moved
 
@@ -85,11 +93,49 @@ The restore goes through the normal loader, so an undone piece gets the same
 checks and the same limits as a loaded one.
 
 What stays with the shell is the shell's own work: the gain slider's flag,
-the selection (the wave, the envelope, the amplitude table, the sequence and
-the sample slot), the transport (an undo does not silence the app) and the
-messages ("Undo: <label>", "The undo could not be applied"). The undo's
-failure path moved to the caller: the session says "failed", the component
-says the message.
+the transport (an undo does not silence the app) and the messages ("Undo:
+<label>", "The undo could not be applied"). The undo's failure path moved
+to the caller: the session says "failed", the component says the message.
+(The selection was the shell's own work at this point; R3.3 moved it behind
+the session.)
+
+### R3.3 - the selection
+
+The selection used to be the component's own: nine members, scattered over
+three hundred lines of its header.
+
+| before | after |
+|---|---|
+| `MainComponent::selWave` | `SelectionModel::wave` |
+| `MainComponent::selEnv` | `SelectionModel::envelope` |
+| `MainComponent::selSlot` | `SelectionModel::sampleSlot` |
+| `MainComponent::selAmpTableId` | `SelectionModel::ampTable` |
+| `MainComponent::selSeqId` | `SelectionModel::sequence` |
+| `MainComponent::selGroupId` | `SelectionModel::group` |
+| `MainComponent::selChannelId` | `SelectionModel::channel` |
+| `MainComponent::selectedArcId` | `SelectionModel::arc` |
+| `MainComponent::lastArcSelection` | `SelectionModel::arcSelection` |
+
+The new class is in `Source/SelectionModel.h`, and the session owns it:
+
+```cpp
+upic::SelectionModel& selection() noexcept { return selection_; }
+const upic::SelectionModel& selection() const noexcept { return selection_; }
+```
+
+Every use asks the session now - `document.selection().wave` and its eight
+siblings - and the defaults are the old ones: the first wavetable, the
+first envelope and the first sample slot (0), and -1 for the amplitude
+table, the sequence, the group, the mixer channel and the arc.
+
+The selection's *meaning* did not change: the same fallbacks (the first
+wave, the first envelope, the first amplitude table, the first sequence),
+the same sample-slot clamp, and the same loader behaviour (a load selects
+the first item of the bank it loads).
+
+The canvas's own multi-selection stays with the canvas: the `ScoreEditor`
+owns it. What the model carries is the arc the panel points at and the
+mirror of the canvas selection the panel last showed.
 
 ## Why the revision and the epoch are two counters
 
@@ -121,6 +167,11 @@ snapshots are pieces, so the session asks for `<JuceHeader.h>` and
 
 It stays out of the boundary check's JUCE-free groups for the same reason
 the codecs stay out: it is the application layer's owner of the document.
+
+The selection model it owns (`Source/SelectionModel.h`) is JUCE-free - ids
+and a vector of ids - but it is out of the groups too: it is the
+application layer's own, and a group for it would be a rule that has to be
+taken back when the piece's data moves.
 
 ## The suites
 
@@ -162,12 +213,30 @@ It pins:
   there, and falls back to the first wave when it is gone;
 - the transport: the undo does not silence the app.
 
-Both suites came first: they were written against the code where it was,
-and they pass unchanged after the moves. The state suite reads the document
-through one door (the `state` helper at the top of the file); the history
-suite reads the history through the component's own doors (canUndo,
-undoLabel, undoDepth, ...), so the move touched each suite in one place and
-the checks themselves did not change.
+`Source/SelfTestSelection.cpp` is the selection's own contract: 27 checks.
+It pins:
+
+- a fresh document: the first wavetable and the first envelope are
+  selected, the first sample slot is selected, and the amplitude table, the
+  sequence, the group, the mixer channel and the arc are not;
+- a load: the selection follows the piece that is loaded - the first
+  wavetable, the first envelope, the first sample slot, the first mixer
+  channel and the first performance sequence;
+- a load does not touch the amplitude table and the group selection: the
+  loader leaves them alone;
+- deleting the selected item moves the selection: the delete acts on the
+  selected wavetable (or envelope), and the replacement takes its place in
+  the selection;
+- two documents keep their own selection;
+- a load leaves no arc selected.
+
+All three suites came first: they were written against the code where it
+was, and they pass unchanged after the moves. The state suite reads the
+document through one door (the `state` helper at the top of the file); the
+history suite reads the history through the component's own doors (canUndo,
+undoLabel, undoDepth, ...); the selection suite reads the selection through
+the component's own doors (the `selected*ForTest` accessors). The move
+touched each suite in one place and the checks themselves did not change.
 
 The components in the suites are made in plugin mode: the document does not
 depend on the window, and the plugin mode does not open an audio device.
@@ -177,11 +246,8 @@ depend on the window, and the plugin mode does not open an audio device.
 - **The piece's data has not moved.** The component still holds the
   waveforms, the envelopes, the pages, the arcs, the channels, the sample
   slots, the tuning and the sieve as its own members. The session owns the
-  document's *state* and its *history*, not its *data*; moving the data is a
-  much bigger job and it comes later in R3.
-- **The selection has not moved.** The selected wave, envelope, amplitude
-  table, sequence and sample slot are still the component's own (the
-  review's R006).
+  document's *state*, its *history* and its *selection*, not its *data*;
+  moving the data is a much bigger job and it comes later in R3.
 - **There is no command dispatcher.** The model still changes through
   `markModelChanged()` at the end of a hundred call sites, not through a
   command that says what it did (the review's R008). One command = one
