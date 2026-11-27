@@ -169,6 +169,8 @@ int upic::runSelfTest()
     upic::runPerformanceCodecChecks (t);
     // R2.13: the frequency space definition's codec - the file format of a space.
     upic::runFreqSpaceCodecChecks (t);
+    // R3.1: the document session - the document's revision and its unsaved flag.
+    upic::runDocumentSessionChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

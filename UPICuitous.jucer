@@ -31,6 +31,7 @@
       <FILE id="sTs33" name="SelfTestSieveCodec.cpp" compile="1" resource="0" file="Source/SelfTestSieveCodec.cpp"/>
       <FILE id="sTp34" name="SelfTestPerformanceCodec.cpp" compile="1" resource="0" file="Source/SelfTestPerformanceCodec.cpp"/>
       <FILE id="sTf35" name="SelfTestFreqSpaceCodec.cpp" compile="1" resource="0" file="Source/SelfTestFreqSpaceCodec.cpp"/>
+      <FILE id="sDs36" name="SelfTestDocumentSession.cpp" compile="1" resource="0" file="Source/SelfTestDocumentSession.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>

@@ -167,6 +167,12 @@ public:
     bool pieceHasUnsavedChanges() const { return pieceDirty.load (std::memory_order_relaxed); }
     void markPieceSaved() { pieceDirty.store (false, std::memory_order_relaxed); }
 
+    // R3.1: the document's own counters, for the suite that pins the
+    // document session's contract. The production code does not read them
+    // through these - it reads the session itself.
+    std::uint64_t modelRevisionForTest() const { return modelRevision.load (std::memory_order_relaxed); }
+    std::uint64_t modelEpochForTest() const { return modelEpoch.load (std::memory_order_relaxed); }
+
     // --- v1.33.4 (H3): the host transport follow ---
     //
     // The review: "the DAW's transport does not drive the app, so the plugin
