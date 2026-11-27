@@ -89,6 +89,7 @@ namespace upic
     void runTuningCodecChecks (SelfTest& t);   // R2.10: the tuning's codec - the file format
     void runSieveCodecChecks (SelfTest& t);    // R2.11: the sieve zone's codec - the file format
     void runPerformanceCodecChecks (SelfTest& t); // R2.12: the performance sequence's codec - the file format
+    void runFreqSpaceCodecChecks (SelfTest& t);   // R2.13: the frequency space definition's codec - the file format
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);

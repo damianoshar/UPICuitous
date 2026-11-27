@@ -167,6 +167,8 @@ int upic::runSelfTest()
     upic::runSieveCodecChecks (t);
     // R2.12: the performance sequence's codec - the file format of a sequence.
     upic::runPerformanceCodecChecks (t);
+    // R2.13: the frequency space definition's codec - the file format of a space.
+    upic::runFreqSpaceCodecChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
