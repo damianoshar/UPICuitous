@@ -2,7 +2,7 @@
 
 The architecture note for R3. It describes the boundary R3 introduced - the
 document's state, the document's history, the document's selection and the
-command dispatcher - as it is after R3.4, not as it is meant to be at the
+command dispatcher - as it is after R3.5, not as it is meant to be at the
 end of the refactoring.
 
 ## The boundary
@@ -200,6 +200,37 @@ is still how it reports a change (it calls the session's `reportChange()`).
 
 The suite that pins the rule is `Source/SelfTestCommands.cpp`; see below.
 
+### R3.5 - the edits
+
+The dispatcher was the only way into the document, but the shell's call sites
+were not commands yet: the model still changed through `markModelChanged()`
+at the end of about eighty call sites, and each of them was a change of its
+own - no label, no undo step. R3.5 turns the twenty that are user edits
+into commands.
+
+The shell gets one helper for it:
+
+```cpp
+void MainComponent::runEdit (const juce::String& label,
+                             const std::function<void()>& fn);
+```
+
+If a command is already open it just runs `fn`; otherwise it opens the
+command with the label, runs `fn` and closes it. So a one-shot edit is one
+command, and a gesture - which opens the command at its drag start and
+closes it at its drag end - is one command too, with the value changes in
+between joining it.
+
+The twenty edits and their labels are in the plan (§6.22 and the R3.5
+record). The six changes that stay raw are named there as well: the loop
+toggle (a change that does not affect the piece), the page box (a page
+switch is navigation), the document replacements (a load, an undo or redo
+restore, a recovery) and the test door that installs a sample slot. A
+change outside a command is legal - R3.4 defined what it means.
+
+The suite that pins the new contract is
+`Source/SelfTestModelCommands.cpp`; see below.
+
 ## Why the revision and the epoch are two counters
 
 They no longer move together: the epoch moves with every model change, the
@@ -253,7 +284,8 @@ The command dispatcher (`Source/CommandDispatcher.h`) needs JUCE as well:
 the label is a string and the snapshot it holds is a piece. It is the
 application layer's own, like the session that owns it, and it is out of
 the boundary check's JUCE-free groups for the same reason. It is a header,
-so the check still counts 51 source files.
+so the check counts the source files, not the headers: 53 of them now
+(R3.5's suite is the last one added).
 
 ## The suites
 
@@ -327,7 +359,21 @@ checks. It pins:
 - two documents: independent;
 - an undo: a change that leaves the piece unsaved.
 
-All four suites came first: they were written against the code where it
+`Source/SelfTestModelCommands.cpp` is the edits' own contract: 140 checks.
+It pins, for each of the nineteen edits the suite can drive:
+
+- the edit changes the document once (the revision advances by one);
+- the epoch follows every change inside the command (the live reverse's
+  two changes: the epoch +2, the revision +1);
+- the piece is unsaved;
+- the edit is one undo step, and the step knows what the edit was called;
+- the piece carries the edit (the suite reads the piece the component
+  would save).
+
+The twentieth edit - the capture - needs live audio, so the suite does not
+drive it; the plan says so rather than pretending the suite covers it.
+
+All five suites came first: they were written against the code where it
 was, and they pass after the moves. The state suite reads the document
 through one door (the `state` helper at the top of the file); the history
 suite reads the history through the component's own doors (canUndo,
@@ -335,11 +381,15 @@ undoLabel, undoDepth, ...); the selection suite reads the selection through
 the component's own doors (the `selected*ForTest` accessors); the command
 suite reads the command through the component's own doors
 (`modelRevisionForTest`, `modelEpochForTest`, `pieceHasUnsavedChanges`,
-`undoDepth`, `undoLabel` and `commandOpenForTest`). The move touched each
-suite in one place and the checks themselves did not change - except one
-expectation in the command suite: a command with two changes used to
-advance the revision by two and advances it by one now. That is the wave's
-exit criterion, and the plan said so before the move.
+`undoDepth`, `undoLabel` and `commandOpenForTest`); the edits' suite reads
+the edits through the named controls, the public methods and the three
+doors added with the move (the workspace split's drag and the arc list's
+two per-arc controls). The moves touched each suite in one place and the
+checks themselves did not change - except one expectation in the command
+suite (a command with two changes used to advance the revision by two and
+advances it by one now) and one expectation per edit in the edits' suite
+(these edits used to leave no undo step and are one step now). That is the
+wave's exit criterion, and the plan said so before the move.
 
 The components in the suites are made in plugin mode: the document does not
 depend on the window, and the plugin mode does not open an audio device.
@@ -352,11 +402,10 @@ depend on the window, and the plugin mode does not open an audio device.
   document's *state*, its *history*, its *selection* and its *command
   dispatcher*, not its *data*; moving the data is a much bigger job and it
   comes later in R3.
-- **The call sites are not commands yet.** The dispatcher is there and it
-  is the only way into the document, but the model still changes through
-  `markModelChanged()` at the end of about eighty call sites: each of them
-  is a change of its own, not a command with a label (the review's R008).
-  Converting the call sites is R3.5, and that is where one command = one
-  labelled transaction = one revision is reached.
+- **The edits are commands now, but the piece's data is not behind the
+  session.** R3.5 gave the twenty remaining user edits a command each, so
+  one command = one labelled transaction = one revision is reached. What is
+  left of R3 is the piece's *data*: it still lives in the component's
+  members, and moving it is a much bigger job than a phase.
 - **The document's data still holds JUCE values** - that is the deferred
   type migration (the plan's section 2), not this wave.

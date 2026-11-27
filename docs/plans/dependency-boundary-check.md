@@ -65,8 +65,9 @@ moves.
 The command dispatcher (`Source/CommandDispatcher.h`, R3.4) needs JUCE too
 - the label is a string and the snapshot it holds is a piece - and it is
 out of the groups for the same reason the session is: it is the application
-layer's mutation entry point. It is a header, so the 51 source files the
-check counts do not change.
+layer's mutation entry point. It is a header, so the source files the
+check counts do not change (53 of them now: R3.5's suite is the last one
+added).
 
 An empty permitted list is a list: it forbids every project header. No group
 uses one yet - the leaf rule is for the day the domain's value types move
@@ -121,9 +122,9 @@ build. The gate's step is:
     B1/B2 the arc (1 file): no JUCE header, no header outside the group
     B1/B2 the arc's geometry (1 file): no JUCE header, no header outside the group
     B1/B2 the page (1 file): no JUCE header, no header outside the group
-    B3 the Projucer project lists all 51 source files
+    B3 the Projucer project lists all 53 source files
     B4 the plugin's two targets carry the same 19 source files
-    B5 the generated Visual Studio project lists all 51 source files
+    B5 the generated Visual Studio project lists all 53 source files
     dependency boundaries: 5 rules, 0 violations
 ```
 

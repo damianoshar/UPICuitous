@@ -856,6 +856,99 @@ is reached there.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.22 R3.5 - the edits become commands
+
+**What moves.** The edits that still change the piece without a command.
+R3.4 gave the document one way in; this phase makes the shell use it for
+every user edit that changes the piece. Twenty of them are left, and they
+are the controls added after the undo stack was built: the page
+sequencer, the workspace split, the live pitch and reverse, the
+modulation and step controls, the page's ambitus, acceleration and four
+frequency spaces, the arc's space, the arc list's reverse and mode, the
+sample's reverse, level and pitch, the tuning and the capture.
+
+**The helper.** A gesture and a one-shot need the same thing - a command
+that is open exactly once - so the shell gets one method: `runEdit
+(label, fn)`. If a command is already open (a drag, a caller that
+groups), it just runs `fn`; otherwise it opens the command with the
+label, runs `fn` and closes it. A drag opens on drag start and closes on
+drag end; a slider's value change inside the drag joins the drag's
+command. This is the "standalone" pattern the channel gain already uses,
+formalized for every edit.
+
+**The rule.** A command carries the state the snapshot carries (the
+`PieceModel`). The loop page is not in the piece, so its toggle stays a
+change of its own. The two pitch modes are in the piece (they are written
+into the file), so the live and the sample pitch selectors are commands
+even though the engine holds them. A load, an undo or redo restore and a
+recovery replace the document; they are not edits, they are not undoable,
+and they stay changes of their own.
+
+**The edits and their labels.**
+
+| edit | site | label | gesture |
+|---|---|---|---|
+| the page sequencer | `seqBtn` | Sequence the pages | one-shot |
+| the workspace split | `WorkspaceSplitter` | Resize the workspace | drag |
+| the live pitch | `livePitchBox` | Live pitch | one-shot |
+| the live reverse | `liveRevBtn` | Live reverse | one-shot |
+| the wave use | `modUseBox` | Wave use | one-shot |
+| the modulation rate | `modRateSlider` | Modulation rate | drag |
+| the modulation depth | `modDepthSlider` | Modulation depth | drag |
+| the stepped pitch | `stepBtn` | Step the pitch | one-shot |
+| the step divisions | `stepDivSlider` | Step divisions | drag |
+| the page's spaces | `spaceDefBox[]` | Frequency space | one-shot |
+| the arc's space | `spaceBox` | Arc frequency space | one-shot |
+| the page's ambitus | `ambitusBox` | Page ambitus | one-shot |
+| the page's acceleration | `warpSlider` | Page acceleration | drag |
+| the arc list's reverse | `ArcListPanel::onReverseToggled` | Arc reverse | one-shot |
+| the arc list's mode | `ArcListPanel::onModeChosen` | Arc pitch mode | one-shot |
+| the sample's reverse | `revBtn` | Reverse the material | one-shot |
+| the sample's level | `levelSlider` | Slot level | drag |
+| the sample's pitch | `samplePitchBox` | Sample pitch | one-shot |
+| the tuning | `applyTuning()` | Tuning | one-shot |
+| the capture | `finalizeCapture()` | Capture the material | one-shot |
+
+**What stays raw, and why.** The loop toggle (`markModelChanged
+(false)`), the page box (a page switch is navigation, not an edit), a
+load, an undo or redo restore, a recovery, the refresh helpers that run
+inside their caller's command, and the workspace open and close - which
+changes the piece's layout but does not mark the model today, and this
+phase does not add a mark. A change outside a command is legal; R3.4
+defined what it means.
+
+**The contract.** `Source/SelfTestModelCommands.cpp`, written before the
+move. It drives the edits through the shell's own doors (the named
+controls, the public methods, and the three doors added with the move -
+the workspace split's drag and the arc list's two per-arc controls), the
+way the audio and model suites already do. It pins today's behaviour -
+the counters move, the piece is unsaved, there is no undo step - and
+after the move each edit is one step with its label, the revision
+advances once, and the epoch follows every change inside the command.
+The live reverse has two changes in one callback: one step, the epoch +2
+and the revision +1.
+
+Nineteen of the twenty edits are driven by the suite: the tuning, the
+page sequencer, the live pitch and reverse, the wave use, the
+modulation rate and depth, the stepped pitch, the step divisions, the
+page's spaces, the arc's space, the page's ambitus and acceleration, the
+arc list's reverse and mode, the sample's reverse, level and pitch, and
+the workspace split. The capture is the one the suite cannot drive - it
+needs live audio - and the plan says so rather than pretending the suite
+covers it.
+
+**The mechanical check.** Every `markModelChanged` in the shell is
+inside a command now, except the six that are named as raw above: the
+loop toggle, the page box, the load, the undo or redo restore, the
+recovery, and the test door that installs a sample slot. The twenty
+callbacks are each inside a `runEdit` or between a drag's begin and end,
+the production code does not call a test-only door, and the diff outside
+the converted callbacks is empty.
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -885,7 +978,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R0 Baseline | **shipped** | `0003f33`, `620a3e9`, `12f8a61` | app selftest 1,846/1,846, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R3 Document and commands | **R3.4 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05` | app selftest 2,853/2,853, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27 and the command's own suite 29/29, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | not started | - | - |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
@@ -2463,3 +2556,120 @@ command's own suite 29/29, golden render `0x6d7571bdd80e3cd9` unchanged,
 legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22,
 pluginval strictness 5 SUCCESS, boundaries 5 rules / 0 violations (51
 source files).
+
+### R3.5 record (2026-11-27)
+
+The edits are commands now, and the wave's exit criterion is reached: one
+model command = one labelled undo transaction, and the revision advances
+per command.
+
+The characterization commit is `9142a17`, the move `0432be3`.
+
+| Measure | Before | After |
+|---|---|---|
+| the edits that changed the piece | 20 raw changes | 20 commands, one label each |
+| the shell's helper | - | `MainComponent::runEdit (label, fn)` |
+| a gesture | one raw change per tick | one command, from the drag's start to its end |
+| the revision | once per mark | once per command |
+| an undo step | none for these edits | one per edit |
+| the edits' own suite | - | `Source/SelfTestModelCommands.cpp`, 140 checks |
+| the source files | 52 | 53 (the suite) |
+
+**The suite came first.** `Source/SelfTestModelCommands.cpp` was written
+against the old code: 68 checks, and every edit they drove changed the
+document (the revision and the epoch move by one), marked the piece
+unsaved and left no undo step. The move turned that last expectation
+around - each edit is now one step under its label - and the suite grew
+by 72 checks: the eight edits that had no driving door (the three doors
+added with the move, and the five that could be driven through the named
+controls).
+
+**What the helper is.** One method in the shell:
+
+```cpp
+void MainComponent::runEdit (const juce::String& label,
+                             const std::function<void()>& fn);
+```
+
+If a command is already open it just runs `fn`; otherwise it opens the
+command with the label, runs `fn` and closes it. So a one-shot edit is
+one command, and a gesture - which opens the command at its drag start
+and closes it at its drag end - is one command too, with the value
+changes in between joining it. The knobs use the slider's own
+`onDragStart` / `onDragEnd`; the workspace's divider grows two callbacks
+for the drag's edges (`PageWorkspace.h`).
+
+This is the "standalone" pattern the channel gain already used, with the
+`modLevelsEditing` flag replaced by the dispatcher's own "is a command
+open?" answer.
+
+**The twenty edits and their labels.**
+
+| edit | site | label |
+|---|---|---|
+| the page sequencer | `seqBtn` | Sequence the pages |
+| the workspace split | `WorkspaceSplitter` | Resize the workspace |
+| the live pitch | `livePitchBox` | Live pitch |
+| the live reverse | `liveRevBtn` | Live reverse |
+| the wave use | `modUseBox` | Wave use |
+| the modulation rate | `modRateSlider` | Modulation rate |
+| the modulation depth | `modDepthSlider` | Modulation depth |
+| the stepped pitch | `stepBtn` | Step the pitch |
+| the step divisions | `stepDivSlider` | Step divisions |
+| the page's spaces | `spaceDefBox[]` | Frequency space |
+| the arc's space | `spaceBox` | Arc frequency space |
+| the page's ambitus | `ambitusBox` | Page ambitus |
+| the page's acceleration | `warpSlider` | Page acceleration |
+| the arc list's reverse | `ArcListPanel::onReverseToggled` | Arc reverse |
+| the arc list's mode | `ArcListPanel::onModeChosen` | Arc pitch mode |
+| the sample's reverse | `revBtn` | Reverse the material |
+| the sample's level | `levelSlider` | Slot level |
+| the sample's pitch | `samplePitchBox` | Sample pitch |
+| the tuning | `applyTuning()` | Tuning |
+| the capture | `finalizeCapture()` | Capture the material |
+
+**The behaviour change.** These edits are undoable now, and the
+document's revision advances once per edit instead of once per mark.
+That is the point of the phase: before it, a user who moved the page's
+ambitus or the slot's level could not undo it, and the undo menu's
+labels said nothing about them.
+
+The live reverse is the one edit with two changes in one callback (the
+arcs' direction and the re-anchor of the live voices): it is one step,
+the epoch +2 and the revision +1.
+
+**What stays raw, and why.** Six sites, and the plan names them before
+the move:
+
+- the **loop toggle** (`markModelChanged (false)`) - a change that does
+  not affect the piece, so it is not a command and does not make the app
+  ask to save;
+- the **page box** - a page switch is navigation, not an edit;
+- a **load** (`loadFromVar`), an **undo or redo restore**
+  (`restorePieceModel`) and a **recovery** (`offerRecovery`) - these
+  replace the document, so they are not edits and they are not
+  undoable;
+- the **test door** that installs a sample slot (`setSampleSlotForTest`)
+  - the suite's own way in, not the user's.
+
+The workspace's open and close change the piece's layout but do not mark
+the model today, and this phase does not add a mark.
+
+**The mechanical check.** Every `markModelChanged` in the shell is
+inside a command now, except the six named above: the twenty callbacks
+are each inside a `runEdit` or between a drag's begin and end, the
+production code does not call a test-only door, and the diff outside the
+converted callbacks is empty.
+
+**The revision still has no production reader.** The epoch is the signal
+the audio, the saver and the recovery follow; the revision is the
+document's own counter (one command, one revision), and the suite reads
+it. That is deliberate and unchanged by this phase.
+
+**The capture is the one edit the suite cannot drive** - it needs live
+audio - and the plan says so rather than pretending the suite covers it.
+
+Gate: app selftest 2,993/2,993, the edits' own suite 140/140, golden
+render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975`
+unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS,
+boundaries 5 rules / 0 violations (53 source files).
