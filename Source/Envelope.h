@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "PieceLimits.h"
+#include "UpicMath.h"
 
 namespace upic
 {

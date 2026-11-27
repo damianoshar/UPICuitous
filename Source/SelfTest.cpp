@@ -153,6 +153,8 @@ int upic::runSelfTest()
     upic::runPageCodecChecks (t);
     // R2.5: the arc group's data and its file format.
     upic::runArcGroupCodecChecks (t);
+    // R2.6: the envelope's codec - the file format of an envelope.
+    upic::runEnvelopeCodecChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
