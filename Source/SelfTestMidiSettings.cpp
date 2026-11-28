@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "SelfTest.h"
 #include "MainComponent.h"
+#include "MidiSettings.h"
 
 #include <algorithm>
 #include <functional>
@@ -253,4 +254,38 @@ void upic::runMidiSettingsChecks (upic::SelfTest& t)
     mc.timerCallback();
     check (gainBind->getText() == "-",
            "R5.10 a cleared binding reads -", gainBind->getText());
+
+    // --- the app follows the edge (R5.10) -------------------------------------
+    namespace ms = upic::midi_settings;
+    check (ms::rows().size() == 4
+           && devLab->getText() == ms::deviceCaption()
+           && tooltipOf (dev) == ms::deviceTooltip()
+           && dev->getItemText (0) == ms::noneItemName()
+           && dev->getItemId (0) == ms::kNoneItemId,
+           "R5.10 the device row follows the edge", devLab->getText());
+
+    bool edgeCaptions = true;
+    for (int i = 0; i < 4 && i < (int) ms::rows().size(); ++i)
+    {
+        auto* lab = dynamic_cast<juce::Label*> (findByName (mc, rows[i].captionName));
+        edgeCaptions = edgeCaptions && lab != nullptr
+                       && lab->getText() == ms::rows()[(size_t) i].caption;
+    }
+    check (edgeCaptions, "R5.10 the four captions follow the edge's rows");
+
+    check (juce::String (ms::learnText()) == "Learn"
+           && juce::String (ms::cancelText()) == "Cancel"
+           && juce::String (ms::unboundText()) == "-"
+           && juce::String (ms::learningText()) == "learning...",
+           "R5.10 the learn's words follow the edge");
+
+    check (ms::bindingText (false, 7, 2) == "CC 7 ch 3"
+           && ms::bindingText (true, 60, 0) == "note 60 ch 1"
+           && gainBind->getText() == ms::unboundText(),
+           "R5.10 the binding's text follows the edge", gainBind->getText());
+
+    check (ms::itemIdForDeviceIndex (0) == 2
+           && ms::deviceIndexForItemId (ms::itemIdForDeviceIndex (3)) == 3
+           && ms::isNoneItem (ms::kNoneItemId),
+           "R5.10 the device item ids follow the edge's rule");
 }

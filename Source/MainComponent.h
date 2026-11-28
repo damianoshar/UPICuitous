@@ -39,6 +39,10 @@
 #include "SequenceTransport.h"   // R5.8: the sequence card and the transport's words
 #include "ChannelControls.h"      // R5.9: the channel card's description
 #include "ModulationControls.h"   // R5.9: the modulation card's description
+#include "MidiSettings.h"         // R5.10: the MIDI settings' description
+#include "SampleMaterial.h"       // R5.10: the sample material panel's description
+#include "LiveInput.h"            // R5.10: the live input panel's description
+#include "PhaseModulation.h"      // R5.10: the phase modulation panel's description
 
 //==============================================================================
 // WP7: the audio preview routes.
@@ -1487,6 +1491,51 @@ public:
         if (role < 0 || role >= modulationControlCountForTest()) return nullptr;
         return modulationControls[(size_t) role].label;
     }
+    // R5.10: the sample material, the live input and the phase modulation
+    // bindings. The suites pin the edge's roles against the app's widgets;
+    // the production code never reads the binding through this.
+    int sampleMaterialControlCountForTest() const
+    {
+        return (int) (sizeof (sampleMaterialControls) / sizeof (sampleMaterialControls[0]));
+    }
+    juce::Component* sampleMaterialControlForTest (int role) const
+    {
+        if (role < 0 || role >= sampleMaterialControlCountForTest()) return nullptr;
+        return sampleMaterialControls[(size_t) role].control;
+    }
+    juce::Component* sampleMaterialControlLabelForTest (int role) const
+    {
+        if (role < 0 || role >= sampleMaterialControlCountForTest()) return nullptr;
+        return sampleMaterialControls[(size_t) role].label;
+    }
+    int liveInputControlCountForTest() const
+    {
+        return (int) (sizeof (liveInputControls) / sizeof (liveInputControls[0]));
+    }
+    juce::Component* liveInputControlForTest (int role) const
+    {
+        if (role < 0 || role >= liveInputControlCountForTest()) return nullptr;
+        return liveInputControls[(size_t) role].control;
+    }
+    juce::Component* liveInputControlLabelForTest (int role) const
+    {
+        if (role < 0 || role >= liveInputControlCountForTest()) return nullptr;
+        return liveInputControls[(size_t) role].label;
+    }
+    int phaseModulationControlCountForTest() const
+    {
+        return (int) (sizeof (phaseModulationControls) / sizeof (phaseModulationControls[0]));
+    }
+    juce::Component* phaseModulationControlForTest (int role) const
+    {
+        if (role < 0 || role >= phaseModulationControlCountForTest()) return nullptr;
+        return phaseModulationControls[(size_t) role].control;
+    }
+    juce::Component* phaseModulationControlLabelForTest (int role) const
+    {
+        if (role < 0 || role >= phaseModulationControlCountForTest()) return nullptr;
+        return phaseModulationControls[(size_t) role].label;
+    }
 
     // --- R1.2: the panels below the toolbar ------------------------------
     // The bottom half of the window, for the characterization suite that
@@ -2794,6 +2843,18 @@ private:
     ControlBinding modulationControls[(size_t) upic::modulation_controls::Control::count];
     void bindModulationControl (upic::modulation_controls::Control role,
                                 juce::Component* label, juce::Component* widget);
+    // R5.10: the sample material, the live input and the phase modulation
+    // panels. The material card keeps its layout (R5.6); these bindings name
+    // the roles the edges describe, and the suites pin them.
+    ControlBinding sampleMaterialControls[(size_t) upic::sample_material::Control::count];
+    void bindSampleMaterialControl (upic::sample_material::Control role,
+                                    juce::Component* label, juce::Component* widget);
+    ControlBinding liveInputControls[(size_t) upic::live_input::Control::count];
+    void bindLiveInputControl (upic::live_input::Control role,
+                               juce::Component* label, juce::Component* widget);
+    ControlBinding phaseModulationControls[(size_t) upic::phase_modulation::Control::count];
+    void bindPhaseModulationControl (upic::phase_modulation::Control role,
+                                     juce::Component* label, juce::Component* widget);
 
     // v1.21 (wave 19): the arc list - the score's inventory on the right,
     // with the per-arc controls (the Rev box and the mode dropdown). It is a
@@ -2808,11 +2869,14 @@ private:
     MidiHub midi;
     juce::ComboBox midiDevBox;
     juce::StringArray midiDeviceIds;   // the identifier of each combo box item (v1.33.4 / H9)
-    juce::Label midiDevLab{ {}, "MIDI in" };
-    juce::Label midiActLab{ {}, "no MIDI yet" };
+    // R5.10: the section's words come from the edge (Source/MidiSettings.h):
+    // the captions, the activity line and the bindings' text are set when
+    // the section is built, not written here.
+    juce::Label midiDevLab;
+    juce::Label midiActLab;
     juce::TextButton midiLearnGain{ "Learn" }, midiLearnInt{ "Learn" }, midiLearnScrub{ "Learn" }, midiLearnTransport{ "Learn" };
-    juce::Label midiBindGainLab{ {}, "-" }, midiBindIntLab{ {}, "-" }, midiBindScrubLab{ {}, "-" }, midiBindTransportLab{ {}, "-" };
-    juce::Label midiGainLab{ {}, "Master gain" }, midiIntLab{ {}, "Intensity" }, midiScrubLab{ {}, "Scrub" }, midiTransportLab{ {}, "Transport" };
+    juce::Label midiBindGainLab, midiBindIntLab, midiBindScrubLab, midiBindTransportLab;
+    juce::Label midiGainLab, midiIntLab, midiScrubLab, midiTransportLab;
 
     // v1.29: the OSC scrub receiver. MobMuPlat (or any OSC sender) moves the
     // playhead with /upic/scrub <0..1> on UDP 9000.

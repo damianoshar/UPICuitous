@@ -269,14 +269,16 @@ void MainComponent::refreshBoxes()
         sampleBox.addItem(juce::String(sampleSlots[i].id) + ": "
                           + (sampleSlots[i].loaded() ? sampleSlots[i].name : juce::String("(empty)"))
                           + (sampleSlots[i].reversed ? " (rev)" : ""),
-                          (int)i + 1);
+                          upic::sample_material::itemIdForSlotIndex ((int) i));
     document.selection().sampleSlot = juce::jlimit(0, (int) sampleSlots.size() - 1, document.selection().sampleSlot);
-    sampleBox.setSelectedId(document.selection().sampleSlot + 1, juce::dontSendNotification);
+    sampleBox.setSelectedId(upic::sample_material::itemIdForSlotIndex (document.selection().sampleSlot),
+                            juce::dontSendNotification);
     // M5: the Sample tab shows the slot's own Ref and level, and the
     // material's buttons follow the slot.
     syncRefToSlot();
     levelSlider.setValue (document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size()
-                            ? (double) sampleSlots[(size_t) document.selection().sampleSlot].level : 1.0,
+                            ? (double) sampleSlots[(size_t) document.selection().sampleSlot].level
+                            : upic::sample_material::kDefaultLevel,
                           juce::dontSendNotification);
     updateMaterialButtons();
 
@@ -1752,7 +1754,7 @@ void MainComponent::pushVoice()
         pmEnvId = envelopes[(size_t)(pmIdx - 2)].id;
     score.setCurrentPmVoice(pmRatioSlider.getValue(), pmIndexSlider.getValue(),
                             pmEnvId, pmFeedbackSlider.getValue(),
-                            pmOpsBox.getSelectedId() == 2 ? 4 : 2);
+                            upic::phase_modulation::opsCountForItemId (pmOpsBox.getSelectedId()));
 }
 
 // Load one arc into the toolbar. The canvas calls this when an arc is clicked;
@@ -1790,7 +1792,7 @@ void MainComponent::syncControlsToArc(int arcId)
             pmRatioSlider.setValue (a.pmRatio, juce::dontSendNotification);
             pmIndexSlider.setValue (a.pmIndex, juce::dontSendNotification);
             pmFeedbackSlider.setValue (a.pmFeedback, juce::dontSendNotification);
-            pmOpsBox.setSelectedId (a.pmOps == 4 ? 2 : 1, juce::dontSendNotification);
+            pmOpsBox.setSelectedId (upic::phase_modulation::opsItemId (a.pmOps), juce::dontSendNotification);
             intenSlider.setValue(a.intensity, juce::dontSendNotification);
             drawIntensity = a.intensity; // keep new strokes in sync with the slider
             // v1.31 (U1): the polyagogy controls follow the selected arc
@@ -1811,7 +1813,8 @@ void MainComponent::syncControlsToArc(int arcId)
             syncMaterialTabs();
             for (size_t i = 0; i < sampleSlots.size(); ++i)
                 if (sampleSlots[i].id == a.sampleId) { document.selection().sampleSlot = (int) i; break; }
-            sampleBox.setSelectedId(document.selection().sampleSlot + 1, juce::dontSendNotification);
+            sampleBox.setSelectedId(upic::sample_material::itemIdForSlotIndex (document.selection().sampleSlot),
+                                    juce::dontSendNotification);
             updateRevButton();
             drawRef = a.refFreq;
             refSlider.setValue(drawRef, juce::dontSendNotification);
@@ -2010,7 +2013,7 @@ void MainComponent::runGenerator(int kind)
                 a.pmIndexEnv = (pmIdx >= 2 && pmIdx - 2 < (int) envelopes.size())
                                    ? envelopes[(size_t)(pmIdx - 2)].id : 0;
                 a.pmFeedback = pmFeedbackSlider.getValue();
-                a.pmOps = pmOpsBox.getSelectedId() == 2 ? 4 : 2;
+                a.pmOps = upic::phase_modulation::opsCountForItemId (pmOpsBox.getSelectedId());
             }
             created.push_back(a.id);
             pg.arcs.push_back(std::move(a));

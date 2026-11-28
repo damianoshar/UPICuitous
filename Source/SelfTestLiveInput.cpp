@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "SelfTest.h"
 #include "MainComponent.h"
+#include "LiveInput.h"
 
 #include <algorithm>
 #include <cmath>
@@ -212,4 +213,76 @@ void upic::runLiveInputChecks (upic::SelfTest& t)
                                        "Only affects the Granular live pitch mode.\n40 ms",
            "R5.10 the live grain says what it does",
            liveGrain != nullptr ? tooltipOf (liveGrain) : juce::String());
+
+    // --- the app follows the edge (R5.10) -------------------------------------
+    namespace li = upic::live_input;
+    check (mc.liveInputControlCountForTest() == (int) li::allControls().size(),
+           "R5.10 every role of the edge is bound",
+           juce::String (mc.liveInputControlCountForTest()) + " / "
+             + juce::String ((int) li::allControls().size()));
+
+    bool rolesBound = true;
+    for (auto role : li::allControls())
+        if (mc.liveInputControlForTest ((int) role) == nullptr) rolesBound = false;
+    check (rolesBound, "R5.10 every role of the edge has a widget");
+
+    check (mc.liveInputControlForTest ((int) li::Control::Capture) == cap
+           && mc.liveInputControlForTest ((int) li::Control::InputGain) == gain
+           && mc.liveInputControlForTest ((int) li::Control::WaveFromSlot) == waveBtn
+           && mc.liveInputControlForTest ((int) li::Control::Pitch) == livePitch
+           && mc.liveInputControlForTest ((int) li::Control::Grain) == liveGrain,
+           "R5.10 the roles point at the panel's own widgets");
+
+    bool edgeTooltips = true;
+    for (auto role : li::allControls())
+    {
+        const char* tip = li::tooltip (role);
+        if (tip == nullptr || *tip == '\0') continue;
+        auto* control = mc.liveInputControlForTest ((int) role);
+        edgeTooltips = edgeTooltips && control != nullptr
+                       && tooltipOf (control).startsWith (tip);
+    }
+    check (edgeTooltips, "R5.10 the panel's words follow the edge");
+
+    check (std::abs (gain->getMinimum() - li::kInputGainMin) < 1e-9
+           && std::abs (gain->getMaximum() - li::kInputGainMax) < 1e-9
+           && std::abs (gain->getInterval() - li::kInputGainInterval) < 1e-9
+           && std::abs (gain->getValue() - li::kDefaultInputGain) < 1e-9
+           && cap->getButtonText() == li::captureText(),
+           "R5.10 the input's gain and the capture follow the edge");
+
+    bool edgePitch = livePitch != nullptr
+                     && livePitch->getNumItems() == (int) li::pitchModes().size();
+    for (int i = 0; livePitch != nullptr && i < (int) li::pitchModes().size()
+                    && i < livePitch->getNumItems(); ++i)
+        if (livePitch->getItemText (i) != li::pitchModes()[(size_t) i].name
+            || livePitch->getItemId (i) != li::pitchItemId (li::pitchModes()[(size_t) i].mode)
+            || li::pitchModeForItemId (livePitch->getItemId (i)) != li::pitchModes()[(size_t) i].mode)
+            edgePitch = false;
+    check (edgePitch, "R5.10 the live pitch list follows the edge's items and ids");
+    check (livePitch != nullptr && livePitch->getSelectedId() == li::kDefaultPitchItemId,
+           "R5.10 the live pitch starts on the edge's item");
+
+    bool edgeLengths = revLen != nullptr
+                       && revLen->getNumItems() == (int) li::reverseLengths().size();
+    for (int i = 0; revLen != nullptr && i < (int) li::reverseLengths().size()
+                    && i < revLen->getNumItems(); ++i)
+        if (revLen->getItemText (i) != li::reverseLengths()[(size_t) i].name
+            || revLen->getItemId (i) != li::reverseLengthItemId (i)
+            || li::reverseLengthForItemId (revLen->getItemId (i))
+                  != li::reverseLengths()[(size_t) i].seconds)
+            edgeLengths = false;
+    check (edgeLengths, "R5.10 the reverse's buffer list follows the edge");
+    check (revLen != nullptr && revLen->getSelectedId() == li::kDefaultReverseLengthItemId,
+           "R5.10 the reverse starts on the edge's item");
+
+    check (liveGrain != nullptr && sampleGrain != nullptr
+           && std::abs (liveGrain->getMinimum() - li::kGrainMinMs) < 1e-9
+           && std::abs (liveGrain->getMaximum() - li::kGrainMaxMs) < 1e-9
+           && std::abs (liveGrain->getInterval() - li::kGrainIntervalMs) < 1e-9
+           && std::abs (liveGrain->getValue() - li::kDefaultGrainMs) < 1e-9
+           && std::abs (sampleGrain->getMinimum() - li::kGrainMinMs) < 1e-9
+           && std::abs (sampleGrain->getMaximum() - li::kGrainMaxMs) < 1e-9
+           && std::abs (sampleGrain->getInterval() - li::kGrainIntervalMs) < 1e-9,
+           "R5.10 both grain sliders follow the edge's domain");
 }

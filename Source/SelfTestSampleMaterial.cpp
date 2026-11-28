@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "SelfTest.h"
 #include "MainComponent.h"
+#include "SampleMaterial.h"
 
 #include <algorithm>
 #include <cmath>
@@ -184,4 +185,59 @@ void upic::runSampleMaterialChecks (upic::SelfTest& t)
     check (tooltipOf (extract) == "Find the repeating cycle in the selected material,\n"
                                   "preview it, and save it as a wavetable or envelope",
            "R5.10 the extraction says what it does", tooltipOf (extract));
+
+    // --- the app follows the edge (R5.10) -------------------------------------
+    namespace sm = upic::sample_material;
+    check (mc.sampleMaterialControlCountForTest() == (int) sm::allControls().size(),
+           "R5.10 every role of the edge is bound",
+           juce::String (mc.sampleMaterialControlCountForTest()) + " / "
+             + juce::String ((int) sm::allControls().size()));
+
+    bool rolesBound = true;
+    for (auto role : sm::allControls())
+        if (mc.sampleMaterialControlForTest ((int) role) == nullptr) rolesBound = false;
+    check (rolesBound, "R5.10 every role of the edge has a widget");
+
+    check (mc.sampleMaterialControlForTest ((int) sm::Control::Slot) == slot
+           && mc.sampleMaterialControlForTest ((int) sm::Control::Level) == level
+           && mc.sampleMaterialControlForTest ((int) sm::Control::Pitch) == pitch
+           && mc.sampleMaterialControlForTest ((int) sm::Control::Extract) == extract,
+           "R5.10 the roles point at the panel's own widgets");
+
+    bool edgeTooltips = true;
+    for (auto role : sm::allControls())
+    {
+        const char* tip = sm::tooltip (role);
+        if (tip == nullptr || *tip == '\0') continue;
+        auto* control = mc.sampleMaterialControlForTest ((int) role);
+        // a knob shows its value under the tooltip, so the edge's words are
+        // the head of it
+        edgeTooltips = edgeTooltips && control != nullptr
+                       && tooltipOf (control).startsWith (tip);
+    }
+    check (edgeTooltips, "R5.10 the panel's words follow the edge");
+
+    check (std::abs (level->getMinimum() - sm::kLevelMin) < 1e-9
+           && std::abs (level->getMaximum() - sm::kLevelMax) < 1e-9
+           && std::abs (level->getInterval() - sm::kLevelInterval) < 1e-9
+           && std::abs (level->getSkewFactor() - sm::kLevelSkew) < 1e-9
+           && std::abs (level->getValue() - sm::kDefaultLevel) < 1e-9,
+           "R5.10 the level's domain follows the edge");
+
+    bool edgePitch = pitch->getNumItems() == (int) sm::pitchModes().size();
+    for (int i = 0; i < (int) sm::pitchModes().size() && i < pitch->getNumItems(); ++i)
+        if (pitch->getItemText (i) != sm::pitchModes()[(size_t) i].name
+            || pitch->getItemId (i) != sm::pitchItemId (sm::pitchModes()[(size_t) i].mode)
+            || sm::pitchModeForItemId (pitch->getItemId (i)) != sm::pitchModes()[(size_t) i].mode)
+            edgePitch = false;
+    check (edgePitch, "R5.10 the pitch list follows the edge's items and ids");
+    check (pitch->getSelectedId() == sm::kDefaultPitchItemId,
+           "R5.10 the pitch list starts on the edge's item");
+
+    bool edgeSlots = true;
+    for (int i = 0; i < slot->getNumItems(); ++i)
+        if (slot->getItemId (i) != sm::itemIdForSlotIndex (i)
+            || sm::slotIndexForItemId (slot->getItemId (i)) != i)
+            edgeSlots = false;
+    check (edgeSlots, "R5.10 the slot list follows the edge's item ids");
 }

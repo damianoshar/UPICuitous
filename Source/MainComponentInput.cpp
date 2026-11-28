@@ -258,14 +258,14 @@ void MainComponent::startCapture()
     capStopReason = 0;
     capFinalReason = 0;
     capturing = true;
-    capBtn.setButtonText("Stop");
+    capBtn.setButtonText(upic::live_input::stopText());
 }
 
 void MainComponent::finalizeCapture()
 {
     if (! capReady.exchange(false)) return;
     capBtn.setToggleState(false, juce::dontSendNotification);
-    capBtn.setButtonText("Capture");
+    capBtn.setButtonText(upic::live_input::captureText());
     repaint();
 
     const int reason = capFinalReason;

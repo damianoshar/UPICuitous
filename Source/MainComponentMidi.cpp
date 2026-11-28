@@ -209,45 +209,51 @@ void MainComponent::injectMidiMessage (const juce::MidiMessage& m)
 
 void MainComponent::updateMidiLabels()
 {
+    // R5.10: the words come from the edge (Source/MidiSettings.h).
+    namespace ms = upic::midi_settings;
     auto describe = [this] (MidiHub::Target t) -> juce::String
     {
         if (midi.isLearning() && midi.learningTarget() == t)
-            return "learning...";
+            return ms::learningText();
         const auto b = midi.binding (t);
-        if (! b.bound) return "-";
-        return (b.note ? "note " : "CC ") + juce::String (b.number)
-               + " ch " + juce::String (b.channel + 1);
+        if (! b.bound) return ms::unboundText();
+        return juce::String (ms::bindingText (b.note, b.number, b.channel).c_str());
     };
     midiBindGainLab.setText (describe (MidiHub::Target::masterGain), juce::dontSendNotification);
     midiBindIntLab.setText (describe (MidiHub::Target::drawIntensity), juce::dontSendNotification);
     midiBindScrubLab.setText (describe (MidiHub::Target::scrub), juce::dontSendNotification);
     midiBindTransportLab.setText (describe (MidiHub::Target::transport), juce::dontSendNotification);
-    midiLearnGain.setButtonText (midi.isLearning() && midi.learningTarget() == MidiHub::Target::masterGain
-                                   ? "Cancel" : "Learn");
-    midiLearnInt.setButtonText (midi.isLearning() && midi.learningTarget() == MidiHub::Target::drawIntensity ? "Cancel" : "Learn");
-    midiLearnScrub.setButtonText (midi.isLearning() && midi.learningTarget() == MidiHub::Target::scrub ? "Cancel" : "Learn");
-    midiLearnTransport.setButtonText (midi.isLearning() && midi.learningTarget() == MidiHub::Target::transport ? "Cancel" : "Learn");
+    auto learnText = [this] (MidiHub::Target t) -> juce::String
+    {
+        return midi.isLearning() && midi.learningTarget() == t ? ms::cancelText() : ms::learnText();
+    };
+    midiLearnGain.setButtonText (learnText (MidiHub::Target::masterGain));
+    midiLearnInt.setButtonText (learnText (MidiHub::Target::drawIntensity));
+    midiLearnScrub.setButtonText (learnText (MidiHub::Target::scrub));
+    midiLearnTransport.setButtonText (learnText (MidiHub::Target::transport));
 }
 
 void MainComponent::refreshMidiDevices()
 {
     // the list is rebuilt when the overlay opens, so a device plugged in
     // after the app started shows up; the open device stays selected
+    // R5.10: the item ids come from the edge (Source/MidiSettings.h).
+    namespace ms = upic::midi_settings;
     const juce::String current = midi.openDeviceId();
     midiDevBox.clear (juce::dontSendNotification);
-    midiDevBox.addItem ("None", 1);
+    midiDevBox.addItem (ms::noneItemName(), ms::kNoneItemId);
     midiDeviceIds.clear();
     const auto infos = MidiHub::deviceInfos();
-    int selected = 1;
+    int selected = ms::kNoneItemId;
     for (int i = 0; i < infos.size(); ++i)
     {
-        midiDevBox.addItem (infos[i].name, i + 2);
+        midiDevBox.addItem (infos[i].name, ms::itemIdForDeviceIndex (i));
         midiDeviceIds.add (infos[i].identifier);
         // v1.33.4 (H9): the selection follows the identifier, not the name
-        if (infos[i].identifier == current) selected = i + 2;
+        if (infos[i].identifier == current) selected = ms::itemIdForDeviceIndex (i);
     }
     midiDevBox.setSelectedId (selected, juce::dontSendNotification);
-    if (midi.isOpen() && selected == 1)
+    if (midi.isOpen() && ms::isNoneItem (selected))
         midi.close();   // the device disappeared
 }
 

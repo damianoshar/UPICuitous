@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "SelfTest.h"
 #include "MainComponent.h"
+#include "PhaseModulation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -39,6 +40,12 @@ namespace
         for (int i = 0; i < c.getNumChildComponents(); ++i)
             if (auto* r = findByName (*c.getChildComponent (i), name)) return r;
         return nullptr;
+    }
+
+    juce::String tooltipOf (juce::Component* c)
+    {
+        if (auto* t = dynamic_cast<juce::TooltipClient*> (c)) return t->getTooltip();
+        return {};
     }
 
     juce::ComboBox* findComboByFirstItem (juce::Component& c, const juce::String& first)
@@ -275,4 +282,80 @@ void upic::runPhaseModulationChecks (upic::SelfTest& t)
     check (arcPropertyInt (mc.pieceToVar(), 0, "pmOps") == 2,
            "R5.10 2-op writes the arc's two operators",
            juce::String (arcPropertyInt (mc.pieceToVar(), 0, "pmOps")));
+
+    // --- the app follows the edge (R5.10) -------------------------------------
+    namespace pm = upic::phase_modulation;
+    check (mc.phaseModulationControlCountForTest() == (int) pm::allControls().size(),
+           "R5.10 every role of the edge is bound",
+           juce::String (mc.phaseModulationControlCountForTest()) + " / "
+             + juce::String ((int) pm::allControls().size()));
+
+    bool rolesBound = true;
+    for (auto role : pm::allControls())
+        if (mc.phaseModulationControlForTest ((int) role) == nullptr) rolesBound = false;
+    check (rolesBound, "R5.10 every role of the edge has a widget");
+
+    check (mc.phaseModulationControlForTest ((int) pm::Control::Ops) == ops
+           && mc.phaseModulationControlForTest ((int) pm::Control::Preset) == preset
+           && mc.phaseModulationControlForTest ((int) pm::Control::Ratio) == ratio
+           && mc.phaseModulationControlForTest ((int) pm::Control::IndexEnv) == indexEnv
+           && mc.phaseModulationControlForTest ((int) pm::Control::Import) == import,
+           "R5.10 the roles point at the panel's own widgets");
+
+    bool edgeTooltips = true;
+    for (auto role : pm::allControls())
+    {
+        const char* tip = pm::tooltip (role);
+        if (tip == nullptr || *tip == '\0') continue;
+        auto* control = mc.phaseModulationControlForTest ((int) role);
+        edgeTooltips = edgeTooltips && control != nullptr
+                       && tooltipOf (control).startsWith (tip);
+    }
+    check (edgeTooltips, "R5.10 the panel's words follow the edge");
+
+    bool edgeOps = ops->getNumItems() == (int) pm::opsCounts().size();
+    for (int i = 0; i < (int) pm::opsCounts().size() && i < ops->getNumItems(); ++i)
+        if (ops->getItemText (i) != pm::opsCounts()[(size_t) i].name
+            || ops->getItemId (i) != pm::opsItemId (pm::opsCounts()[(size_t) i].count)
+            || pm::opsCountForItemId (ops->getItemId (i)) != pm::opsCounts()[(size_t) i].count)
+            edgeOps = false;
+    check (edgeOps, "R5.10 the ops list follows the edge's items and ids");
+    check (ops->getSelectedId() == pm::opsItemId (2),
+           "R5.10 the ops list starts on the edge's item");
+
+    bool edgePresets = preset->getNumItems() == (int) pm::presets().size() + 1
+                       && preset->getItemText (0) == pm::manualName()
+                       && preset->getItemId (0) == pm::kManualItemId;
+    for (int i = 0; i < (int) pm::presets().size() && i + 1 < preset->getNumItems(); ++i)
+        if (preset->getItemText (i + 1) != pm::presets()[(size_t) i].name
+            || preset->getItemId (i + 1) != pm::presets()[(size_t) i].itemId)
+            edgePresets = false;
+    check (edgePresets, "R5.10 the preset list follows the edge's items and ids");
+
+    bool edgeVoice = std::abs (ratio->getMinimum() - pm::kRatioMin) < 1e-9
+                     && std::abs (ratio->getMaximum() - pm::kRatioMax) < 1e-9
+                     && std::abs (ratio->getInterval() - pm::kRatioInterval) < 1e-9
+                     && std::abs (ratio->getSkewFactor() - pm::kRatioSkew) < 1e-9
+                     && std::abs (index->getMinimum() - pm::kIndexMin) < 1e-9
+                     && std::abs (index->getMaximum() - pm::kIndexMax) < 1e-9
+                     && std::abs (index->getInterval() - pm::kIndexInterval) < 1e-9
+                     && std::abs (index->getSkewFactor() - pm::kIndexSkew) < 1e-9
+                     && std::abs (feedback->getMinimum() - pm::kFeedbackMin) < 1e-9
+                     && std::abs (feedback->getMaximum() - pm::kFeedbackMax) < 1e-9
+                     && std::abs (feedback->getInterval() - pm::kFeedbackInterval) < 1e-9
+                     && std::abs (feedback->getSkewFactor() - pm::kFeedbackSkew) < 1e-9;
+    check (edgeVoice, "R5.10 the voice's domains follow the edge");
+
+    // the presets the edge names write what it says
+    bool edgePresetValues = true;
+    for (auto& p : pm::presets())
+    {
+        preset->setSelectedId (p.itemId, juce::dontSendNotification);
+        preset->onChange();
+        if (std::abs (ratio->getValue() - p.ratio) > 0.01
+            || std::abs (index->getValue() - p.index) > 1e-9
+            || std::abs (feedback->getValue() - p.feedback) > 1e-9)
+            edgePresetValues = false;
+    }
+    check (edgePresetValues, "R5.10 the presets write the edge's values");
 }

@@ -527,7 +527,7 @@ void MainComponent::buildEditors()
                 a.intensity = (float) intenSlider.getValue();
                 a.mode = drawMatMode; // the current tab's material
                 if (drawMatMode == 3) { int _ei = pmIndexEnvBox.getSelectedId(); a.pmIndexEnv = (_ei >= 2 && _ei - 2 < (int) envelopes.size()) ? envelopes[(size_t)(_ei - 2)].id : 0; }
-                int si = sampleBox.getSelectedId() - 1;
+                int si = upic::sample_material::slotIndexForItemId (sampleBox.getSelectedId());
                 if (si >= 0 && si < (int) sampleSlots.size()) a.sampleId = sampleSlots[(size_t) si].id;
                 a.refFreq = refSlider.getValue();
             }
@@ -1782,7 +1782,7 @@ void MainComponent::handleScrubPreview (double t)
             // pitch) - the same one the engine uses, so the marker in
             // the material view sits where the sound is.
             double ref = juce::jmax(1.0, slot.refFreq > 0.0 ? slot.refFreq : a.refFreq);
-            const int tabMode = samplePitchBox.getSelectedId() - 1;
+            const int tabMode = upic::sample_material::pitchModeForItemId (samplePitchBox.getSelectedId());
             bool arcMapped = (a.pitchMode >= 0) ? (a.pitchMode == 1 || a.pitchMode == 2)
                                                 : (tabMode == 1 || tabMode == 2);
             double arcDur = juce::jmax(1.0e-6, a.endTime() - a.startTime());

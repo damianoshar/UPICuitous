@@ -80,6 +80,40 @@ void MainComponent::buildMaterialControls()
     bindMaterialControl (mi::Control::PmImport, nullptr, &pmImportBtn);
     bindMaterialControl (mi::Control::PmExport, nullptr, &pmExportBtn);
 
+    // R5.10: the panels' own descriptions. The material inspector still says
+    // where the cells go; these edges own the words, the domains and the
+    // lists for the same widgets.
+    namespace sm = upic::sample_material;
+    bindSampleMaterialControl (sm::Control::Slot,        &slotLab,       &sampleBox);
+    bindSampleMaterialControl (sm::Control::LoadSample,  nullptr,        &loadSampleBtn);
+    bindSampleMaterialControl (sm::Control::Reverse,     nullptr,        &revBtn);
+    bindSampleMaterialControl (sm::Control::Level,       &levelLab,      &levelSlider);
+    bindSampleMaterialControl (sm::Control::Pitch,       &samplePitchLab, &samplePitchBox);
+    bindSampleMaterialControl (sm::Control::Normalise,   nullptr,        &normMatBtn);
+    bindSampleMaterialControl (sm::Control::Fade,        nullptr,        &fadeMatBtn);
+    bindSampleMaterialControl (sm::Control::Reset,       nullptr,        &resetMatBtn);
+    bindSampleMaterialControl (sm::Control::Extract,     nullptr,        &sampleExtractBtn);
+
+    namespace li = upic::live_input;
+    bindLiveInputControl (li::Control::Monitor,        nullptr,       &monBtn);
+    bindLiveInputControl (li::Control::Capture,        nullptr,       &capBtn);
+    bindLiveInputControl (li::Control::InputGain,      &inGainLab,    &inGainSlider);
+    bindLiveInputControl (li::Control::WaveFromSlot,   nullptr,       &waveFromSlotBtn);
+    bindLiveInputControl (li::Control::Pitch,          &livePitchLab, &livePitchBox);
+    bindLiveInputControl (li::Control::Grain,          &liveGrainLab, &liveGrainSlider);
+    bindLiveInputControl (li::Control::Reverse,        nullptr,       &liveRevBtn);
+    bindLiveInputControl (li::Control::ReverseLength,  &liveRevLab,   &liveRevLenBox);
+
+    namespace pm = upic::phase_modulation;
+    bindPhaseModulationControl (pm::Control::Ops,       &pmOpsLab,       &pmOpsBox);
+    bindPhaseModulationControl (pm::Control::Preset,    &pmPresetLab,    &pmPresetBox);
+    bindPhaseModulationControl (pm::Control::Ratio,     &pmRatioLab,     &pmRatioSlider);
+    bindPhaseModulationControl (pm::Control::Index,     &pmIndexLab,     &pmIndexSlider);
+    bindPhaseModulationControl (pm::Control::IndexEnv,  &pmIndexEnvLab,  &pmIndexEnvBox);
+    bindPhaseModulationControl (pm::Control::Feedback,  &pmFeedbackLab,  &pmFeedbackSlider);
+    bindPhaseModulationControl (pm::Control::Import,    nullptr,         &pmImportBtn);
+    bindPhaseModulationControl (pm::Control::Export,    nullptr,         &pmExportBtn);
+
     // --- v1.31 (U1): the polyagogy. The UPIC's wave page had no fixed
     //     meaning: the same drawn curve could be the carrier's timbre AND a
     //     control signal. Here the arc's own wave can also be an amplitude
@@ -191,6 +225,42 @@ void MainComponent::bindModulationControl (upic::modulation_controls::Control ro
     auto& binding = modulationControls[(size_t) role];
     binding.label = label;
     binding.control = widget;
+}
+
+void MainComponent::bindSampleMaterialControl (upic::sample_material::Control role,
+                                               juce::Component* label, juce::Component* widget)
+{
+    auto& binding = sampleMaterialControls[(size_t) role];
+    binding.label = label;
+    binding.control = widget;
+    // the edge owns the words; an empty description leaves the widget's own
+    // tooltip (the button-text fallback) alone
+    const char* tip = upic::sample_material::tooltip (role);
+    if (widget != nullptr && tip != nullptr && *tip != '\0')
+        if (auto* tc = dynamic_cast<juce::SettableTooltipClient*> (widget))
+            tc->setTooltip (tip);
+}
+
+void MainComponent::bindLiveInputControl (upic::live_input::Control role,
+                                          juce::Component* label, juce::Component* widget)
+{
+    auto& binding = liveInputControls[(size_t) role];
+    binding.label = label;
+    binding.control = widget;
+    const char* tip = upic::live_input::tooltip (role);
+    if (widget != nullptr && tip != nullptr && *tip != '\0')
+        if (auto* tc = dynamic_cast<juce::SettableTooltipClient*> (widget))
+            tc->setTooltip (tip);
+}
+
+void MainComponent::bindPhaseModulationControl (upic::phase_modulation::Control role,
+                                                juce::Component* label, juce::Component* widget)
+{
+    auto& binding = phaseModulationControls[(size_t) role];
+    binding.label = label;
+    binding.control = widget;
+    // the PM panel's controls have no tooltips today; the edge says so with
+    // an empty string, and the binding leaves the widget alone
 }
 
 void MainComponent::buildSieveControls()
@@ -2377,19 +2447,30 @@ void MainComponent::buildMidiControls()
     midiTransportLab.setName("midiTransportLab");
     // the four Learn buttons keep the name "Learn": the button icons are
     // chosen by the name, and "Learn" is in the icon table.
-    midiDevBox.setTooltip ("The MIDI input the app listens to");
+    // R5.10: the section's words come from the edge (Source/MidiSettings.h).
+    namespace ms = upic::midi_settings;
+    midiDevLab.setText (ms::deviceCaption(), juce::dontSendNotification);
+    midiActLab.setText (ms::noActivityText(), juce::dontSendNotification);
+    {
+        juce::Label* captions[] = { &midiGainLab, &midiIntLab, &midiScrubLab, &midiTransportLab };
+        for (auto& row : ms::rows())
+            captions[(int) row.target]->setText (row.caption, juce::dontSendNotification);
+    }
+    midiDevBox.setTooltip (ms::deviceTooltip());
     midiDevBox.onChange = [this]
     {
         const int id = midiDevBox.getSelectedId();
         // v1.33.4 (H9): the device is opened by its identifier - two devices
         // can have the same name, and a name can change.
-        const juce::String devId = (id <= 1 || (size_t) (id - 2) >= midiDeviceIds.size())
-                                     ? juce::String() : midiDeviceIds[(size_t) (id - 2)];
+        const int devIndex = ms::deviceIndexForItemId (id);
+        const juce::String devId = (ms::isNoneItem (id)
+                                     || devIndex < 0 || devIndex >= midiDeviceIds.size())
+                                    ? juce::String() : midiDeviceIds[(size_t) devIndex];
         const bool ok = midi.open (devId);
         if (! ok)
         {
             flash ("Could not open the MIDI input");
-            midiDevBox.setSelectedId (1);
+            midiDevBox.setSelectedId (ms::kNoneItemId);
             midi.close();
         }
         else
@@ -2533,14 +2614,20 @@ void MainComponent::buildMaterialTabs()
 
 void MainComponent::buildPmControls()
 {
+    // R5.10: the phase modulation panel's description
+    // (Source/PhaseModulation.h) owns the words, the domains and the lists.
+    namespace pm = upic::phase_modulation;
     pmRatioSlider.setName ("pmRatioSlider");
-    pmRatioSlider.setNormalisableRange (juce::NormalisableRange<double> (0.1, 32.0, 0.01, 0.4));
-    pmRatioSlider.setValue (2.0);
+    pmRatioSlider.setNormalisableRange (juce::NormalisableRange<double> (pm::kRatioMin, pm::kRatioMax,
+                                                                       pm::kRatioInterval, pm::kRatioSkew));
+    pmRatioSlider.setValue (pm::kDefaultRatio);
     pmIndexSlider.setName ("pmIndexSlider");
-    pmIndexSlider.setNormalisableRange (juce::NormalisableRange<double> (0.0, 20.0, 0.01, 0.4));
-    pmIndexSlider.setValue (1.5);
-    pmFeedbackSlider.setNormalisableRange (juce::NormalisableRange<double> (0.0, 1.0, 0.001, 0.4));
-    pmFeedbackSlider.setValue (0.0);
+    pmIndexSlider.setNormalisableRange (juce::NormalisableRange<double> (pm::kIndexMin, pm::kIndexMax,
+                                                                        pm::kIndexInterval, pm::kIndexSkew));
+    pmIndexSlider.setValue (pm::kDefaultIndex);
+    pmFeedbackSlider.setNormalisableRange (juce::NormalisableRange<double> (pm::kFeedbackMin, pm::kFeedbackMax,
+                                                                             pm::kFeedbackInterval, pm::kFeedbackSkew));
+    pmFeedbackSlider.setValue (pm::kDefaultFeedback);
     pmFeedbackSlider.onValueChange = [this]{
         if (! score.getSelectedArcs().empty())
         {
@@ -2552,22 +2639,22 @@ void MainComponent::buildPmControls()
         }
         pushVoice();
     };
-    pmPresetBox.addItem ("(manual)", 1);
-    pmPresetBox.addItem ("Bell (2.0x, percussive)", 2);
-    pmPresetBox.addItem ("Brass (1.0x, flat)", 3);
-    pmPresetBox.addItem ("Pluck (3.0x, percussive)", 4);
-    pmPresetBox.addItem ("Organ (1.0x, sustain, fb)", 5);
-    pmPresetBox.addItem ("Metallic (1.414x, perc, fb)", 6);
-    pmPresetBox.setSelectedId (1);
-    pmOpsBox.addItem ("2-op", 1); pmOpsBox.addItem ("4-op", 2); pmOpsBox.setSelectedId (1);
+    pmPresetBox.addItem (pm::manualName(), pm::kManualItemId);
+    for (auto& preset : pm::presets())
+        pmPresetBox.addItem (preset.name, preset.itemId);
+    pmPresetBox.setSelectedId (pm::kManualItemId);
+    for (auto& ops : pm::opsCounts())
+        pmOpsBox.addItem (ops.name, pm::opsItemId (ops.count));
+    pmOpsBox.setSelectedId (pm::opsItemId (2));
     // names used by the selftest and UI automation
     waveBox.setName ("waveBox");
     sampleBox.setName ("sampleBox");
     pmOpsBox.setName ("pmOpsBox");
     pmPresetBox.setName ("pmPresetBox");
     pmFeedbackSlider.setName ("pmFeedbackSlider");
-    pmOpsBox.onChange = [this]{
-        const int ops = (pmOpsBox.getSelectedId() == 2) ? 4 : 2;
+    pmOpsBox.onChange = [this]
+    {
+        const int ops = pm::opsCountForItemId (pmOpsBox.getSelectedId());
         const auto ids = score.getSelectedArcs();
         if (! ids.empty())
         {
@@ -2638,15 +2725,14 @@ void MainComponent::buildPmControls()
         });
     };
 
-    pmPresetBox.onChange = [this]{
+    pmPresetBox.onChange = [this]
+    {
         const int sel = pmPresetBox.getSelectedId();
-        if (sel <= 1) return;
-        double ratio = 2.0, idx = 1.5, fb = 0.0; int envId = 0;
-        if (sel == 2) { ratio = 2.0;   idx = 2.5; envId = 1; fb = 0.0; }
-        else if (sel == 3) { ratio = 1.0; idx = 1.0; envId = 0;  fb = 0.1; }
-        else if (sel == 4) { ratio = 3.0; idx = 4.0; envId = 1; fb = 0.0; }
-        else if (sel == 5) { ratio = 1.0; idx = 0.5; envId = 0;  fb = 0.3; }
-        else if (sel == 6) { ratio = 1.414; idx = 5.0; envId = 1; fb = 0.2; }
+        if (pm::isManualItem (sel)) return;
+        const auto* preset = pm::presetForItemId (sel);
+        if (preset == nullptr) return;
+        const double ratio = preset->ratio, idx = preset->index, fb = preset->feedback;
+        const int envId = preset->indexEnv;
         // the preset also sets the current voice, so the next PM arc drawn
         // is born with it (whether or not an arc is selected)
         pmRatioSlider.setValue (ratio);
@@ -2693,8 +2779,12 @@ void MainComponent::buildPmControls()
 
 void MainComponent::buildSampleControls()
 {
-    sampleBox.onChange = [this]{
-        int i = sampleBox.getSelectedId() - 1;
+    // R5.10: the panel's description (Source/SampleMaterial.h) owns the
+    // words, the domains and the lists.
+    namespace sm = upic::sample_material;
+    sampleBox.onChange = [this]
+    {
+        int i = sm::slotIndexForItemId (sampleBox.getSelectedId());
         if (i >= 0 && i < (int) sampleSlots.size()) document.selection().sampleSlot = i;
         // v1.26: the slot is an arc setting too - changing it with a
         // multi-selection assigns the slot to every selected sample arc.
@@ -2717,7 +2807,8 @@ void MainComponent::buildSampleControls()
         syncRefToSlot();
         updateMaterialButtons();
         levelSlider.setValue (document.selection().sampleSlot >= 0 && document.selection().sampleSlot < (int) sampleSlots.size()
-                                ? (double) sampleSlots[(size_t) document.selection().sampleSlot].level : 1.0,
+                                ? (double) sampleSlots[(size_t) document.selection().sampleSlot].level
+                                : sm::kDefaultLevel,
                               juce::dontSendNotification);
         updateRevButton(); // v1.19: the button shows the selected slot's state
     };
@@ -2726,8 +2817,6 @@ void MainComponent::buildSampleControls()
     // WP7: the cycle-aware extraction panel. The panel is built lazily when
     // it opens; this button only asks for it.
     sampleExtractBtn.setName ("sampleExtractBtn");
-    sampleExtractBtn.setTooltip ("Find the repeating cycle in the selected material,\n"
-                                  "preview it, and save it as a wavetable or envelope");
     sampleExtractBtn.onClick = [this]{ openSampleExtractPanel(); };
 
     // v1.19 (wave 17): the selected slot plays backwards. The engine mirrors
@@ -2736,7 +2825,6 @@ void MainComponent::buildSampleControls()
     addAndMakeVisible(revBtn);
     revBtn.setName("revBtn");
     revBtn.setClickingTogglesState(true);
-    revBtn.setTooltip("Play the selected slot backwards");
     revBtn.onClick = [this]{
         if (document.selection().sampleSlot < 0 || document.selection().sampleSlot >= (int) sampleSlots.size()) return;
         const bool on = revBtn.getToggleState();
@@ -2776,10 +2864,9 @@ void MainComponent::buildSampleControls()
     // The level is the slot's own knob (the material's loudness). It
     // changes the sound, so it travels with the piece.
     levelSlider.setName("levelSlider");
-    levelSlider.setNormalisableRange (juce::NormalisableRange<double> (0.0, 2.0, 0.01, 0.2));
-    levelSlider.setValue (1.0);
-    levelSlider.setTooltip ("The slot's level - how loud the material is "
-                            "(1 = as it was loaded)");
+    levelSlider.setNormalisableRange (juce::NormalisableRange<double> (sm::kLevelMin, sm::kLevelMax,
+                                                                     sm::kLevelInterval, sm::kLevelSkew));
+    levelSlider.setValue (sm::kDefaultLevel);
     levelSlider.onValueChange = [this]{
         if (document.selection().sampleSlot < 0 || document.selection().sampleSlot >= (int) sampleSlots.size()) return;
         const float v = (float) levelSlider.getValue();
@@ -2802,16 +2889,10 @@ void MainComponent::buildSampleControls()
     // normalise is a gain, the fades and the trim are read parameters, so
     // they can be undone (the app's undo stack and the Reset button).
     normMatBtn.setName ("normMatBtn");
-    normMatBtn.setTooltip ("Normalize the material: the gain is set so the "
-                           "loudest point of the material is just under full scale");
     normMatBtn.onClick = [this]{ editMaterial (1); };
     fadeMatBtn.setName ("fadeMatBtn");
-    fadeMatBtn.setTooltip ("Fade the material in and out over a tenth of its "
-                           "length, so the loop does not click");
     fadeMatBtn.onClick = [this]{ editMaterial (2); };
     resetMatBtn.setName ("resetMatBtn");
-    resetMatBtn.setTooltip ("Undo the material's edits (the trim, the fades "
-                            "and the normalise gain)");
     resetMatBtn.onClick = [this]{ editMaterial (3); };
     updateMaterialButtons();
 
@@ -2822,28 +2903,20 @@ void MainComponent::buildSampleControls()
     // Session-only, like the live pitch mode.
     samplePitchLab.setName("samplePitchLab");
     samplePitchBox.setName("samplePitchBox");
-    samplePitchBox.addItem("Varispeed (tape)", 1);
-    samplePitchBox.addItem("Granular (stretch)", 2);
-    samplePitchBox.addItem("Phase vocoder", 3);
-    samplePitchBox.addItem("Granular (no stretch)", 4);
-    samplePitchBox.setSelectedId(1);
-    score.sampleGranularTab = (samplePitchBox.getSelectedId() == 2);
-    samplePitchBox.setTooltip("Sample-tab arcs: how the slot is transposed.\n"
-                              "At 1x (the arc sits on Ref) the pitch is unchanged; "
-                              "draw above/below Ref to transpose.\n"
-                              "Varispeed and Granular (no stretch) change the slot's "
-                              "playback length with pitch; Granular (stretch) fits "
-                              "the slot to the arc length; Phase vocoder keeps the "
-                              "slot's length and shifts pitch only.");
-    samplePitchBox.onChange = [this]{
-        const int pm = samplePitchBox.getSelectedId() - 1;
+    for (auto& mode : sm::pitchModes())
+        samplePitchBox.addItem (mode.name, sm::pitchItemId (mode.mode));
+    samplePitchBox.setSelectedId (sm::kDefaultPitchItemId);
+    score.sampleGranularTab = sm::usesGranularTab (samplePitchBox.getSelectedId());
+    samplePitchBox.onChange = [this]
+    {
+        const int pm = sm::pitchModeForItemId (samplePitchBox.getSelectedId());
         runEdit ("Sample pitch", [this, pm]{
             // v1.33.4 (M21): the vocoder's working memory is prepared BEFORE the
             // audio thread can see the new mode
             prepareVocodersIfNeeded (pm, engine.getLivePitchMode());
             engine.setSamplePitchMode(pm);
             scrubEngine.setSamplePitchMode(pm);
-            score.sampleGranularTab = (samplePitchBox.getSelectedId() == 2);
+            score.sampleGranularTab = sm::usesGranularTab (samplePitchBox.getSelectedId());
             markModelChanged(); // v1.15: the sample voices re-anchor -> fade across it
         });
         flash("Sample pitch: " + samplePitchBox.getText());
@@ -2870,7 +2943,7 @@ void MainComponent::buildLiveInputControls()
         if (! capBtn.getToggleState())
         {
             if (capturing.load()) requestCaptureStop(1);
-            capBtn.setButtonText("Capture");
+            capBtn.setButtonText(upic::live_input::captureText());
             return;
         }
         ensureLiveInputFor([this](bool ok){
@@ -2879,8 +2952,9 @@ void MainComponent::buildLiveInputControls()
         });
     };
     inGainSlider.setName("inGainSlider");
-    inGainSlider.setRange(0.0, 1.0, 0.01);
-    inGainSlider.setValue(0.8);
+    inGainSlider.setRange(upic::live_input::kInputGainMin, upic::live_input::kInputGainMax,
+                           upic::live_input::kInputGainInterval);
+    inGainSlider.setValue(upic::live_input::kDefaultInputGain);
     inGainSlider.onValueChange = [this]{ inputGain = (float) inGainSlider.getValue(); };
 
     // v1.31 (U4): the digitised wave page. The real UPIC could fill the
@@ -2888,10 +2962,6 @@ void MainComponent::buildLiveInputControls()
     // Taurhiphanie). Here the selected sample slot becomes a wavetable: the
     // whole take is resampled into one loop of the oscillator.
     waveFromSlotBtn.setName("waveFromSlotBtn");
-    waveFromSlotBtn.setTooltip("Turn the selected slot into a wavetable\n"
-                                "(the UPIC's digitised wave page: the take\n"
-                                "becomes one loop of the oscillator, so its\n"
-                                "pitch follows the arc).");
     waveFromSlotBtn.onClick = [this]{ waveFromSelectedSlot(); };
 
     slotLab.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::bold)));

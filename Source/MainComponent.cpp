@@ -284,7 +284,8 @@ void MainComponent::buildTransportControls()
     grainSlider.setNumDecimalPlacesToDisplay(0);
     grainSlider.setName ("grainSlider");
     grainSlider.setTextValueSuffix(" ms");
-    grainSlider.setRange(5.0, 500.0, 1.0);
+    grainSlider.setRange (upic::live_input::kGrainMinMs, upic::live_input::kGrainMaxMs,
+                          upic::live_input::kGrainIntervalMs);
     grainSlider.setValue((double) sampleGrainMs, juce::dontSendNotification);
     grainSlider.onValueChange = [this]{
         sampleGrainMs = (int) grainSlider.getValue();
@@ -476,16 +477,14 @@ void MainComponent::buildLiveControls()
     // sustained material). Session-only, like the rest of the audio settings.
     livePitchLab.setName("livePitchLab");
     livePitchBox.setName("livePitchBox");
-    livePitchBox.addItem("Granular (smooth)", 1);
-    livePitchBox.addItem("Tape (varispeed)", 2);
-    livePitchBox.addItem("Phase vocoder", 3);
-    livePitchBox.setSelectedId(1, juce::dontSendNotification);
-    livePitchBox.setTooltip("Live input pitch shift for LIVE-tab arcs.\n"
-                            "Granular and Phase vocoder cover the full 1/16x - 16x range "
-                            "(like the Sample tab); Tape (varispeed) reads the mic faster "
-                            "than it arrives, so it keeps an octave up/down.");
+    // R5.10: the live input panel's description (Source/LiveInput.h) owns the
+    // words, the domains and the lists.
+    namespace li = upic::live_input;
+    for (auto& mode : li::pitchModes())
+        livePitchBox.addItem (mode.name, li::pitchItemId (mode.mode));
+    livePitchBox.setSelectedId (li::kDefaultPitchItemId, juce::dontSendNotification);
     livePitchBox.onChange = [this]{
-        const int pm = livePitchBox.getSelectedId() - 1;
+        const int pm = li::pitchModeForItemId (livePitchBox.getSelectedId());
         runEdit ("Live pitch", [this, pm]{
             // v1.33.4 (M21): the vocoder's working memory is prepared BEFORE the
             // audio thread can see the new mode
@@ -511,20 +510,16 @@ void MainComponent::buildLiveControls()
     // in the audio settings overlay - that one is for the device.
     liveRevLab.setName("liveRevLab");
     liveRevLenBox.setName("liveRevLenBox");
-    liveRevLenBox.addItem("0.5 s", 1);
-    liveRevLenBox.addItem("1 s", 2);
-    liveRevLenBox.addItem("2 s", 3);
-    liveRevLenBox.setSelectedId(2, juce::dontSendNotification);
-    liveRevLenBox.setTooltip("How much of the microphone input the reverse plays back.\n"
-                              "The longer the buffer, the longer the delay.");
+    for (int i = 0; i < (int) li::reverseLengths().size(); ++i)
+        liveRevLenBox.addItem (li::reverseLengths()[(size_t) i].name,
+                               li::reverseLengthItemId (i));
+    liveRevLenBox.setSelectedId (li::kDefaultReverseLengthItemId, juce::dontSendNotification);
     liveRevLenBox.onChange = [this]{
-        revBufSec = liveRevLenBox.getSelectedId() == 1 ? 0.5
-                    : liveRevLenBox.getSelectedId() == 3 ? 2.0 : 1.0;
+        revBufSec = li::reverseLengthForItemId (liveRevLenBox.getSelectedId());
         updateRevBuffers();
     };
     liveRevBtn.setName("liveRevBtn");
     liveRevBtn.setClickingTogglesState(true);
-    liveRevBtn.setTooltip("Play the microphone's last seconds backwards");
     liveRevBtn.onClick = [this]{
         const bool on = liveRevBtn.getToggleState();
         runEdit ("Live reverse", [this, on]{
@@ -572,10 +567,8 @@ void MainComponent::buildLiveControls()
     liveGrainSlider.setName("liveGrainSlider");
     liveGrainSlider.setNumDecimalPlacesToDisplay(0);
     liveGrainSlider.setTextValueSuffix(" ms");
-    liveGrainSlider.setRange(5.0, 500.0, 1.0);
+    liveGrainSlider.setRange(li::kGrainMinMs, li::kGrainMaxMs, li::kGrainIntervalMs);
     liveGrainSlider.setValue((double) liveGrainMs, juce::dontSendNotification);
-    liveGrainSlider.setTooltip("Granular grain size for the LIVE tab.\n"
-                               "Only affects the Granular live pitch mode.");
     liveGrainSlider.onValueChange = [this]{
         liveGrainMs = (int) liveGrainSlider.getValue();
         engine.setLiveGrainMs(liveGrainMs);
