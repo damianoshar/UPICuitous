@@ -345,15 +345,10 @@ void MainComponent::setMaterial(int m)
     for (auto& c : workspaceScores)
         if (c != nullptr) c->setLayer (drawMatMode);
     syncMaterialTabs();
-    matHintLab.setText (drawMatMode == 0 ? "Osc: draw arcs on the wavetable\n"
-                                          "Wave = carrier, Env = amplitude"
-                      : drawMatMode == 1 ? "Sample: Pitch sets how arcs transpose the slot\n"
-                                          "Ref = unison"
-                      : drawMatMode == 2 ? "Live: arcs multiply the input pitch\n"
-                                          "1x = input, 2x = octave up"
-                      : "PM: Ratio x Index into the carrier phase\n"
-                        "IdxEnv shapes the modulation index",
-                      juce::dontSendNotification);
+    // R5.6: the material inspector's edge says what each material explains
+    // about itself (Source/MaterialInspector.h).
+    matHintLab.setText (upic::material_inspector::describe (drawMatMode).hint,
+                        juce::dontSendNotification);
     resized();
     updateSampleView();
     pushVoice();

@@ -2,6 +2,7 @@
 #include "SelfTest.h"
 #include "MainComponent.h"
 #include "Knob.h"
+#include "MaterialInspector.h"
 
 #include <algorithm>
 #include <map>
@@ -62,12 +63,9 @@ namespace
     // control's kind.
     struct Cell
     {
-        juce::String caption;
-        juce::String kind;
+        juce::String text;
         int bottom = 0;   // the row's bottom - the reading order
         int x = 0;
-
-        juce::String text() const { return caption + "|" + kind; }
     };
 
     const char* kindOf (juce::Component* c)
@@ -80,6 +78,22 @@ namespace
         return "Control";
     }
 
+    // The fingerprint of a control in the material card: the caption above it
+    // (or the caption it draws itself) and its kind.
+    juce::String fingerprintOf (juce::Component* widget, juce::Component* label)
+    {
+        if (widget == nullptr) return "?";
+
+        juce::String caption;
+        if (auto* lab = dynamic_cast<juce::Label*> (label))
+            caption = lab->getText();
+        if (caption.isEmpty())
+        {
+            if (auto* k = dynamic_cast<upic::Knob*> (widget)) caption = k->getCellCaption();
+            else if (auto* b = dynamic_cast<juce::Button*> (widget)) caption = b->getButtonText();
+        }
+        return caption + "|" + kindOf (widget);
+    }
     // The material card's cells, in the card's reading order (the row's
     // bottom, then the column).
     std::vector<Cell> materialCard (MainComponent& mc)
@@ -100,7 +114,7 @@ namespace
         }
 
         // a cell's caption sits directly above its control
-        std::map<juce::Component*, juce::String> captions;
+        std::map<juce::Component*, juce::Component*> captions;
         for (auto* c : inCard)
         {
             auto* lab = dynamic_cast<juce::Label*> (c);
@@ -111,7 +125,7 @@ namespace
                 const auto ob = other->getBounds();
                 if (ob.getX() != c->getBounds().getX()) continue;
                 if (ob.getY() != c->getBounds().getBottom()) continue;
-                captions[other] = lab->getText();
+                captions[other] = lab;
                 break;
             }
         }
@@ -122,19 +136,8 @@ namespace
             if (dynamic_cast<juce::Label*> (c) != nullptr) continue;   // a caption
             Cell cell;
             auto it = captions.find (c);
-            if (it != captions.end())
-            {
-                cell.caption = it->second;
-            }
-            else if (auto* k = dynamic_cast<upic::Knob*> (c))
-            {
-                cell.caption = k->getCellCaption();
-            }
-            else if (auto* b = dynamic_cast<juce::Button*> (c))
-            {
-                cell.caption = b->getButtonText();
-            }
-            cell.kind = kindOf (c);
+            juce::Component* label = (it != captions.end()) ? it->second : nullptr;
+            cell.text = fingerprintOf (c, label);
             cell.bottom = c->getBounds().getBottom();
             cell.x = c->getBounds().getX();
             cells.push_back (cell);
@@ -154,7 +157,28 @@ namespace
         for (auto& c : cells)
         {
             if (out.isNotEmpty()) out += ", ";
-            out += c.text();
+            out += c.text;
+        }
+        return out;
+    }
+
+    // The edge's card, seen through the app's binding: the same cells, in the
+    // card engine's reading order (the plain controls first, then the knobs).
+    juce::String edgeCardText (MainComponent& mc,
+                               const upic::material_inspector::Description& material)
+    {
+        std::vector<const upic::material_inspector::Cell*> ordered;
+        for (auto& cell : material.card)
+            if (cell.kind != upic::material_inspector::Kind::Knob) ordered.push_back (&cell);
+        for (auto& cell : material.card)
+            if (cell.kind == upic::material_inspector::Kind::Knob) ordered.push_back (&cell);
+
+        juce::String out;
+        for (auto* cell : ordered)
+        {
+            if (out.isNotEmpty()) out += ", ";
+            out += fingerprintOf (mc.materialControlForTest ((int) cell->control),
+                                  mc.materialControlLabelForTest ((int) cell->control));
         }
         return out;
     }
@@ -264,6 +288,39 @@ void upic::runMaterialInspectorChecks (upic::SelfTest& t)
                    waveBox != nullptr ? (waveBox->isVisible() ? "shown" : "hidden")
                                       : juce::String ("no box"));
         }
+
+        // --- the edge and the app (R5.6) --------------------------------------
+        //
+        // The edge says what the material shows; the app binds the roles to
+        // its widgets; the layout asks the edge what to draw. These three
+        // checks pin the three against each other.
+        {
+            const auto& edge = upic::material_inspector::describe (m);
+
+            // the app shows exactly what the edge says
+            int wrong = 0;
+            for (auto role : upic::material_inspector::allControls())
+            {
+                auto* widget = mc.materialControlForTest ((int) role);
+                if (widget == nullptr) continue;
+                if (widget->isVisible() != edge.shows (role)) ++wrong;
+            }
+            check (wrong == 0, "R5.6 the visibility follows the edge",
+                   juce::String (wrong));
+
+            // the card the layout built is the edge's card
+            check (edgeCardText (mc, edge) == material.card,
+                   "R5.6 the material's card is the edge's card",
+                   edgeCardText (mc, edge));
+
+            // the tab and the hint are the edge's words
+            check (tab->getButtonText() == edge.name && tab->getTooltip() == edge.tooltip,
+                   "R5.6 the material's tab is the edge's tab",
+                   tab->getButtonText());
+            check (hintLab != nullptr && hintLab->getText() == edge.hint,
+                   "R5.6 the material's hint is the edge's hint",
+                   hintLab != nullptr ? hintLab->getText() : juce::String ("no label"));
+        }
     }
 
     // --- the tab strip ------------------------------------------------------
@@ -276,5 +333,89 @@ void upic::runMaterialInspectorChecks (upic::SelfTest& t)
             if (tab != nullptr && tab->getToggleState()) ++on;
         }
         check (on == 1, "R5.6 the material's tabs are one at a time", juce::String (on));
+    }
+
+    // --- the edge's own contract --------------------------------------------
+    //
+    // The edge is data, and the data is checked here: it needs no window.
+    {
+        namespace mi = upic::material_inspector;
+
+        // every role is bound to a widget of the app
+        int unbound = 0;
+        for (auto role : mi::allControls())
+            if (mc.materialControlForTest ((int) role) == nullptr) ++unbound;
+        check (unbound == 0, "R5.6 every material control is bound",
+               juce::String (unbound));
+
+        // the four materials are named, and each of them says something
+        {
+            const char* const names[] = { "Osc", "Sample", "Live", "PM" };
+            bool ok = true;
+            juce::String detail;
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto& d = mi::describe (i);
+                if (juce::String (d.name) != names[i]) { ok = false; detail = d.name; }
+                if (d.hint == nullptr || *d.hint == '\0') { ok = false; detail = "no hint"; }
+                if (d.tooltip == nullptr || *d.tooltip == '\0') { ok = false; detail = "no tooltip"; }
+                if (d.card.empty()) { ok = false; detail = "an empty card"; }
+            }
+            check (ok, "R5.6 the edge names its four materials", detail);
+        }
+
+        // the shared controls: the Ref belongs to the Sample and the Live
+        // tab, the carrier wave to the Osc and the PM tab
+        {
+            int refShown = 0, waveShown = 0;
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto& d = mi::describe (i);
+                if (d.shows (mi::Control::Ref)) ++refShown;
+                if (d.shows (mi::Control::Wave)) ++waveShown;
+            }
+            check (refShown == 2, "R5.6 the Ref belongs to two materials",
+                   juce::String (refShown));
+            check (waveShown == 2, "R5.6 the carrier wave belongs to two materials",
+                   juce::String (waveShown));
+        }
+
+        // a card only holds controls the material shows
+        {
+            int wrong = 0;
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto& d = mi::describe (i);
+                for (auto& cell : d.card)
+                    if (! d.shows (cell.control)) ++wrong;
+            }
+            check (wrong == 0, "R5.6 a card only holds controls the material shows",
+                   juce::String (wrong));
+        }
+
+        // every control belongs to a material, and every material's control is
+        // in its card or in a card of its own (the carrier wave lives in the
+        // voice card)
+        {
+            int orphan = 0, uncarded = 0;
+            for (auto role : mi::allControls())
+            {
+                bool shown = false, carded = false;
+                for (int i = 0; i < 4; ++i)
+                {
+                    const auto& d = mi::describe (i);
+                    if (! d.shows (role)) continue;
+                    shown = true;
+                    for (auto& cell : d.card)
+                        if (cell.control == role) carded = true;
+                }
+                if (! shown) ++orphan;
+                if (shown && ! carded) ++uncarded;
+            }
+            check (orphan == 0, "R5.6 every material control belongs to a material",
+                   juce::String (orphan));
+            check (uncarded == 1, "R5.6 one control lives in another card",
+                   juce::String (uncarded));
+        }
     }
 }

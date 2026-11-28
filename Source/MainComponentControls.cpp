@@ -31,6 +31,62 @@ void MainComponent::buildMaterialControls()
     addAndMakeVisible (pmPresetLab); addAndMakeVisible (pmPresetBox);
     addAndMakeVisible (pmFeedbackLab); addAndMakeVisible (pmFeedbackSlider);
     addAndMakeVisible (pmImportBtn); addAndMakeVisible (pmExportBtn);
+
+    // R5.6: the material inspector's roles. The edge
+    // (Source/MaterialInspector.h) says which control belongs to which
+    // material and in which order; here the roles meet the app's widgets.
+    // The controls that live in another card (the carrier wave in the voice
+    // card, the polyagogy with the sieve's builders) are bound here too -
+    // the binding is about the role, not about who adds the widget.
+    namespace mi = upic::material_inspector;
+
+    bindMaterialControl (mi::Control::Wave, &waveLab, &waveBox);
+    bindMaterialControl (mi::Control::Ref, &refLab, &refSlider);
+
+    // the Osc tab - the polyagogy (the wave page's own)
+    bindMaterialControl (mi::Control::ModUse, &modUseLab, &modUseBox);
+    bindMaterialControl (mi::Control::ModRate, &modRateLab, &modRateSlider);
+    bindMaterialControl (mi::Control::ModDepth, &modDepthLab, &modDepthSlider);
+
+    // the Sample tab - the slot and its own edits
+    bindMaterialControl (mi::Control::Slot, &slotLab, &sampleBox);
+    bindMaterialControl (mi::Control::LoadSample, nullptr, &loadSampleBtn);
+    bindMaterialControl (mi::Control::Reverse, nullptr, &revBtn);
+    bindMaterialControl (mi::Control::Level, &levelLab, &levelSlider);
+    bindMaterialControl (mi::Control::SamplePitch, &samplePitchLab, &samplePitchBox);
+    bindMaterialControl (mi::Control::Grain, &grainLab, &grainSlider);
+    bindMaterialControl (mi::Control::Normalise, nullptr, &normMatBtn);
+    bindMaterialControl (mi::Control::Fade, nullptr, &fadeMatBtn);
+    bindMaterialControl (mi::Control::Reset, nullptr, &resetMatBtn);
+    bindMaterialControl (mi::Control::InputGain, &inGainLab, &inGainSlider);
+    bindMaterialControl (mi::Control::Monitor, nullptr, &monBtn);
+    bindMaterialControl (mi::Control::Capture, nullptr, &capBtn);
+    bindMaterialControl (mi::Control::WaveFromSlot, nullptr, &waveFromSlotBtn);
+    bindMaterialControl (mi::Control::Extract, nullptr, &sampleExtractBtn);   // WP7
+
+    // the Live tab - the microphone
+    bindMaterialControl (mi::Control::LivePitch, &livePitchLab, &livePitchBox);
+    bindMaterialControl (mi::Control::LiveGrain, &liveGrainLab, &liveGrainSlider);
+    bindMaterialControl (mi::Control::LiveReverseLength, &liveRevLab, &liveRevLenBox);
+    bindMaterialControl (mi::Control::LiveReverse, nullptr, &liveRevBtn);
+
+    // the PM tab - the phase modulation
+    bindMaterialControl (mi::Control::PmOps, &pmOpsLab, &pmOpsBox);
+    bindMaterialControl (mi::Control::PmPreset, &pmPresetLab, &pmPresetBox);
+    bindMaterialControl (mi::Control::PmRatio, &pmRatioLab, &pmRatioSlider);
+    bindMaterialControl (mi::Control::PmIndex, &pmIndexLab, &pmIndexSlider);
+    bindMaterialControl (mi::Control::PmIndexEnv, &pmIndexEnvLab, &pmIndexEnvBox);
+    bindMaterialControl (mi::Control::PmFeedback, &pmFeedbackLab, &pmFeedbackSlider);
+    bindMaterialControl (mi::Control::PmImport, nullptr, &pmImportBtn);
+    bindMaterialControl (mi::Control::PmExport, nullptr, &pmExportBtn);
+}
+
+void MainComponent::bindMaterialControl (upic::material_inspector::Control role,
+                                         juce::Component* label, juce::Component* widget)
+{
+    auto& binding = materialControls[(size_t) role];
+    binding.label = label;
+    binding.control = widget;
 }
 
 void MainComponent::buildSieveControls()
@@ -2268,10 +2324,16 @@ void MainComponent::buildMaterialTabs()
     }
     matLiveTog.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff6a4a2a));
     matPmTog.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xff6a2a6a));
-    matOscTog.setTooltip("Osc tab: oscillator arcs (wavetables)");
-    matSampleTog.setTooltip("Sample tab: sample arcs - Slot, Load sample, In/Mon/Capture above");
-    matLiveTog.setTooltip("Live tab: arcs transpose the mic input in realtime");
-    matPmTog.setTooltip ("PM tab: 2-op phase-modulation arcs");
+    // R5.6: the tab's label and its tooltip come from the material
+    // inspector's edge (Source/MaterialInspector.h).
+    matOscTog.setButtonText (upic::material_inspector::describe (0).name);
+    matSampleTog.setButtonText (upic::material_inspector::describe (1).name);
+    matLiveTog.setButtonText (upic::material_inspector::describe (2).name);
+    matPmTog.setButtonText (upic::material_inspector::describe (3).name);
+    matOscTog.setTooltip (upic::material_inspector::describe (0).tooltip);
+    matSampleTog.setTooltip (upic::material_inspector::describe (1).tooltip);
+    matLiveTog.setTooltip (upic::material_inspector::describe (2).tooltip);
+    matPmTog.setTooltip (upic::material_inspector::describe (3).tooltip);
     matOscTog.setToggleState (true, juce::dontSendNotification);
     matOscTog.onClick    = [this]{ setMaterial(0); };
     matSampleTog.onClick = [this]{ setMaterial(1); };

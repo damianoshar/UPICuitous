@@ -821,44 +821,24 @@ void MainComponent::resized()
     // the material (v1.8). The other tab's controls are hidden, not left in
     // place, so the row does not get crowded and the two pitch selectors
     // (the Sample one and the Live one) cannot be confused.
-    const bool showSampleCtl = (drawMatMode == 1);
-    const bool showLiveCtl   = (drawMatMode == 2);
-    const bool showPmCtl     = (drawMatMode == 3);
-    // v1.25: the input/capture group (gain, monitor, Capture) records into a
-    // sample slot, so it belongs to the Sample tab only.
-    juce::Component* const sampleCtl[] = { &slotLab, &sampleBox, &loadSampleBtn, &revBtn,
-                                           &samplePitchLab, &samplePitchBox,
-                                           &grainLab, &grainSlider,
-                                           // M5: the slot's level and the material's edits
-                                           &levelLab, &levelSlider,
-                                           &normMatBtn, &fadeMatBtn, &resetMatBtn,
-                                           &inGainLab, &inGainSlider, &monBtn, &capBtn,
-                                           &waveFromSlotBtn, &sampleExtractBtn };  // WP7
-    for (auto* c : sampleCtl) c->setVisible(showSampleCtl);
-    juce::Component* const liveCtl[] = { &livePitchLab, &livePitchBox,
-                                         &liveGrainLab, &liveGrainSlider,
-                                         &liveRevLab, &liveRevLenBox, &liveRevBtn };
-    for (auto* c : liveCtl) c->setVisible(showLiveCtl);
-    // Ref belongs to both pitched materials (Sample and Live); it is not a
-    // wavetable or PM control.
-    const bool showRefCtl = (showSampleCtl || showLiveCtl);
-    refLab.setVisible (showRefCtl);
-    refSlider.setVisible (showRefCtl);
-    // The wavetable selector only applies to Osc and PM arcs. Sample arcs play
-    // the slot and Live arcs transpose the mic input, so showing a carrier
-    // wave there was misleading - and left a dead gap in the row.
-    const bool showWaveCtl = (drawMatMode == 0 || drawMatMode == 3);
-    waveLab.setVisible (showWaveCtl); waveBox.setVisible (showWaveCtl);
-    juce::Component* const pmCtl[] = { &pmOpsLab, &pmOpsBox, &pmPresetLab, &pmPresetBox,
-                                       &pmRatioLab, &pmRatioSlider, &pmIndexLab, &pmIndexSlider,
-                                       &pmIndexEnvLab, &pmIndexEnvBox, &pmFeedbackLab,
-                                       &pmFeedbackSlider, &pmImportBtn, &pmExportBtn };
-    for (auto* c : pmCtl) c->setVisible (showPmCtl);
-    // v1.31 (U1): the polyagogy controls belong to the Osc tab (the wave
-    // page is the Osc material's).
-    juce::Component* const oscModCtl[] = { &modUseLab, &modUseBox, &modRateLab,
-                                          &modRateSlider, &modDepthLab, &modDepthSlider };
-    for (auto* c : oscModCtl) c->setVisible (! showSampleCtl && ! showLiveCtl && ! showPmCtl);
+    //
+    // R5.6: the material inspector's own edge says what the current material
+    // shows (Source/MaterialInspector.h). The app binds the roles to its
+    // widgets, so this pass is one walk over the inspector's controls - and
+    // the card below is built from the same description, so the two can no
+    // longer disagree.
+    const auto& material = upic::material_inspector::describe (drawMatMode);
+    for (auto control : upic::material_inspector::allControls())
+    {
+        const auto& binding = materialControls[(size_t) control];
+        const bool shown = material.shows (control);
+        if (binding.label != nullptr) binding.label->setVisible (shown);
+        if (binding.control != nullptr) binding.control->setVisible (shown);
+    }
+    // The wavetable selector only applies to Osc and PM arcs. Sample arcs
+    // play the slot and Live arcs transpose the mic input, so showing a
+    // carrier wave there was misleading - and left a dead gap in the row.
+    const bool showWaveCtl = material.shows (upic::material_inspector::Control::Wave);
 
     // --- the toolbar's groups ---
     // v1.33.3: the groups keep their internal grouping and wrap onto the
@@ -921,42 +901,30 @@ void MainComponent::resized()
     }
 
     // the material: the current tab's own controls
+    //
+    // R5.6: the card is the edge's description - the same list the
+    // visibility pass above walks, so a control cannot be shown without a
+    // cell or left in the card without being shown.
     {
         FlowGroup mat { "material", {} };
-        if (showSampleCtl)
-            mat.items = { FL(&slotLab, 34, &sampleBox, 180),
-                          F(&loadSampleBtn, 110), F(&revBtn, 64),
-                          FK(&refLab, 34, &refSlider),
-                          FK(&levelLab, 34, &levelSlider),
-                          FL(&samplePitchLab, 34, &samplePitchBox, 180),
-                          FK(&grainLab, 40, &grainSlider),
-                          // M5: the material's own edits (the normalise, the
-                          // fades and the reset; the trim is dragged in the
-                          // material view)
-                          F(&normMatBtn, 64), F(&fadeMatBtn, 64), F(&resetMatBtn, 64),
-                          FK(&inGainLab, 30, &inGainSlider), F(&monBtn, 64), F(&capBtn, 84),
-                          F(&waveFromSlotBtn, 110), F(&sampleExtractBtn, 82) };  // WP7
-        else if (showLiveCtl)
-            mat.items = { FK(&refLab, 34, &refSlider),
-                          FL(&livePitchLab, 42, &livePitchBox, 180),
-                          FK(&liveGrainLab, 40, &liveGrainSlider),
-                          FL(&liveRevLab, 52, &liveRevLenBox, 90),
-                          F(&liveRevBtn, 64) };
-        else if (showPmCtl)
-            mat.items = { FL(&pmOpsLab, 34, &pmOpsBox, 80),
-                          FL(&pmPresetLab, 44, &pmPresetBox, 180),
-                          FK(&pmRatioLab, 40, &pmRatioSlider),
-                          FK(&pmIndexLab, 40, &pmIndexSlider),
-                          FL(&pmIndexEnvLab, 46, &pmIndexEnvBox, 120),
-                          FK(&pmFeedbackLab, 42, &pmFeedbackSlider),
-                          F(&pmImportBtn, 64), F(&pmExportBtn, 64) };
-        else
-            // v1.31 (U1): the Osc tab's material group carries the polyagogy
-            // controls - what the arc's drawn wave does besides being the
-            // timbre.
-            mat.items = { FL(&modUseLab, 56, &modUseBox, 150),
-                          FK(&modRateLab, 34, &modRateSlider),
-                          FK(&modDepthLab, 40, &modDepthSlider) };
+        for (auto& cell : material.card)
+        {
+            const auto& binding = materialControls[(size_t) cell.control];
+            if (cell.kind == upic::material_inspector::Kind::Knob)
+            {
+                if (auto* knob = dynamic_cast<upic::Knob*> (binding.control))
+                    mat.items.push_back (FK (binding.label, cell.labelWidth, knob));
+            }
+            else if (cell.kind == upic::material_inspector::Kind::Labelled)
+            {
+                mat.items.push_back (FL (binding.label, cell.labelWidth,
+                                         binding.control, cell.width));
+            }
+            else
+            {
+                mat.items.push_back (F (binding.control, cell.width));
+            }
+        }
         groups.push_back (mat);
     }
 

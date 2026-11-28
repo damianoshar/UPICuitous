@@ -33,6 +33,7 @@
 #include "OscScrubReceiver.h"
 #include "JobRunner.h"
 #include "UpicButtonIcons.h"
+#include "MaterialInspector.h"   // R5.6: the material inspector's description
 
 //==============================================================================
 // WP7: the audio preview routes.
@@ -1382,6 +1383,24 @@ public:
     }
     juce::Rectangle<int> toolbarBoundsForTest() const { return toolbarBounds; }
 
+    // R5.6: the material inspector's binding - the roles the edge names and
+    // the widgets the app gave them. The suite pins the two against each
+    // other; the production code never reads the binding through this.
+    int materialControlCountForTest() const
+    {
+        return (int) (sizeof (materialControls) / sizeof (materialControls[0]));
+    }
+    juce::Component* materialControlForTest (int role) const
+    {
+        if (role < 0 || role >= materialControlCountForTest()) return nullptr;
+        return materialControls[(size_t) role].control;
+    }
+    juce::Component* materialControlLabelForTest (int role) const
+    {
+        if (role < 0 || role >= materialControlCountForTest()) return nullptr;
+        return materialControls[(size_t) role].label;
+    }
+
     // --- R1.2: the panels below the toolbar ------------------------------
     // The bottom half of the window, for the characterization suite that
     // runs before its geometry moves out of resized().
@@ -2658,6 +2677,19 @@ private:
     // Score / Live pitch tabs): each material is its own tab + canvas layer
     // - Osc (wavetable), Sample (slots + capture), Live (mic)
     juce::TextButton matOscTog{ "Osc" }, matSampleTog{ "Sample" }, matLiveTog{ "Live" }, matPmTog{ "PM" };
+
+    // R5.6: the material inspector's controls. The edge
+    // (Source/MaterialInspector.h) says which control belongs to which
+    // material; the app binds the roles to its own widgets here, and the
+    // layout asks the edge what to draw and what to hide.
+    struct MaterialControlBinding
+    {
+        juce::Component* label = nullptr;
+        juce::Component* control = nullptr;
+    };
+    MaterialControlBinding materialControls[(size_t) upic::material_inspector::Control::count];
+    void bindMaterialControl (upic::material_inspector::Control role,
+                              juce::Component* label, juce::Component* widget);
 
     // v1.21 (wave 19): the arc list - the score's inventory on the right,
     // with the per-arc controls (the Rev box and the mode dropdown). It is a
