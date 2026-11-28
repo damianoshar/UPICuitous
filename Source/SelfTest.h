@@ -115,6 +115,7 @@ namespace upic
     void runLiveInputChecks (SelfTest& t);            // R5.10: the live input panel - the input, the pitch, the reverse and the grain
     void runPhaseModulationChecks (SelfTest& t);      // R5.10: the phase modulation panel - the ops, the presets and the voice
     void runOverlayCardChecks (SelfTest& t);           // R5.11: the overlay card shell - the card's rectangle and the backdrop
+    void runCardThemeChecks (SelfTest& t);             // R5.12: the card's look - the backdrop, the card, the border and the radius
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);

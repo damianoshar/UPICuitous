@@ -219,6 +219,8 @@ int upic::runSelfTest()
     upic::runPhaseModulationChecks (t);
     // R5.11: the overlay card shell - the card's rectangle and the backdrop.
     upic::runOverlayCardChecks (t);
+    // R5.12: the card's look - the backdrop, the card, the border and the radius.
+    upic::runCardThemeChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
