@@ -189,6 +189,8 @@ int upic::runSelfTest()
     upic::runLibraryRepositoryChecks (t);
     // R5.1: the score canvas's render - the frame, the grid, the arcs and the playhead.
     upic::runScoreRenderChecks (t);
+    // R5.2: the coordinate mapper - the time axis, the pitch axis and the zoom.
+    upic::runCoordinateMapperChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
