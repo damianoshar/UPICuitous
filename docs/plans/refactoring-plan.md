@@ -1498,6 +1498,119 @@ so.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.33 R5.7 - the sieve panel and the frequency inspector
+
+**What moves.** Two more *descriptions* leave the shell and move into edges of
+their own:
+
+- `Source/SievePanel.h` - the sieve's contents: the sieve card (the switch,
+  the preset library, the m and the R), the global magnets card (the stick and
+  the time grid), the modulus' domain, the time grid's divisions, the
+  remainder list's text format (read and written) and every control's
+  wording;
+- `Source/FrequencyInspector.h` - the frequency controls' contents: the page
+  card (the ambitus, the four frequency spaces and the table button), the
+  pitch card's space cell (the arc's own space), the acceleration card (the
+  page's acceleration), the page's four spaces, the ambitus's "Custom" item
+  rule, the acceleration's range and every control's wording.
+
+The review asks for the frequency and the sieve controls to be decomposed
+(§28):
+
+> | Functions | Proposed destination |
+> |---|---|
+> | `buildSieveControls()` | SievePanel |
+> | `buildFrequencyControls()`, `pushSpaceDefs()` | FrequencyInspector |
+
+and, on the panels:
+
+> "Many panel classes already exist. Extend those boundaries instead of
+> creating unnecessary duplicate wrappers." (§28)
+
+R5.7 takes the first step of that table, the same step R5.6 took for the
+material inspector: the *description* becomes an edge, and the widgets and the
+commands stay the shell's. The panels themselves are still R049's and R052's
+business.
+
+**The shared vocabulary.** The three panel descriptions draw their cards the
+same way, so the way a cell is drawn lives in one place:
+`Source/InspectorCell.h` holds `upic::inspector::Kind` (the control alone,
+the caption above it, the caption beside it on its row, or a knob). Each edge
+does `using Kind = upic::inspector::Kind;`, so `upic::material_inspector::Kind`
+still compiles and the R5.6 suite is untouched.
+
+**What stays.** The widgets stay the shell's (`MainComponent` owns them), and
+so do the commands: the sieve's command (`pushSieve()`), the ambitus's
+(`pushAmbitus()`), the acceleration's (`pushWarp()`) and the frequency spaces'
+(`pushSpaceDefs()`) still write to the model. The card engine keeps its rule
+(the plain controls first, then the knobs), the layout engine keeps the
+geometry, and the document keeps the piece.
+
+**The one change.** The sieve and the frequency controls were written down
+**three times over**:
+
+- the time grid's divisions were one array in the command, one array in the
+  loader, and the dropdown's seven labels beside them;
+- the remainder list's text format was written in the command, in the loader
+  and in the preset library's handler;
+- the ambitus's "Custom" item id was written down twice (once when the items
+  were offered and once when the page's interval was read back).
+
+Nothing made the copies agree. Now the divisions are one list, the remainder
+list's format is one reader and one writer, and the "Custom" id is one rule.
+
+**The second change.** `buildSieveControls()` held three things that are not
+the sieve's: the polyagogy (the Osc material's own controls), the procedural
+arc generator and the keyboard help. The polyagogy moves to
+`buildMaterialControls()` (it is the Osc material's control, and the material
+card has always held it), and the generator and the help move to a new
+`buildToolsControls()`. The sieve's builder now holds the sieve and the global
+magnets only.
+
+**The contract.** Two suites, written before the move:
+
+- `Source/SelfTestSievePanel.cpp` - 28 checks at the characterization, 42
+  after the move;
+- `Source/SelfTestFrequencyInspector.cpp` - 21 checks at the characterization,
+  29 after the move.
+
+Both drive the real component: they type into the fields, pick from the
+dropdowns, move the knob and read the page.
+
+They pin:
+
+- the cards: the sieve card holds the switch, the preset library, the m and
+  the R; the magnets card holds the stick and the time grid; the page card
+  holds the ambitus, the four spaces and the table button; the pitch card
+  holds the arc's own space; the acceleration card holds the page's
+  acceleration;
+- the sieve's rules: the switch reaches the canvas both ways, the modulus'
+  domain (2..120 - an invalid one is refused and the last valid one is
+  kept), the remainder list's separators, the tokens that are not numbers
+  (skipped, not refused), the remainders taken modulo the modulus, an empty
+  field keeping the last list, and the list following the modulus;
+- the sieve's presets, the stickiness and the time grid's seven divisions;
+- the ambitus's six presets plus "Custom" (which changes nothing), the four
+  frequency spaces, the acceleration's range and the table button's target;
+- the wording: every control says what it does.
+
+The move added the checks that pin the edges against the app: every role is
+bound to a widget, the app's cards are the edges' cell lists, the cells'
+kinds agree with the widgets, the controls' wording is the edges' wording,
+the dropdown's divisions are the edge's list, the remainder field is the
+edge's text format, the "Custom" id is the edge's rule, and the edges' own
+tables are sound (the edge reads the separators, skips what is not a number
+and takes a remainder modulo the modulus).
+
+**The mechanical check.** The production code does not call a test-only
+door, the bodies are the editor's body for body, and the behaviour is
+unchanged where it should be - the golden render and the v0.29 fixture say
+so.
+
+**Gate.** Both suites pass, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1529,7 +1642,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5 and R5.6 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480` | app selftest 3,372/3,372, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5, R5.6 and R5.7 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480`, `2cd45f1`, `39e7cbb`, `c84a287` | app selftest 3,443/3,443, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. R5.7 gives the sieve and the frequency controls descriptions of their own (`Source/SievePanel.h`, `Source/FrequencyInspector.h`) and a shared cell vocabulary (`Source/InspectorCell.h`), so the time grid's divisions, the remainder list's text format and the ambitus's "Custom" item id are each written down once. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, the sieve panel's own suite 42/42, the frequency inspector's own suite 29/29, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
 | R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
@@ -4196,3 +4309,210 @@ own suite 34/34, the mapper's own suite 14/14, the render's own suite 18/18,
 golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture
 `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness
 5 SUCCESS, boundaries 5 rules / 0 violations (64 source files).
+
+### R5.7 record (2026-11-28)
+
+The sieve and the frequency controls are written down once.
+
+The characterization commit is `39e7cbb`, the move `c84a287`.
+
+| Measure | Before | After |
+|---|---|---|
+| the sieve's contents | four branches in `MainComponent::resized()` | one description (`Source/SievePanel.h`) |
+| the frequency's contents | four branches in `MainComponent::resized()` | one description (`Source/FrequencyInspector.h`) |
+| how a cell is drawn | three enums, one per description | one vocabulary (`Source/InspectorCell.h`) |
+| the roles and the widgets | the layout named the widgets itself | the app binds the roles to its widgets (`sieveControls`, `frequencyControls`) |
+| the time grid's divisions | three copies (the command, the loader, the labels) | one list (`timeGridDivisions()`) |
+| the remainder list's text | three copies (the command, the loader, the presets) | one reader and one writer (`parseRemainders`, `formatRemainders`) |
+| the ambitus's "Custom" id | two copies (the builder, the read-back) | one rule (`ambitusCustomItemId`) |
+| the page's four spaces | the literal `4` in six places | one count (`kSpaceCount`) |
+| the acceleration's range | two copies (the knob, the command) | one range (`kMinWarp`, `kMaxWarp`, `kWarpInterval`) |
+| `buildSieveControls()` | the sieve, the polyagogy, the magnets, the generator and the help | the sieve and the magnets; the polyagogy goes to the material, the generator and the help to `buildToolsControls()` |
+| the sieve panel's own suite | - | `Source/SelfTestSievePanel.cpp`, 42 checks |
+| the frequency inspector's own suite | - | `Source/SelfTestFrequencyInspector.cpp`, 29 checks |
+| the source files | 64 | 66 (the two suites) |
+
+**The suites came first.** `Source/SelfTestSievePanel.cpp` (28 checks) and
+`Source/SelfTestFrequencyInspector.cpp` (21 checks) were written against the
+old code: they type into the fields, pick from the dropdowns, move the knob
+and read the page.
+
+They pin:
+
+- the cards: the sieve card holds the switch, the preset library, the m and
+  the R; the magnets card holds the stick and the time grid; the page card
+  holds the ambitus, the four spaces and the table button; the pitch card
+  holds the arc's own space; the acceleration card holds the page's
+  acceleration;
+- the sieve's rules: the switch reaches the canvas both ways, the modulus'
+  domain (2..120 - an invalid one is refused and the last valid one is
+  kept), the remainder list's separators, the tokens that are not numbers
+  (skipped, not refused), the remainders taken modulo the modulus, an empty
+  field keeping the last list, and the list following the modulus;
+- the sieve's presets, the stickiness and the time grid's seven divisions;
+- the ambitus's six presets plus "Custom" (which changes nothing), the four
+  frequency spaces, the acceleration's range and the table button's target;
+- the wording: every control says what it does.
+
+The move added the checks that pin the edges against the app: every role is
+bound to a widget, the app's cards are the edges' cell lists, the cells'
+kinds agree with the widgets, the controls' wording is the edges' wording,
+the dropdown's divisions are the edge's list, the remainder field is the
+edge's text format, the "Custom" id is the edge's rule, and the edges' own
+tables are sound.
+
+**The edges.** `Source/SievePanel.h` is the sieve's description:
+
+```cpp
+namespace upic::sieve_panel
+{
+    using Kind = upic::inspector::Kind;
+
+    enum class Control { On, Modulus, Remainders, Preset, Stickiness, TimeGrid, count };
+
+    struct Cell
+    {
+        Control control;
+        Kind kind;
+        int labelWidth = 0;
+        int width = 0;
+        bool newLine = false;
+    };
+
+    struct Description
+    {
+        const char* name;
+        std::vector<Cell> card;     // the sieve card's cells
+        std::vector<Cell> magnets;  // the global magnets card's cells
+    };
+
+    const Description& describe();
+    const std::vector<Control>& allControls();
+
+    constexpr int kMinModulus = 2;
+    constexpr int kMaxModulus = 120;
+
+    struct Division { const char* label; double value; };
+    const std::vector<Division>& timeGridDivisions();
+    int timeGridDivisionIndex (double value);
+
+    std::string formatRemainders (const std::vector<int>& remainders);
+    std::vector<int> parseRemainders (const std::string& text, int modulus);
+
+    const char* tooltip (Control control);
+}
+```
+
+and `Source/FrequencyInspector.h` is the frequency controls':
+
+```cpp
+namespace upic::frequency_inspector
+{
+    using Kind = upic::inspector::Kind;
+
+    enum class Control { Space, Ambitus, Warp, SpaceDef1, /* ... */ Table, count };
+
+    struct Cell { Control control; Kind kind; int labelWidth; int width; bool newLine; };
+
+    struct Description
+    {
+        const char* name;
+        std::vector<Cell> page;   // the page card's cells
+        std::vector<Cell> pitch;  // the pitch card's frequency cell
+        std::vector<Cell> accel;  // the acceleration card's cells
+    };
+
+    const Description& describe();
+    const std::vector<Control>& allControls();
+
+    constexpr int kSpaceCount = 4;
+    constexpr double kMinWarp = -0.9;
+    constexpr double kMaxWarp = 0.9;
+    constexpr double kWarpInterval = 0.05;
+
+    int ambitusCustomItemId (int presetCount);
+
+    const char* tooltip (Control control);
+    std::string labelTooltip (Control control);
+}
+```
+
+Both headers hold no widget and no document, and they are free of JUCE: the
+descriptions are data, and the data can be checked without a window.
+
+**The shared vocabulary.** The three panel descriptions draw their cards the
+same way, so the way a cell is drawn lives in one place -
+`Source/InspectorCell.h`:
+
+```cpp
+namespace upic::inspector
+{
+    enum class Kind { Plain, Labelled, Inline, Knob };
+}
+```
+
+Each edge does `using Kind = upic::inspector::Kind;`, so
+`upic::material_inspector::Kind::Knob` still compiles and the R5.6 suite is
+untouched.
+
+**The bindings.** The app owns the widgets, so the app binds the roles to
+them - once, in `buildSieveControls()` and `buildFrequencyControls()`:
+
+```cpp
+bindSieveControl (sp::Control::Modulus, &sieveMLab, &sieveMEdit);
+bindFrequencyControl (fi::Control::Ambitus, &ambitusLab, &ambitusBox);
+```
+
+The layout then builds the cards from the edges' cells, with one helper that
+handles the four kinds:
+
+```cpp
+auto addCell = [&] (FlowGroup& group, const ControlBinding& binding,
+                    upic::inspector::Kind kind,
+                    int labelWidth, int width, bool startsNewLine);
+```
+
+**The one change.** The sieve and the frequency controls were written down
+three times over. The time grid's divisions were one array in the command,
+one array in the loader, and the dropdown's seven labels beside them. The
+remainder list's text format was written in the command, in the loader and in
+the preset library's handler. The ambitus's "Custom" item id was written
+down twice - once when the items were offered and once when the page's
+interval was read back. Nothing made the copies agree.
+
+Now the divisions are one list, the remainder list's format is one reader and
+one writer, and the "Custom" id is one rule. The page's four spaces and the
+acceleration's range are one count and one range each.
+
+**The second change.** `buildSieveControls()` held three things that are not
+the sieve's. The polyagogy (the Osc material's own controls) moves to
+`buildMaterialControls()` - it is the Osc material's control, and the
+material card has always held it. The procedural arc generator and the
+keyboard help move to a new `buildToolsControls()`. The sieve's builder now
+holds the sieve and the global magnets only.
+
+**The behaviour is unchanged.** The cards' cells keep their order, their
+widths and their kinds - the edge carries the same numbers the layout had
+(64 for the switch, 150 for the preset library, 18/52 for the m, 18/84 for
+the R, 84 for the stick, 86/84 for the time grid, 58/170 for the ambitus,
+46/120 for a space, 66 for the table button, 44/170 for the arc's space and
+40 for the acceleration). The card engine still puts the plain controls first
+and the knobs after them, so the cards look the same. The wording says the
+same words.
+
+**The mechanical check.** The production code does not call a test-only
+door, the bodies are the editor's body for body, and the behaviour is
+unchanged where it should be - the golden render and the v0.29 fixture say
+so.
+
+The boundaries, the APIs and what stays in the shell are described in
+[`sieve-panel-edge.md`](sieve-panel-edge.md) and
+[`frequency-inspector-edge.md`](frequency-inspector-edge.md).
+
+Gate: app selftest 3,443/3,443, the sieve panel's own suite 42/42, the
+frequency inspector's own suite 29/29, the inspector's own suite 50/50, the
+transactions' own suite 45/45, the tools' own suite 45/45, the hit tester's
+own suite 34/34, the mapper's own suite 14/14, the render's own suite 18/18,
+golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture
+`8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness
+5 SUCCESS, boundaries 5 rules / 0 violations (66 source files).

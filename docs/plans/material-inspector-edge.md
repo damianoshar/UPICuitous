@@ -62,7 +62,7 @@ namespace upic::material_inspector
     enum class Control { Wave, Ref, ModUse, /* ... */ count };
 
     /** How a cell of the material card is drawn. */
-    enum class Kind { Plain, Labelled, Knob };
+    using Kind = upic::inspector::Kind;   // Source/InspectorCell.h
 
     /** One cell of the material card. */
     struct Cell
@@ -127,8 +127,12 @@ bindMaterialControl (mi::Control::Ref, &refLab, &refSlider);
 ```
 
 The controls that live in another card are bound there too (the carrier wave
-in the voice card, the polyagogy with the sieve's builders): the binding is
-about the role, not about who adds the widget.
+in the voice card, the polyagogy with the material's own controls): the
+binding is about the role, not about who adds the widget.
+
+R5.7 moved the polyagogy's builder: it used to be built with the sieve's
+builders, and it is now built with the material's - it is the Osc material's
+control, and the material card has always held it.
 
 The layout then walks the edge's controls and asks the description what to
 show, and builds the card from the same description's cells:
@@ -186,10 +190,13 @@ against the app) were added with the move.
   controls first and the knobs after them, so the card's *reading* order is
   not the description's order. The description carries the logical order (the
   cell order), and the engine lays the card out.
-- **The other cards are not described.** The voice card, the pitch card, the
-  page card and the rest are still written down in `MainComponent::resized()`,
-  one branch each. Only the material card was described twice, so only the
-  material card needed a description.
+- **The other cards are described now, but not by this edge.** R5.7 gave the
+  sieve card, the magnets card, the page card, the pitch card's frequency
+  cell and the acceleration card descriptions of their own
+  (`Source/SievePanel.h`, `Source/FrequencyInspector.h`), and the way a cell
+  is drawn now lives in one shared vocabulary (`Source/InspectorCell.h`).
+  The voice card, the tools card and the rest are still written down in
+  `MainComponent::resized()`, one branch each.
 - **The fold is still the shell's.** A group the window is too narrow for
   folds into its header, and the fold is applied on top of the material's
   visibility - so a control the material shows can still be hidden by the
