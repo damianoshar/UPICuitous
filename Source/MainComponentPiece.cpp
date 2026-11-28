@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "DocumentRepository.h"
+#include "RecoveryRepository.h"
 #include "PageCodec.h"
 #include "EnvelopeCodec.h"
 #include "WaveformCodec.h"
@@ -380,7 +381,7 @@ bool MainComponent::savePieceToURL (const juce::URL& url, juce::int64 maxBytes)
     // v1.33.4 (L15, part 3): the piece is safe, so the recovery snapshot is
     // not needed any more (it would offer a stale copy at the next start).
     if (! pluginMode_)
-        deleteRecoverySnapshot (recoveryDirectory());
+        upic::deleteRecoverySnapshot (upic::recoveryDirectory());
     return true;
 }
 

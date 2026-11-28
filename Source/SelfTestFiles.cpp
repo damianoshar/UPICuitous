@@ -4,6 +4,7 @@
 #include "AllocCounter.h"
 #include "ArcCodec.h"
 #include "PageCodec.h"
+#include "RecoveryRepository.h"
 #include "SampleCodec.h"
 #include "TuningCodec.h"
 
@@ -432,7 +433,7 @@ void upic::runPieceStateChecks (upic::SelfTest& t)
         }
 
         juce::String error;
-        check (MainComponent::writeRecoverySnapshot (dir, model, error),
+        check (upic::writeRecoverySnapshot (dir, model, error),
                "the recovery snapshot is written", error);
 
         const auto pieceFile = dir.getChildFile ("piece.json");
@@ -460,7 +461,7 @@ void upic::runPieceStateChecks (upic::SelfTest& t)
 
         // it reads back: the piece and the audio are both there
         juce::var recovered;
-        check (MainComponent::readRecoverySnapshot (dir, recovered, error),
+        check (upic::readRecoverySnapshot (dir, recovered, error),
                "the recovery snapshot reads back", error);
         {
             auto* pages = recovered.getProperty ("pages", juce::var()).getArray();
@@ -485,12 +486,12 @@ void upic::runPieceStateChecks (upic::SelfTest& t)
         sidecar.setReadOnly (true);
         upic::PieceModel model2 = model;
         model2.pages[0].arcs[0].points[1].freq = 990.0;   // the pages changed
-        check (MainComponent::writeRecoverySnapshot (dir, model2, error),
+        check (upic::writeRecoverySnapshot (dir, model2, error),
                "the second snapshot is written", error);
         sidecar.setReadOnly (false);
         {
             juce::var recovered2;
-            MainComponent::readRecoverySnapshot (dir, recovered2, error);
+            upic::readRecoverySnapshot (dir, recovered2, error);
             auto* pages = recovered2.getProperty ("pages", juce::var()).getArray();
             auto* arcs = pages != nullptr && pages->size() > 0
                             ? (*pages)[0].getProperty ("arcs", juce::var()).getArray()
@@ -511,14 +512,14 @@ void upic::runPieceStateChecks (upic::SelfTest& t)
             juce::File broken = dir.getChildFile ("piece.json");
             broken.replaceWithText ("this is not a piece");
             juce::var nope;
-            check (! MainComponent::readRecoverySnapshot (dir, nope, error),
+            check (! upic::readRecoverySnapshot (dir, nope, error),
                    "a broken recovery snapshot is refused", error);
         }
 
         // a snapshot that lost its audio is refused too
         {
-            MainComponent::deleteRecoverySnapshot (dir);
-            check (! MainComponent::readRecoverySnapshot (dir, recovered, error),
+            upic::deleteRecoverySnapshot (dir);
+            check (! upic::readRecoverySnapshot (dir, recovered, error),
                    "there is nothing to recover after the cleanup", error);
         }
         dir.deleteRecursively();

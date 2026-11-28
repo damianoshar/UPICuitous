@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "MainComponent.h"
 #include "PieceCodec.h"
+#include "RecoveryRepository.h"
 #include "SampleCodec.h"
 #include "SelfTest.h"
 
@@ -30,7 +31,7 @@
 // - every refusal, with the words it uses.
 //
 // The suite reaches the storage through the shell's own doors
-// (MainComponent::writeRecoverySnapshot and its neighbours). The move turns
+// (upic::writeRecoverySnapshot and its neighbours). The move turns
 // them into the edge's, and the checks themselves do not change.
 //
 // The suite works in its own folders under the temp directory, so it never
@@ -115,7 +116,7 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
 
     // --- where the snapshots live -------------------------------------------
     {
-        const auto dir = MainComponent::recoveryDirectory();
+        const auto dir = upic::recoveryDirectory();
         const auto wanted = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                                 .getChildFile ("UPICuitous")
                                 .getChildFile ("recovery");
@@ -128,7 +129,7 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
     {
         const auto dir = workFolder ("shape");
         juce::String error;
-        const bool written = MainComponent::writeRecoverySnapshot (dir, modelWithAudio(), error);
+        const bool written = upic::writeRecoverySnapshot (dir, modelWithAudio(), error);
         check (written && error.isEmpty(),
                "R4.3 a snapshot is written", error);
 
@@ -158,11 +159,11 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         juce::String error;
         const auto model = modelWithAudio();
 
-        MainComponent::writeRecoverySnapshot (dir, model, error);
+        upic::writeRecoverySnapshot (dir, model, error);
         const auto first = sidecarName (dir);
 
         // the same audio again: the same sidecar
-        MainComponent::writeRecoverySnapshot (dir, model, error);
+        upic::writeRecoverySnapshot (dir, model, error);
         check (sidecarName (dir) == first && dir.getChildFile (first).existsAsFile(),
                "R4.3 the same audio keeps its sidecar", first);
 
@@ -170,7 +171,7 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         // folder must not grow with every snapshot)
         auto changed = model;
         changed.sampleSlots[0].data = modelWithAudio (1.0f).sampleSlots[0].data;
-        MainComponent::writeRecoverySnapshot (dir, changed, error);
+        upic::writeRecoverySnapshot (dir, changed, error);
         const auto second = sidecarName (dir);
         check (second != first && ! dir.getChildFile (first).existsAsFile()
                && dir.getChildFile (second).existsAsFile(),
@@ -185,7 +186,7 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         const auto file = blocked.getChildFile ("a file");
         file.replaceWithText ("not a folder");
         juce::String error;
-        const bool written = MainComponent::writeRecoverySnapshot (file.getChildFile ("recovery"),
+        const bool written = upic::writeRecoverySnapshot (file.getChildFile ("recovery"),
                                                                    modelWithAudio(), error);
         check (! written && error == "the recovery folder could not be created",
                "R4.3 a folder that cannot be created is refused", error);
@@ -195,11 +196,11 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         // an audio file that cannot be stored
         const auto dir = workFolder ("blocked_audio");
         juce::String error;
-        MainComponent::writeRecoverySnapshot (dir, modelWithAudio(), error);
+        upic::writeRecoverySnapshot (dir, modelWithAudio(), error);
         const auto name = sidecarName (dir);
         dir.getChildFile (name).deleteFile();
         dir.getChildFile (name).createDirectory();
-        const bool written = MainComponent::writeRecoverySnapshot (dir, modelWithAudio(), error);
+        const bool written = upic::writeRecoverySnapshot (dir, modelWithAudio(), error);
         check (! written && error == "the recovery audio could not be stored"
                && dir.getChildFile (name).isDirectory(),
                "R4.3 an audio file that cannot be stored is refused", error);
@@ -210,7 +211,7 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         const auto dir = workFolder ("blocked_piece");
         dir.getChildFile ("piece.json").createDirectory();
         juce::String error;
-        const bool written = MainComponent::writeRecoverySnapshot (dir, modelWithAudio(), error);
+        const bool written = upic::writeRecoverySnapshot (dir, modelWithAudio(), error);
         check (! written && error == "the recovery snapshot could not be stored",
                "R4.3 a piece file that cannot be stored is refused", error);
     }
@@ -221,7 +222,7 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         const auto dir = workFolder ("no_snapshot");
         juce::String error;
         juce::var recovered;
-        check (! MainComponent::readRecoverySnapshot (dir, recovered, error)
+        check (! upic::readRecoverySnapshot (dir, recovered, error)
                && error == "there is no recovery snapshot",
                "R4.3 there is no recovery snapshot", error);
     }
@@ -232,7 +233,7 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         dir.getChildFile ("piece.json").replaceWithText ("");
         juce::String error;
         juce::var recovered;
-        check (! MainComponent::readRecoverySnapshot (dir, recovered, error)
+        check (! upic::readRecoverySnapshot (dir, recovered, error)
                && error == "the recovery snapshot is empty",
                "R4.3 an empty snapshot is refused", error);
     }
@@ -243,7 +244,7 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         dir.getChildFile ("piece.json").replaceWithText ("this is not a piece");
         juce::String error;
         juce::var recovered;
-        check (! MainComponent::readRecoverySnapshot (dir, recovered, error)
+        check (! upic::readRecoverySnapshot (dir, recovered, error)
                && error == "the recovery snapshot is not a piece",
                "R4.3 a snapshot that is not a piece is refused", error);
     }
@@ -254,7 +255,7 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         writeBigFile (dir.getChildFile ("piece.json"), 9);
         juce::String error;
         juce::var recovered;
-        check (! MainComponent::readRecoverySnapshot (dir, recovered, error)
+        check (! upic::readRecoverySnapshot (dir, recovered, error)
                && error == "the recovery snapshot is too big",
                "R4.3 a snapshot over the cap is refused", error);
     }
@@ -263,10 +264,10 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         // a snapshot that lost its audio
         const auto dir = workFolder ("lost_audio");
         juce::String error;
-        MainComponent::writeRecoverySnapshot (dir, modelWithAudio(), error);
+        upic::writeRecoverySnapshot (dir, modelWithAudio(), error);
         dir.getChildFile (sidecarName (dir)).deleteFile();
         juce::var recovered;
-        check (! MainComponent::readRecoverySnapshot (dir, recovered, error)
+        check (! upic::readRecoverySnapshot (dir, recovered, error)
                && error == "the recovery snapshot lost its audio",
                "R4.3 a snapshot that lost its audio is refused", error);
     }
@@ -275,10 +276,10 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         // an audio file over the cap
         const auto dir = workFolder ("big_audio");
         juce::String error;
-        MainComponent::writeRecoverySnapshot (dir, modelWithAudio(), error);
+        upic::writeRecoverySnapshot (dir, modelWithAudio(), error);
         writeBigFile (dir.getChildFile (sidecarName (dir)), 34);
         juce::var recovered;
-        check (! MainComponent::readRecoverySnapshot (dir, recovered, error)
+        check (! upic::readRecoverySnapshot (dir, recovered, error)
                && error == "the recovery audio is too big",
                "R4.3 an audio file over the cap is refused", error);
     }
@@ -287,10 +288,10 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         // an audio file that cannot be read
         const auto dir = workFolder ("empty_audio");
         juce::String error;
-        MainComponent::writeRecoverySnapshot (dir, modelWithAudio(), error);
+        upic::writeRecoverySnapshot (dir, modelWithAudio(), error);
         dir.getChildFile (sidecarName (dir)).replaceWithText ("");
         juce::var recovered;
-        check (! MainComponent::readRecoverySnapshot (dir, recovered, error)
+        check (! upic::readRecoverySnapshot (dir, recovered, error)
                && error == "the recovery audio could not be read",
                "R4.3 an audio file that cannot be read is refused", error);
     }
@@ -300,10 +301,10 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
         const auto dir = workFolder ("round_trip");
         const auto model = modelWithAudio();
         juce::String error;
-        MainComponent::writeRecoverySnapshot (dir, model, error);
+        upic::writeRecoverySnapshot (dir, model, error);
 
         juce::var recovered;
-        const bool read = MainComponent::readRecoverySnapshot (dir, recovered, error);
+        const bool read = upic::readRecoverySnapshot (dir, recovered, error);
         check (read, "R4.3 the snapshot reads back", error);
 
         // the audio is base64 again, and the sidecar's name is gone - the
@@ -321,8 +322,8 @@ void upic::runRecoveryRepositoryChecks (SelfTest& t)
     {
         const auto dir = workFolder ("cleanup");
         juce::String error;
-        MainComponent::writeRecoverySnapshot (dir, modelWithAudio(), error);
-        MainComponent::deleteRecoverySnapshot (dir);
+        upic::writeRecoverySnapshot (dir, modelWithAudio(), error);
+        upic::deleteRecoverySnapshot (dir);
 
         int left = 0;
         for (const auto& entry : juce::RangedDirectoryIterator (dir, false))

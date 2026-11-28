@@ -140,6 +140,7 @@
       <FILE id="mdPce44" name="PieceCodec.h" compile="0" resource="0" file="Source/PieceCodec.h"/>
       <!-- R4.2: the document's file adapter - the read and the write. -->
       <FILE id="mdDpr46" name="DocumentRepository.h" compile="0" resource="0" file="Source/DocumentRepository.h"/>
+      <FILE id="mdRcr48" name="RecoveryRepository.h" compile="0" resource="0" file="Source/RecoveryRepository.h"/>
       <FILE id="mdTun44" name="Tuning.h" compile="0" resource="0" file="Source/Tuning.h"/>
       <FILE id="uFvbxi" name="LivePitch.h" compile="0" resource="0" file="Source/LivePitch.h"/>
       <FILE id="qySKM1" name="AndroidBars.h" compile="0" resource="0" file="Source/AndroidBars.h"/>

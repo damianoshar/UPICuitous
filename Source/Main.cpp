@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "MainComponent.h"
 #include "AndroidBars.h"
+#include "RecoveryRepository.h"
 #include "SelfTest.h"
 
 class UpicApplication : public juce::JUCEApplication
@@ -163,7 +164,7 @@ public:
                     // v1.33.4 (L15, part 3): the work is thrown away on
                     // purpose, so the recovery snapshot must not offer it
                     // again at the next start
-                    MainComponent::deleteRecoverySnapshot (MainComponent::recoveryDirectory());
+                    upic::deleteRecoverySnapshot (upic::recoveryDirectory());
                     JUCEApplication::getInstance()->quit();
                 }
                 // 0 = Cancel: the app stays open

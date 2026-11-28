@@ -447,16 +447,11 @@ public:
     // The snapshot is written while the piece has unsaved changes (on the
     // worker thread, like the other long jobs) and it is offered at the next
     // start - the app asks whether to recover it.
-    static juce::File recoveryDirectory();
-    // writes the snapshot (the worker thread): the piece JSON and the
-    // sidecars of the samples that changed
-    static bool writeRecoverySnapshot (const juce::File& dir, const upic::PieceModel& model,
-                                       juce::String& error);
-    // reads it back (the message thread): the piece, with the audio put
-    // back where the loader expects it
-    static bool readRecoverySnapshot (const juce::File& dir, juce::var& pieceOut, juce::String& error);
-    // throws it away (the piece was saved, or the user did not want it)
-    static void deleteRecoverySnapshot (const juce::File& dir);
+    //
+    // R4.3: the storage of the snapshot is an edge of its own
+    // (Source/RecoveryRepository.h) - where it lives, how it is written, how
+    // it comes back and how it is thrown away. The shell keeps the service:
+    // when the snapshot is written and how it is offered.
     // the message thread
     void offerRecovery();
     void maybeWriteRecoverySnapshot();
