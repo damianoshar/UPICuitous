@@ -126,6 +126,10 @@ and the checks themselves did not change.
 - **The drawing modes have controllers of their own now** (R046):
   `Source/ScoreEditingTools.h`. They ask with this mapper too, through the
   canvas. See [`score-editing-tools-edge.md`](score-editing-tools-edge.md).
+- **The gesture has an explicit transaction now** (R047):
+  `Source/ScoreGestureTransaction.h`. The mapper is unchanged; the
+  transaction holds the gesture's command. See
+  [`score-gesture-transaction-edge.md`](score-gesture-transaction-edge.md).
 - **The view's state is still the editor's fields** (`timeZoom`,
   `timeOffset`, `freqZoom`, `freqOffset`). A `ScoreCamera` (the review's
   §24 file list) would own the zoom and the scroll; until then the editor

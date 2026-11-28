@@ -1367,6 +1367,70 @@ unchanged - the golden render and the v0.29 fixture say so.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.31 R5.5 - the score canvas's gesture transactions
+
+**What moves.** The gesture's transaction leaves the canvas's raw callbacks
+and moves into the new `Source/ScoreGestureTransaction.h`: the lifecycle of
+one command - `begin()` (with the label), `commit()` and `cancel()`. The
+review asks for exactly this (R047, "Introduce gesture transactions", §25):
+
+> "A stroke should have an explicit lifecycle: during drawing, temporary
+> geometry should normally remain in the editor. On release, produce one
+> validated editing command." (§25)
+
+The document's dispatcher grows the third exit of a command
+(`cancelCommand()`): the command is closed and dropped - no undo step, and
+the revision does not move. The app grows the door that reaches it
+(`MainComponent::cancelEdit()`), and the canvas grows the hook
+(`onEditCancel`).
+
+**What stays.** The document's dispatcher keeps the snapshot, the undo step
+and the change report; the app keeps the wiring; the tools keep their bodies
+(the stroke's resampling, the line's anchor, the marquee's rectangle, the
+move's ratio, the zone's drag); the canvas keeps the gesture state (the
+render borrows it) and the commands (`commitStroke()`, `commitLine()`,
+`deleteSelected()`, `addZone()`).
+
+**The one change.** A gesture is one transaction, and it ends in exactly one
+of two ways: a command (one labelled undo step, and the document changed
+once) or nothing (no step, no open transaction, the model as it was). Before,
+a cancelled gesture left its transaction open - the next command was
+swallowed by it, and a cancelled move left a phantom "Move the arc" step
+behind. And a gesture that changed nothing - a click that only takes an arc,
+a click that only takes a zone - still committed a step, because the release
+reported a change that had not happened.
+
+**The contract.** `Source/SelfTestGestureTransactions.cpp`, written before the
+move, 45 checks. It drives the editor with synthesised mouse events and
+watches the document's own transaction (`Source/CommandDispatcher.h`): the
+stroke's transaction (it opens at the press with its label, it closes at the
+release, the temporary geometry does not touch the model, the release is one
+step and the document changed once), the line and the move (each with its own
+label), the move's drag (the model moves while the pointer moves - the audio
+follows the gesture - but the document has not changed yet), the refused
+stroke (a transaction that opens and closes, and no step), the erase and the
+zone (one command each), the click that only takes an arc or a zone (no step,
+and the model is left alone), the move that ends where it started (no step),
+the cancelled gesture (no step, no open transaction, the model as it was) and
+the command after a cancelled gesture (a command of its own).
+
+**The measurement.** §25 asks for the mouse-release behaviour to be profiled
+("large curves, empty pages, maximum-sized pages"). The suite measures the
+press, the drag and the release of a stroke on an empty page, on a page with
+a large curve (1,000 points) and on a page at the arc limit (4,000 arcs), and
+records the numbers as notes: the release is 0.033 ms, 0.037 ms and 0.611 ms
+(the press - the snapshot the transaction takes - is 0.026 ms, 0.025 ms and
+0.934 ms). The numbers are a baseline, not a threshold.
+
+**The mechanical check.** The production code does not call a test-only
+door, the bodies are the editor's body for body, and the behaviour is
+unchanged where it should be - the golden render and the v0.29 fixture say
+so.
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1398,7 +1462,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R5 UI decomposition | **R5.1, R5.2, R5.3 and R5.4 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d` | app selftest 3,277/3,277, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; and each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4 and R5.5 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd` | app selftest 3,322/3,322, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; and each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
 | R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
@@ -3818,3 +3882,129 @@ tester's own suite 34/34, the mapper's own suite 14/14, the render's own
 suite 18/18, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture
 `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness
 5 SUCCESS, boundaries 5 rules / 0 violations (62 source files).
+
+### R5.5 record (2026-11-28)
+
+Every gesture on the score canvas is one transaction, and it ends in exactly
+one of two ways: a command or nothing.
+
+The characterization commit is `40f93dd`, the move `caaf6cd`.
+
+| Measure | Before | After |
+|---|---|---|
+| the gesture's transaction | two callbacks (`onEditStart`, `onEditEnd`) and no third exit | a lifecycle of its own (`Source/ScoreGestureTransaction.h`): `begin`, `commit`, `cancel` |
+| the canvas's doors | the tools called the callbacks directly | three doors: `beginGesture()`, `commitGesture()`, `cancelGesture()` |
+| the document's exits | `beginCommand()`, `endCommand()` | `beginCommand()`, `endCommand()`, `cancelCommand()` |
+| the app's doors | `beginEdit()`, `endEdit()` | `beginEdit()`, `endEdit()`, `cancelEdit()` |
+| the canvas's hooks | `onEditStart`, `onEditEnd` | `onEditStart`, `onEditEnd`, `onEditCancel` |
+| the cancelled gesture | the transaction stayed open; the next command joined it | the transaction is closed and dropped |
+| a click that only takes an arc | an undo step ("Move the arc"), and the piece marked as changed | no step, and the piece is not marked as changed |
+| the transactions' own suite | - | `Source/SelfTestGestureTransactions.cpp`, 45 checks |
+| the source files | 62 | 63 (the suite) |
+
+**The suite came first.** `Source/SelfTestGestureTransactions.cpp` was written
+against the old code: 45 checks that drive the editor with synthesised mouse
+events and watch the document's own transaction
+(`Source/CommandDispatcher.h`) - the same class the app uses.
+
+It pins:
+
+- the stroke: the transaction opens at the press with its label ("Draw") and
+  closes at the release; the temporary geometry does not touch the model; the
+  release is one undo step, and the document changed once;
+- the line and the move: the same, each with its own label ("Draw a line",
+  "Move the arc");
+- the move's drag: the model moves while the pointer moves (the audio follows
+  the gesture), but the document has not changed yet - the revision waits for
+  the release;
+- the refused stroke (too short): the transaction opens and closes, and there
+  is no step - a gesture that changed nothing is not an undo step;
+- the erase and the zone: one command each, with their own labels;
+- the click that only takes an arc, and the click that only takes a zone: no
+  step, and the model is left alone;
+- the move that ends where it started: no step, and the arc is where it was;
+- the cancelled gesture: no step, no open transaction, the model as it was -
+  and a cancelled move puts the arc back, and the model that moved back is
+  heard;
+- the command after a cancelled gesture: a command of its own.
+
+**The edge.** `Source/ScoreGestureTransaction.h` is the lifecycle:
+
+```cpp
+namespace upic::score_gesture
+{
+    class GestureTransaction
+    {
+    public:
+        using Open  = std::function<void (const juce::String& label)>;
+        using Close = std::function<void()>;   // the command is kept
+        using Drop  = std::function<void()>;   // the command is dropped
+
+        void setDoors (Open open, Close close, Drop drop);
+        void begin (const juce::String& label);
+        void commit();
+        void cancel();
+        bool isOpen() const noexcept;
+    };
+}
+```
+
+The class owns no model and no document: the doors are the canvas's hooks,
+and the class only remembers whether a transaction is open and what it was
+called.
+
+**The one change.** A gesture is one transaction, and it ends in exactly one
+of two ways: a command (one labelled undo step, and the document changed
+once) or nothing (no step, no open transaction, the model as it was).
+
+Before, a cancelled gesture left its transaction open. The next command was
+swallowed by it (`MainComponent::runEdit()` folds its change into a command
+that is already open), and a cancelled move left a phantom "Move the arc"
+step behind, because the dispatcher's `changed_` flag was still set from the
+drag.
+
+And a gesture that changed nothing still produced a step: a click that takes
+an arc also starts the move (so that a drag can move it in one go), and the
+release reported a change that had not happened - an undo step labelled "Move
+the arc" for a click, and a piece marked as changed by a click. The same
+held for a click that takes a zone.
+
+Now the release compares the model with the state the gesture started from:
+the move compares the arcs' points, the zone compares its bounds. If nothing
+moved, the gesture ends in nothing - the transaction is dropped, and there is
+no step.
+
+**The live audition is unchanged.** The epoch still moves with every change
+during the drag, and the status timer still publishes one snapshot per tick -
+the bounded transient preview §25 asks for. The cancel is the one new
+signal: when a gesture had changed the model and was then undone, the epoch
+moves once more, so the audio hears the state the gesture left behind.
+
+**The measurement.** §25 asks for the mouse-release behaviour to be profiled.
+The suite measures the press, the drag and the release of a stroke:
+
+| the page | the press | the drag | the release |
+|---|---|---|---|
+| an empty page | 0.026 ms | 0.001 ms | 0.033 ms |
+| a page with a large curve (1,000 points) | 0.025 ms | 0.001 ms | 0.037 ms |
+| a page at the arc limit (4,000 arcs) | 0.934 ms | 0.002 ms | 0.611 ms |
+
+The press is the snapshot the transaction takes (a copy of the piece); the
+release is the commit and the undo step's measurement. The numbers are
+notes, not thresholds - they are the baseline a later phase compares
+against.
+
+**The mechanical check.** The production code does not call a test-only
+door, the bodies are the editor's body for body, and the behaviour is
+unchanged where it should be - the golden render and the v0.29 fixture say
+so.
+
+The boundary, the API and what stays in the canvas are described in
+[`score-gesture-transaction-edge.md`](score-gesture-transaction-edge.md).
+
+Gate: app selftest 3,322/3,322, the transactions' own suite 45/45, the
+tools' own suite 45/45, the hit tester's own suite 34/34, the mapper's own
+suite 14/14, the render's own suite 18/18, golden render
+`0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged,
+plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS, boundaries 5
+rules / 0 violations (63 source files).

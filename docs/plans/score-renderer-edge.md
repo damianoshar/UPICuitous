@@ -14,6 +14,10 @@ phase, not as it is meant to be at the end of the refactoring.
 > below is still the canvas's (this render borrows it), but each mode's
 > behaviour now lives in its own tool. See
 > [`score-editing-tools-edge.md`](score-editing-tools-edge.md).
+>
+> **R5.5 gave the gesture an explicit transaction.** The gesture's state below
+> is still the canvas's; the transaction holds the gesture's command. See
+> [`score-gesture-transaction-edge.md`](score-gesture-transaction-edge.md).
 
 ## The boundary
 
@@ -144,6 +148,10 @@ edge's, and the checks themselves did not change.
   `Source/ScoreEditingTools.h`. The gesture's state is still the canvas's
   (this render borrows it), but each mode's behaviour lives in its own
   tool. See [`score-editing-tools-edge.md`](score-editing-tools-edge.md).
+- **The gesture has an explicit transaction now** (R047):
+  `Source/ScoreGestureTransaction.h`. The gesture's state is still the
+  canvas's; the transaction holds the gesture's command. See
+  [`score-gesture-transaction-edge.md`](score-gesture-transaction-edge.md).
 - **The grid and the arcs are not separate painters yet.** The review's
   §24 lists `ScoreGridRenderer` and `ArcPainter`; R5.1 extracts the render
   as a whole, and the sub-painters can be split out of it later without

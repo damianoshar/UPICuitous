@@ -4,6 +4,11 @@ The architecture note for R5.4. It describes the boundary R5.4 introduced -
 the score canvas's drawing modes as explicit controllers - as it is after
 that phase, not as it is meant to be at the end of the refactoring.
 
+> **R5.5 gave the gesture an explicit transaction.** The tools below still
+> act on the canvas's gesture state, but the transaction they open and close
+> has a lifecycle of its own, with a third exit: a cancelled gesture. See
+> [`score-gesture-transaction-edge.md`](score-gesture-transaction-edge.md).
+
 ## The boundary
 
 ```
