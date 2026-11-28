@@ -1471,89 +1471,55 @@ upic::Arc* ScoreEditor::findArc(int id)
         return nullptr;
     }
 
+//==============================================================================
+// R5.3: the hit tester.
+//
+// The editor asks the hit tester what is under the cursor; the hit tester
+// answers from the mapper, the page, the layer and the touch's grab band.
+// The editor acts on the answer - it keeps the gesture.
+upic::score_hit_test::ScoreHitTester ScoreEditor::hitTester() const
+{
+    upic::score_hit_test::ScoreHitTester h;
+    h.mapper = coordinateMapper();
+    h.page = page;
+    h.layer = layer;
+    h.touchSeen = touchSeen;
+    return h;
+}
+
 std::vector<int> ScoreEditor::arcsNear(juce::Point<float> pos, float maxD) const
 {
-        if (maxD <= 0.0f) maxD = touchSeen ? 20.0f : 12.0f;
-        std::vector<std::pair<float, int>> hits;
-        if (! page) return {};
-        for (auto& a : page->arcs)
-        {
-            if (! arcInLayer(a)) continue;
-            float bestD = maxD;
-            for (auto& pt : a.points)
-                bestD = juce::jmin(bestD, (float) std::hypot(timeToX(pt.t) - pos.x,
-                                                             freqToY(pt.freq) - pos.y));
-            for (size_t i = 1; i < a.points.size(); ++i)
-            {
-                juce::Point<float> p0{ timeToX(a.points[i-1].t), freqToY(a.points[i-1].freq) };
-                juce::Point<float> p1{ timeToX(a.points[i].t),   freqToY(a.points[i].freq) };
-                juce::Line<float> seg(p0, p1);
-                juce::Point<float> nearest;
-                const float d = seg.getDistanceFromPoint(pos, nearest);
-                if (d < bestD && pos.x >= juce::jmin(p0.x, p1.x) - 4
-                              && pos.x <= juce::jmax(p0.x, p1.x) + 4)
-                    bestD = d;
-            }
-            if (bestD < maxD) hits.push_back({ bestD, a.id });
-        }
-        std::sort(hits.begin(), hits.end(), [](auto& x, auto& y){ return x.first < y.first; });
-        std::vector<int> out;
-        for (auto& h : hits) out.push_back(h.second);
-        return out;
-    }
+    return hitTester().arcsNear (pos, maxD);
+}
 
 int ScoreEditor::pickArc(juce::Point<float> pos) const
 {
-        auto v = arcsNear(pos);
-        return v.empty() ? -1 : v.front();
-    }
+    return hitTester().pickArc (pos);
+}
 
 int ScoreEditor::pickZone(juce::Point<float> pos) const
 {
-        if (! page) return -1;
-        const double t = xToTime(pos.x), f = yToFreq(pos.y);
-        // topmost (last drawn) first. A few pixels of slack let the border
-        // itself be grabbed for a move/resize (the exact edge can round to
-        // just outside the time/frequency rectangle).
-        for (auto it = page->zones.rbegin(); it != page->zones.rend(); ++it)
-            if (it->contains(t, f) || zoneRect(*it).expanded (4.0f).contains (pos))
-                return it->id;
-        return -1;
-    }
+    return hitTester().pickZone (pos);
+}
 
 upic::SieveZone* ScoreEditor::findZone(int id)
 {
-        if (! page) return nullptr;
-        for (auto& z : page->zones) if (z.id == id) return &z;
-        return nullptr;
-    }
+    if (! page) return nullptr;
+    for (auto& z : page->zones) if (z.id == id) return &z;
+    return nullptr;
+}
 
 int ScoreEditor::zoneHandleAt(const upic::SieveZone& z, juce::Point<float> pos) const
 {
-        const auto r = zoneRect (z);
-        const float h = 7.0f;
-        const bool onL = std::abs (pos.x - r.getX())      <= h;
-        const bool onR = std::abs (pos.x - r.getRight())  <= h;
-        const bool onT = std::abs (pos.y - r.getY())      <= h;
-        const bool onB = std::abs (pos.y - r.getBottom()) <= h;
-        if (onL && onT) return 5;
-        if (onR && onT) return 6;
-        if (onL && onB) return 7;
-        if (onR && onB) return 8;
-        if (onL) return 1;
-        if (onR) return 2;
-        if (onT) return 3;
-        if (onB) return 4;
-        return 0;
-    }
+    return hitTester().zoneHandleAt (z, pos);
+}
 
 //==============================================================================
 // R5.3: the hit testing's doors for the selftest.
 //
 // The hit testing is what is under the cursor: the arcs near a point, the
 // nearest arc, the zone under a point and the zone's handle under a point.
-// The review gives it a name and a home of its own in R045 ("Extract
-// ScoreHitTester"); until then these doors reach it where it is.
+// The doors reach the hit tester where it is: Source/ScoreHitTester.h.
 std::vector<int> ScoreEditor::arcsNearForTest (juce::Point<float> pos, float maxD) const
 {
     return arcsNear (pos, maxD);

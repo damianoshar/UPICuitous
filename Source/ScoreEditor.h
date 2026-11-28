@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "UpicModel.h"
 #include "ScoreCoordinateMapper.h"
+#include "ScoreHitTester.h"
 #include "ScoreRenderer.h"
 #include <optional>
 #include <algorithm>
@@ -484,6 +485,11 @@ private:
     // mapping between the page's time/pitch and the screen. The editor and
     // the render share it, so the drawing and the hit testing agree.
     upic::score_coordinates::ScoreCoordinateMapper coordinateMapper() const;
+
+    // The hit tester: what is under the cursor. It answers the question
+    // from the mapper, the page, the layer and the touch's grab band; the
+    // editor acts on the answer.
+    upic::score_hit_test::ScoreHitTester hitTester() const;
 
     juce::Rectangle<float> timeStripRect() const;
 
