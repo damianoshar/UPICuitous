@@ -9,6 +9,11 @@ phase, not as it is meant to be at the end of the refactoring.
 > `Source/ScoreCoordinateMapper.h`, and the render's state carries it as
 > `State::mapper`. The render's own edge is unchanged. See
 > [`score-coordinate-mapper-edge.md`](score-coordinate-mapper-edge.md).
+>
+> **R5.4 gave the drawing modes their own controllers.** The gesture's state
+> below is still the canvas's (this render borrows it), but each mode's
+> behaviour now lives in its own tool. See
+> [`score-editing-tools-edge.md`](score-editing-tools-edge.md).
 
 ## The boundary
 
@@ -135,6 +140,10 @@ edge's, and the checks themselves did not change.
   `Source/ScoreHitTester.h`. It asks with the same mapper this render draws
   with, so the picture and the grab agree. See
   [`score-hit-tester-edge.md`](score-hit-tester-edge.md).
+- **The drawing modes have controllers of their own now** (R046):
+  `Source/ScoreEditingTools.h`. The gesture's state is still the canvas's
+  (this render borrows it), but each mode's behaviour lives in its own
+  tool. See [`score-editing-tools-edge.md`](score-editing-tools-edge.md).
 - **The grid and the arcs are not separate painters yet.** The review's
   §24 lists `ScoreGridRenderer` and `ArcPainter`; R5.1 extracts the render
   as a whole, and the sub-painters can be split out of it later without

@@ -4,6 +4,10 @@ The architecture note for R5.3. It describes the boundary R5.3 introduced -
 the score canvas's answer to "what is under the cursor?" - as it is after
 that phase, not as it is meant to be at the end of the refactoring.
 
+> **R5.4 gave the drawing modes their own controllers.** The hit tester is
+> unchanged; the tools ask it the same questions, from the tools. See
+> [`score-editing-tools-edge.md`](score-editing-tools-edge.md).
+
 ## The boundary
 
 ```
@@ -114,9 +118,12 @@ a header of its own, and the checks themselves did not change.
   zone's edges and corners), but no tool edits a single point of an arc, so
   there is nothing to identify yet. The review's `PointEditingTool`
   (R046's family) brings that question with it.
-- **The gesture is still in the editor.** The review's R046 ("Introduce
-  editing tools") and R047 ("Introduce gesture transactions") are the next
-  steps; they will ask the hit tester the same questions, from the tools.
-- **The selection's rules are still in the editor** - the shift-click's
-  cycle, the ctrl-click's toggle and the marquee. They act on the hit
-  tester's answer, but they are the editor's rules.
+- **The gesture is still in the canvas.** The gesture's *state* is the
+  canvas's (the render borrows it), and R5.4 gave each drawing mode its own
+  controller (`Source/ScoreEditingTools.h`): the tools ask the hit tester the
+  same questions, from the tools. The review's R047 ("Introduce gesture
+  transactions") is the next step in that line.
+- **The selection's rules are still in the canvas' controller** - the
+  shift-click's cycle, the ctrl-click's toggle and the marquee. They act on
+  the hit tester's answer, but they are the selection tool's rules, not the
+  hit tester's.

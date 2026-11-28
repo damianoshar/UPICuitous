@@ -1309,6 +1309,64 @@ unchanged - the golden render and the v0.29 fixture say so.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.30 R5.4 - the score canvas's editing tools
+
+**What moves.** The per-drawing-mode conditions leave the canvas's mouse
+handlers and move into the tools: the new `Source/ScoreEditingTools.h` holds
+one controller per drawing mode - the freehand stroke (Draw and SineStroke),
+the straight line, the selection and the move, the erase and the zone. The
+review asks for exactly this (R046, "Introduce editing tools", §24):
+
+> "Rather than allowing mouse handlers to accumulate conditions for every
+> drawing mode, create an explicit tool controller."
+
+The interface and the pointer's input are in the new
+`Source/ScoreEditingTool.h`: `begin()`, `update()`, `end()` and `cancel()`,
+and a `PointerInput` that carries the coordinates, the pressure, the
+modifiers, the pointer's identity and where the gesture began - what the
+review asks the pointer input to include (§24). The tools never see a JUCE
+mouse event.
+
+**What stays.** `ScoreEditor` keeps the canvas and the model: the gesture
+state (the render borrows it), the commands (`commitStroke()`,
+`commitLine()`, `deleteSelected()`, `addZone()`, the hit tester's answers)
+and the canvas's own targets (the playhead's handle, the centre band's scrub
+target, the pinch, the multi-touch). The mouse handlers keep only what is
+the canvas's: the touch handling, the plot's bounds, the two scrub targets -
+and then they ask the tool.
+
+**The one change.** The gesture belongs to the tool that began it. Before,
+the handlers asked "which tool is active?" on every event, so a tool change
+in the middle of a drag changed who finished the gesture (a line drawn with
+the Line tool was dropped when another tool was picked in between; a stroke
+was committed). Now the tool that took the gesture finishes it. A tool change
+during a drag needs a toolbar click, which needs the pointer to be released
+first, so this cannot be reached by hand - it is the review's model made
+explicit.
+
+**The contract.** `Source/SelfTestEditingTools.cpp`, written before the
+move, 45 checks. It drives the editor with synthesised mouse events - the
+way the app's own UI tests do it - and pins: the freehand stroke (one arc,
+the points sorted by time, the release's point part of the stroke, the
+points on the page, the pressure, the material, the layer, the
+simplification and the fine mode's exemption from it, the refusal of a
+stroke that is too short, the layer switch that cancels it), the undo
+transaction (one labelled transaction per gesture), the sine stroke (one
+arc, the wobble around the line), the line (one arc that follows the drag,
+its own label, the refusal of a line that is too short), the erase (the arc
+under the cursor, and nothing on empty space), the selection (the click,
+the ctrl-click, the shift-click, the click on empty space), the marquee, the
+move, the zone (the drag, the times, the pitches, its label) and the scrub
+band (it scrubs, and it draws nothing).
+
+**The mechanical check.** The production code does not call a test-only
+door, the bodies are the editor's body for body, and the behaviour is
+unchanged - the golden render and the v0.29 fixture say so.
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1340,7 +1398,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R5 UI decomposition | **R5.1, R5.2 and R5.3 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576` | app selftest 3,232/3,232, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R5 UI decomposition | **R5.1, R5.2, R5.3 and R5.4 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d` | app selftest 3,277/3,277, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; and each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
 | R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
@@ -3644,3 +3702,119 @@ mapper's own suite 14/14, the render's own suite 18/18, golden render
 `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged,
 plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS, boundaries 5
 rules / 0 violations (61 source files).
+
+### R5.4 record (2026-11-28)
+
+Each drawing mode has its own controller, and the canvas's mouse handlers
+have stopped accumulating a condition per mode.
+
+The characterization commit is `a3b3eb0`, the move `1d6ad4d`.
+
+| Measure | Before | After |
+|---|---|---|
+| the mouse handlers | about 390 lines, with a branch per drawing mode (the zone, the right button, the selection, the marquee, the move, the erase, the stroke, the line) | about 110 lines: the touch handling, the plot's bounds, the two scrub targets - and then the tool |
+| the drawing modes | conditions in `ScoreEditor::mouseDown()`, `mouseDrag()` and `mouseUp()` | five controllers in `Source/ScoreEditingTools.h` (the freehand stroke for Draw and SineStroke, the line, the selection and the move, the erase, the zone) |
+| the interface | none | `Source/ScoreEditingTool.h`: `EditingTool` (`begin`, `update`, `end`, `cancel`) and `PointerInput` |
+| the canvas's source | `Source/ScoreEditor.cpp`, 2,136 lines | 1,933 lines |
+| the tools' own suite | - | `Source/SelfTestEditingTools.cpp`, 45 checks |
+| the source files | 61 | 62 (the suite) |
+
+**The suite came first.** `Source/SelfTestEditingTools.cpp` was written
+against the old code: 45 checks that drive the editor with synthesised
+mouse events - the way the app's own UI tests do it.
+
+It pins:
+
+- the freehand stroke: one arc per drag, the points sorted by time, the
+  release's point part of the stroke, the points on the page, the pressure,
+  the stroke temporary until the release, the current material, the layer the
+  stroke was drawn in, the simplification (a straight drag is simplified to
+  its two ends) and the fine mode's exemption from it, the refusal of a
+  stroke that is too short (and the message), and the layer switch that
+  cancels the stroke;
+- the undo transaction: one labelled transaction per gesture ("Draw", "Draw
+  a line", "Delete", "Move the arc", "Add a sieve zone");
+- the sine stroke: one arc, and the wobble around the line (0.166 octaves in
+  the suite's stroke);
+- the line: one arc that runs from the drag's start to its end and is
+  subdivided along it, its own label, and the refusal of a line that is too
+  short (and the message);
+- the erase: the arc under the cursor is deleted, and nothing on empty
+  space;
+- the selection: a click selects the arc under the cursor, a ctrl-click
+  unselects it, a shift-click adds another, a click on empty space clears the
+  selection;
+- the marquee: it takes the arcs inside it;
+- the move: a selected arc follows the pointer;
+- the zone: a drag draws one, with the times and the pitches of the drag, and
+  its own label;
+- the scrub band: it moves the playhead and draws nothing, whatever the tool
+  is.
+
+**The edge.** `Source/ScoreEditingTool.h` is the interface and the pointer's
+input:
+
+```cpp
+namespace upic::score_tools
+{
+    struct PointerInput
+    {
+        juce::Point<float> position;
+        juce::Point<float> downPosition;
+        float pressure = 1.0f;
+        juce::ModifierKeys mods;
+        int pointerId = 0;
+        bool isTouch = false;
+    };
+
+    class EditingTool
+    {
+    public:
+        virtual ~EditingTool() = default;
+        virtual void begin  (const PointerInput&) = 0;
+        virtual void update (const PointerInput&) = 0;
+        virtual void end    (const PointerInput&) = 0;
+        virtual void cancel () = 0;
+    };
+}
+```
+
+`Source/ScoreEditingTools.h` holds the five controllers. The bodies are the
+editor's, body for body: the stroke's resampling, the line's anchor and its
+rubber band, the selection's click rules (the ctrl-click's toggle, the
+shift-click's add), the marquee's rectangle, the move's ratio, the erase's
+pick and delete, the zone's draw and drag - none of them changes by a
+character.
+
+**The canvas keeps what is the canvas's.** The scrub targets (the playhead's
+handle, the centre band), the multi-touch and the pinch are not tools: they
+belong to the canvas, whatever tool is active. The right button is a tool's
+business, because the Zone tool has its own menu and every other tool opens
+the arc's.
+
+**The tool that began the gesture finishes it.** Before, every event asked
+"which tool is active?", so a tool change in the middle of a drag changed
+who finished the gesture. Now the canvas remembers the tool that took the
+gesture (`gestureTool`) and the drag, the release and the cancel go to it.
+This is the review's model made explicit; it cannot be reached by hand (a
+tool change needs a toolbar click, which needs the pointer to be released
+first).
+
+**The tools act; the canvas owns.** The tools are the canvas's own
+controllers, so they act on the canvas's gesture state (the render borrows
+it) and call the canvas's commands (`commitStroke()`, `commitLine()`,
+`deleteSelected()`, `addZone()`). The canvas declares them friends, which
+keeps the app's public API unchanged.
+
+**The mechanical check.** The production code does not call a test-only
+door, the moved bodies are the editor's body for body, and the behaviour is
+unchanged - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the canvas are described in
+[`score-editing-tools-edge.md`](score-editing-tools-edge.md).
+
+Gate: app selftest 3,277/3,277, the tools' own suite 45/45, the hit
+tester's own suite 34/34, the mapper's own suite 14/14, the render's own
+suite 18/18, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture
+`8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness
+5 SUCCESS, boundaries 5 rules / 0 violations (62 source files).

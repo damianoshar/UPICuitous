@@ -5,6 +5,10 @@ the score canvas's mapping between the musical coordinates and the screen -
 as it is after that phase, not as it is meant to be at the end of the
 refactoring.
 
+> **R5.4 gave the drawing modes their own controllers.** The mapper is
+> unchanged; the tools ask the canvas, and the canvas asks the mapper. See
+> [`score-editing-tools-edge.md`](score-editing-tools-edge.md).
+
 ## The boundary
 
 ```
@@ -115,6 +119,13 @@ and the checks themselves did not change.
 
 ## What is not covered yet
 
+- **The hit tester has an edge of its own now** (R045):
+  `Source/ScoreHitTester.h`. It asks with this mapper, so the picture and
+  the grab agree. See
+  [`score-hit-tester-edge.md`](score-hit-tester-edge.md).
+- **The drawing modes have controllers of their own now** (R046):
+  `Source/ScoreEditingTools.h`. They ask with this mapper too, through the
+  canvas. See [`score-editing-tools-edge.md`](score-editing-tools-edge.md).
 - **The view's state is still the editor's fields** (`timeZoom`,
   `timeOffset`, `freqZoom`, `freqOffset`). A `ScoreCamera` (the review's
   §24 file list) would own the zoom and the scroll; until then the editor
