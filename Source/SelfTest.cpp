@@ -191,6 +191,8 @@ int upic::runSelfTest()
     upic::runScoreRenderChecks (t);
     // R5.2: the coordinate mapper - the time axis, the pitch axis and the zoom.
     upic::runCoordinateMapperChecks (t);
+    // R5.3: the hit tester - the arcs near a point, the zone under it and its handles.
+    upic::runScoreHitTestChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

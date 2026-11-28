@@ -194,6 +194,17 @@ public:
 
     double zoneStickinessForTest (int id) const;
 
+    // R5.3: the hit testing - what is under the cursor. The doors are the
+    // hit tester's own contract (R045): the arcs near a point, the nearest
+    // arc, the zone under a point and the zone's handle under a point.
+    std::vector<int> arcsNearForTest (juce::Point<float> pos, float maxD = -1.0f) const;
+
+    int pickArcForTest (juce::Point<float> pos) const;
+
+    int pickZoneForTest (juce::Point<float> pos) const;
+
+    int zoneHandleAtForTest (int zoneId, juce::Point<float> pos) const;
+
     void setSnap(bool s);
 
     void setShowGrid(bool s);
@@ -529,7 +540,7 @@ private:
     // Touch pointers get a wider grab band (fat fingers, no hover).
     std::vector<int> arcsNear(juce::Point<float> pos, float maxD = -1.0f) const;
 
-    int pickArc(juce::Point<float> pos);
+    int pickArc(juce::Point<float> pos) const;
 
     int pickZone(juce::Point<float> pos) const;
 

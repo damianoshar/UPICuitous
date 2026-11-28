@@ -1502,7 +1502,7 @@ std::vector<int> ScoreEditor::arcsNear(juce::Point<float> pos, float maxD) const
         return out;
     }
 
-int ScoreEditor::pickArc(juce::Point<float> pos)
+int ScoreEditor::pickArc(juce::Point<float> pos) const
 {
         auto v = arcsNear(pos);
         return v.empty() ? -1 : v.front();
@@ -1546,6 +1546,36 @@ int ScoreEditor::zoneHandleAt(const upic::SieveZone& z, juce::Point<float> pos) 
         if (onB) return 4;
         return 0;
     }
+
+//==============================================================================
+// R5.3: the hit testing's doors for the selftest.
+//
+// The hit testing is what is under the cursor: the arcs near a point, the
+// nearest arc, the zone under a point and the zone's handle under a point.
+// The review gives it a name and a home of its own in R045 ("Extract
+// ScoreHitTester"); until then these doors reach it where it is.
+std::vector<int> ScoreEditor::arcsNearForTest (juce::Point<float> pos, float maxD) const
+{
+    return arcsNear (pos, maxD);
+}
+
+int ScoreEditor::pickArcForTest (juce::Point<float> pos) const
+{
+    return pickArc (pos);
+}
+
+int ScoreEditor::pickZoneForTest (juce::Point<float> pos) const
+{
+    return pickZone (pos);
+}
+
+int ScoreEditor::zoneHandleAtForTest (int zoneId, juce::Point<float> pos) const
+{
+    if (page == nullptr) return 0;
+    for (const auto& z : page->zones)
+        if (z.id == zoneId) return zoneHandleAt (z, pos);
+    return 0;
+}
 
 void ScoreEditor::beginZoneDrag(juce::Point<float> pos)
 {
