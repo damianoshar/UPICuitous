@@ -187,6 +187,8 @@ int upic::runSelfTest()
     upic::runRecoveryRepositoryChecks (t);
     // R4.4: the user library's storage - the write, the read and the listing.
     upic::runLibraryRepositoryChecks (t);
+    // R5.1: the score canvas's render - the frame, the grid, the arcs and the playhead.
+    upic::runScoreRenderChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

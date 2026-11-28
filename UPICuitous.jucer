@@ -40,6 +40,7 @@
       <FILE id="sDo45" name="SelfTestDocumentIO.cpp" compile="1" resource="0" file="Source/SelfTestDocumentIO.cpp"/>
       <FILE id="sRr47" name="SelfTestRecoveryRepository.cpp" compile="1" resource="0" file="Source/SelfTestRecoveryRepository.cpp"/>
       <FILE id="sLr48" name="SelfTestLibraryRepository.cpp" compile="1" resource="0" file="Source/SelfTestLibraryRepository.cpp"/>
+      <FILE id="sSr49" name="SelfTestScoreRender.cpp" compile="1" resource="0" file="Source/SelfTestScoreRender.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>
