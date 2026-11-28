@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include "SequenceTransport.h"
+#include "OverlayCard.h"
 
 //==============================================================================
 // WP8: the performance view.
@@ -401,7 +402,7 @@ public:
 
     void resized() override
     {
-        auto card = cardRect().reduced (18, 12);
+        auto card = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         auto titleRow = card.removeFromTop (titleH);
         closeBtn.setBounds (titleRow.removeFromRight (64));
         card.removeFromBottom (18);
@@ -491,6 +492,16 @@ public:
     void playForTest() { if (onSequencePlay) onSequencePlay(); }
     void loopForTest() { if (onSequenceLoop) onSequenceLoop(); }
 
+    // R5.11: the card's rectangle. The other shells show it too - it is the
+    // overlay shell's rule, and the view's own layout hangs on it.
+    juce::Rectangle<int> cardRect() const
+    {
+        // R5.11: the card's rectangle is the overlay shell's rule.
+        const auto r = upic::overlay_card::cardFor (upic::overlay_card::Shell::Performance,
+                                                    getWidth(), getHeight());
+        return juce::Rectangle<int> (r.x, r.y, r.w, r.h);
+    }
+
 private:
     //==========================================================================
     struct TrailPoint
@@ -519,16 +530,9 @@ private:
         s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colour (0xff4a4a5c));
     }
 
-    juce::Rectangle<int> cardRect() const
-    {
-        auto r = getLocalBounds().reduced (10);
-        return juce::Rectangle<int> (juce::jmin (980, r.getWidth()),
-                                     juce::jmin (620, r.getHeight())).withCentre (r.getCentre());
-    }
-
     juce::Rectangle<float> plotRect() const
     {
-        auto card = cardRect().reduced (18, 12);
+        auto card = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         card.removeFromTop (titleH);
         card.removeFromBottom (18);
         auto right = card;

@@ -12,6 +12,7 @@
 // are self-contained and do not need any of the app's state.
 //==============================================================================
 #include <JuceHeader.h>
+#include "OverlayCard.h"
 
 //------------------------------------------------------------------------------//
 // The backdrop + card that the audio and the MIDI/OSC settings use. The
@@ -25,9 +26,10 @@ struct AudioOverlay : juce::Component
 
     juce::Rectangle<int> cardRect() const
     {
-        auto r = getLocalBounds().reduced(10);
-        return juce::Rectangle<int>(juce::jmin(560, r.getWidth()),
-                                    juce::jmin(600, r.getHeight())).withCentre(r.getCentre());
+        // R5.11: the card's rectangle is the overlay shell's rule.
+        const auto r = upic::overlay_card::cardFor (upic::overlay_card::Shell::AudioSettings,
+                                                    getWidth(), getHeight());
+        return juce::Rectangle<int> (r.x, r.y, r.w, r.h);
     }
 
     void paint(juce::Graphics& g) override
@@ -73,9 +75,10 @@ struct ClearOverlay : juce::Component
 
     juce::Rectangle<int> cardRect() const
     {
-        auto r = getLocalBounds().reduced(10);
-        return juce::Rectangle<int>(juce::jmin(480, r.getWidth()),
-                                    juce::jmin(210, r.getHeight())).withCentre(r.getCentre());
+        // R5.11: the card's rectangle is the overlay shell's rule.
+        const auto r = upic::overlay_card::cardFor (upic::overlay_card::Shell::ClearPage,
+                                                    getWidth(), getHeight());
+        return juce::Rectangle<int> (r.x, r.y, r.w, r.h);
     }
 
     void paint(juce::Graphics& g) override

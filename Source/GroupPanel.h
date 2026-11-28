@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "UpicModel.h"
+#include "OverlayCard.h"
 
 //==============================================================================
 // WP3: the arc-group panel.
@@ -208,14 +209,15 @@ public:
     //--------------------------------------------------------------------------
     juce::Rectangle<int> cardRect() const
     {
-        auto r = getLocalBounds().reduced (10);
-        return juce::Rectangle<int> (juce::jmin (840, r.getWidth()),
-                                     juce::jmin (600, r.getHeight())).withCentre (r.getCentre());
+        // R5.11: the card's rectangle is the overlay shell's rule.
+        const auto r = upic::overlay_card::cardFor (upic::overlay_card::Shell::Group,
+                                                    getWidth(), getHeight());
+        return juce::Rectangle<int> (r.x, r.y, r.w, r.h);
     }
 
     juce::Rectangle<int> listRect() const
     {
-        auto inner = cardRect().reduced (18, 12);
+        auto inner = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         inner.removeFromTop (titleH);
         inner.removeFromBottom (bottomH);
         return inner.removeFromLeft (listW);
@@ -280,7 +282,7 @@ public:
 
     void resized() override
     {
-        auto inner = cardRect().reduced (18, 12);
+        auto inner = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         inner.removeFromTop (titleH);
         auto bottom = inner.removeFromBottom (bottomH).reduced (0, 4);
         auto left = inner.removeFromLeft (listW);

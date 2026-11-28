@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "LibraryManager.h"
 #include "UpicModel.h"
+#include "OverlayCard.h"
 
 //==============================================================================
 // WP1: the drawn frequency-table editor (the New UPIC's editable conversion
@@ -120,14 +121,15 @@ public:
     //--------------------------------------------------------------------------
     juce::Rectangle<int> cardRect() const
     {
-        auto r = getLocalBounds().reduced (10);
-        return juce::Rectangle<int> (juce::jmin (760, r.getWidth()),
-                                     juce::jmin (560, r.getHeight())).withCentre (r.getCentre());
+        // R5.11: the card's rectangle is the overlay shell's rule.
+        const auto r = upic::overlay_card::cardFor (upic::overlay_card::Shell::FreqTable,
+                                                    getWidth(), getHeight());
+        return juce::Rectangle<int> (r.x, r.y, r.w, r.h);
     }
 
     juce::Rectangle<float> plotRect() const
     {
-        auto card = cardRect().reduced (18, 12);
+        auto card = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         card.removeFromTop (titleH);
         card.removeFromTop (libraryH);
         card.removeFromBottom (buttonH);
@@ -222,7 +224,7 @@ public:
 
     void resized() override
     {
-        auto card = cardRect().reduced (18, 12);
+        auto card = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         card.removeFromTop (titleH);
         library.setBounds (card.removeFromTop (libraryH).reduced (0, 2));
         auto row = card.removeFromBottom (buttonH).reduced (0, 4);

@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "SelfTest.h"
 #include "MainComponent.h"
+#include "OverlayCard.h"
 
 //==============================================================================
 // R5.11 (the review's R053, section 29): the overlay card shell.
@@ -59,6 +60,32 @@ namespace
                                0.0f, 0.0f, 0.0f, 0.0f, &c, &c, now, pos, now, 1, false);
         c.mouseDown (down);
     }
+
+    /** The card's centre, in the shell's own coordinates - the edge's card. */
+    juce::Point<float> cardCentre (upic::overlay_card::Shell shell, int w, int h)
+    {
+        const auto r = upic::overlay_card::cardFor (shell, w, h);
+        return { (float) (r.x + r.w / 2), (float) (r.y + r.h / 2) };
+    }
+
+    /** The shell's own dismissal rule: the backdrop closes the shell and the
+        card keeps it. The card's centre comes from the edge, so the check is
+        a check of the edge too. */
+    void checkDismissal (upic::SelfTest& t, const juce::String& name,
+                         juce::Component& shell, std::function<void()>& hook,
+                         upic::overlay_card::Shell which)
+    {
+        shell.setBounds (0, 0, 1280, 800);
+        bool closed = false;
+        hook = [&closed] { closed = true; };
+
+        pressAt (shell, juce::Point<float> (5.0f, 5.0f));   // the backdrop
+        t.check (closed, "R5.11 a tap on the backdrop closes " + name);
+
+        closed = false;
+        pressAt (shell, cardCentre (which, 1280, 800));        // the card
+        t.check (! closed, "R5.11 a tap on the card keeps " + name);
+    }
 }
 
 void upic::runOverlayCardChecks (upic::SelfTest& t)
@@ -75,19 +102,27 @@ void upic::runOverlayCardChecks (upic::SelfTest& t)
     {
         const char* shell;          // the shell's name
         const char* component;      // the component that draws it
+        upic::overlay_card::Shell edge;   // the shell the edge names
         juce::Rectangle<int> atDesktop;   // the card at 1280 x 800
         juce::Rectangle<int> atCompact;   // the card at 1024 x 700
     };
 
     const ShellCase cases[] =
     {
-        { "the group panel",      "groupPanel",    { 220, 100, 840, 600 }, {  92,  50, 840, 600 } },
-        { "the mixer",            "channelPanel",  { 260, 150, 760, 500 }, { 132, 100, 760, 500 } },
-        { "the sequence panel",   "sequencePanel", { 230, 130, 820, 540 }, { 102,  80, 820, 540 } },
-        { "the amplitude tables", "ampTableEd",    { 250, 115, 780, 570 }, { 122,  65, 780, 570 } },
-        { "the frequency table",  "freqTableEd",   { 260, 120, 760, 560 }, { 132,  70, 760, 560 } },
-        { "the audio settings",   "audioOverlay",  { 360, 100, 560, 600 }, { 232,  50, 560, 600 } },
-        { "the clear warning",    "clearOverlay",  { 400, 295, 480, 210 }, { 272, 245, 480, 210 } }
+        { "the group panel",      "groupPanel",    upic::overlay_card::Shell::Group,
+          { 220, 100, 840, 600 }, {  92,  50, 840, 600 } },
+        { "the mixer",            "channelPanel",  upic::overlay_card::Shell::Channel,
+          { 260, 150, 760, 500 }, { 132, 100, 760, 500 } },
+        { "the sequence panel",   "sequencePanel", upic::overlay_card::Shell::Sequence,
+          { 230, 130, 820, 540 }, { 102,  80, 820, 540 } },
+        { "the amplitude tables", "ampTableEd",    upic::overlay_card::Shell::AmpTables,
+          { 250, 115, 780, 570 }, { 122,  65, 780, 570 } },
+        { "the frequency table",  "freqTableEd",   upic::overlay_card::Shell::FreqTable,
+          { 260, 120, 760, 560 }, { 132,  70, 760, 560 } },
+        { "the audio settings",   "audioOverlay",  upic::overlay_card::Shell::AudioSettings,
+          { 360, 100, 560, 600 }, { 232,  50, 560, 600 } },
+        { "the clear warning",    "clearOverlay",  upic::overlay_card::Shell::ClearPage,
+          { 400, 295, 480, 210 }, { 272, 245, 480, 210 } }
     };
 
     auto mcHolder = std::make_unique<MainComponent>();
@@ -180,4 +215,89 @@ void upic::runOverlayCardChecks (upic::SelfTest& t)
         pressAt (ov, ov.cardRect().getCentre().toFloat());  // the card
         check (! cancelled, "R5.11 a tap on the card keeps the warning");
     }
+
+    // --- the app follows the edge (R5.11) -------------------------------------
+    namespace oc = upic::overlay_card;
+
+    // --- the editors dismiss the same way (R5.11) ---------------------------
+    // The card is the shell's boundary: a tap on the backdrop closes the
+    // editor, and a tap on the card does not.
+    {
+        GroupPanel shell;
+        checkDismissal (t, "the group panel", shell, shell.onClose, oc::Shell::Group);
+    }
+    {
+        ChannelPanel shell;
+        checkDismissal (t, "the mixer", shell, shell.onClose, oc::Shell::Channel);
+    }
+    {
+        SequencePanel shell;
+        checkDismissal (t, "the sequence panel", shell, shell.onClose, oc::Shell::Sequence);
+    }
+    {
+        AmpTableEditor shell;
+        checkDismissal (t, "the amplitude tables", shell, shell.onClose, oc::Shell::AmpTables);
+    }
+    {
+        FreqTableEditor shell;
+        checkDismissal (t, "the frequency table", shell, shell.onClose, oc::Shell::FreqTable);
+    }
+
+    // the performance view is the one shell with no backdrop dismissal: it
+    // has a close button instead
+    {
+        PerformanceView shell;
+        shell.setBounds (0, 0, 1280, 800);
+        bool closed = false;
+        shell.onClose = [&closed] { closed = true; };
+        pressAt (shell, juce::Point<float> (5.0f, 5.0f));   // the backdrop
+        check (! closed, "R5.11 the performance view has no backdrop dismissal");
+    }
+
+    // the edge names every shell once, and every shell's card may take a size
+    bool sizesSound = true;
+    for (int i = 0; i < (int) oc::Shell::count; ++i)
+    {
+        const auto s = oc::sizeFor ((oc::Shell) i);
+        if (s.maxWidth <= 0 || s.maxHeight <= 0) sizesSound = false;
+    }
+    check (sizesSound, "R5.11 the edge gives every shell a card size",
+           juce::String ((int) oc::Shell::count) + " shells");
+
+    // every shell's card is the edge's card
+    bool cardsFollowEdge = true;
+    for (auto& c : cases)
+    {
+        auto* comp = findByName (mc, c.component);
+        if (comp == nullptr) { cardsFollowEdge = false; continue; }
+        const auto r = oc::cardFor (c.edge, comp->getWidth(), comp->getHeight());
+        if (cardOf (comp) != juce::Rectangle<int> (r.x, r.y, r.w, r.h))
+            cardsFollowEdge = false;
+    }
+    check (cardsFollowEdge, "R5.11 every shell's card is the edge's card");
+
+    // the performance view keeps its card in the same place as the others
+    auto* perf = dynamic_cast<PerformanceView*> (findByName (mc, "performanceView"));
+    bool perfFollowsEdge = false;
+    if (perf != nullptr)
+    {
+        const auto r = oc::cardFor (oc::Shell::Performance, perf->getWidth(), perf->getHeight());
+        perfFollowsEdge = perf->cardRect() == juce::Rectangle<int> (r.x, r.y, r.w, r.h);
+    }
+    check (perfFollowsEdge, "R5.11 the performance view's card is the edge's card");
+
+    // the content's padding is the edge's
+    auto* groupEdge = dynamic_cast<GroupPanel*> (findByName (mc, "groupPanel"));
+    bool paddingFollowsEdge = false;
+    if (groupEdge != nullptr)
+    {
+        const auto r = oc::cardFor (oc::Shell::Group, groupEdge->getWidth(), groupEdge->getHeight());
+        const auto padded = oc::paddedFor (r);
+        // the group's own rows: a 26 px title strip above the list
+        constexpr int groupTitleH = 26;
+        paddingFollowsEdge = groupEdge->listRect().getX() == padded.x
+                              && groupEdge->listRect().getY() == padded.y + groupTitleH
+                              && groupEdge->listRect().getWidth() > 0;
+    }
+    check (paddingFollowsEdge, "R5.11 the content's padding is the edge's");
 }

@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "LibraryManager.h"
 #include "UpicModel.h"
+#include "OverlayCard.h"
 
 //==============================================================================
 // WP2: the amplitude conversion-table bank editor.
@@ -135,14 +136,15 @@ public:
     //--------------------------------------------------------------------------
     juce::Rectangle<int> cardRect() const
     {
-        auto r = getLocalBounds().reduced (10);
-        return juce::Rectangle<int> (juce::jmin (780, r.getWidth()),
-                                     juce::jmin (570, r.getHeight())).withCentre (r.getCentre());
+        // R5.11: the card's rectangle is the overlay shell's rule.
+        const auto r = upic::overlay_card::cardFor (upic::overlay_card::Shell::AmpTables,
+                                                    getWidth(), getHeight());
+        return juce::Rectangle<int> (r.x, r.y, r.w, r.h);
     }
 
     juce::Rectangle<int> listRect() const
     {
-        auto inner = cardRect().reduced (18, 12);
+        auto inner = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         inner.removeFromTop (titleH);
         inner.removeFromTop (libraryH);
         inner.removeFromBottom (bottomH);
@@ -151,7 +153,7 @@ public:
 
     juce::Rectangle<float> plotRect() const
     {
-        auto inner = cardRect().reduced (18, 12);
+        auto inner = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         inner.removeFromTop (titleH);
         inner.removeFromTop (libraryH);
         inner.removeFromBottom (bottomH);
@@ -248,7 +250,7 @@ public:
 
     void resized() override
     {
-        auto inner = cardRect().reduced (18, 12);
+        auto inner = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         inner.removeFromTop (titleH);
         library.setBounds (inner.removeFromTop (libraryH).reduced (0, 2));
         auto bottom = inner.removeFromBottom (bottomH).reduced (0, 4);

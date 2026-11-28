@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "UpicModel.h"
+#include "OverlayCard.h"
 
 //==============================================================================
 // WP6.4: the mixer panel. The channel list (with the name, the level, the
@@ -174,14 +175,15 @@ public:
 
     juce::Rectangle<int> cardRect() const
     {
-        auto r = getLocalBounds().reduced (10);
-        return juce::Rectangle<int> (juce::jmin (760, r.getWidth()),
-                                     juce::jmin (500, r.getHeight())).withCentre (r.getCentre());
+        // R5.11: the card's rectangle is the overlay shell's rule.
+        const auto r = upic::overlay_card::cardFor (upic::overlay_card::Shell::Channel,
+                                                    getWidth(), getHeight());
+        return juce::Rectangle<int> (r.x, r.y, r.w, r.h);
     }
     // The channel column: the list, then the New / Delete row under it.
     juce::Rectangle<int> listColumn() const
     {
-        auto inner = cardRect().reduced (18, 12);
+        auto inner = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         inner.removeFromTop (titleH);
         inner.removeFromBottom (bottomH);
         return inner.removeFromLeft (listW);
@@ -219,7 +221,7 @@ public:
 
     juce::Rectangle<float> plotRect() const
     {
-        auto inner = cardRect().reduced (18, 12);
+        auto inner = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         inner.removeFromTop (titleH);
         inner.removeFromBottom (bottomH + presetH);
         inner.removeFromLeft (listW + 16);
@@ -309,7 +311,7 @@ public:
 
     void resized() override
     {
-        auto inner = cardRect().reduced (18, 12);
+        auto inner = cardRect().reduced (upic::overlay_card::kPaddingX, upic::overlay_card::kPaddingY);
         inner.removeFromTop (titleH);
         auto bottom = inner.removeFromBottom (bottomH).reduced (0, 4);
         inner.removeFromLeft (listW + 16); // the channel column and the gap

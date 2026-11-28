@@ -135,6 +135,7 @@
       <FILE id="saMa70" name="SampleMaterial.h" compile="0" resource="0" file="Source/SampleMaterial.h"/>
       <FILE id="liIn71" name="LiveInput.h" compile="0" resource="0" file="Source/LiveInput.h"/>
       <FILE id="phMo72" name="PhaseModulation.h" compile="0" resource="0" file="Source/PhaseModulation.h"/>
+      <FILE id="ovCa73" name="OverlayCard.h" compile="0" resource="0" file="Source/OverlayCard.h"/>
       <FILE id="sVbr01" name="ScoreViewBar.h" compile="0" resource="0"
             file="Source/ScoreViewBar.h"/>
       <FILE id="kNOb01" name="Knob.h" compile="0" resource="0"
