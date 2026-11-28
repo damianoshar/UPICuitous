@@ -87,6 +87,7 @@ MainComponent::MainComponent(bool pluginMode)
     buildToolbarControls();
     buildMaterialControls();
     buildSieveControls();
+    buildToolsControls();
     buildStepControls();
     buildFrequencyControls();
     buildArcListPanel();

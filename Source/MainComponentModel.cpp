@@ -235,7 +235,10 @@ void MainComponent::refreshBoxes()
             if (std::abs (curPage().pitchLo - presets[(size_t) i].lo) < 1e-6
                 && std::abs (curPage().pitchHi - presets[(size_t) i].hi) < 1e-6)
             { match = i + 1; break; }
-        ambitusBox.setSelectedId (match > 0 ? match : (int) presets.size() + 1,
+        // R5.7: the item id of "Custom" is the edge's own - the dropdown
+        // and the read-back cannot disagree about it.
+        ambitusBox.setSelectedId (match > 0 ? match
+                                  : upic::frequency_inspector::ambitusCustomItemId ((int) presets.size()),
                                   juce::dontSendNotification);
     }
     // v1.33: the acceleration
@@ -1942,15 +1945,13 @@ void MainComponent::pushSieve()
 {
     sieveOn = sieveBtn.getToggleState();
     const int m = sieveMEdit.getText().trim().getIntValue();
-    if (m >= 2 && m <= 120) sieveM = m; // keep previous value while an invalid one is typed
-    std::vector<int> rs;
-    auto tokens = juce::StringArray::fromTokens(sieveREdit.getText(), ",; \t", "");
-    for (auto& tok : tokens)
-    {
-        auto t = tok.trim();
-        if (t.isEmpty() || ! t.containsOnly("-0123456789")) continue;
-        rs.push_back(((t.getIntValue() % sieveM) + sieveM) % sieveM);
-    }
+    if (m >= upic::sieve_panel::kMinModulus && m <= upic::sieve_panel::kMaxModulus)
+        sieveM = m; // keep previous value while an invalid one is typed
+    // R5.7: the remainder list's text format is the panel's own - the
+    // separators, the tokens that are not numbers and the modulus are read
+    // in one place (Source/SievePanel.h).
+    const auto rs = upic::sieve_panel::parseRemainders (sieveREdit.getText().toStdString(),
+                                                         sieveM);
     // v1.33.2: an empty/unparseable remainder field must not silently turn
     // the sieve off (the checkbox then looked like it did nothing). Keep the
     // last valid list while the field is being edited.

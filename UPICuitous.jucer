@@ -117,6 +117,9 @@
       <FILE id="mdEdt57" name="ScoreEditingTools.h" compile="0" resource="0" file="Source/ScoreEditingTools.h"/>
       <FILE id="mdGt58" name="ScoreGestureTransaction.h" compile="0" resource="0" file="Source/ScoreGestureTransaction.h"/>
       <FILE id="mdMi59" name="MaterialInspector.h" compile="0" resource="0" file="Source/MaterialInspector.h"/>
+      <FILE id="icCl62" name="InspectorCell.h" compile="0" resource="0" file="Source/InspectorCell.h"/>
+      <FILE id="spPl63" name="SievePanel.h" compile="0" resource="0" file="Source/SievePanel.h"/>
+      <FILE id="fiIn64" name="FrequencyInspector.h" compile="0" resource="0" file="Source/FrequencyInspector.h"/>
       <FILE id="sVbr01" name="ScoreViewBar.h" compile="0" resource="0"
             file="Source/ScoreViewBar.h"/>
       <FILE id="kNOb01" name="Knob.h" compile="0" resource="0"

@@ -817,6 +817,41 @@ void MainComponent::resized()
         return it;
     };
 
+    // R5.7: a cell of a panel description becomes a flow item. The edge
+    // (Source/SievePanel.h, Source/FrequencyInspector.h) says how the cell
+    // is drawn - the control alone, the caption above it, the caption beside
+    // it on its row, or a knob (whose caption sits above the disc). The app
+    // binds the roles to its widgets, so the card below is the edge's
+    // description and the two cannot disagree.
+    auto addCell = [&] (FlowGroup& group, const ControlBinding& binding,
+                        upic::inspector::Kind kind,
+                        int labelWidth, int width, bool startsNewLine)
+    {
+        if (kind == upic::inspector::Kind::Knob)
+        {
+            // a knob cell needs a knob: if the app bound something else,
+            // the cell is skipped (the suite pins the two against each
+            // other)
+            if (auto* knob = dynamic_cast<upic::Knob*> (binding.control))
+            {
+                auto it = FK (binding.label, labelWidth, knob);
+                it.newLine = startsNewLine;
+                group.items.push_back (it);
+            }
+            return;
+        }
+
+        FlowItem it;
+        if (kind == upic::inspector::Kind::Labelled)
+            it = FL (binding.label, labelWidth, binding.control, width);
+        else if (kind == upic::inspector::Kind::Inline)
+            it = FI (binding.label, labelWidth, binding.control, width);
+        else
+            it = F (binding.control, width);
+        it.newLine = startsNewLine;
+        group.items.push_back (it);
+    };
+
     // v1.21: the material row shows the CURRENT tab's material - the tab IS
     // the material (v1.8). The other tab's controls are hidden, not left in
     // place, so the row does not get crowded and the two pitch selectors
@@ -864,7 +899,17 @@ void MainComponent::resized()
     groups.push_back ({ "tempo", { FK(&tempoLab, 40, &tempoSlider) } });
     // v1.34.3: acceleration gets a card of its own (the Page card keeps
     // only its ambitus and its four frequency spaces).
-    groups.push_back ({ "accel", { FK (&warpLab, 40, &warpSlider) } });
+    //
+    // R5.7: the card is the frequency inspector's description - the edge
+    // says which cell the acceleration is and how it is drawn.
+    {
+        FlowGroup accel { "accel", {} };
+        const auto& freq = upic::frequency_inspector::describe();
+        for (auto& cell : freq.accel)
+            addCell (accel, frequencyControls[(size_t) cell.control],
+                     cell.kind, cell.labelWidth, cell.width, cell.newLine);
+        groups.push_back (accel);
+    }
     groups.push_back ({ "clock", { F(&timeLab, 150) } });
 
     // the voice: what is drawn (the carrier wave, the envelope). The tool
@@ -894,9 +939,12 @@ void MainComponent::resized()
         auto stepDiv = FK (&stepDivLab, 52, &stepDivSlider);
         stepDiv.spansRows = true;
         pitch.items.push_back (stepDiv);
-        auto pitchSpace = FL (&spaceLab, 44, &spaceBox, 170);
-        pitchSpace.newLine = true;
-        pitch.items.push_back (pitchSpace);
+        // R5.7: the arc's own frequency space is the frequency inspector's
+        // cell - the edge says it is a labelled cell on its own row.
+        const auto& freq = upic::frequency_inspector::describe();
+        for (auto& cell : freq.pitch)
+            addCell (pitch, frequencyControls[(size_t) cell.control],
+                     cell.kind, cell.labelWidth, cell.width, cell.newLine);
         groups.push_back (pitch);
     }
 
@@ -908,47 +956,53 @@ void MainComponent::resized()
     {
         FlowGroup mat { "material", {} };
         for (auto& cell : material.card)
-        {
-            const auto& binding = materialControls[(size_t) cell.control];
-            if (cell.kind == upic::material_inspector::Kind::Knob)
-            {
-                if (auto* knob = dynamic_cast<upic::Knob*> (binding.control))
-                    mat.items.push_back (FK (binding.label, cell.labelWidth, knob));
-            }
-            else if (cell.kind == upic::material_inspector::Kind::Labelled)
-            {
-                mat.items.push_back (FL (binding.label, cell.labelWidth,
-                                         binding.control, cell.width));
-            }
-            else
-            {
-                mat.items.push_back (F (binding.control, cell.width));
-            }
-        }
+            addCell (mat, materialControls[(size_t) cell.control],
+                     cell.kind, cell.labelWidth, cell.width, cell.newLine);
         groups.push_back (mat);
     }
 
     // v1.33: the sieve is its own section. It quantises the pitch; it
     // is not a tool and it is not a page setting.
-    groups.push_back ({ "sieve", { F(&sieveBtn, 64), F(&sievePresetBox, 150),
-                                   FI(&sieveMLab, 18, &sieveMEdit, 52),
-                                   FI(&sieveRLab, 18, &sieveREdit, 84) } });
+    //
+    // R5.7: the card is the sieve panel's description - the edge says which
+    // cells the sieve holds and how they are drawn.
+    {
+        FlowGroup sieve { "sieve", {} };
+        const auto& panel = upic::sieve_panel::describe();
+        for (auto& cell : panel.card)
+            addCell (sieve, sieveControls[(size_t) cell.control],
+                     cell.kind, cell.labelWidth, cell.width, cell.newLine);
+        groups.push_back (sieve);
+    }
 
     // v1.33: the GLOBAL magnets - the stick and the time grid. Every
     // page and every sieve zone follows these two (a zone can set its
     // own m/R and its own time grid, but not its own stick).
-    groups.push_back ({ "magnets", { FK(&stickLab, 84, &stickSlider),
-                                     FL(&gridLab, 86, &gridBox, 84) } });
+    //
+    // R5.7: the card is the sieve panel's description too - the magnets
+    // are the sieve's neighbours.
+    {
+        FlowGroup magnets { "magnets", {} };
+        const auto& panel = upic::sieve_panel::describe();
+        for (auto& cell : panel.magnets)
+            addCell (magnets, sieveControls[(size_t) cell.control],
+                     cell.kind, cell.labelWidth, cell.width, cell.newLine);
+        groups.push_back (magnets);
+    }
 
     // v1.33: the page's frequency settings - its ambitus and its four
     // frequency spaces (the UPIC's tables). v1.34.3: the acceleration
     // moved to its own card.
-    groups.push_back ({ "page", { FI(&ambitusLab, 58, &ambitusBox, 170),
-                                  FI(&spaceDefLab[0], 46, &spaceDefBox[0], 120),
-                                  FI(&spaceDefLab[1], 46, &spaceDefBox[1], 120),
-                                  FI(&spaceDefLab[2], 46, &spaceDefBox[2], 120),
-                                  FI(&spaceDefLab[3], 46, &spaceDefBox[3], 120),
-                                  F(&spaceTableBtn, 66) } });
+    //
+    // R5.7: the card is the frequency inspector's description.
+    {
+        FlowGroup page { "page", {} };
+        const auto& freq = upic::frequency_inspector::describe();
+        for (auto& cell : freq.page)
+            addCell (page, frequencyControls[(size_t) cell.control],
+                     cell.kind, cell.labelWidth, cell.width, cell.newLine);
+        groups.push_back (page);
+    }
 
     // WP2/WP3/WP5: the amplitude table, the groups and the modulator.
     groups.push_back ({ "amp", { FI(&ampTableLab, 34, &ampTableBox, 150),

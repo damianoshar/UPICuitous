@@ -25,6 +25,8 @@
 // The header is free of JUCE on purpose: the description is data, and the
 // data can be checked without a window.
 
+#include "InspectorCell.h"
+
 #include <cstddef>
 #include <vector>
 
@@ -59,13 +61,9 @@ namespace upic::material_inspector
         count
     };
 
-    /** How a cell of the material card is drawn. */
-    enum class Kind
-    {
-        Plain,      // the control alone
-        Labelled,   // the caption above the control
-        Knob        // the caption above the control, which draws it itself
-    };
+    /** How a cell of the material card is drawn. R5.7: the vocabulary the
+        panel descriptions share (Source/InspectorCell.h). */
+    using Kind = upic::inspector::Kind;
 
     /** One cell of the material card. */
     struct Cell
@@ -74,6 +72,7 @@ namespace upic::material_inspector
         Kind kind = Kind::Plain;
         int labelWidth = 0;   // the caption's width (design units)
         int width = 0;        // the control's width (design units)
+        bool newLine = false; // the cell starts a new line in its card
     };
 
     /** What the inspector says about one material. */

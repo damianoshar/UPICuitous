@@ -207,12 +207,9 @@ void MainComponent::commitPieceModel (const upic::PieceModel& m,
     }
     sieveBtn.setToggleState(sieveOn, juce::dontSendNotification);
     sieveMEdit.setText(juce::String(sieveM), juce::dontSendNotification);
-    {
-        juce::String rt;
-        for (size_t i = 0; i < sieveR.size(); ++i)
-            rt += (i > 0 ? "," : "") + juce::String(sieveR[i]);
-        sieveREdit.setText(rt, juce::dontSendNotification);
-    }
+    // R5.7: the remainder list's text format is the panel's own.
+    sieveREdit.setText(juce::String (upic::sieve_panel::formatRemainders (sieveR)),
+                        juce::dontSendNotification);
     score.setRecordPressure(recordPressure);
     score.setSieve(sieveOn, sieveM, sieveR);
     // M4: the tuning the piece was drawn in. An old piece carries none ->
@@ -225,9 +222,9 @@ void MainComponent::commitPieceModel (const upic::PieceModel& m,
     stickSlider.setValue(stickiness, juce::dontSendNotification);
     score.setStickiness(stickiness);
     {
-        static const double divs[] = { 0.0, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0 };
-        int gi = 0;
-        for (int i = 0; i < 7; ++i) if (std::abs(divs[i] - timeGrid) < 1e-9) gi = i;
+        // R5.7: the time grid's divisions are one list - the dropdown, the
+        // command and the loader all read it.
+        const int gi = upic::sieve_panel::timeGridDivisionIndex (timeGrid);
         gridBox.setSelectedId(gi + 1, juce::dontSendNotification);
         score.setTimeGrid(timeGrid);
     }

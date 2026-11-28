@@ -4,6 +4,7 @@
 #include "Knob.h"
 #include "FreqSpace.h"
 #include "FreqTableEditor.h"
+#include "FrequencyInspector.h"
 
 #include <algorithm>
 #include <vector>
@@ -107,6 +108,39 @@ namespace
             out += c.text;
         }
         return out;
+    }
+
+    // The same cells, sorted: the card engine moves the knobs after the
+    // plain controls, so the card's reading order is not the edge's cell
+    // order. The comparison that matters is the set of cells.
+    juce::String sortedCardText (MainComponent& mc, const juce::String& group)
+    {
+        std::vector<juce::String> texts;
+        for (auto& c : cardCells (mc, group)) texts.push_back (c.text);
+        std::sort (texts.begin(), texts.end());
+        juce::String out;
+        for (auto& t : texts)
+        {
+            if (out.isNotEmpty()) out += ", ";
+            out += t;
+        }
+        return out;
+    }
+
+    // The wording a control shows: a knob adds its live value under the
+    // pointer's tooltip, so its wording is a prefix.
+    juce::String tooltipOf (juce::Component* c)
+    {
+        if (auto* t = dynamic_cast<juce::TooltipClient*> (c)) return t->getTooltip();
+        return {};
+    }
+    bool tooltipIs (juce::Component* c, const char* wording)
+    {
+        return c != nullptr && tooltipOf (c) == juce::String (wording);
+    }
+    bool knobTooltipIs (juce::Component* c, const char* wording)
+    {
+        return c != nullptr && tooltipOf (c).startsWith (juce::String (wording));
     }
 
     // Does the named control sit in the card?
@@ -268,4 +302,96 @@ void upic::runFrequencyInspectorChecks (upic::SelfTest& t)
         if (ed->onClose) ed->onClose();
     check (! mc.freqTableOpenForTest(),
            "R5.7 the frequency table closes again");
+
+    // --- the edge and the app ------------------------------------------------
+    // R5.7: the inspector's description (Source/FrequencyInspector.h) and the
+    // app's binding must agree. Every role is bound to a widget, the app's
+    // cards are the edge's cell lists, and the wording the controls show is
+    // the edge's wording.
+    {
+        namespace fi = upic::frequency_inspector;
+
+        bool allBound = true;
+        for (auto role : fi::allControls())
+            if (mc.frequencyControlForTest ((int) role) == nullptr) allBound = false;
+        check (allBound && mc.frequencyControlCountForTest() == (int) fi::Control::count,
+               "R5.7 every frequency role is bound to a widget",
+               juce::String (mc.frequencyControlCountForTest()) + " roles");
+
+        // the app's cards are the edge's cell lists
+        const auto& freq = fi::describe();
+        auto expected = [&] (const std::vector<fi::Cell>& cells)
+        {
+            std::vector<juce::String> texts;
+            for (auto& c : cells)
+            {
+                auto* w = mc.frequencyControlForTest ((int) c.control);
+                if (w == nullptr) continue;
+                texts.push_back (w->getName() + "|" + kindOf (w));
+            }
+            std::sort (texts.begin(), texts.end());
+            juce::String out;
+            for (auto& t : texts)
+            {
+                if (out.isNotEmpty()) out += ", ";
+                out += t;
+            }
+            return out;
+        };
+        const auto pageCells = cardCells (mc, "page");
+        const auto accelCells = cardCells (mc, "accel");
+        check (sortedCardText (mc, "page") == expected (freq.page),
+               "R5.7 the page card is the edge's cell list",
+               sortedCardText (mc, "page"));
+        check (sortedCardText (mc, "accel") == expected (freq.accel),
+               "R5.7 the acceleration card is the edge's cell list",
+               sortedCardText (mc, "accel"));
+
+        // a cell's kind agrees with the widget it is bound to
+        bool kindsOk = true;
+        auto checkCell = [&] (const fi::Cell& c)
+        {
+            auto* w = mc.frequencyControlForTest ((int) c.control);
+            auto* l = mc.frequencyControlLabelForTest ((int) c.control);
+            if (w == nullptr) { kindsOk = false; return; }
+            if (c.kind == fi::Kind::Knob && dynamic_cast<upic::Knob*> (w) == nullptr)
+                kindsOk = false;
+            if ((c.kind == fi::Kind::Inline || c.kind == fi::Kind::Labelled)
+                && dynamic_cast<juce::Label*> (l) == nullptr)
+                kindsOk = false;
+        };
+        for (auto& c : freq.page) checkCell (c);
+        for (auto& c : freq.pitch) checkCell (c);
+        for (auto& c : freq.accel) checkCell (c);
+        check (kindsOk, "R5.7 the frequency's cells and the app's widgets agree");
+
+        // the wording the controls show is the edge's wording (the knob
+        // adds its live value under the pointer's tooltip)
+        check (tooltipIs (ambitusBox, fi::tooltip (fi::Control::Ambitus))
+               && tooltipIs (spaceBox, fi::tooltip (fi::Control::Space))
+               && knobTooltipIs (warpSlider, fi::tooltip (fi::Control::Warp))
+               && tooltipIs (tableBtn, fi::tooltip (fi::Control::Table)),
+               "R5.7 the frequency controls say what the edge says");
+
+        // the four spaces are the edge's count
+        check (fi::kSpaceCount == 4 && spaceBox->getNumItems() == fi::kSpaceCount,
+               "R5.7 the page's four spaces are the edge's count",
+               juce::String (fi::kSpaceCount));
+
+        // the item id of "Custom" is the edge's: the dropdown and the
+        // read-back cannot disagree about it
+        const int customId = fi::ambitusCustomItemId ((int) upic::ambitusPresets().size());
+        check (customId == 7
+               && ambitusBox->getItemId (ambitusBox->getNumItems() - 1) == customId,
+               "R5.7 the Custom ambitus's item id is the edge's",
+               juce::String (customId));
+
+        // the acceleration's range is the edge's
+        check (warpSlider->getMinimum() == fi::kMinWarp
+               && warpSlider->getMaximum() == fi::kMaxWarp
+               && std::abs (warpSlider->getInterval() - fi::kWarpInterval) < 1e-9,
+               "R5.7 the acceleration's range is the edge's",
+               juce::String (warpSlider->getMinimum(), 2) + " - "
+               + juce::String (warpSlider->getMaximum(), 2));
+    }
 }

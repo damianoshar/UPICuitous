@@ -79,71 +79,16 @@ void MainComponent::buildMaterialControls()
     bindMaterialControl (mi::Control::PmFeedback, &pmFeedbackLab, &pmFeedbackSlider);
     bindMaterialControl (mi::Control::PmImport, nullptr, &pmImportBtn);
     bindMaterialControl (mi::Control::PmExport, nullptr, &pmExportBtn);
-}
-
-void MainComponent::bindMaterialControl (upic::material_inspector::Control role,
-                                         juce::Component* label, juce::Component* widget)
-{
-    auto& binding = materialControls[(size_t) role];
-    binding.label = label;
-    binding.control = widget;
-}
-
-void MainComponent::buildSieveControls()
-{
-    // --- sieve quantizer (with the preset row) ---
-    addAndMakeVisible(sieveBtn); addAndMakeVisible(sieveMEdit); addAndMakeVisible(sieveREdit);
-    sieveMEdit.setName("sieveMEdit");
-    sieveREdit.setName("sieveREdit");
-    sieveBtn.setName("sieveBtn");
-    sieveMEdit.setTextToShowWhenEmpty("m=12", juce::Colour(0xff6a6a76));
-    sieveREdit.setTextToShowWhenEmpty("0,7", juce::Colour(0xff6a6a76));
-    sieveMEdit.setFont(juce::Font(juce::FontOptions(12.0f)));
-    sieveREdit.setFont(juce::Font(juce::FontOptions(12.0f)));
-    sieveMEdit.setText("12");
-    sieveREdit.setText("0");
-    sieveMEdit.onTextChange = [this]{ pushSieve(); };
-    sieveREdit.onTextChange = [this]{ pushSieve(); };
-    sieveBtn.onClick = [this]{ pushSieve(); };
-
-    // v1.33: the sieve row says what each control does. The stickiness in
-    // particular was a mystery: it is the global knob that says how
-    // strongly the drawing is pulled toward whatever magnet is active.
-    // v1.33.2: the zones no longer follow it blindly - each zone carries
-    // its own stick (the zone menu sets it) and only follows the global
-    // value until one is chosen.
-    sieveBtn.setTooltip ("The sieve quantises the drawing's PITCHES: only the\n"
-                         "pitches n mod m in the remainder list are allowed,\n"
-                         "so the curve becomes a staircase of steps.\n"
-                         "The allowed pitches are drawn as guides on the page.\n"
-                         "Inside a sieve zone the zone's own sieve wins.");
-    sieveMEdit.setTooltip ("The sieve's modulus: the octave is divided into m\n"
-                           "equal steps. 12 means semitones.");
-    sieveREdit.setTooltip ("The sieve's remainders: which of the m divisions\n"
-                           "are allowed. 0 leaves only the C's (an octave sieve),\n"
-                           "0,4,7 is a major triad, 0,7 is C and G.");
-    sievePresetBox.setTooltip ("Sieve presets: they set the m/R and switch the\n"
-                               "sieve on.");
-    stickSlider.setTooltip ("How strongly the drawing is pulled toward the\n"
-                             "magnet: the sieve (the pitches), a zone's own\n"
-                             "sieve, and the time grid (the times). 1 is a\n"
-                             "hard snap, 0 leaves the drawing free.\n"
-                             "GLOBAL: this value applies outside the zones.\n"
-                             "A zone carries its own stick (right-click it);\n"
-                             "until you set one it follows this value.");
-    gridBox.setTooltip ("Quantises the drawing's TIMES (the sieve quantises\n"
-                        "the pitches). The points are pulled toward the grid\n"
-                        "by Stick, so the curve takes the grid's shape.\n"
-                        "Off leaves the times free.\n"
-                        "GLOBAL: a sieve zone can set its own time grid,\n"
-                        "which applies inside the zone.");
-    genBox.setTooltip ("Procedural arc generators.");
 
     // --- v1.31 (U1): the polyagogy. The UPIC's wave page had no fixed
     //     meaning: the same drawn curve could be the carrier's timbre AND a
     //     control signal. Here the arc's own wave can also be an amplitude
     //     LFO (envelope shaping) or a frequency LFO (a fixed pitch or a
     //     glissando), read at its own rate.
+    //
+    // R5.7: the polyagogy is the Osc material's own control - it is in the
+    // material card, beside the carrier wave - so it is built with the
+    // material's controls and not with the sieve's.
     addAndMakeVisible(modUseBox); addAndMakeVisible(modRateSlider);
     addAndMakeVisible(modDepthSlider); addAndMakeVisible(modUseLab);
     addAndMakeVisible(modRateLab); addAndMakeVisible(modDepthLab);
@@ -198,20 +143,87 @@ void MainComponent::buildSieveControls()
     modRateSlider.onDragEnd = [this]{ endEdit(); };
     modDepthSlider.onDragStart = [this]{ beginEdit ("Modulation depth"); };
     modDepthSlider.onDragEnd = [this]{ endEdit(); };
+}
 
-    // --- v1.2 magnetic-sieve row: preset library, stickiness, time grid,
-    //     procedural arc generators + persistent shortcut/wheel hint ---
+void MainComponent::bindMaterialControl (upic::material_inspector::Control role,
+                                         juce::Component* label, juce::Component* widget)
+{
+    auto& binding = materialControls[(size_t) role];
+    binding.label = label;
+    binding.control = widget;
+}
+
+void MainComponent::bindSieveControl (upic::sieve_panel::Control role,
+                                      juce::Component* label, juce::Component* widget)
+{
+    auto& binding = sieveControls[(size_t) role];
+    binding.label = label;
+    binding.control = widget;
+}
+
+void MainComponent::bindFrequencyControl (upic::frequency_inspector::Control role,
+                                          juce::Component* label, juce::Component* widget)
+{
+    auto& binding = frequencyControls[(size_t) role];
+    binding.label = label;
+    binding.control = widget;
+}
+
+void MainComponent::buildSieveControls()
+{
+    // R5.7: the sieve panel's own edge (Source/SievePanel.h) says which
+    // controls the panel holds, what its remainder list looks like as text
+    // and what every control says about itself. The app binds the roles to
+    // its widgets here, and the layout asks the edge what to draw.
+    namespace sp = upic::sieve_panel;
+
+    // --- sieve quantizer (with the preset row) ---
+    addAndMakeVisible(sieveBtn); addAndMakeVisible(sieveMEdit); addAndMakeVisible(sieveREdit);
+    sieveMEdit.setName("sieveMEdit");
+    sieveREdit.setName("sieveREdit");
+    sieveBtn.setName("sieveBtn");
+    sieveMEdit.setTextToShowWhenEmpty("m=12", juce::Colour(0xff6a6a76));
+    sieveREdit.setTextToShowWhenEmpty("0,7", juce::Colour(0xff6a6a76));
+    sieveMEdit.setFont(juce::Font(juce::FontOptions(12.0f)));
+    sieveREdit.setFont(juce::Font(juce::FontOptions(12.0f)));
+    sieveMEdit.setText("12");
+    sieveREdit.setText("0");
+    sieveMEdit.onTextChange = [this]{ pushSieve(); };
+    sieveREdit.onTextChange = [this]{ pushSieve(); };
+    sieveBtn.onClick = [this]{ pushSieve(); };
+
+    // v1.33: the sieve row says what each control does. The stickiness in
+    // particular was a mystery: it is the global knob that says how
+    // strongly the drawing is pulled toward whatever magnet is active.
+    // v1.33.2: the zones no longer follow it blindly - each zone carries
+    // its own stick (the zone menu sets it) and only follows the global
+    // value until one is chosen.
+    //
+    // R5.7: the wording is the panel's own - it lives in the edge.
+    sieveBtn.setTooltip (sp::tooltip (sp::Control::On));
+    sieveMEdit.setTooltip (sp::tooltip (sp::Control::Modulus));
+    sieveREdit.setTooltip (sp::tooltip (sp::Control::Remainders));
+
+    // --- v1.2 magnetic-sieve row: preset library, stickiness, time grid ---
     addAndMakeVisible(sievePresetBox); addAndMakeVisible(stickSlider);
-    addAndMakeVisible(gridBox); addAndMakeVisible(genBox);
+    addAndMakeVisible(gridBox);
     addAndMakeVisible(stickLab); addAndMakeVisible(gridLab);
     addAndMakeVisible(sieveMLab); addAndMakeVisible(sieveRLab);
     sieveMLab.setName("sieveMLab"); sieveRLab.setName("sieveRLab");
-    addAndMakeVisible(kbdHintLab);
     sievePresetBox.setName("sievePresetBox");
     stickSlider.setName("stickSlider");
     gridBox.setName("gridBox");
-    genBox.setName("genBox");
-    kbdHintLab.setName("kbdHintLab");
+    sievePresetBox.setTooltip (sp::tooltip (sp::Control::Preset));
+    stickSlider.setTooltip (sp::tooltip (sp::Control::Stickiness));
+    gridBox.setTooltip (sp::tooltip (sp::Control::TimeGrid));
+
+    // the roles meet the app's widgets here
+    bindSieveControl (sp::Control::On, nullptr, &sieveBtn);
+    bindSieveControl (sp::Control::Modulus, &sieveMLab, &sieveMEdit);
+    bindSieveControl (sp::Control::Remainders, &sieveRLab, &sieveREdit);
+    bindSieveControl (sp::Control::Preset, nullptr, &sievePresetBox);
+    bindSieveControl (sp::Control::Stickiness, &stickLab, &stickSlider);
+    bindSieveControl (sp::Control::TimeGrid, &gridLab, &gridBox);
 
     sievePresetBox.setTextWhenNothingSelected("Sieve preset");
     {
@@ -225,10 +237,8 @@ void MainComponent::buildSieveControls()
         if (idx < 0 || idx >= (int) presets.size()) return;
         const auto& pr = presets[(size_t) idx];
         sieveMEdit.setText(juce::String(pr.m));
-        juce::String rt;
-        for (size_t i = 0; i < pr.remainders.size(); ++i)
-            rt += (i > 0 ? "," : "") + juce::String(pr.remainders[i]);
-        sieveREdit.setText(rt);
+        // R5.7: the remainder list's text format is the panel's own.
+        sieveREdit.setText(juce::String (upic::sieve_panel::formatRemainders (pr.remainders)));
         sieveBtn.setToggleState (true, juce::dontSendNotification);
         pushSieve();
         flash("Sieve preset: " + pr.name);
@@ -242,18 +252,32 @@ void MainComponent::buildSieveControls()
         score.setStickiness(stickiness);
     };
 
+    // R5.7: the time grid's divisions are ONE list - the dropdown offers
+    // them, the command reads them and the loader puts the page's grid back
+    // on the right one.
     gridBox.setTextWhenNothingSelected("Time grid");
-    gridBox.addItem("Off", 1);
-    gridBox.addItem("0.5/s", 2); gridBox.addItem("1/s", 3); gridBox.addItem("2/s", 4);
-    gridBox.addItem("4/s", 5);   gridBox.addItem("8/s", 6); gridBox.addItem("16/s", 7);
+    for (size_t i = 0; i < sp::timeGridDivisions().size(); ++i)
+        gridBox.addItem (sp::timeGridDivisions()[i].label, (int) i + 1);
     gridBox.setSelectedId(1);
     gridBox.onChange = [this]{
-        static const double divs[] = { 0.0, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0 };
-        const int i = juce::jlimit(0, 6, gridBox.getSelectedId() - 1);
-        timeGrid = divs[i];
+        const auto& divisions = upic::sieve_panel::timeGridDivisions();
+        const int i = juce::jlimit (0, (int) divisions.size() - 1,
+                                    gridBox.getSelectedId() - 1);
+        timeGrid = divisions[(size_t) i].value;
         score.setTimeGrid(timeGrid);
     };
+}
 
+// The tools card's generator and the sidebar's keyboard help. Neither is the
+// sieve's: the generator draws arcs and the hint says what the keyboard does.
+//
+// R5.7: they leave the sieve's builder, which now holds the sieve and the
+// global magnets only.
+void MainComponent::buildToolsControls()
+{
+    addAndMakeVisible(genBox);
+    genBox.setName("genBox");
+    genBox.setTooltip ("Procedural arc generators.");
     genBox.setTextWhenNothingSelected("Procedural arc generator");
     genBox.addItem("Stochastic arborescence", 1);
     genBox.addItem("Convergent arborescence", 2);
@@ -270,6 +294,8 @@ void MainComponent::buildSieveControls()
     // (juce_String.cpp) and render as mojibake in Release.
     //
     // v1.33.3: the hints live in their own sidebar now, one item per line.
+    addAndMakeVisible(kbdHintLab);
+    kbdHintLab.setName("kbdHintLab");
     kbdHintLab.setText("Wheel: pan pitch\n"
                        "Alt+wheel: zoom pitch\n"
                        "Ctrl+wheel: zoom time\n"
@@ -370,17 +396,22 @@ void MainComponent::applyStepToSelection()
 // heard in another register, with its intervals scaled.
 void MainComponent::buildFrequencyControls()
 {
+    // R5.7: the frequency inspector's own edge (Source/FrequencyInspector.h)
+    // says which controls the inspector holds and what every control says
+    // about itself. The app binds the roles to its widgets here, and the
+    // layout asks the edge what to draw.
+    namespace fi = upic::frequency_inspector;
+
     // ---- the page's ambitus: the interval its vertical axis covers ----
     addAndMakeVisible(ambitusBox); addAndMakeVisible(ambitusLab);
     ambitusBox.setName("ambitusBox");
-    ambitusBox.setTooltip ("The interval the page's vertical axis covers.\n"
-                            "The UPIC's normal ambitus was six octaves; it\n"
-                            "could be ten, or as small as a semitone.");
+    ambitusBox.setTooltip (fi::tooltip (fi::Control::Ambitus));
     {
         const auto& presets = upic::ambitusPresets();
         for (int i = 0; i < (int) presets.size(); ++i)
             ambitusBox.addItem (juce::String (presets[(size_t) i].name), i + 1);
-        ambitusBox.addItem ("Custom", (int) presets.size() + 1);
+        // "Custom" is the page's own interval - the dropdown cannot set it
+        ambitusBox.addItem ("Custom", fi::ambitusCustomItemId ((int) presets.size()));
     }
     ambitusBox.setSelectedId (1);
     ambitusBox.onChange = [this]{ pushAmbitus(); };
@@ -388,13 +419,11 @@ void MainComponent::buildFrequencyControls()
     // ---- the page's acceleration: a tempo sweep across the page ----
     addAndMakeVisible(warpSlider); addAndMakeVisible(warpLab);
     warpSlider.setName("warpSlider");
-    warpSlider.setRange (-0.9, 0.9, 0.05);
+    warpSlider.setRange (fi::kMinWarp, fi::kMaxWarp, fi::kWarpInterval);
     warpSlider.setValue (0.0);
     warpSlider.setNumDecimalPlacesToDisplay (2);
-    warpSlider.setTooltip ("The page's acceleration: the page's own time runs\n"
-                            "at a varying rate. Positive starts slow and speeds\n"
-                            "up, negative starts fast and slows down.");
-    warpLab.setTooltip ("The page's acceleration.");
+    warpSlider.setTooltip (fi::tooltip (fi::Control::Warp));
+    warpLab.setTooltip (fi::labelTooltip (fi::Control::Warp));
     warpSlider.onValueChange = [this]{ pushWarp(); };
     warpSlider.onDragStart = [this]{ beginEdit ("Page acceleration"); };
     warpSlider.onDragEnd = [this]{ endEdit(); };
@@ -402,10 +431,8 @@ void MainComponent::buildFrequencyControls()
     // ---- the page's four frequency spaces ----
     addAndMakeVisible(spaceBox); addAndMakeVisible(spaceLab);
     spaceBox.setName("spaceBox");
-    spaceBox.setTooltip ("The frequency space this arc is played in.\n"
-                         "The page has four (the UPIC's four tables);\n"
-                         "the drawing is mapped into the one you pick.");
-    for (int i = 0; i < 4; ++i)
+    spaceBox.setTooltip (fi::tooltip (fi::Control::Space));
+    for (int i = 0; i < fi::kSpaceCount; ++i)
     {
         addAndMakeVisible(spaceDefBox[i]); addAndMakeVisible(spaceDefLab[i]);
         spaceDefBox[i].setName ("spaceDefBox" + juce::String (i));
@@ -413,9 +440,8 @@ void MainComponent::buildFrequencyControls()
         spaceDefLab[i].setJustificationType (juce::Justification::centredRight);
         spaceDefLab[i].setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
         spaceDefLab[i].setText ("S" + juce::String (i + 1), juce::dontSendNotification);
-        spaceDefLab[i].setTooltip ("The page's frequency space " + juce::String (i + 1)
-                                   + " - the range the page's vertical axis is\n"
-                                     "mapped into for the arcs that use it.");
+        spaceDefLab[i].setTooltip (fi::labelTooltip (
+            (fi::Control) ((int) fi::Control::SpaceDef1 + i)));
         const auto& presets = upic::freqSpacePresets();
         for (int p = 0; p < (int) presets.size(); ++p)
             spaceDefBox[i].addItem (juce::String (presets[(size_t) p].name), p + 1);
@@ -423,10 +449,20 @@ void MainComponent::buildFrequencyControls()
         spaceDefBox[i].onChange = [this]{ pushSpaceDefs(); };
     }
 
+    // the roles meet the app's widgets here
+    bindFrequencyControl (fi::Control::Space, &spaceLab, &spaceBox);
+    bindFrequencyControl (fi::Control::Ambitus, &ambitusLab, &ambitusBox);
+    bindFrequencyControl (fi::Control::Warp, &warpLab, &warpSlider);
+    for (int i = 0; i < fi::kSpaceCount; ++i)
+        bindFrequencyControl ((fi::Control) ((int) fi::Control::SpaceDef1 + i),
+                              &spaceDefLab[i], &spaceDefBox[i]);
+
     spaceBox.onChange = [this]{
         if (refreshingControls) return; // a refresh is not a command
         applySpaceToSelection();
-        const int s = juce::jlimit (0, 3, spaceBox.getSelectedId() - 1);
+        // R5.7: the page has four spaces - the edge says how many.
+        const int s = juce::jlimit (0, upic::frequency_inspector::kSpaceCount - 1,
+                                    spaceBox.getSelectedId() - 1);
         flash ("Space " + juce::String (s + 1) + ": "
                + upic::freqSpacePresets()[(size_t) curPage().spaces[(size_t) s]].name);
     };
@@ -436,10 +472,11 @@ void MainComponent::buildFrequencyControls()
     // is the whole gesture.
     addAndMakeVisible (spaceTableBtn);
     spaceTableBtn.setName ("spaceTableBtn");
-    spaceTableBtn.setTooltip ("Draw the frequency table of the space\n"
-                              "selected in the Space menu (WP1)");
+    spaceTableBtn.setTooltip (fi::tooltip (fi::Control::Table));
+    bindFrequencyControl (fi::Control::Table, nullptr, &spaceTableBtn);
     spaceTableBtn.onClick = [this]{
-        showFreqTableEditor (juce::jlimit (0, 3, spaceBox.getSelectedId() - 1));
+        showFreqTableEditor (juce::jlimit (0, upic::frequency_inspector::kSpaceCount - 1,
+                                           spaceBox.getSelectedId() - 1));
     };
 
     freqTableEd.setName ("freqTableEd");
@@ -698,11 +735,15 @@ void MainComponent::buildFrequencyControls()
 // The page's four spaces -> the model.
 void MainComponent::pushSpaceDefs()
 {
+    // R5.7: the page has four frequency spaces - the edge says how many,
+    // and the page's four tables are named by it.
+    namespace fi = upic::frequency_inspector;
+
     runEdit ("Frequency space", [this]{
         {
             const juce::ScopedLock l(dataLock);
             auto& pg = curPage();
-            for (int i = 0; i < 4; ++i)
+            for (int i = 0; i < fi::kSpaceCount; ++i)
                 pg.spaces[(size_t) i] = juce::jlimit (0,
                     (int) upic::freqSpacePresets().size() - 1,
                     spaceDefBox[i].getSelectedId() - 1);
@@ -715,7 +756,7 @@ void MainComponent::pushSpaceDefs()
     // say what changed, and whether anything is in that space - a space
     // with no arcs in it changes nothing you can hear
     int which = -1;
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < fi::kSpaceCount; ++i)
         if (spaceDefBox[i].getSelectedId() != 1) { which = i; break; }
     if (which >= 0)
     {
@@ -2048,7 +2089,8 @@ void MainComponent::setModOnSelection (int modId, int target, double depth)
 // assigned.
 void MainComponent::applySpaceToSelection()
 {
-    const int s = juce::jlimit (0, 3, spaceBox.getSelectedId() - 1);
+    const int s = juce::jlimit (0, upic::frequency_inspector::kSpaceCount - 1,
+                                spaceBox.getSelectedId() - 1);
     runEdit ("Arc frequency space", [this, s]{
         const auto ids = score.getSelectedArcs();
         if (ids.empty()) return;
@@ -2069,18 +2111,20 @@ void MainComponent::applySpaceToSelection()
 // The arc's combo lists the page's four spaces by name.
 void MainComponent::refreshSpaceBox()
 {
+    namespace fi = upic::frequency_inspector;
+
     const auto ids = score.getSelectedArcs();
     int cur = -1;
     {
         const juce::ScopedLock l(dataLock);
         for (auto& a : curPage().arcs)
             if (! ids.empty() && std::find (ids.begin(), ids.end(), a.id) != ids.end())
-            { cur = juce::jlimit (0, 3, a.space); break; }
+            { cur = juce::jlimit (0, fi::kSpaceCount - 1, a.space); break; }
         if (cur < 0) cur = score.getCurrentSpace();
     }
     spaceBox.clear (juce::dontSendNotification);
     const auto& presets = upic::freqSpacePresets();
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < fi::kSpaceCount; ++i)
     {
         const int p = juce::jlimit (0, (int) presets.size() - 1,
                                     curPage().spaces[(size_t) i]);
@@ -2094,7 +2138,7 @@ void MainComponent::refreshSpaceBox()
     // v1.33: the space labels carry the number of arcs in each space, so
     // it is visible which spaces are in use - changing a space that no arc
     // is in sounds like nothing happened, because nothing did.
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < fi::kSpaceCount; ++i)
     {
         int n = 0;
         for (auto& a : curPage().arcs) if (a.space == i) ++n;
@@ -2130,7 +2174,9 @@ void MainComponent::pushWarp()
     runEdit ("Page acceleration", [this]{
         {
             const juce::ScopedLock l(dataLock);
-            curPage().warp = juce::jlimit (-0.9, 0.9, warpSlider.getValue());
+            curPage().warp = juce::jlimit (upic::frequency_inspector::kMinWarp,
+                                          upic::frequency_inspector::kMaxWarp,
+                                          warpSlider.getValue());
         }
         publishModelSnapshot();
         markModelChanged();

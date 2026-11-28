@@ -34,6 +34,8 @@
 #include "JobRunner.h"
 #include "UpicButtonIcons.h"
 #include "MaterialInspector.h"   // R5.6: the material inspector's description
+#include "SievePanel.h"          // R5.7: the sieve panel's description
+#include "FrequencyInspector.h"  // R5.7: the frequency inspector's description
 
 //==============================================================================
 // WP7: the audio preview routes.
@@ -1401,6 +1403,39 @@ public:
         return materialControls[(size_t) role].label;
     }
 
+    // R5.7: the sieve panel's and the frequency inspector's bindings - the
+    // roles the edges name and the widgets the app gave them. The suites pin
+    // the two against each other; the production code never reads the
+    // binding through this.
+    int sieveControlCountForTest() const
+    {
+        return (int) (sizeof (sieveControls) / sizeof (sieveControls[0]));
+    }
+    juce::Component* sieveControlForTest (int role) const
+    {
+        if (role < 0 || role >= sieveControlCountForTest()) return nullptr;
+        return sieveControls[(size_t) role].control;
+    }
+    juce::Component* sieveControlLabelForTest (int role) const
+    {
+        if (role < 0 || role >= sieveControlCountForTest()) return nullptr;
+        return sieveControls[(size_t) role].label;
+    }
+    int frequencyControlCountForTest() const
+    {
+        return (int) (sizeof (frequencyControls) / sizeof (frequencyControls[0]));
+    }
+    juce::Component* frequencyControlForTest (int role) const
+    {
+        if (role < 0 || role >= frequencyControlCountForTest()) return nullptr;
+        return frequencyControls[(size_t) role].control;
+    }
+    juce::Component* frequencyControlLabelForTest (int role) const
+    {
+        if (role < 0 || role >= frequencyControlCountForTest()) return nullptr;
+        return frequencyControls[(size_t) role].label;
+    }
+
     // --- R1.2: the panels below the toolbar ------------------------------
     // The bottom half of the window, for the characterization suite that
     // runs before its geometry moves out of resized().
@@ -1504,6 +1539,7 @@ private:
     void buildToolbarControls();
     void buildMaterialControls();
     void buildSieveControls();
+    void buildToolsControls();   // R5.7: the generator and the keyboard help
     void buildStepControls();
     void buildFrequencyControls();
     void buildArcListPanel();
@@ -2678,18 +2714,24 @@ private:
     // - Osc (wavetable), Sample (slots + capture), Live (mic)
     juce::TextButton matOscTog{ "Osc" }, matSampleTog{ "Sample" }, matLiveTog{ "Live" }, matPmTog{ "PM" };
 
-    // R5.6: the material inspector's controls. The edge
-    // (Source/MaterialInspector.h) says which control belongs to which
-    // material; the app binds the roles to its own widgets here, and the
-    // layout asks the edge what to draw and what to hide.
-    struct MaterialControlBinding
+    // R5.6/R5.7: the panel descriptions' bindings. The edges (the material
+    // inspector, the sieve panel and the frequency inspector) say which
+    // control belongs where; the app binds the roles to its own widgets
+    // here, and the layout asks the edges what to draw and what to hide.
+    struct ControlBinding
     {
         juce::Component* label = nullptr;
         juce::Component* control = nullptr;
     };
-    MaterialControlBinding materialControls[(size_t) upic::material_inspector::Control::count];
+    ControlBinding materialControls[(size_t) upic::material_inspector::Control::count];
     void bindMaterialControl (upic::material_inspector::Control role,
                               juce::Component* label, juce::Component* widget);
+    ControlBinding sieveControls[(size_t) upic::sieve_panel::Control::count];
+    void bindSieveControl (upic::sieve_panel::Control role,
+                           juce::Component* label, juce::Component* widget);
+    ControlBinding frequencyControls[(size_t) upic::frequency_inspector::Control::count];
+    void bindFrequencyControl (upic::frequency_inspector::Control role,
+                               juce::Component* label, juce::Component* widget);
 
     // v1.21 (wave 19): the arc list - the score's inventory on the right,
     // with the per-arc controls (the Rev box and the mode dropdown). It is a

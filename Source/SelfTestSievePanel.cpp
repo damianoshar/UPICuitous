@@ -2,6 +2,7 @@
 #include "SelfTest.h"
 #include "MainComponent.h"
 #include "Knob.h"
+#include "SievePanel.h"
 
 #include <algorithm>
 #include <vector>
@@ -100,6 +101,39 @@ namespace
             out += c.text;
         }
         return out;
+    }
+
+    // The same cells, sorted: the card engine moves the knobs after the
+    // plain controls, so the card's reading order is not the edge's cell
+    // order. The comparison that matters is the set of cells.
+    juce::String sortedCardText (MainComponent& mc, const juce::String& group)
+    {
+        std::vector<juce::String> texts;
+        for (auto& c : cardCells (mc, group)) texts.push_back (c.text);
+        std::sort (texts.begin(), texts.end());
+        juce::String out;
+        for (auto& t : texts)
+        {
+            if (out.isNotEmpty()) out += ", ";
+            out += t;
+        }
+        return out;
+    }
+
+    // The wording a control shows: a knob adds its live value under the
+    // pointer's tooltip, so its wording is a prefix.
+    juce::String tooltipOf (juce::Component* c)
+    {
+        if (auto* t = dynamic_cast<juce::TooltipClient*> (c)) return t->getTooltip();
+        return {};
+    }
+    bool tooltipIs (juce::Component* c, const char* wording)
+    {
+        return c != nullptr && tooltipOf (c) == juce::String (wording);
+    }
+    bool knobTooltipIs (juce::Component* c, const char* wording)
+    {
+        return c != nullptr && tooltipOf (c).startsWith (juce::String (wording));
     }
 
     // The remainders as text, so a failure says what the list was.
@@ -329,4 +363,112 @@ void upic::runSievePanelChecks (upic::SelfTest& t)
            "R5.7 the sieve's fields show their shape when they are empty",
            sieveMEdit->getTextToShowWhenEmpty() + " / "
            + sieveREdit->getTextToShowWhenEmpty());
+
+    // --- the edge and the app ------------------------------------------------
+    // R5.7: the panel's description (Source/SievePanel.h) and the app's
+    // binding must agree. Every role is bound to a widget, the app's cards
+    // are the edge's cell lists, and the wording the controls show is the
+    // edge's wording.
+    {
+        namespace sp = upic::sieve_panel;
+
+        bool allBound = true;
+        for (auto role : sp::allControls())
+            if (mc.sieveControlForTest ((int) role) == nullptr) allBound = false;
+        check (allBound && mc.sieveControlCountForTest() == (int) sp::Control::count,
+               "R5.7 every sieve role is bound to a widget",
+               juce::String (mc.sieveControlCountForTest()) + " roles");
+
+        // the app's cards are the edge's cell lists
+        const auto& panel = sp::describe();
+        auto expected = [&] (const std::vector<sp::Cell>& cells)
+        {
+            std::vector<juce::String> texts;
+            for (auto& c : cells)
+            {
+                auto* w = mc.sieveControlForTest ((int) c.control);
+                if (w == nullptr) continue;
+                texts.push_back (w->getName() + "|" + kindOf (w));
+            }
+            std::sort (texts.begin(), texts.end());
+            juce::String out;
+            for (auto& t : texts)
+            {
+                if (out.isNotEmpty()) out += ", ";
+                out += t;
+            }
+            return out;
+        };
+        const auto sieveCells = cardCells (mc, "sieve");
+        const auto magnetCells = cardCells (mc, "magnets");
+        check (sortedCardText (mc, "sieve") == expected (panel.card),
+               "R5.7 the sieve card is the edge's cell list",
+               sortedCardText (mc, "sieve"));
+        check (sortedCardText (mc, "magnets") == expected (panel.magnets),
+               "R5.7 the magnets card is the edge's cell list",
+               sortedCardText (mc, "magnets"));
+
+        // a cell's kind agrees with the widget it is bound to
+        bool kindsOk = true;
+        auto checkCell = [&] (const sp::Cell& c)
+        {
+            auto* w = mc.sieveControlForTest ((int) c.control);
+            auto* l = mc.sieveControlLabelForTest ((int) c.control);
+            if (w == nullptr) { kindsOk = false; return; }
+            if (c.kind == sp::Kind::Knob && dynamic_cast<upic::Knob*> (w) == nullptr)
+                kindsOk = false;
+            if (c.kind == sp::Kind::Inline && dynamic_cast<juce::Label*> (l) == nullptr)
+                kindsOk = false;
+            if (c.kind == sp::Kind::Labelled && dynamic_cast<juce::Label*> (l) == nullptr)
+                kindsOk = false;
+        };
+        for (auto& c : panel.card) checkCell (c);
+        for (auto& c : panel.magnets) checkCell (c);
+        check (kindsOk, "R5.7 the sieve's cells and the app's widgets agree");
+
+        // the wording the controls show is the edge's wording (the knob
+        // adds its live value under the pointer's tooltip)
+        check (tooltipIs (sieveBtn, sp::tooltip (sp::Control::On))
+               && tooltipIs (sieveMEdit, sp::tooltip (sp::Control::Modulus))
+               && tooltipIs (sieveREdit, sp::tooltip (sp::Control::Remainders))
+               && tooltipIs (sievePresets, sp::tooltip (sp::Control::Preset))
+               && knobTooltipIs (stickSlider, sp::tooltip (sp::Control::Stickiness))
+               && tooltipIs (gridBox, sp::tooltip (sp::Control::TimeGrid)),
+               "R5.7 the sieve's controls say what the edge says");
+
+        // the time grid's divisions are one list: the dropdown offers the
+        // edge's divisions, and the edge finds every one of them back
+        const auto& divs = sp::timeGridDivisions();
+        bool same = gridBox->getNumItems() == (int) divs.size();
+        bool foundBack = true;
+        for (int i = 0; i < (int) divs.size(); ++i)
+        {
+            if (gridBox->getItemText (i) != divs[(size_t) i].label) same = false;
+            if (sp::timeGridDivisionIndex (divs[(size_t) i].value) != i) foundBack = false;
+        }
+        check (same, "R5.7 the time grid's dropdown is the edge's list");
+        check (foundBack, "R5.7 the edge finds every division back");
+
+        // the remainder list's text format is the edge's
+        check (sieveREdit->getText() == juce::String (sp::formatRemainders (score.getSieveR())),
+               "R5.7 the remainder field is the edge's text format",
+               sieveREdit->getText());
+        check (sp::formatRemainders ({ 0, 4, 7 }) == "0,4,7",
+               "R5.7 the edge writes the remainder list");
+
+        // and the edge reads the list the way the app does
+        check (sp::parseRemainders ("0; 4", 12) == std::vector<int>({ 0, 4 }),
+               "R5.7 the edge reads the separators");
+        check (sp::parseRemainders ("0,4,x,7", 12) == std::vector<int>({ 0, 4, 7 }),
+               "R5.7 the edge skips what is not a number");
+        check (sp::parseRemainders ("-1", 12) == std::vector<int>({ 11 }),
+               "R5.7 the edge takes a remainder modulo the modulus");
+        check (sp::parseRemainders ("13", 7) == std::vector<int>({ 6 }),
+               "R5.7 the edge takes a remainder modulo the modulus");
+
+        // the modulus' domain is the edge's
+        check (sp::kMinModulus == 2 && sp::kMaxModulus == 120,
+               "R5.7 the modulus' domain is the edge's",
+               juce::String (sp::kMinModulus) + " - " + juce::String (sp::kMaxModulus));
+    }
 }
