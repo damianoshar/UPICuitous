@@ -183,6 +183,8 @@ int upic::runSelfTest()
     upic::runPieceCodecChecks (t);
     // R4.2: the document's file adapter - the read and the write.
     upic::runDocumentIOChecks (t);
+    // R4.3: the recovery snapshot's storage - the write, the read and the cleanup.
+    upic::runRecoveryRepositoryChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
