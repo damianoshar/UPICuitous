@@ -1963,6 +1963,101 @@ The boundary, the API and what stays in the shell are described in
 **Gate.** The suites pass, the rest of the selftest is untouched, the golden
 render and the legacy fixture are unchanged, and the full gate is green.
 
+### 6.37 R5.11 - the overlay card shell
+
+**What moves.** The card's rectangle - the rule that puts the card in the
+middle of the window - leaves the eight shells that draw one and moves into an
+edge of its own:
+
+- `Source/OverlayCard.h` - the shells that draw a card (the audio settings and
+  the MIDI + OSC settings, the clear warning, the group panel, the mixer, the
+  sequence panel, the amplitude tables, the frequency table and the performance
+  view), each shell's card maximum, the window's margin (10), the card's
+  padding (18 by 12) and the rule that puts the card in the middle.
+
+The review's §29 ("Unify repeated editor functionality") names the shared
+facility:
+
+> | Shared facility | Potential consumers |
+> |---|---|
+> | Modal panel shell | Overlay-based panels |
+
+R5.11 takes that row's *modal panel shell*: the card every overlay-based panel
+draws. The app cannot use a floating dialog window - on Android there is no
+title bar and no close button, so a dialog could never be dismissed - so every
+editor and overlay is a plain `Component` that paints a backdrop, a card and
+its own contents, and a tap on the backdrop dismisses it.
+
+Eight of those shells wrote the same rule again:
+
+```cpp
+auto r = getLocalBounds().reduced (10);
+return juce::Rectangle<int> (juce::jmin (maxW, r.getWidth()),
+                             juce::jmin (maxH, r.getHeight())).withCentre (r.getCentre());
+```
+
+and fourteen call sites wrote the card's padding again (`reduced (18, 12)`).
+Nothing made the eight copies agree, and a new shell would have had to copy the
+rule a ninth time.
+
+**What stays.** The widgets stay the shell's, and so do the painting, the
+card's contents and the dismissal: the group panel's list, the mixer's
+channels, the sequence's points, the tables' curves and the performance view's
+groups are each shell's own. The colours (the backdrop `0xcc000000`, the card
+`0xff1e1e26`, the border `0xff34343f`) and the 6 px corner radius stay too -
+they are the theme's business (the review's R055), and R055 has to find them
+in one place.
+
+**The arithmetic is copied, not improved.** The old rule was `withCentre
+(r.getCentre())`, and JUCE's centre is `pos + size / 2` with an integer
+division that truncates. The edge copies that division, so the card lands on
+the same pixel it landed on before - including in the odd-sized windows where
+the rounding could have moved. The card also stays in the shell's own
+coordinates (the old `getLocalBounds()`), so the painting, the hit testing and
+the children's bounds are untouched.
+
+**A gap is pinned, not fixed.** The performance view has no backdrop
+dismissal: the other seven shells close on a tap outside the card, the
+performance view does not (it has a close button of its own). R5.11 moves the
+geometry and does not change the dismissal; the suite records the gap. Giving
+the performance view the same rule is a behaviour change and belongs to its
+own phase.
+
+**The behaviour is unchanged.** The cards sit where they sat, the contents sit
+where they sat, the backdrop still closes seven of the eight shells, and the
+golden render and the v0.29 fixture say so.
+
+**The contract.** One suite, written before the move,
+`Source/SelfTestOverlayCard.cpp` (23 checks at the characterization, 38 after
+the move).
+
+It pins:
+
+- the card of every shell at a 1280 x 800 window, at a 1024 x 700 window and
+  at a 640 x 480 window - the last one is the window that is too small, where
+  the card fills it;
+- the MIDI + OSC settings' card, which is the audio settings' card;
+- the performance view's card, which its close button shows;
+- the group's content, which starts inside the card's padding;
+- the dismissal rule of every shell: the backdrop closes it, the card keeps it
+  - and the performance view, which has no backdrop dismissal at all.
+
+The move added the checks that pin the edge against the app: every shell's
+card is the edge's card, the performance view's card is the edge's card, the
+content's padding is the edge's padding, the edge gives every shell a size,
+and the dismissal rule is measured against the edge's card (the card's centre
+comes from the edge).
+
+**The mechanical check.** The production code does not call a test-only door,
+the bodies are the old ones, and the behaviour is unchanged where it should
+be - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`overlay-card-edge.md`](overlay-card-edge.md).
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the golden
+render and the legacy fixture are unchanged, and the full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1994,7 +2089,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5, R5.6, R5.7, R5.8, R5.9 and R5.10 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480`, `2cd45f1`, `39e7cbb`, `c84a287`, `9dbd160`, `3148d5d`, `60b7224`, `27c85a6`, `1112dc3`, `7ce31c9` | app selftest 3,663/3,663, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. R5.7 gives the sieve and the frequency controls descriptions of their own (`Source/SievePanel.h`, `Source/FrequencyInspector.h`) and a shared cell vocabulary (`Source/InspectorCell.h`), so the time grid's divisions, the remainder list's text format and the ambitus's "Custom" item id are each written down once. R5.8 gives the sequence card and the performance transport one description of their own (`Source/SequenceTransport.h`), so the card's cells, the three surfaces' wording, the press rule, the tempo's domain and the page-duration fallback are each written down once. R5.9 gives the channel and the modulation controls descriptions of their own (`Source/ChannelControls.h`, `Source/ModulationControls.h`), so the two cards' cells, the channel list's item ids, the modulation list's items and ids, the target rule and the depth's domain are each written down once. R5.10 gives the MIDI settings, the sample material, the live input and the phase modulation descriptions of their own (`Source/MidiSettings.h`, `Source/SampleMaterial.h`, `Source/LiveInput.h`, `Source/PhaseModulation.h`), so the four learn rows' captions, the device list's item ids, the slot list's item ids, the pitch lists' items and ids, the level's and the input gain's domains, the operator counts, the six presets and the three knobs' domains are each written down once. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, the sieve panel's own suite 42/42, the frequency inspector's own suite 29/29, the sequence transport's own suite 45/45, the channel controls' own suite 26/26, the modulation controls' own suite 38/38, the MIDI settings' own suite 28/28, the sample material's own suite 26/26, the live input's own suite 31/31, the phase modulation's own suite 26/26, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5, R5.6, R5.7, R5.8, R5.9, R5.10 and R5.11 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480`, `2cd45f1`, `39e7cbb`, `c84a287`, `9dbd160`, `3148d5d`, `60b7224`, `27c85a6`, `1112dc3`, `7ce31c9`, `cb6595c`, `14a2c83` | app selftest 3,701/3,701, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. R5.7 gives the sieve and the frequency controls descriptions of their own (`Source/SievePanel.h`, `Source/FrequencyInspector.h`) and a shared cell vocabulary (`Source/InspectorCell.h`), so the time grid's divisions, the remainder list's text format and the ambitus's "Custom" item id are each written down once. R5.8 gives the sequence card and the performance transport one description of their own (`Source/SequenceTransport.h`), so the card's cells, the three surfaces' wording, the press rule, the tempo's domain and the page-duration fallback are each written down once. R5.9 gives the channel and the modulation controls descriptions of their own (`Source/ChannelControls.h`, `Source/ModulationControls.h`), so the two cards' cells, the channel list's item ids, the modulation list's items and ids, the target rule and the depth's domain are each written down once. R5.10 gives the MIDI settings, the sample material, the live input and the phase modulation descriptions of their own (`Source/MidiSettings.h`, `Source/SampleMaterial.h`, `Source/LiveInput.h`, `Source/PhaseModulation.h`), so the four learn rows' captions, the device list's item ids, the slot list's item ids, the pitch lists' items and ids, the level's and the input gain's domains, the operator counts, the six presets and the three knobs' domains are each written down once. R5.11 gives the overlay card shell one description (`Source/OverlayCard.h`), so the eight shells' card rectangle, their card's maximum size and the content's padding are each written down once. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, the sieve panel's own suite 42/42, the frequency inspector's own suite 29/29, the sequence transport's own suite 45/45, the channel controls' own suite 26/26, the modulation controls' own suite 38/38, the MIDI settings' own suite 28/28, the sample material's own suite 26/26, the live input's own suite 31/31, the phase modulation's own suite 26/26, the overlay card's own suite 38/38, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
 | R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
@@ -5384,3 +5479,91 @@ channel controls' own suite 26/26, golden render `0x6d7571bdd80e3cd9`
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS, boundaries 5 rules / 0 violations
 (73 source files).
+
+### R5.11 record (2026-11-28)
+
+The overlay card shell is written down once.
+
+The characterization commit is `cb6595c`, the move `14a2c83`.
+
+| Measure | Before | After |
+|---|---|---|
+| the card's rectangle | `getLocalBounds().reduced (10)` + `jmin` + `withCentre`, written in eight shells | one rule (`upic::overlay_card::cardFor`) |
+| the card's maximum size | eight numbers, one in each shell | one table (`sizeFor`) |
+| the window's margin | `reduced (10)` in eight shells | one margin (`kOuterMargin`) |
+| the card's padding | `reduced (18, 12)` at fourteen call sites in six shells | one padding (`kPaddingX`, `kPaddingY`) |
+| the performance view's card | a private rule of its own | the edge's rule, like the other seven |
+| the backdrop dismissal | seven shells' own `mouseDown` | unchanged - the shells keep it, and the suite pins it |
+| the overlay card's own suite | - | `Source/SelfTestOverlayCard.cpp`, 38 checks |
+| the source files | 73 | 74 (the suite) |
+
+**The suite came first.** `Source/SelfTestOverlayCard.cpp` (23 checks) was
+written against the old code: it opens the app's panels, resizes the window
+and reads the cards, and it presses the backdrop and the card.
+
+It pins:
+
+- the card of every shell at a 1280 x 800 window, at a 1024 x 700 window and
+  at a 640 x 480 window - the last one is the window that is too small, where
+  the card fills it;
+- the MIDI + OSC settings' card, which is the audio settings' card;
+- the performance view's card, which its close button shows;
+- the group's content, which starts inside the card's padding;
+- the dismissal rule of every shell: the backdrop closes it, the card keeps it
+  - and the performance view, which has no backdrop dismissal at all.
+
+The move added the checks that pin the edge against the app: every shell's
+card is the edge's card, the performance view's card is the edge's card, the
+content's padding is the edge's padding, the edge gives every shell a size,
+and the dismissal rule is measured against the edge's card (the card's centre
+comes from the edge).
+
+**The edge.** The header is a description - geometry, no widgets, no document,
+no JUCE:
+
+```cpp
+namespace upic::overlay_card
+{
+    enum class Shell { AudioSettings = 0, ClearPage, Group, Channel, Sequence,
+                       AmpTables, FreqTable, Performance, count };
+
+    struct Size { int maxWidth = 0; int maxHeight = 0; };
+    Size sizeFor (Shell shell);
+
+    constexpr int kOuterMargin = 10;
+    constexpr int kPaddingX = 18;
+    constexpr int kPaddingY = 12;
+
+    Rect cardFor (Shell shell, int windowW, int windowH);
+    Rect paddedFor (const Rect& card);
+}
+```
+
+`Rect` is the project's own plain rectangle (`Source/LayoutRect.h`), so the
+edge stays inside the layout group's vocabulary.
+
+**The arithmetic is copied, not improved.** The old rule was `withCentre
+(r.getCentre())`, and JUCE's centre is `pos + size / 2` with an integer
+division that truncates. The edge copies that division, and the card stays in
+the shell's own coordinates (the old `getLocalBounds()`), so every card lands
+on the pixel it landed on before.
+
+**The gap the characterization found.** The performance view has no backdrop
+dismissal: the other seven shells close on a tap outside the card, the
+performance view does not (it has a close button of its own). R5.11 moves the
+geometry and does not change the dismissal; the suite records the gap. Giving
+the performance view the same rule is a behaviour change and belongs to its
+own phase.
+
+The production code does not call a test-only door, the bodies are the old
+ones, and the behaviour is unchanged where it should be - the golden render and
+the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`overlay-card-edge.md`](overlay-card-edge.md).
+
+Gate: app selftest 3,701/3,701, the overlay card's own suite 38/38, the
+modulation controls' own suite 38/38, the channel controls' own suite 26/26,
+golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975`
+unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS,
+boundaries 5 rules / 0 violations (74 source files).
