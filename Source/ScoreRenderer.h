@@ -11,7 +11,7 @@
 // hit testing (R045) and the coordinate mapping (R044) can agree with the
 // drawing instead of being one operation with it.
 //
-// This is that render. It draws what it is handed: a View (where the plot
+// This is that render. It draws what it is handed: a mapper (where the plot
 // is, and how the page's time and pitch map onto the screen) and a State
 // (the page, the waves, the layers, the flags and the in-progress gesture).
 // It owns nothing and it changes nothing: the editor keeps the gesture, the
@@ -23,46 +23,20 @@
 // hint lines do not change by a character; the suite
 // (Source/SelfTestScoreRender.cpp) pins the picture.
 //
-// The View is the mapping the editor and the render share, so the drawing
-// and the hit testing cannot drift apart. The review gives the mapping a
-// name of its own in R044 ("Introduce ScoreCoordinateMapper"); until then it
-// lives here, next to the render that needs it.
+// The mapper is the mapping the editor and the render share, so the drawing
+// and the hit testing cannot drift apart. R044 gave the mapping a name and
+// a home of its own: Source/ScoreCoordinateMapper.h.
 #include <JuceHeader.h>
 
 #include <vector>
 
+#include "ScoreCoordinateMapper.h"
 #include "UpicModel.h"
 
 namespace upic
 {
     namespace score_render
     {
-        //================ the view ===========================================
-        // Where the plot is and how the page's time and pitch map onto it.
-        // The editor builds one of these for every use of the mapping, so
-        // the two never disagree about where a time or a pitch is.
-        struct View
-        {
-            juce::Rectangle<float> plot;
-            double durationSec = 30.0;
-            double pitchLo = kDefaultPitchLo;
-            double pitchHi = kDefaultPitchHi;
-            double timeZoom = 1.0, timeOffset = 0.0;
-            double freqZoom = 1.0, freqOffset = 0.0;
-
-            double xToTime (float x) const;
-
-            float timeToX (double t) const;
-
-            double yToFreq (float y) const;
-
-            float freqToY (double f) const;
-
-            // The zone's rectangle on the screen. A zone's times and
-            // frequencies are order-independent, so the corners are sorted.
-            juce::Rectangle<float> zoneRect (const SieveZone& z) const;
-        };
-
         //================ what is drawn ======================================
         // One point of the stroke in progress.
         struct StrokePoint
@@ -77,7 +51,7 @@ namespace upic
         // nothing.
         struct State
         {
-            View view;
+            score_coordinates::ScoreCoordinateMapper mapper;
 
             const Page* page = nullptr;
             const std::vector<Waveform>* waves = nullptr;

@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "UpicModel.h"
+#include "ScoreCoordinateMapper.h"
 #include "ScoreRenderer.h"
 #include <optional>
 #include <algorithm>
@@ -468,10 +469,10 @@ private:
 
     juce::Rectangle<float> plotArea() const;
 
-    // The view the renderer draws into: the plot's rectangle and the
+    // The mapper the renderer draws with: the plot's rectangle and the
     // mapping between the page's time/pitch and the screen. The editor and
     // the render share it, so the drawing and the hit testing agree.
-    upic::score_render::View renderView() const;
+    upic::score_coordinates::ScoreCoordinateMapper coordinateMapper() const;
 
     juce::Rectangle<float> timeStripRect() const;
 

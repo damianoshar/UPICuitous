@@ -13,45 +13,6 @@ namespace upic
 {
     namespace score_render
     {
-        //================ the view ===========================================
-        double View::xToTime (float x) const
-        {
-            float f = juce::jlimit (0.0f, 1.0f, (x - plot.getX()) / juce::jmax (1.0f, plot.getWidth()));
-            return f * durationSec / timeZoom + timeOffset;
-        }
-
-        float View::timeToX (double t) const
-        {
-            double f = (t - timeOffset) * timeZoom / juce::jmax (0.001, durationSec);
-            return plot.getX() + (float) f * plot.getWidth();
-        }
-
-        double View::yToFreq (float y) const
-        {
-            float sN = 1.0f - juce::jlimit (0.0f, 1.0f, (y - plot.getY()) / juce::jmax (1.0f, plot.getHeight()));
-            double norm = (double) sN / freqZoom + freqOffset;
-            return upic::normYToFreqIn ((float) juce::jlimit (0.0, 1.0, norm),
-                                        pitchLo, pitchHi);
-        }
-
-        float View::freqToY (double f) const
-        {
-            // NOT clamped: a pitch outside the page's ambitus (or outside the
-            // zoomed window) has to be drawn off the edge, where the plot area
-            // clips it - clamping it would draw it as a line along the border.
-            double sN = (upic::freqToNormYIn (f, pitchLo, pitchHi) - freqOffset) * freqZoom;
-            return plot.getBottom() - (float) sN * plot.getHeight();
-        }
-
-        juce::Rectangle<float> View::zoneRect (const SieveZone& z) const
-        {
-            const float x0 = timeToX (juce::jmin (z.t0, z.t1));
-            const float x1 = timeToX (juce::jmax (z.t0, z.t1));
-            const float yTop  = freqToY (juce::jmax (z.f0, z.f1)); // higher freq = higher on screen
-            const float yBot  = freqToY (juce::jmin (z.f0, z.f1));
-            return { x0, yTop, juce::jmax (1.0f, x1 - x0), juce::jmax (1.0f, yBot - yTop) };
-        }
-
         // The grid's step: a round number the time lines fall on.
         static double niceStep (double raw)
         {
@@ -65,7 +26,7 @@ namespace upic
         void paint (juce::Graphics& g, const State& s)
         {
             g.fillAll (upic::uiBackground());
-            auto r = s.view.plot;
+            auto r = s.mapper.plot;
 
             // frame
             g.setColour(juce::Colour(0xff1e1e26));
@@ -81,7 +42,7 @@ namespace upic
             {
                 for (const auto& z : s.page->zones)
                 {
-                    auto rect = s.view.zoneRect (z);
+                    auto rect = s.mapper.zoneRect (z);
                     g.setColour(juce::Colour(0x2a5ac8fa));
                     g.fillRect(rect);
                     g.setColour(z.id == s.selectedZone ? juce::Colour(0xff8ad4ff)
@@ -110,7 +71,7 @@ namespace upic
                 g.setColour(juce::Colour(0xff2a2a35));
                 for (double t = 0; t <= dur + 1e-9; t += step)
                 {
-                    float x = s.view.timeToX (t);
+                    float x = s.mapper.timeToX (t);
                     if (x < r.getX() || x > r.getRight()) continue;
                     g.drawVerticalLine((int)x, r.getY(), r.getBottom());
                     if (x + 3 + 26 <= r.getRight()) // keep the label inside the plot
@@ -139,7 +100,7 @@ namespace upic
                         const double fh = f * juce::MathConstants<double>::sqrt2;
                         if (fh >= upic::kMinFreq && fh <= upic::kMaxFreq)
                         {
-                            float yh = s.view.freqToY (fh);
+                            float yh = s.mapper.freqToY (fh);
                             if (yh >= r.getY() && yh <= r.getBottom())
                             {
                                 g.setColour(juce::Colour(0xff26262f));
@@ -147,7 +108,7 @@ namespace upic
                             }
                         }
                         if (f < upic::kMinFreq || f > upic::kMaxFreq) continue;
-                        float y = s.view.freqToY (f);
+                        float y = s.mapper.freqToY (f);
                         if (y < r.getY() || y > r.getBottom()) continue;
                         const bool isRef = (k == 0);
                         g.setColour(isRef ? juce::Colour(0xffff9f0a) : juce::Colour(0xff3a3a4d));
@@ -170,7 +131,7 @@ namespace upic
                         const double f = st.freq;
                         const long long si = (long long) std::llround(st.step);
                         const bool isBase = (((si % n) + n) % n) == 0;
-                        float y = s.view.freqToY (f);
+                        float y = s.mapper.freqToY (f);
                         if (y < r.getY() || y > r.getBottom()) continue;
                         if (! isBase)
                         {
@@ -196,7 +157,7 @@ namespace upic
                     if (f < upic::kMinFreq || f > upic::kMaxFreq) continue;
                     const bool isC = (midi % 12 == 0);
                     const bool isA440 = (midi == 69);
-                    float y = s.view.freqToY (f);
+                    float y = s.mapper.freqToY (f);
                     if (y < r.getY() || y > r.getBottom()) continue;
                     if (isA440) g.setColour(juce::Colour(0xffff9f0a));
                     else if (isC) g.setColour(juce::Colour(0xff3a3a4d));
@@ -236,7 +197,7 @@ namespace upic
                         const long long si = (long long) std::llround(st.step);
                         const int rr = (int) (((si % m) + m) % m);
                         if (std::find (R.begin(), R.end(), rr) == R.end()) continue;
-                        const float y = s.view.freqToY (st.freq);
+                        const float y = s.mapper.freqToY (st.freq);
                         if (y < r.getY() || y > r.getBottom()) continue;
                         if ((int) ys.size() >= 96) return;
                         ys.push_back (y);
@@ -247,12 +208,12 @@ namespace upic
                 };
 
                 if (pitchGuides && s.sieveOn)
-                    drawSievePitches (s.sieveM, *s.sieveR, s.view.pitchLo, s.view.pitchHi,
+                    drawSievePitches (s.sieveM, *s.sieveR, s.mapper.pitchLo, s.mapper.pitchHi,
                                       r.getX(), r.getRight(), juce::Colour (0x2438bdf8));
 
                 for (const auto& z : s.page->zones)
                 {
-                    const auto clip = s.view.zoneRect (z).getIntersection (r);
+                    const auto clip = s.mapper.zoneRect (z).getIntersection (r);
                     if (clip.isEmpty()) continue;
                     if (pitchGuides)
                         drawSievePitches (z.m, z.remainders,
@@ -266,7 +227,7 @@ namespace upic
                         for (double t = 0.0; t <= s.page->durationSec + 1e-9 && guard < 512;
                              t += step, ++guard)
                         {
-                            const float x = s.view.timeToX (t);
+                            const float x = s.mapper.timeToX (t);
                             if (x < clip.getX() || x > clip.getRight()) continue;
                             g.drawVerticalLine ((int) x, clip.getY(), clip.getBottom());
                         }
@@ -302,7 +263,7 @@ namespace upic
                     bool first = true;
                     for (const auto& pt : arc.points)
                     {
-                        float x = s.view.timeToX (pt.t), y = s.view.freqToY (pt.freq);
+                        float x = s.mapper.timeToX (pt.t), y = s.mapper.freqToY (pt.freq);
                         if (first) { p.startNewSubPath(x, y); first = false; }
                         else p.lineTo(x, y);
                     }
@@ -314,7 +275,7 @@ namespace upic
                     for (const auto& pt : arc.points)
                     {
                         const float rr = 2.5f * (0.35f + 0.65f * juce::jlimit(0.0f, 1.0f, pt.i));
-                        g.fillEllipse((float) s.view.timeToX (pt.t) - rr, (float) s.view.freqToY (pt.freq) - rr,
+                        g.fillEllipse((float) s.mapper.timeToX (pt.t) - rr, (float) s.mapper.freqToY (pt.freq) - rr,
                                       rr * 2.0f, rr * 2.0f);
                     }
 
@@ -324,7 +285,7 @@ namespace upic
                         auto lp = arc.points.back();
                         overlay.push_back({ isLive ? "live e" + juce::String(arc.envelopeId)
                                                    : "v" + juce::String(arc.waveformId) + " e" + juce::String(arc.envelopeId),
-                                        9.0f, c, (int)s.view.timeToX (lp.t) - 34, (int)s.view.freqToY (lp.freq) - 7 });
+                                        9.0f, c, (int)s.mapper.timeToX (lp.t) - 34, (int)s.mapper.freqToY (lp.freq) - 7 });
                     }
                 }
             }
@@ -387,7 +348,7 @@ namespace upic
             // only drawn once there is a position to show.
             if (s.hasPlayhead)
             {
-                float x = s.view.timeToX (s.playhead);
+                float x = s.mapper.timeToX (s.playhead);
                 if (x >= r.getX() && x <= r.getRight())
                 {
                     g.setColour(juce::Colour(0xffff375f));

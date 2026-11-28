@@ -284,34 +284,34 @@ const upic::Tuning& ScoreEditor::getTuning() const
 { return tuning; }
 
 //==============================================================================
-// R5.1: the view.
+// R5.2: the coordinate mapper.
 //
 // The editor and the renderer share one mapping, so the drawing and the hit
-// testing cannot drift apart. The view is built for every use - it is a
+// testing cannot drift apart. The mapper is built for every use - it is a
 // small value, and it always carries the live plot rectangle, the page's
 // length and ambitus and the editor's zoom and scroll.
-upic::score_render::View ScoreEditor::renderView() const
+upic::score_coordinates::ScoreCoordinateMapper ScoreEditor::coordinateMapper() const
 {
-    upic::score_render::View v;
-    v.plot = plotArea();
-    v.durationSec = page ? page->durationSec : 30.0;
-    v.pitchLo = ambitusLo();
-    v.pitchHi = ambitusHi();
-    v.timeZoom = timeZoom;
-    v.timeOffset = timeOffset;
-    v.freqZoom = freqZoom;
-    v.freqOffset = freqOffset;
-    return v;
+    upic::score_coordinates::ScoreCoordinateMapper m;
+    m.plot = plotArea();
+    m.durationSec = page ? page->durationSec : 30.0;
+    m.pitchLo = ambitusLo();
+    m.pitchHi = ambitusHi();
+    m.timeZoom = timeZoom;
+    m.timeOffset = timeOffset;
+    m.freqZoom = freqZoom;
+    m.freqOffset = freqOffset;
+    return m;
 }
 
 double ScoreEditor::xToTime(float x) const
 {
-    return renderView().xToTime (x);
+    return coordinateMapper().xToTime (x);
 }
 
 float ScoreEditor::timeToX(double t) const
 {
-    return renderView().timeToX (t);
+    return coordinateMapper().timeToX (t);
 }
 
 double ScoreEditor::ambitusLo() const
@@ -322,12 +322,12 @@ double ScoreEditor::ambitusHi() const
 
 double ScoreEditor::yToFreq(float y) const
 {
-    return renderView().yToFreq (y);
+    return coordinateMapper().yToFreq (y);
 }
 
 float ScoreEditor::freqToY(double f) const
 {
-    return renderView().freqToY (f);
+    return coordinateMapper().freqToY (f);
 }
 
 //==============================================================================
@@ -730,7 +730,7 @@ void ScoreEditor::paint(juce::Graphics& g)
     // R5.1: the editor hands the render what it draws and keeps the
     // gesture, the selection and the model. The picture is the render's.
     upic::score_render::State s;
-    s.view = renderView();
+    s.mapper = coordinateMapper();
     s.page = page;
     s.waves = waves;
     s.tuning = &tuning;
@@ -1429,7 +1429,7 @@ juce::Rectangle<float> ScoreEditor::zoneScreenRect() const
 
 juce::Rectangle<float> ScoreEditor::zoneRect(const upic::SieveZone& z) const
 {
-    return renderView().zoneRect (z);
+    return coordinateMapper().zoneRect (z);
 }
 
 juce::String ScoreEditor::toolName() const
