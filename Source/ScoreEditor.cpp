@@ -20,9 +20,32 @@ ScoreEditor::ScoreEditor()
         selectTool   = std::make_unique<upic::score_tools::SelectTool> (*this);
         eraseTool    = std::make_unique<upic::score_tools::EraseTool> (*this);
         zoneTool     = std::make_unique<upic::score_tools::ZoneTool> (*this);
+
+        // R5.5: the gesture's transaction. The doors reach the app's hooks
+        // when the gesture needs them (the app fills them in after the
+        // canvas is built), so the lambdas read them at the time of the call.
+        gestureTransaction.setDoors (
+            [this] (const juce::String& label) { if (onEditStart) onEditStart (label); },
+            [this] { if (onEditEnd) onEditEnd(); },
+            [this] { if (onEditCancel) onEditCancel(); });
 }
 
 ScoreEditor::~ScoreEditor() = default;
+
+void ScoreEditor::beginGesture (const juce::String& label)
+{
+        gestureTransaction.begin (label);
+}
+
+void ScoreEditor::commitGesture()
+{
+        gestureTransaction.commit();
+}
+
+void ScoreEditor::cancelGesture()
+{
+        gestureTransaction.cancel();
+}
 
 upic::score_tools::EditingTool* ScoreEditor::activeTool() const
 {
@@ -553,7 +576,8 @@ void ScoreEditor::deleteSelected()
         if (! page || selArcs.empty()) return;
         // v1.33.4 (L15, part 2): the undo transaction - the app keeps the
         // state from before the change.
-        if (onEditStart) onEditStart ("Delete");
+        // R5.5: the transaction goes through the canvas's own door.
+        beginGesture ("Delete");
         {
             const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
             auto& v = page->arcs;
@@ -566,7 +590,7 @@ void ScoreEditor::deleteSelected()
         // The callback refreshes the controls and takes the model lock itself;
         // it must never run while that lock is held.
         notify();
-        if (onEditEnd) onEditEnd();
+        commitGesture();
     }
 
 void ScoreEditor::duplicateSelected()
@@ -574,7 +598,8 @@ void ScoreEditor::duplicateSelected()
         if (! page || selArcs.empty()) return;
         std::vector<int> created;
         // v1.33.4 (L15, part 2): the undo transaction
-        if (onEditStart) onEditStart ("Duplicate");
+        // R5.5: the transaction goes through the canvas's own door.
+        beginGesture ("Duplicate");
         {
             const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
             const double off = juce::jlimit(0.1, 1.0, page->durationSec * 0.05);
@@ -606,7 +631,7 @@ void ScoreEditor::duplicateSelected()
         }
         if (! created.empty()) selArcs = created; // selection follows the copies
         notify();
-        if (onEditEnd) onEditEnd();
+        commitGesture();
     }
 
 void ScoreEditor::toggleMuteSelected()
@@ -673,7 +698,8 @@ int ScoreEditor::addZone(double ta, double tb, double fa, double fb)
         }
         upic::SieveZone z;
         // v1.33.4 (L15, part 2): the undo transaction
-        if (onEditStart) onEditStart ("Add a sieve zone");
+        // R5.5: the transaction goes through the canvas's own door.
+        beginGesture ("Add a sieve zone");
         {
             const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
             z.id = page->nextZoneId++;
@@ -690,7 +716,7 @@ int ScoreEditor::addZone(double ta, double tb, double fa, double fb)
         selectedZone = z.id;
         selArcs.clear();
         notify();
-        if (onEditEnd) onEditEnd();
+        commitGesture();
         return z.id;
     }
 
@@ -698,7 +724,8 @@ void ScoreEditor::deleteZone(int id)
 {
         if (! page) return;
         // v1.33.4 (L15, part 2): the undo transaction
-        if (onEditStart) onEditStart ("Delete a sieve zone");
+        // R5.5: the transaction goes through the canvas's own door.
+        beginGesture ("Delete a sieve zone");
         {
             const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
             auto& v = page->zones;
@@ -707,7 +734,7 @@ void ScoreEditor::deleteZone(int id)
         }
         if (selectedZone == id) selectedZone = -1;
         notify();
-        if (onEditEnd) onEditEnd();
+        commitGesture();
     }
 
 void ScoreEditor::scrubTo(float x)
@@ -1127,18 +1154,13 @@ float ScoreEditor::touchSpread() const
 
 void ScoreEditor::cancelInteraction()
 {
-        if (movingArc && page)
-        {
-            const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
-            for (auto& a : page->arcs)
-            {
-                auto it = moveStartMap.find(a.id);
-                if (it != moveStartMap.end()) a.points = it->second;
-            }
-        }
-
-        // R5.4: the tool that began the gesture gives it up (it clears its
-        // own state); the canvas keeps the model and the commands.
+        // R5.4: the tool that began the gesture gives it up (it undoes what
+        // it did and closes its transaction); the canvas keeps the model and
+        // the commands.
+        //
+        // R5.5: the transaction is closed and dropped - a gesture that was
+        // cancelled produces no command, so the document ends where it
+        // started.
         if (gestureTool != nullptr) gestureTool->cancel();
         gestureTool = nullptr;
         scrubbing = false;
@@ -1357,7 +1379,8 @@ void ScoreEditor::beginZoneDrag(juce::Point<float> pos)
         zoneDragT0 = z->t0; zoneDragT1 = z->t1;
         zoneDragF0 = z->f0; zoneDragF1 = z->f1;
         // v1.33.4 (L15, part 2): the whole drag is one undo step
-        if (onEditStart) onEditStart ("Move the sieve zone");
+        // R5.5: the transaction goes through the canvas's own door.
+        beginGesture ("Move the sieve zone");
     }
 
 void ScoreEditor::dragZoneTo(juce::Point<float> pos)

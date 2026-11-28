@@ -100,6 +100,34 @@ namespace upic
                 documentChanged_();
         }
 
+        // Close the command without keeping it: the gesture produced
+        // nothing, so there is no undo step, and the document's revision does
+        // not move - the document ends where it started.
+        //
+        // R5.5: this is the third exit of a command. A gesture that was
+        // cancelled (the layer switched under it, a pinch took the pointer
+        // over) must close its command, or the command stays open and
+        // swallows the next one.
+        //
+        // The epoch moves when the gesture had changed the model: the
+        // gesture undid itself, so the model moved back, and the audio must
+        // see the state the gesture left behind.
+        void cancelCommand()
+        {
+            if (! open_) return;
+
+            const bool changed = changed_;
+
+            // the step is not kept: the pending state is dropped
+            pending_.reset();
+
+            open_ = false;
+            changed_ = false;
+            label_.clear();
+
+            if (changed && modelMoved_) modelMoved_ (false);
+        }
+
         // Is a command open right now?
         bool isCommandOpen() const noexcept { return open_; }
 

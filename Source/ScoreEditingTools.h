@@ -50,7 +50,8 @@ namespace upic
                 editor.strokePts.clear();
                 editor.strokePts.push_back ({ in.position, in.pressure });
                 // v1.33.4 (L15, part 2): the undo transaction
-                if (editor.onEditStart) editor.onEditStart ("Draw");
+                // R5.5: the gesture's transaction - the canvas's own door.
+                editor.beginGesture ("Draw");
                 if (editor.onArcEditingChanged != nullptr) editor.onArcEditingChanged (true);
             }
 
@@ -81,7 +82,8 @@ namespace upic
                 editor.strokePts.clear();
                 // v1.33.4 (L15, part 2): the transaction ends after the stroke
                 // is committed, so the app can see that something really changed.
-                if (editor.onEditEnd) editor.onEditEnd();
+                // R5.5: the gesture ends in a command - one undo step.
+                editor.commitGesture();
                 editor.repaint();
             }
 
@@ -89,6 +91,9 @@ namespace upic
             {
                 editor.drawing = false;
                 editor.strokePts.clear();
+                // R5.5: the gesture produced nothing - the transaction is
+                // closed and dropped.
+                editor.cancelGesture();
             }
 
         private:
@@ -109,7 +114,8 @@ namespace upic
 
                 editor.lineAnchor = in.position;
                 // v1.33.4 (L15, part 2): the undo transaction
-                if (editor.onEditStart) editor.onEditStart ("Draw a line");
+                // R5.5: the gesture's transaction - the canvas's own door.
+                editor.beginGesture ("Draw a line");
                 if (editor.onArcEditingChanged != nullptr) editor.onArcEditingChanged (true);
                 editor.lastMouse = in.position;
                 editor.repaint();
@@ -131,12 +137,16 @@ namespace upic
                 editor.lineAnchor.reset();
                 // v1.33.4 (L15, part 2): the transaction ends after the line is
                 // committed, so the app can see that something really changed.
-                if (editor.onEditEnd) editor.onEditEnd();
+                // R5.5: the gesture ends in a command - one undo step.
+                editor.commitGesture();
             }
 
             void cancel() override
             {
                 editor.lineAnchor.reset();
+                // R5.5: the gesture produced nothing - the transaction is
+                // closed and dropped.
+                editor.cancelGesture();
             }
 
         private:
@@ -195,7 +205,8 @@ namespace upic
                     editor.moveStartPos = in.position;
                     // v1.33.4 (L15, part 2): the whole drag is one undo step -
                     // the pointer moves do not push anything.
-                    if (editor.onEditStart) editor.onEditStart ("Move the arc");
+                    // R5.5: the gesture's transaction - the canvas's own door.
+                    editor.beginGesture ("Move the arc");
                     const juce::ScopedLock modelSl (editor.modelLock != nullptr ? *editor.modelLock : editor.dummyLock);
                     editor.moveStartMap.clear();
                     for (auto& a : editor.page->arcs)
@@ -283,10 +294,26 @@ namespace upic
 
                 if (editor.movingArc)
                 {
-                    editor.movingArc = false; editor.moveStartMap.clear();
+                    editor.movingArc = false;
+                    // R5.5: did the move really move something? A click that
+                    // only takes an arc did not - and a gesture that changed
+                    // nothing is not an undo step.
+                    const bool moved = movedSomething();
+                    editor.moveStartMap.clear();
                     if (editor.onArcEditingChanged != nullptr) editor.onArcEditingChanged (false);
-                    editor.notify(); editor.repaint();
-                    if (editor.onEditEnd) editor.onEditEnd();
+                    if (moved)
+                    {
+                        editor.notify();
+                        // R5.5: the gesture ends in a command - one undo step.
+                        editor.commitGesture();
+                    }
+                    else
+                    {
+                        // R5.5: the gesture produced nothing - the transaction
+                        // is closed and dropped.
+                        editor.cancelGesture();
+                    }
+                    editor.repaint();
                     return;
                 }
             }
@@ -294,11 +321,48 @@ namespace upic
             void cancel() override
             {
                 editor.movingArc = false;
+                // R5.5: the gesture is cancelled - the arcs go back to where
+                // they were, and the transaction is closed and dropped.
+                restoreMovedArcs();
                 editor.moveStartMap.clear();
+                editor.cancelGesture();
             }
 
         private:
             ScoreEditor& editor;
+
+            // Did the move really move something? The arcs are compared with
+            // the state the move started from.
+            bool movedSomething() const
+            {
+                if (editor.page == nullptr) return false;
+
+                const juce::ScopedLock modelSl (editor.modelLock != nullptr ? *editor.modelLock : editor.dummyLock);
+                for (auto& a : editor.page->arcs)
+                {
+                    auto it = editor.moveStartMap.find (a.id);
+                    if (it == editor.moveStartMap.end()) continue;
+                    if (a.points.size() != it->second.size()) return true;
+                    for (size_t i = 0; i < a.points.size(); ++i)
+                        if (a.points[i].t != it->second[i].t
+                            || a.points[i].freq != it->second[i].freq
+                            || a.points[i].i != it->second[i].i) return true;
+                }
+                return false;
+            }
+
+            // The move is undone: the arcs go back to where they were.
+            void restoreMovedArcs() const
+            {
+                if (editor.page == nullptr) return;
+
+                const juce::ScopedLock modelSl (editor.modelLock != nullptr ? *editor.modelLock : editor.dummyLock);
+                for (auto& a : editor.page->arcs)
+                {
+                    auto it = editor.moveStartMap.find (a.id);
+                    if (it != editor.moveStartMap.end()) a.points = it->second;
+                }
+            }
         };
 
         //================ the erase ==========================================
@@ -399,9 +463,22 @@ namespace upic
                 {
                     editor.draggingZone = false;
                     editor.zoneHandle = 0;
-                    editor.notify();
-                    // v1.33.4 (L15, part 2): the transaction ends here
-                    if (editor.onEditEnd) editor.onEditEnd();
+                    // R5.5: did the zone really move? A click that only takes
+                    // a zone did not - and a gesture that changed nothing is
+                    // not an undo step.
+                    if (movedSomething())
+                    {
+                        editor.notify();
+                        // v1.33.4 (L15, part 2): the transaction ends here
+                        // R5.5: the gesture ends in a command - one undo step.
+                        editor.commitGesture();
+                    }
+                    else
+                    {
+                        // R5.5: the gesture produced nothing - the transaction
+                        // is closed and dropped.
+                        editor.cancelGesture();
+                    }
                     editor.repaint();
                     return;
                 }
@@ -410,10 +487,45 @@ namespace upic
             void cancel() override
             {
                 editor.drawingZone = false;
+                // R5.5: the gesture is cancelled - the zone goes back to
+                // where it was, and the transaction is closed and dropped.
+                if (editor.draggingZone)
+                {
+                    editor.draggingZone = false;
+                    editor.zoneHandle = 0;
+                    restoreZone();
+                }
+                editor.cancelGesture();
             }
 
         private:
             ScoreEditor& editor;
+
+            // Did the zone really move? It is compared with the state the
+            // drag started from.
+            bool movedSomething() const
+            {
+                if (editor.page == nullptr) return false;
+
+                const juce::ScopedLock modelSl (editor.modelLock != nullptr ? *editor.modelLock : editor.dummyLock);
+                if (auto* z = editor.findZone (editor.zoneDragId))
+                    return z->t0 != editor.zoneDragT0 || z->t1 != editor.zoneDragT1
+                        || z->f0 != editor.zoneDragF0 || z->f1 != editor.zoneDragF1;
+                return false;
+            }
+
+            // The drag is undone: the zone goes back to where it was.
+            void restoreZone() const
+            {
+                if (editor.page == nullptr) return;
+
+                const juce::ScopedLock modelSl (editor.modelLock != nullptr ? *editor.modelLock : editor.dummyLock);
+                if (auto* z = editor.findZone (editor.zoneDragId))
+                {
+                    z->t0 = editor.zoneDragT0; z->t1 = editor.zoneDragT1;
+                    z->f0 = editor.zoneDragF0; z->f1 = editor.zoneDragF1;
+                }
+            }
         };
     }
 }

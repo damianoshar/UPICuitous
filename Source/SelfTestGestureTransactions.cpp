@@ -97,6 +97,9 @@ namespace
             ed.onModelEdited = [this]{ dispatcher.reportChange (true); };
             ed.onEditStart = [this] (const juce::String& what) { dispatcher.beginCommand (what); };
             ed.onEditEnd   = [this] { dispatcher.endCommand(); };
+            // R5.5: the gesture's third exit - the app's way of dropping the
+            // transaction of a gesture that produced nothing.
+            ed.onEditCancel = [this] { dispatcher.cancelCommand(); };
         }
 
         // An arc with one point, in the osc layer.
@@ -308,6 +311,86 @@ void upic::runGestureTransactionChecks (SelfTest& t)
                juce::String (rig.revisionMoves));
     }
 
+    // --- the click that only takes an arc -------------------------------------
+    //
+    // A press on an arc takes it, and the press also starts the move - but a
+    // click does not move anything. A gesture that changed nothing is not an
+    // undo step (R5.5).
+    {
+        Rig rig;
+        rig.addPointArc (1, 2.0, 1000.0);
+        rig.ed.setTool (ScoreEditor::Select);
+
+        const auto p = juce::Point<float> (rig.ed.timeToX (2.0), rig.ed.freqToY (1000.0));
+        down (rig, p);
+        up (rig, p, p);
+
+        check (rig.ed.getSelectedArc() == 1,
+               "R5.5 a click takes the arc under the cursor",
+               juce::String (rig.ed.getSelectedArc()));
+        check (rig.steps == 0,
+               "R5.5 a click that only takes an arc is not an undo step",
+               juce::String (rig.steps));
+        check (rig.revisionMoves == 0,
+               "R5.5 a click that only takes an arc does not change the document",
+               juce::String (rig.revisionMoves));
+        check (rig.page.arcs.size() == 1,
+               "R5.5 a click that only takes an arc leaves the model alone",
+               juce::String (rig.page.arcs.size()));
+    }
+
+    // --- the click that only takes a zone ---------------------------------------
+    //
+    // The zone's drag is a transaction too, and a click that only takes the
+    // zone does not move it.
+    {
+        Rig rig;
+        upic::SieveZone z;
+        z.id = 1; z.t0 = 1.0; z.t1 = 2.0; z.f0 = 100.0; z.f1 = 200.0;
+        rig.page.zones.push_back (z);
+        rig.ed.setTool (ScoreEditor::Zone);
+
+        const auto p = juce::Point<float> (rig.ed.timeToX (1.5), rig.ed.freqToY (150.0));
+        down (rig, p);
+        up (rig, p, p);
+
+        check (rig.ed.getSelectedZone() == 1,
+               "R5.5 a click takes the zone under the cursor",
+               juce::String (rig.ed.getSelectedZone()));
+        check (rig.steps == 0,
+               "R5.5 a click that only takes a zone is not an undo step",
+               juce::String (rig.steps));
+        check (rig.page.zones.size() == 1
+               && std::abs (rig.page.zones.front().t0 - 1.0) < 1e-9,
+               "R5.5 a click that only takes a zone leaves the model alone",
+               juce::String (rig.page.zones.size()));
+    }
+
+    // --- the move that ends where it started -------------------------------------
+    {
+        Rig rig;
+        rig.addPointArc (1, 2.0, 1000.0);
+        rig.ed.setTool (ScoreEditor::Select);
+        rig.ed.setSelectedArc (1);
+
+        const auto p = juce::Point<float> (rig.ed.timeToX (2.0), rig.ed.freqToY (1000.0));
+        down (rig, p);
+        drag (rig, { p.x + 100.0f, p.y }, p);   // the arc follows the pointer
+        drag (rig, p, p);                      // and back again
+        up (rig, p, p);
+
+        const double t = rig.page.arcs.empty() ? -1.0 : rig.page.arcs.front().points.front().t;
+        check (std::abs (t - 2.0) < 1e-9,
+               "R5.5 a move that ends where it started leaves the arc where it was",
+               juce::String (t, 4));
+        check (rig.steps == 0,
+               "R5.5 a move that ends where it started is not an undo step",
+               juce::String (rig.steps));
+        check (rig.revisionMoves == 0,
+               "R5.5 a move that ends where it started does not change the document",
+               juce::String (rig.revisionMoves));
+    }
+
     // --- the cancelled gesture ---------------------------------------------------
     {
         Rig rig;
@@ -330,6 +413,72 @@ void upic::runGestureTransactionChecks (SelfTest& t)
         check (rig.epochMoves == 0 && rig.revisionMoves == 0,
                "R5.5 a cancelled stroke leaves the model alone",
                juce::String (rig.epochMoves) + " / " + juce::String (rig.revisionMoves));
+        check (! rig.dispatcher.isCommandOpen(),
+               "R5.5 a cancelled gesture closes its transaction");
+    }
+
+    // --- the cancelled move --------------------------------------------------------
+    //
+    // The move edits the model in place, so a cancelled move has to put the
+    // arc back - and the audio has to hear that the model moved back.
+    {
+        Rig rig;
+        rig.addPointArc (1, 2.0, 1000.0);
+        rig.ed.setTool (ScoreEditor::Select);
+        rig.ed.setSelectedArc (1);
+
+        const auto p = juce::Point<float> (rig.ed.timeToX (2.0), rig.ed.freqToY (1000.0));
+        down (rig, p);                                  // the move starts
+        drag (rig, { p.x + 100.0f, p.y }, p);           // the arc follows the pointer
+        rig.ed.setLayer (1);                            // the layer switch cancels it
+        up (rig, { p.x + 100.0f, p.y }, p);
+
+        const double t = rig.page.arcs.empty() ? -1.0 : rig.page.arcs.front().points.front().t;
+        check (rig.page.arcs.size() == 1 && std::abs (t - 2.0) < 1e-9,
+               "R5.5 a cancelled move puts the arc back",
+               juce::String (t, 4));
+        check (rig.steps == 0,
+               "R5.5 a cancelled move is not an undo step",
+               juce::String (rig.steps));
+        check (! rig.dispatcher.isCommandOpen(),
+               "R5.5 a cancelled move closes its transaction");
+        check (rig.epochMoves == 2,
+               "R5.5 the model that moved back is heard (the drag and the cancel)",
+               juce::String (rig.epochMoves));
+        check (rig.revisionMoves == 0,
+               "R5.5 a cancelled move does not change the document",
+               juce::String (rig.revisionMoves));
+    }
+
+    // --- the command after a cancelled gesture -----------------------------------
+    //
+    // The cancelled gesture's transaction used to stay open, and the next
+    // command was swallowed by it: it joined the stale transaction, and the
+    // undo step that came out of it carried the stale label.
+    {
+        Rig rig;
+        rig.ed.setTool (ScoreEditor::Draw);
+
+        const juce::Point<float> p0 (100.0f, 100.0f);
+        const juce::Point<float> p1 (200.0f, 120.0f);
+
+        down (rig, p0);
+        drag (rig, p1, p0);
+        rig.ed.setLayer (1);   // the layer switch cancels the gesture
+        up (rig, p1, p0);
+
+        // the next gesture is a command of its own
+        rig.ed.setTool (ScoreEditor::Draw);
+        down (rig, p0);
+        drag (rig, p1, p0);
+        up (rig, p1, p0);
+
+        check (rig.steps == 1 && rig.lastStepLabel == "Draw",
+               "R5.5 the command after a cancelled gesture is its own",
+               rig.lastStepLabel + " (" + juce::String (rig.steps) + ")");
+        check (rig.revisionMoves == 1,
+               "R5.5 the command after a cancelled gesture changes the document once",
+               juce::String (rig.revisionMoves));
     }
 
     // --- the release path's cost ---------------------------------------------------

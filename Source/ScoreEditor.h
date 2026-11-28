@@ -3,6 +3,7 @@
 #include "UpicModel.h"
 #include "ScoreCoordinateMapper.h"
 #include "ScoreEditingTool.h"
+#include "ScoreGestureTransaction.h"
 #include "ScoreHitTester.h"
 #include "ScoreRenderer.h"
 #include <optional>
@@ -406,6 +407,11 @@ public:
     // (the review: "coalesce pointer drags into one undo action").
     std::function<void (const juce::String& what)> onEditStart;
     std::function<void()> onEditEnd;
+    // R5.5: the gesture's third exit. A gesture that was cancelled (the
+    // layer switched under it, a pinch took the pointer over) closes its
+    // transaction without keeping it: there is no undo step, and the
+    // document ends where it started.
+    std::function<void()> onEditCancel;
     // v1.33.4 (L15, part 2): the undo and redo keys (Ctrl+Z / Ctrl+Shift+Z).
     // The editor has the keyboard focus while the user draws, so it hands
     // the keys to the app.
@@ -486,6 +492,11 @@ private:
     std::unique_ptr<upic::score_tools::EditingTool> zoneTool;
     upic::score_tools::EditingTool* gestureTool = nullptr;
 
+    // R5.5: the gesture's transaction. The canvas opens it when a gesture
+    // begins and closes it when the gesture ends - by committing it (the
+    // gesture produced a command) or by cancelling it (it did not).
+    upic::score_gesture::GestureTransaction gestureTransaction;
+
     upic::score_tools::EditingTool* activeTool() const;
     upic::score_tools::PointerInput pointerInput (const juce::MouseEvent& e) const;
 
@@ -550,6 +561,19 @@ private:
     // narrow band at the top of the line and it never leaves it, so the
     // canvas stays free for drawing.
     juce::Rectangle<float> timeStripHitRect() const;
+
+    //==========================================================================
+    // the gesture's transaction (R5.5)
+    //
+    // Every model command the canvas makes goes through these three doors:
+    // the gesture opens a transaction, and it ends in exactly one of two
+    // ways - a command (commit: one labelled undo step) or nothing (cancel:
+    // no step, and the document ends where it started). The lifecycle itself
+    // is in Source/ScoreGestureTransaction.h; the doors are the canvas's
+    // hooks, which the app fills in.
+    void beginGesture (const juce::String& label);
+    void commitGesture();
+    void cancelGesture();
 
     //==========================================================================
     // multi-touch helpers

@@ -147,6 +147,9 @@ namespace upic
         // The command's doors (the shell asks the session).
         void beginCommand (const juce::String& label) { dispatcher_.beginCommand (label); }
         void endCommand() { dispatcher_.endCommand(); }
+        // R5.5: the gesture's third exit - the gesture produced nothing, so
+        // the command is closed and dropped (no undo step, no revision).
+        void cancelCommand() { dispatcher_.cancelCommand(); }
         bool isCommandOpen() const { return dispatcher_.isCommandOpen(); }
 
         // --- one model change ---

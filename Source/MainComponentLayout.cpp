@@ -365,6 +365,15 @@ void MainComponent::buildScoreArea()
         // v1.36: publish after the commit, not before it.
         publishModelSnapshot();
     };
+    // R5.5: the gesture's third exit. A gesture that was cancelled (the
+    // layer switched under it, a pinch took the pointer over) closes its
+    // transaction without keeping it: there is no undo step, and the
+    // document ends where it started. The snapshot goes out after the
+    // cancel, because the gesture may have put the model back.
+    score.onEditCancel = [this]{
+        cancelEdit();
+        publishModelSnapshot();
+    };
     score.onUndo = [this]{ undo(); };
     score.onRedo = [this]{ redo(); };
     // WP8: the geometric transforms of the drawn curve. The app fills the
@@ -1915,6 +1924,12 @@ void MainComponent::wireWorkspaceCanvas (ScoreEditor& ed)
     ed.onEditStart = [this](const juce::String& what){ beginEdit (what); };
     ed.onEditEnd = [this]{
         endEdit();
+        publishModelSnapshot();
+    };
+    // R5.5: the gesture's third exit - a cancelled gesture closes its
+    // transaction without keeping it.
+    ed.onEditCancel = [this]{
+        cancelEdit();
         publishModelSnapshot();
     };
     ed.onModelEdited = [this]{ markModelChanged(); };

@@ -229,6 +229,11 @@ public:
     // command ends.
     void beginEdit (const juce::String& label);
     void endEdit();
+    // R5.5: the gesture's third exit. A gesture that was cancelled (the
+    // layer switched under it, a pinch took the pointer over) closes its
+    // command without keeping it: there is no undo step, and the document
+    // ends where it started.
+    void cancelEdit();
     // R3.5: one edit is one command. A one-shot opens and closes it here; a
     // gesture opens it at its drag start and closes it at its drag end, and
     // the value changes in between join it. A call made while a command is

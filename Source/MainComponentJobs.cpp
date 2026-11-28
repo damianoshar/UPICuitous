@@ -47,6 +47,19 @@ void MainComponent::endEdit()
     document.endCommand();
 }
 
+void MainComponent::cancelEdit()
+{
+    if (! document.isCommandOpen()) return;
+
+    // the gesture is over: the flag cannot outlive the transaction
+    channelGainEditing = false;
+
+    // R5.5: the command is closed and dropped - the gesture produced
+    // nothing, so there is no undo step and the document's revision does not
+    // move.
+    document.cancelCommand();
+}
+
 void MainComponent::runEdit (const juce::String& label,
                              const std::function<void()>& fn)
 {
