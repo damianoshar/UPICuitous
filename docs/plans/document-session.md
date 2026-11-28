@@ -284,8 +284,8 @@ The command dispatcher (`Source/CommandDispatcher.h`) needs JUCE as well:
 the label is a string and the snapshot it holds is a piece. It is the
 application layer's own, like the session that owns it, and it is out of
 the boundary check's JUCE-free groups for the same reason. It is a header,
-so the check counts the source files, not the headers: 59 of them now
-(R5.1's score-render suite and the renderer are the last ones added).
+so the check counts the source files, not the headers: 60 of them now
+(R5.2's coordinate-mapper suite is the last one added).
 
 ## The suites
 

@@ -1217,6 +1217,53 @@ the golden render and the v0.29 fixture say so.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.28 R5.2 - the score canvas's coordinate mapper
+
+**What moves.** The mapping between the page's musical coordinates and the
+screen moves out of `ScoreEditor` and out of the renderer's header into the
+new `Source/ScoreCoordinateMapper.h`: the time axis (`xToTime()` /
+`timeToX()`), the pitch axis (`yToFreq()` / `freqToY()`) and a zone's
+rectangle (`zoneRect()`). The review asks for the mapping to be a thing of
+its own (R044, "Introduce ScoreCoordinateMapper") and says what it is for:
+"`ScoreCoordinateMapper` should supply consistent mappings between musical
+and screen coordinates" (§24).
+
+The mapper is `upic::score_coordinates::ScoreCoordinateMapper`: a small value
+that carries where the plot is on the screen, how long the page is, over
+which ambitus the pitch runs and where the view is zoomed and scrolled. It
+converts and it owns nothing.
+
+**What stays.** `ScoreEditor` keeps the gesture, the selection, the model's
+commands and the wheel's view commands (the zoom, the pan, the fit) - the
+view's *state* is the editor's, and the mapper is handed it. The editor's
+public mapping (`timeToX()`, `freqToY()`, …) stays, and now delegates to the
+mapper.
+
+**The one change.** None in the behaviour. The bodies are the editor's, body
+for body: the clamping of a cursor outside the page, the deliberate
+*non*-clamping of a pitch outside the ambitus (it is drawn off the edge, not
+along the border) and the sorting of a zone's corners do not change by a
+character.
+
+**The contract.** `Source/SelfTestCoordinateMapper.cpp`, written before the
+move, 14 checks. It reaches the mapping through the editor's own doors
+(`timeToX()`, `xToTime()`, `freqToY()`, `yToFreq()`, `zoneRectForTest()`) and
+pins: where time 0 and the page's end are on the screen, the round trips (a
+time and a pitch survive the trip out and back), the ambitus (its low end is
+the plot's bottom, its high end the plot's top), the non-clamping of a pitch
+outside the ambitus, the clamping of a cursor outside the page, a zone's
+rectangle (its times and its frequencies are order-independent), and the zoom
+(it keeps the view's centre where it was, and a time survives the round trip
+through it).
+
+**The mechanical check.** The production code does not call a test-only
+door, the diff outside the mapping is empty, and the behaviour is unchanged -
+the golden render and the v0.29 fixture say so.
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1248,7 +1295,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R5 UI decomposition | **R5.1 shipped** | `bf1ad70`, `e7dd14c` | app selftest 3,184/3,184, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands, the render's own suite 18/18, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R5 UI decomposition | **R5.1 and R5.2 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62` | app selftest 3,198/3,198, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands, and the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`), so the drawing and the hit testing share one mapping. The render's own suite 18/18, the mapper's own suite 14/14, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
 | R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
@@ -3343,6 +3390,9 @@ for ("Rendering, hit testing and coordinate conversion should agree, but
 they should not be implemented as one operation", §24). The review gives
 the mapping a name of its own in R044 ("Introduce ScoreCoordinateMapper");
 until then it lives next to the render that needs it, and R044 moves it.
+(R5.2 did: the `View` is now
+`upic::score_coordinates::ScoreCoordinateMapper`, in
+`Source/ScoreCoordinateMapper.h`.)
 
 **The service stays in the editor.** The gesture, the tools, the
 quantisers, the commit of a stroke, the selection and the model's commands
@@ -3360,3 +3410,102 @@ Gate: app selftest 3,184/3,184, the render's own suite 18/18, golden render
 `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged,
 plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS, boundaries 5
 rules / 0 violations (59 source files).
+
+### R5.2 record (2026-11-28)
+
+The canvas's coordinates are a thing of their own, and the editor keeps the
+view's state.
+
+The characterization commit is `c2437c2`, the move `3b23d62`.
+
+| Measure | Before | After |
+|---|---|---|
+| the coordinate mapping | `upic::score_render::View` in `Source/ScoreRenderer.h`, with the bodies in `Source/ScoreRenderer.cpp` | `upic::score_coordinates::ScoreCoordinateMapper` in `Source/ScoreCoordinateMapper.h` (100 lines, header-only) |
+| the renderer's header | 125 lines, the mapping among them | 99 lines - the drawing's contract only |
+| the renderer's source | 453 lines | 414 lines |
+| the canvas's source | `Source/ScoreEditor.cpp`, 2,136 lines | 2,136 lines (the editor still builds the mapper) |
+| the mapper's own suite | - | `Source/SelfTestCoordinateMapper.cpp`, 14 checks |
+| the source files | 59 | 60 (the suite) |
+
+**The suite came first.** `Source/SelfTestCoordinateMapper.cpp` was written
+against the old code: 14 checks that reach the mapping through the editor's
+own doors (`timeToX()`, `xToTime()`, `freqToY()`, `yToFreq()`,
+`zoneRectForTest()`) and pin where time 0 and the page's end are on the
+screen, the round trips (a time and a pitch survive the trip out and back),
+the ambitus (its low end is the plot's bottom, its high end the plot's
+top), the non-clamping of a pitch outside the ambitus, the clamping of a
+cursor outside the page, a zone's rectangle (its times and its frequencies
+are order-independent), and the zoom (it keeps the view's centre where it
+was, and a time survives the round trip through it).
+
+The tolerances are the float's precision, not the last bit: the screen
+coordinates are floats, so the round trip is exact to the float's
+precision.
+
+**The edge.** `Source/ScoreCoordinateMapper.h` is the mapper's contract:
+
+```cpp
+namespace upic::score_coordinates
+{
+    struct ScoreCoordinateMapper
+    {
+        // The plot's rectangle on the screen.
+        juce::Rectangle<float> plot;
+
+        // The page's length and ambitus.
+        double durationSec = 30.0;
+        double pitchLo = kDefaultPitchLo;
+        double pitchHi = kDefaultPitchHi;
+
+        // The view's zoom and scroll.
+        double timeZoom = 1.0, timeOffset = 0.0;
+        double freqZoom = 1.0, freqOffset = 0.0;
+
+        // The time axis: seconds <-> pixels.
+        double xToTime (float x) const;
+        float timeToX (double t) const;
+
+        // The pitch axis: Hz <-> pixels (logarithmic).
+        double yToFreq (float y) const;
+        float freqToY (double f) const;
+
+        // A zone's rectangle (its times and its frequencies are sorted).
+        juce::Rectangle<float> zoneRect (const SieveZone& z) const;
+    };
+}
+```
+
+The bodies are the editor's, body for body. The clamping of a cursor
+outside the page, the deliberate *non*-clamping of a pitch outside the
+ambitus and the sorting of a zone's corners do not change by a character.
+
+**The mapper is a value, and the editor builds it.** The view's *state* -
+the zoom, the scroll, the plot's rectangle, the page's current length and
+ambitus - is the editor's, and the editor hands it to the mapper
+(`ScoreEditor::coordinateMapper()`). The mapper converts and owns nothing.
+That is why the editor's public doors (`timeToX()`, `freqToY()`, …) stay:
+they are the app's way in, and they now go through the mapper.
+
+**One mapping, three users.** The render (R043) draws with it, the editor
+maps the cursor and the strokes with it, and the hit tester (R045) will use
+it too. The review asks for exactly this: "Rendering, hit testing and
+coordinate conversion should agree, but they should not be implemented as
+one operation" (§24).
+
+**The service stays in the editor.** The gesture, the tools, the
+quantisers, the commit of a stroke, the selection, the model's commands and
+the wheel's view commands (the zoom, the pan, the fit) stay in
+`ScoreEditor`. The view commands change the view's state and then repaint;
+they belong with the editor, not with the conversion.
+
+**The mechanical check.** The production code does not call a test-only
+door, the moved bodies are the editor's body for body, and the behaviour is
+unchanged - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the editor are described in
+[`score-coordinate-mapper-edge.md`](score-coordinate-mapper-edge.md).
+
+Gate: app selftest 3,198/3,198, the mapper's own suite 14/14, the render's
+own suite 18/18, golden render `0x6d7571bdd80e3cd9` unchanged, legacy
+fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval
+strictness 5 SUCCESS, boundaries 5 rules / 0 violations (60 source files).

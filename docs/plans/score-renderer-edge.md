@@ -4,13 +4,19 @@ The architecture note for R5.1. It describes the boundary R5.1 introduced -
 the score canvas's render and the editor's gesture - as it is after that
 phase, not as it is meant to be at the end of the refactoring.
 
+> **R5.2 moved the mapping out of this edge.** The `View` below is now
+> `upic::score_coordinates::ScoreCoordinateMapper`, in
+> `Source/ScoreCoordinateMapper.h`, and the render's state carries it as
+> `State::mapper`. The render's own edge is unchanged. See
+> [`score-coordinate-mapper-edge.md`](score-coordinate-mapper-edge.md).
+
 ## The boundary
 
 ```
-Source/ScoreRenderer.h   the render edge: the View (where the plot is and
-Source/ScoreRenderer.cpp how time and pitch map onto it) and the State (the
-                         page, the waves, the layers, the flags and the
-                         gesture), and the paint that draws them
+Source/ScoreRenderer.h   the render edge: the State (the page, the waves, the
+Source/ScoreRenderer.cpp layers, the flags and the gesture) and the paint
+                         that draws it, with the mapper (where the plot is and
+                         how time and pitch map onto it)
         |
         |  the editor keeps the gesture, the selection and the commands;
         v  it hands the render a snapshot of what it draws
@@ -32,7 +38,8 @@ the coordinate conversion to agree without being one operation (§24):
 > should not be implemented as one operation.
 
 R5.1 extracts the render. The editor's gesture stays, and the two share one
-mapping - the `View` - so they cannot drift apart.
+mapping - the `View` - so they cannot drift apart. (R5.2 gave that mapping a
+header of its own.)
 
 ## What moved
 
@@ -65,28 +72,23 @@ contract:
 8. the playhead (the line and the top triangle), over the labels;
 9. the border, the workspace's mark and the hint lines.
 
-## The view
+## The mapper
 
-The `View` is a small value: the plot's rectangle, the page's length and
-ambitus, and the editor's zoom and scroll. It carries the mapping between
-the page's time and pitch and the screen:
+The render draws with the canvas's coordinate mapper: where the plot is on
+the screen and how the page's time and pitch map onto it. R5.1 kept it in
+this header as the `View`; R5.2 gave it a header of its own -
+`upic::score_coordinates::ScoreCoordinateMapper` in
+`Source/ScoreCoordinateMapper.h` - and the render's state carries it as
+`State::mapper`.
 
-- `xToTime()` / `timeToX()` - the time axis;
-- `yToFreq()` / `freqToY()` - the pitch axis (logarithmic, over the page's
-  ambitus; `freqToY()` is deliberately not clamped, so a pitch outside the
-  ambitus is drawn off the edge instead of along the border);
-- `zoneRect()` - a zone's rectangle (the times and the frequencies are
-  order-independent, so the corners are sorted).
+The editor builds one for every use of the mapping
+(`ScoreEditor::coordinateMapper()`), so the mapper always carries the live
+plot rectangle, the page's current length and ambitus and the editor's
+current zoom and scroll. The drawing and the hit testing therefore use the
+same numbers.
 
-The editor builds one of these for every use of the mapping
-(`ScoreEditor::renderView()`), so the view always carries the live plot
-rectangle, the page's current length and ambitus and the editor's current
-zoom and scroll. The drawing and the hit testing therefore use the same
-numbers.
-
-The review gives the mapping a name of its own in R044 ("Introduce
-ScoreCoordinateMapper"). Until then it lives next to the render that needs
-it, and R044 moves it into a header of its own.
+The mapper's conversions and its own contract are described in
+[`score-coordinate-mapper-edge.md`](score-coordinate-mapper-edge.md).
 
 ## What stays in the editor
 
@@ -96,7 +98,7 @@ it, and R044 moves it into a header of its own.
 - the model's commands: the arcs, the zones, the deletion, the duplication;
 - the wheel's view commands: the zoom, the pan, the fit;
 - the public mapping (`timeToX()`, `freqToY()`, …), which now delegates to
-  the `View`.
+  the mapper.
 
 They need the editor's state, the model's lock and the app's hooks. They
 are not the picture.
@@ -131,11 +133,8 @@ edge's, and the checks themselves did not change.
 
 - **The hit testing is still in the editor** (`arcsNear()`, `pickArc()`,
   `pickZone()`, `zoneHandleAt()`). The review's R045 ("Extract
-  ScoreHitTester") is the next step, and the `View` is what the two will
+  ScoreHitTester") is the next step, and the mapper is what the two will
   share.
-- **The coordinate mapper has no header of its own yet.** It is the
-  `View` in `Source/ScoreRenderer.h`; the review's R044 gives it a name and
-  a home.
 - **The grid and the arcs are not separate painters yet.** The review's
   §24 lists `ScoreGridRenderer` and `ArcPainter`; R5.1 extracts the render
   as a whole, and the sub-painters can be split out of it later without

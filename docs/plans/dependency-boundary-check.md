@@ -122,9 +122,9 @@ build. The gate's step is:
     B1/B2 the arc (1 file): no JUCE header, no header outside the group
     B1/B2 the arc's geometry (1 file): no JUCE header, no header outside the group
     B1/B2 the page (1 file): no JUCE header, no header outside the group
-    B3 the Projucer project lists all 59 source files
+    B3 the Projucer project lists all 60 source files
     B4 the plugin's two targets carry the same 19 source files
-    B5 the generated Visual Studio project lists all 59 source files
+    B5 the generated Visual Studio project lists all 60 source files
     dependency boundaries: 5 rules, 0 violations
 ```
 
