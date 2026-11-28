@@ -1008,12 +1008,30 @@ void MainComponent::resized()
     groups.push_back ({ "amp", { FI(&ampTableLab, 34, &ampTableBox, 150),
                                   F(&ampTableBtn, 76),
                                   F(&groupBtn, 86) } });
-    groups.push_back ({ "mod", { FI(&arcModLab, 30, &arcModBox, 100),
-                                  FI(&arcModTgtLab, 26, &arcModTgtBox, 66),
-                                  FI(&arcModDepthLab, 36, &arcModSlider, 110) } });
+
+    // R5.9: the card is the modulation controls' description - the edge says
+    // which cells the card holds and how they are drawn.
+    {
+        FlowGroup mod { "mod", {} };
+        const auto& modulation = upic::modulation_controls::describe();
+        for (auto& cell : modulation.card)
+            addCell (mod, modulationControls[(size_t) cell.control],
+                     cell.kind, cell.labelWidth, cell.width, cell.newLine);
+        groups.push_back (mod);
+    }
+
     // --- WP6.4: the mixer (WP7 adds its own card in its marked block) ---
-    groups.push_back ({ "ch", { FI(&channelLab, 26, &channelBox, 100),
-                                F(&channelBtn, 62) } });
+    //
+    // R5.9: the card is the channel controls' description - the edge says
+    // which cells the card holds and how they are drawn.
+    {
+        FlowGroup ch { "ch", {} };
+        const auto& mixer = upic::channel_controls::describe();
+        for (auto& cell : mixer.card)
+            addCell (ch, channelControls[(size_t) cell.control],
+                     cell.kind, cell.labelWidth, cell.width, cell.newLine);
+        groups.push_back (ch);
+    }
     // --- end WP6.4 ---
 
     // WP4: the performance sequences.

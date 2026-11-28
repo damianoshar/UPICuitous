@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "SelfTest.h"
 #include "MainComponent.h"
+#include "ChannelControls.h"
 
 #include <algorithm>
 #include <memory>
@@ -118,6 +119,33 @@ void upic::runChannelControlsChecks (upic::SelfTest& t)
         t.check (ok, name, detail);
     };
 
+    namespace cc = upic::channel_controls;
+
+    // --- the edge ------------------------------------------------------------
+    // The description is data, so it is checked without a window first.
+    check (juce::String (cc::describe().name) == "Channel"
+           && cc::describe().card.size() == (size_t) cc::Control::count,
+           "R5.9 the edge describes the channel card",
+           juce::String ((int) cc::describe().card.size()) + " cells");
+
+    check (cc::allControls().size() == (size_t) cc::Control::count,
+           "R5.9 the edge names every role once",
+           juce::String ((int) cc::allControls().size()) + " roles");
+
+    check (cc::kMainItemId == 1 && cc::itemIdForChannelIndex (0) == 2
+           && cc::itemIdForChannelIndex (1) == 3
+           && cc::itemIdForChannelIndex (-1) == 1
+           && cc::isMainItem (1) && ! cc::isMainItem (2)
+           && cc::channelIndexForItemId (2) == 0 && cc::channelIndexForItemId (3) == 1,
+           "R5.9 the channel list's ids are one rule",
+           juce::String (cc::itemIdForChannelIndex (0)) + ", "
+             + juce::String (cc::itemIdForChannelIndex (1)));
+
+    check (juce::String (cc::mainName()) == "Main"
+           && juce::String (cc::openButtonText()) == "Mix...",
+           "R5.9 the channel card's own words are the edge's words",
+           juce::String (cc::openButtonText()));
+
     auto mcHolder = std::make_unique<MainComponent>();
     auto& mc = *mcHolder;
     mc.setSize (1280, 800);
@@ -146,6 +174,49 @@ void upic::runChannelControlsChecks (upic::SelfTest& t)
            && tooltipOf (chBtn) == "The mixer: channel levels, mute/solo and routing",
            "R5.9 the channel's controls say what they do", tooltipOf (chBox));
 
+    // --- the edge and the app's widgets are the same card -------------------
+    bool allBound = mc.channelControlCountForTest() == (int) cc::Control::count;
+    bool sameWidgets = true;
+    for (int role = 0; role < mc.channelControlCountForTest(); ++role)
+    {
+        auto* w = mc.channelControlForTest (role);
+        if (w == nullptr) { allBound = false; continue; }
+        switch ((cc::Control) role)
+        {
+            case cc::Control::Channel: sameWidgets = sameWidgets && w == chBox; break;
+            case cc::Control::Open:    sameWidgets = sameWidgets && w == chBtn; break;
+            default: break;
+        }
+    }
+    check (allBound, "R5.9 every channel role is bound to a widget",
+           juce::String (mc.channelControlCountForTest()) + " roles");
+    check (sameWidgets
+           && mc.channelControlLabelForTest ((int) cc::Control::Channel) == chLab,
+           "R5.9 the roles are the card's own controls");
+
+    juce::String fromEdge;
+    for (auto& cell : cc::describe().card)
+    {
+        auto* w = mc.channelControlForTest ((int) cell.control);
+        if (w == nullptr) continue;
+        if (fromEdge.isNotEmpty()) fromEdge += ", ";
+        fromEdge += w->getName() + "|" + kindOf (w);
+    }
+    check (cardText (cardCells (mc, "ch")) == fromEdge,
+           "R5.9 the card is the edge's cell list, in the edge's order", fromEdge);
+
+    bool wordsMatch = true;
+    for (int role = 0; role < mc.channelControlCountForTest(); ++role)
+        if (juce::String (cc::tooltip ((cc::Control) role))
+            != tooltipOf (mc.channelControlForTest (role)))
+            wordsMatch = false;
+    check (wordsMatch, "R5.9 the card's tooltips are the edge's wording",
+           tooltipOf (chBox));
+
+    check (chBtn->getButtonText() == juce::String (cc::openButtonText()),
+           "R5.9 the mix button says the edge's word",
+           chBtn->getButtonText());
+
     // --- the mixer opens from the card --------------------------------------
     chBtn->onClick();
     check (mc.channelPanelOpenForTest(), "R5.9 the mix button opens the mixer");
@@ -172,6 +243,17 @@ void upic::runChannelControlsChecks (upic::SelfTest& t)
     check (chBox->getItemId (0) == 1 && chBox->getItemId (1) == 2,
            "R5.9 the channel list's ids are one rule",
            juce::String (chBox->getItemId (0)) + ", " + juce::String (chBox->getItemId (1)));
+
+    // Main is the list's first item; the channel at the bank's index i is the
+    // list's item i + 1.
+    bool listFollowsEdge = chBox->getItemText (0) == juce::String (cc::mainName())
+                        && chBox->getItemId (0) == cc::kMainItemId;
+    for (int i = 1; i < chBox->getNumItems(); ++i)
+        if (chBox->getItemId (i) != cc::itemIdForChannelIndex (i - 1))
+            listFollowsEdge = false;
+    check (listFollowsEdge,
+           "R5.9 the app's channel list follows the edge's ids",
+           juce::String (chBox->getNumItems()) + " items");
 
     // --- the routing ---------------------------------------------------------
     mc.selectArcsAndSyncForTest ({ 1 });

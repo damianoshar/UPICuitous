@@ -37,6 +37,8 @@
 #include "SievePanel.h"          // R5.7: the sieve panel's description
 #include "FrequencyInspector.h"  // R5.7: the frequency inspector's description
 #include "SequenceTransport.h"   // R5.8: the sequence card and the transport's words
+#include "ChannelControls.h"      // R5.9: the channel card's description
+#include "ModulationControls.h"   // R5.9: the modulation card's description
 
 //==============================================================================
 // WP7: the audio preview routes.
@@ -1454,6 +1456,38 @@ public:
         return sequenceControls[(size_t) role].label;
     }
 
+    // R5.9: the channel card's and the modulation card's bindings - the roles
+    // the edges name and the widgets the app gave them. The suites pin the
+    // two against each other.
+    int channelControlCountForTest() const
+    {
+        return (int) (sizeof (channelControls) / sizeof (channelControls[0]));
+    }
+    juce::Component* channelControlForTest (int role) const
+    {
+        if (role < 0 || role >= channelControlCountForTest()) return nullptr;
+        return channelControls[(size_t) role].control;
+    }
+    juce::Component* channelControlLabelForTest (int role) const
+    {
+        if (role < 0 || role >= channelControlCountForTest()) return nullptr;
+        return channelControls[(size_t) role].label;
+    }
+    int modulationControlCountForTest() const
+    {
+        return (int) (sizeof (modulationControls) / sizeof (modulationControls[0]));
+    }
+    juce::Component* modulationControlForTest (int role) const
+    {
+        if (role < 0 || role >= modulationControlCountForTest()) return nullptr;
+        return modulationControls[(size_t) role].control;
+    }
+    juce::Component* modulationControlLabelForTest (int role) const
+    {
+        if (role < 0 || role >= modulationControlCountForTest()) return nullptr;
+        return modulationControls[(size_t) role].label;
+    }
+
     // --- R1.2: the panels below the toolbar ------------------------------
     // The bottom half of the window, for the characterization suite that
     // runs before its geometry moves out of resized().
@@ -2632,7 +2666,8 @@ private:
     // block below; keep edits inside these markers.
     juce::Label channelLab{ {}, "Ch" };
     juce::ComboBox channelBox;
-    juce::TextButton channelBtn{ "Mix..." };
+    // R5.9: the button's text is the channel card's own (the edge says it).
+    juce::TextButton channelBtn;
     std::unique_ptr<ChannelPanel> channelPanel;
     bool channelBoxReady = false;
     bool channelBoxRefreshing = false;
@@ -2753,6 +2788,12 @@ private:
     ControlBinding sequenceControls[(size_t) upic::sequence_transport::Control::count];
     void bindSequenceControl (upic::sequence_transport::Control role,
                               juce::Component* label, juce::Component* widget);
+    ControlBinding channelControls[(size_t) upic::channel_controls::Control::count];
+    void bindChannelControl (upic::channel_controls::Control role,
+                             juce::Component* label, juce::Component* widget);
+    ControlBinding modulationControls[(size_t) upic::modulation_controls::Control::count];
+    void bindModulationControl (upic::modulation_controls::Control role,
+                                juce::Component* label, juce::Component* widget);
 
     // v1.21 (wave 19): the arc list - the score's inventory on the right,
     // with the per-arc controls (the Rev box and the mode dropdown). It is a
@@ -2988,6 +3029,9 @@ private:
     void refreshGroupPanel();
     void refreshModBox();                    // WP5
     void setModOnSelection (int modId, int target, double depth);
+    // R5.9: the card's two dropdowns read the same way and write the same
+    // command - one rule, so the two copies cannot drift apart.
+    void applyModulationControls();
     bool modWouldCycle (int carrierId, int modId) const;
     int  groupIndexOfId (int id) const;
     void pushAmbitus();               // v1.33: the page's ambitus

@@ -177,6 +177,22 @@ void MainComponent::bindSequenceControl (upic::sequence_transport::Control role,
     binding.control = widget;
 }
 
+void MainComponent::bindChannelControl (upic::channel_controls::Control role,
+                                        juce::Component* label, juce::Component* widget)
+{
+    auto& binding = channelControls[(size_t) role];
+    binding.label = label;
+    binding.control = widget;
+}
+
+void MainComponent::bindModulationControl (upic::modulation_controls::Control role,
+                                           juce::Component* label, juce::Component* widget)
+{
+    auto& binding = modulationControls[(size_t) role];
+    binding.label = label;
+    binding.control = widget;
+}
+
 void MainComponent::buildSieveControls()
 {
     // R5.7: the sieve panel's own edge (Source/SievePanel.h) says which
@@ -668,29 +684,34 @@ void MainComponent::buildFrequencyControls()
         l->setJustificationType (juce::Justification::centredRight);
         l->setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     }
-    arcModBox.setTooltip ("The arc that modulates the selection (its contour bends the pitch or its level)");
-    arcModTgtBox.setTooltip ("What the modulator drives: pitch or amplitude");
+    // R5.9: the modulation card's own edge (Source/ModulationControls.h)
+    // says which controls the card holds, what every control says about
+    // itself, what the two dropdowns offer and how the depth is scaled. The
+    // app binds the roles to its widgets here.
+    namespace mc = upic::modulation_controls;
+
+    arcModBox.setTooltip (mc::tooltip (mc::Control::Modulator));
+    arcModTgtBox.setTooltip (mc::tooltip (mc::Control::Target));
     arcModSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     arcModSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 20);
-    arcModSlider.setRange (0.0, 1.0, 0.001);
-    arcModSlider.setTooltip ("The modulation depth (1 = +/- one octave at the contour extremes)");
-    arcModTgtBox.addItem ("Pitch", 1);
-    arcModTgtBox.addItem ("Amp", 2);
+    arcModSlider.setRange (mc::kMinDepth, mc::kMaxDepth, mc::kDepthInterval);
+    arcModSlider.setTooltip (mc::tooltip (mc::Control::Depth));
+    arcModTgtBox.addItem (mc::targetName (mc::kPitchTarget),
+                          mc::itemIdForTarget (mc::kPitchTarget));
+    arcModTgtBox.addItem (mc::targetName (mc::kAmpTarget),
+                          mc::itemIdForTarget (mc::kAmpTarget));
+    bindModulationControl (mc::Control::Modulator, &arcModLab, &arcModBox);
+    bindModulationControl (mc::Control::Target, &arcModTgtLab, &arcModTgtBox);
+    bindModulationControl (mc::Control::Depth, &arcModDepthLab, &arcModSlider);
     arcModBox.onChange = [this]
     {
         if (refreshingControls) return; // a refresh is not a command
-        const int i = arcModBox.getSelectedId();
-        setModOnSelection (i <= 1 ? -1 : i - 1,
-                           arcModTgtBox.getSelectedId() == 2 ? 1 : 0,
-                           arcModSlider.getValue());
+        applyModulationControls();
     };
     arcModTgtBox.onChange = [this]
     {
         if (refreshingControls) return; // a refresh is not a command
-        const int i = arcModBox.getSelectedId();
-        setModOnSelection (i <= 1 ? -1 : i - 1,
-                           arcModTgtBox.getSelectedId() == 2 ? 1 : 0,
-                           arcModSlider.getValue());
+        applyModulationControls();
     };
     arcModSlider.onDragStart = [this]
     {
@@ -699,8 +720,7 @@ void MainComponent::buildFrequencyControls()
     arcModSlider.onValueChange = [this]
     {
         if (refreshingControls) return; // a refresh is not a command
-        const int i = arcModBox.getSelectedId();
-        if (i <= 1) return;
+        if (upic::modulation_controls::isNoneItem (arcModBox.getSelectedId())) return;
         const bool standalone = ! modLevelsEditing;
         if (standalone) beginEdit ("Modulation depth");
         { const juce::ScopedLock l (dataLock);
@@ -731,16 +751,27 @@ void MainComponent::buildFrequencyControls()
     channelBtn.setName ("channelBtn");
     channelLab.setJustificationType (juce::Justification::centredRight);
     channelLab.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
-    channelBox.setTooltip ("The mixer channel the selected arcs play on");
-    channelBtn.setTooltip ("The mixer: channel levels, mute/solo and routing");
+
+    // R5.9: the channel card's own edge (Source/ChannelControls.h) says
+    // which controls the card holds, what every control says about itself
+    // and how the channel list's items are numbered. The app binds the roles
+    // to its widgets here.
+    namespace cc = upic::channel_controls;
+
+    channelBox.setTooltip (cc::tooltip (cc::Control::Channel));
+    channelBtn.setTooltip (cc::tooltip (cc::Control::Open));
+    channelBtn.setButtonText (cc::openButtonText());
+    bindChannelControl (cc::Control::Channel, &channelLab, &channelBox);
+    bindChannelControl (cc::Control::Open, nullptr, &channelBtn);
     channelBtn.onClick = [this]{ showChannelPanel(); };
     refreshChannelBox();
     channelBox.onChange = [this]
     {
         if (! channelBoxReady || channelBoxRefreshing || refreshingControls) return;
         const int item = channelBox.getSelectedId();
-        if (item <= 1) { setChannelOnSelection (0); return; }
-        const int idx2 = juce::jlimit (0, (int) channels.size() - 1, item - 2);
+        if (upic::channel_controls::isMainItem (item)) { setChannelOnSelection (0); return; }
+        const int idx2 = juce::jlimit (0, (int) channels.size() - 1,
+                                       upic::channel_controls::channelIndexForItemId (item));
         if (idx2 >= 0 && idx2 < (int) channels.size())
             setChannelOnSelection (channels[(size_t) idx2].id);
     };
@@ -1849,18 +1880,21 @@ int MainComponent::channelIndexOfId (int id) const
 
 void MainComponent::refreshChannelBox()
 {
+    // R5.9: the list's items and their ids are the channel card's own rule.
+    namespace cc = upic::channel_controls;
+
     channelBoxRefreshing = true;
     channelBox.clear (juce::dontSendNotification);
-    channelBox.addItem ("Main", 1);
+    channelBox.addItem (cc::mainName(), cc::kMainItemId);
     for (int i = 0; i < (int) channels.size(); ++i)
-        channelBox.addItem (channels[(size_t) i].name, i + 2);
+        channelBox.addItem (channels[(size_t) i].name, cc::itemIdForChannelIndex (i));
     int cur = 0;
     const auto ids = score.getSelectedArcs();
     if (! ids.empty())
         for (auto& a : curPage().arcs)
             if (a.id == ids.front()) { cur = a.channelId; break; }
     const int idx = channelIndexOfId (cur);
-    channelBox.setSelectedId (idx < 0 ? 1 : idx + 2, juce::dontSendNotification);
+    channelBox.setSelectedId (cc::itemIdForChannelIndex (idx), juce::dontSendNotification);
     channelBoxRefreshing = false;
 }
 
@@ -2061,13 +2095,17 @@ bool MainComponent::modWouldCycle (int carrierId, int modId) const
 
 void MainComponent::refreshModBox()
 {
-    arcModBox.clear (juce::dontSendNotification);
-    arcModBox.addItem ("None", 1);
-    for (auto& a : curPage().arcs)
-        arcModBox.addItem ("Arc " + juce::String (a.id), a.id + 1);
+    // R5.9: the lists' items, their ids and the depth's domain are the
+    // modulation card's own rule.
+    namespace mc = upic::modulation_controls;
 
-    int cur = -1, target = 0;
-    double depth = 0.5;
+    arcModBox.clear (juce::dontSendNotification);
+    arcModBox.addItem (mc::noneName(), mc::kNoneItemId);
+    for (auto& a : curPage().arcs)
+        arcModBox.addItem (juce::String (mc::arcName (a.id)), mc::itemIdForArc (a.id));
+
+    int cur = -1, target = mc::kPitchTarget;
+    double depth = mc::kDefaultDepth;
     const auto ids = score.getSelectedArcs();
     if (! ids.empty())
         for (auto& a : curPage().arcs)
@@ -2078,13 +2116,28 @@ void MainComponent::refreshModBox()
                 depth = a.modArcDepth;
                 break;
             }
-    arcModBox.setSelectedId (cur < 0 ? 1 : cur + 1, juce::dontSendNotification);
-    arcModTgtBox.setSelectedId (target == 1 ? 2 : 1, juce::dontSendNotification);
+    arcModBox.setSelectedId (mc::itemIdForArc (cur), juce::dontSendNotification);
+    arcModTgtBox.setSelectedId (mc::itemIdForTarget (target), juce::dontSendNotification);
     arcModSlider.setValue (depth, juce::dontSendNotification);
+}
+
+// R5.9: the card's two dropdowns read the same way and write the same
+// command. Before, the dispatch was copied at both call sites, and the two
+// copies could drift apart.
+void MainComponent::applyModulationControls()
+{
+    namespace mc = upic::modulation_controls;
+
+    const int item = arcModBox.getSelectedId();
+    setModOnSelection (mc::isNoneItem (item) ? -1 : mc::arcForItemId (item),
+                       mc::targetForItemId (arcModTgtBox.getSelectedId()),
+                       arcModSlider.getValue());
 }
 
 void MainComponent::setModOnSelection (int modId, int target, double depth)
 {
+    namespace mc = upic::modulation_controls;
+
     const auto ids = score.getSelectedArcs();
     if (ids.empty()) { flash ("Select an arc first"); return; }
     int applied = 0, refused = 0;
@@ -2097,8 +2150,8 @@ void MainComponent::setModOnSelection (int modId, int target, double depth)
                 if (modId >= 0 && (modId == a.id || modWouldCycle (a.id, modId)))
                 { ++refused; continue; }
                 a.modulatorArcId = modId;
-                a.modTarget = juce::jlimit (0, 1, target);
-                a.modArcDepth = juce::jlimit (0.0, 1.0, depth);
+                a.modTarget = juce::jlimit (mc::kPitchTarget, mc::kAmpTarget, target);
+                a.modArcDepth = juce::jlimit (mc::kMinDepth, mc::kMaxDepth, depth);
                 ++applied;
             }
     }

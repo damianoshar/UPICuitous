@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "SelfTest.h"
 #include "MainComponent.h"
+#include "ModulationControls.h"
 
 #include <algorithm>
 #include <memory>
@@ -120,6 +121,48 @@ void upic::runModulationControlsChecks (upic::SelfTest& t)
         t.check (ok, name, detail);
     };
 
+    namespace moc = upic::modulation_controls;
+
+    // --- the edge ------------------------------------------------------------
+    // The description is data, so it is checked without a window first.
+    check (juce::String (moc::describe().name) == "Modulation"
+           && moc::describe().card.size() == (size_t) moc::Control::count,
+           "R5.9 the edge describes the modulation card",
+           juce::String ((int) moc::describe().card.size()) + " cells");
+
+    check (moc::allControls().size() == (size_t) moc::Control::count,
+           "R5.9 the edge names every role once",
+           juce::String ((int) moc::allControls().size()) + " roles");
+
+    check (moc::kNoneItemId == 1 && moc::itemIdForArc (1) == 2
+           && moc::itemIdForArc (3) == 4 && moc::itemIdForArc (-1) == 1
+           && moc::isNoneItem (1) && ! moc::isNoneItem (2)
+           && moc::arcForItemId (2) == 1 && moc::arcForItemId (4) == 3,
+           "R5.9 the modulator list's ids are one rule",
+           juce::String (moc::itemIdForArc (1)) + ", " + juce::String (moc::itemIdForArc (3)));
+
+    check (moc::itemIdForTarget (moc::kPitchTarget) == 1
+           && moc::itemIdForTarget (moc::kAmpTarget) == 2
+           && moc::targetForItemId (1) == moc::kPitchTarget
+           && moc::targetForItemId (2) == moc::kAmpTarget
+           && juce::String (moc::targetName (moc::kPitchTarget)) == "Pitch"
+           && juce::String (moc::targetName (moc::kAmpTarget)) == "Amp",
+           "R5.9 the target list's ids and names are one rule",
+           juce::String (moc::targetName (moc::kPitchTarget)) + " / "
+             + juce::String (moc::targetName (moc::kAmpTarget)));
+
+    check (std::abs (moc::kMinDepth - 0.0) < 1e-12
+           && std::abs (moc::kMaxDepth - 1.0) < 1e-12
+           && std::abs (moc::kDepthInterval - 0.001) < 1e-12
+           && std::abs (moc::kDefaultDepth - 0.5) < 1e-12,
+           "R5.9 the depth's domain is one domain",
+           juce::String (moc::kMinDepth, 3) + " - " + juce::String (moc::kMaxDepth, 3));
+
+    check (juce::String (moc::arcName (7)) == "Arc 7"
+           && juce::String (moc::noneName()) == "None",
+           "R5.9 an arc's name in the list is one rule",
+           juce::String (moc::arcName (7)));
+
     auto mcHolder = std::make_unique<MainComponent>();
     auto& mc = *mcHolder;
     mc.setSize (1280, 800);
@@ -156,6 +199,48 @@ void upic::runModulationControlsChecks (upic::SelfTest& t)
                                    "(1 = +/- one octave at the contour extremes)",
            "R5.9 the modulation's controls say what they do", tooltipOf (modBox));
 
+    // --- the edge and the app's widgets are the same card -------------------
+    bool allBound = mc.modulationControlCountForTest() == (int) moc::Control::count;
+    bool sameWidgets = true;
+    for (int role = 0; role < mc.modulationControlCountForTest(); ++role)
+    {
+        auto* w = mc.modulationControlForTest (role);
+        if (w == nullptr) { allBound = false; continue; }
+        switch ((moc::Control) role)
+        {
+            case moc::Control::Modulator: sameWidgets = sameWidgets && w == modBox; break;
+            case moc::Control::Target:    sameWidgets = sameWidgets && w == tgtBox; break;
+            case moc::Control::Depth:     sameWidgets = sameWidgets && w == depSl;  break;
+            default: break;
+        }
+    }
+    check (allBound, "R5.9 every modulation role is bound to a widget",
+           juce::String (mc.modulationControlCountForTest()) + " roles");
+    check (sameWidgets
+           && mc.modulationControlLabelForTest ((int) moc::Control::Modulator) == modLab
+           && mc.modulationControlLabelForTest ((int) moc::Control::Target) == tgtLab
+           && mc.modulationControlLabelForTest ((int) moc::Control::Depth) == depLab,
+           "R5.9 the roles are the card's own controls");
+
+    juce::String fromEdge;
+    for (auto& cell : moc::describe().card)
+    {
+        auto* w = mc.modulationControlForTest ((int) cell.control);
+        if (w == nullptr) continue;
+        if (fromEdge.isNotEmpty()) fromEdge += ", ";
+        fromEdge += w->getName() + "|" + kindOf (w);
+    }
+    check (cardText (cardCells (mc, "mod")) == fromEdge,
+           "R5.9 the card is the edge's cell list, in the edge's order", fromEdge);
+
+    bool wordsMatch = true;
+    for (int role = 0; role < mc.modulationControlCountForTest(); ++role)
+        if (juce::String (moc::tooltip ((moc::Control) role))
+            != tooltipOf (mc.modulationControlForTest (role)))
+            wordsMatch = false;
+    check (wordsMatch, "R5.9 the card's tooltips are the edge's wording",
+           tooltipOf (modBox));
+
     // --- the depth's domain --------------------------------------------------
     check (std::abs (depSl->getMinimum() - 0.0) < 1e-12
            && std::abs (depSl->getMaximum() - 1.0) < 1e-12
@@ -163,6 +248,12 @@ void upic::runModulationControlsChecks (upic::SelfTest& t)
            "R5.9 the depth covers its domain",
            juce::String (depSl->getMinimum(), 3) + " - "
              + juce::String (depSl->getMaximum(), 3));
+
+    check (std::abs (depSl->getMinimum() - moc::kMinDepth) < 1e-12
+           && std::abs (depSl->getMaximum() - moc::kMaxDepth) < 1e-12
+           && std::abs (depSl->getInterval() - moc::kDepthInterval) < 1e-12,
+           "R5.9 the slider covers the edge's depth domain",
+           juce::String (depSl->getInterval(), 4));
 
     // --- the lists -----------------------------------------------------------
     // three arcs: arc 1 is bent by arc 3, arcs 2 and 3 are straight.
@@ -194,6 +285,33 @@ void upic::runModulationControlsChecks (upic::SelfTest& t)
     check (tgtBox->getItemId (0) == 1 && tgtBox->getItemId (1) == 2,
            "R5.9 the target list's ids are one rule",
            juce::String (tgtBox->getItemId (0)) + ", " + juce::String (tgtBox->getItemId (1)));
+
+    // --- the app's lists follow the edge's rules ----------------------------
+    // None is the list's first item; the page's arcs follow it, in order.
+    bool modListFollowsEdge = modBox->getItemId (0) == moc::kNoneItemId
+                          && modBox->getItemText (0) == juce::String (moc::noneName());
+    for (int i = 1; i < modBox->getNumItems() && i <= 3; ++i)
+    {
+        const int arcId = i;   // the piece's arcs are numbered 1, 2, 3
+        if (modBox->getItemId (i) != moc::itemIdForArc (arcId)) modListFollowsEdge = false;
+        if (modBox->getItemText (i) != juce::String (moc::arcName (arcId)))
+            modListFollowsEdge = false;
+    }
+    check (modListFollowsEdge,
+           "R5.9 the app's modulator list follows the edge's ids and names",
+           juce::String (modBox->getNumItems()) + " items");
+
+    bool tgtListFollowsEdge = tgtBox->getNumItems() == 2;
+    for (int i = 0; i < tgtBox->getNumItems() && i < 2; ++i)
+    {
+        const int target = i == 0 ? moc::kPitchTarget : moc::kAmpTarget;
+        if (tgtBox->getItemId (i) != moc::itemIdForTarget (target)) tgtListFollowsEdge = false;
+        if (tgtBox->getItemText (i) != juce::String (moc::targetName (target)))
+            tgtListFollowsEdge = false;
+    }
+    check (tgtListFollowsEdge,
+           "R5.9 the app's target list follows the edge's ids and names",
+           juce::String (tgtBox->getNumItems()) + " items");
 
     // --- the card follows the selection --------------------------------------
     mc.selectArcsAndSyncForTest ({ 1 });
