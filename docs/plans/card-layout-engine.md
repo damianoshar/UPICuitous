@@ -44,6 +44,14 @@ builders `F`, `FL`, `FI`, `FX`, `FK`, `neededWidth`, `captionWidthDp` and
 `headerWidthDp` are adapter code for the same reason. The engine receives
 the resolved numbers in `CellSpecification`.
 
+R5.6 gave the material card its *contents* an edge of their own
+(`Source/MaterialInspector.h`): which cells the material card holds, in
+which order and with which widths. The engine keeps the geometry - the
+packing of the cells into lines, and its rule that the plain controls come
+first and the knobs after them, so the card's reading order is not the
+description's order. See
+[`material-inspector-edge.md`](material-inspector-edge.md).
+
 The strip's cell rectangles are engine output too: `layoutStrip()` returns
 per-group cells and per-line segments, and the adapter pushes the segments
 into `toolbarGroups` with the group's name and colour.
