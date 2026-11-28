@@ -1826,6 +1826,143 @@ The boundary, the API and what stays in the shell are described in
 **Gate.** The suites pass, the rest of the selftest is untouched, the golden
 render and the legacy fixture are unchanged, and the full gate is green.
 
+### 6.36 R5.10 - the MIDI settings, the sample material, the live input and the phase modulation
+
+**What moves.** Four more *descriptions* leave the shell and move into edges of
+their own:
+
+- `Source/MidiSettings.h` - the MIDI settings section (the device row, the
+  activity line and the four learn rows), the wording of every word it shows
+  ("MIDI in", "no MIDI yet", "Learn", "Cancel", "-", "learning...", "CC 7 ch 3",
+  "note 60 ch 1") and the device list's item ids (None is 1, the device at the
+  hub's index i is i + 2);
+- `Source/SampleMaterial.h` - the sample material panel (the slot list, the
+  load button, the reverse, the level, the pitch list, the material's three
+  edits and the extraction), the wording of the controls that say something,
+  the pitch algorithm's list and its item ids (the engine's mode plus one), the
+  level's domain (0..2 in steps of 0.01, skewed 0.2, 1 as loaded) and the slot
+  list's item ids (the slot at the index i is the item i + 1);
+- `Source/LiveInput.h` - the live input panel (the monitor, the capture, the
+  input gain, the wave page, the pitch list, the grain and the reverse), the
+  capture's two words ("Capture", "Stop"), the input gain's domain (0..1 in
+  steps of 0.01, 0.8 as it starts), the grain's domain (5..500 ms in steps of
+  1, 40 ms as the live one starts), the live pitch's list and its item ids and
+  the reverse's buffer list (0.5 s, 1 s, 2 s);
+- `Source/PhaseModulation.h` - the phase modulation panel (the operator count,
+  the preset list, the ratio, the index, the index's envelope, the feedback and
+  the preset files), the two operator counts and their item ids, the six
+  presets and the voice each one writes (the ratio, the index, the envelope and
+  the feedback) and the three knobs' domains (0.1..32 / 0..20 / 0..1, skewed
+  0.4).
+
+The review's row R052 asks for the MIDI and the sample controls to be
+extracted, and its §28 names the four panels:
+
+> | Functions | Proposed destination |
+> |---|---|
+> | `buildMidiControls()` | MidiSettingsPanel |
+> | `buildPmControls()` | PhaseModulationPanel |
+> | `buildSampleControls()` | SampleMaterialPanel |
+> | `buildLiveInputControls()` | LiveInputPanel |
+
+R5.10 takes the first step of that table, the same step R5.6, R5.7, R5.8 and
+R5.9 took for the inspectors: the *description* and the *words* become an edge,
+and the widgets and the commands stay the shell's. `buildMidiControls()`,
+`buildPmControls()`, `buildSampleControls()`, `buildLiveInputControls()` and
+`buildLiveControls()` are still `MainComponent`'s: they open the device, they
+start the learn, they capture, they edit the material, they write the arcs and
+they write the undo transactions, which are the shell's. The panels themselves
+are a later phase's business.
+
+**What stays.** The widgets stay the shell's (`MainComponent` owns them), and
+so do the commands: the MIDI routing and the learn, the sample's loading and
+its three edits, the capture's lifecycle, the PM arc's assignment and the
+preset files. The material **card** is not the edge's: where the cells go and
+which tab shows them is still the material inspector's (`Source/MaterialInspector.h`,
+R5.6). The edges say what the controls *mean*, not where they sit.
+
+**The one change.** The PM preset's five rows were if-chains that wrote four
+locals, and the two operator counts were "the id is 2 ? 4 : 2" at three call
+sites:
+
+```cpp
+if (sel == 2) { ratio = 2.0;   idx = 2.5; envId = 1; fb = 0.0; }
+else if (sel == 3) { ratio = 1.0; idx = 1.0; envId = 0;  fb = 0.1; }
+...
+const int ops = (pmOpsBox.getSelectedId() == 2) ? 4 : 2;
+```
+
+Now the presets are one table in the edge and the operator count is one rule
+(`opsCountForItemId()`), and the app reads them. The same holds for the other
+three edges: the device list's ids ("index + 2" when it was written, "item - 2"
+when it was read), the slot list's ids, the pitch lists' ids, the reverse's
+lengths ("`id == 1 ? 0.5 : id == 3 ? 2.0 : 1.0`") and the MIDI binding's text
+format are each written down once now.
+
+**Two gaps are pinned, not fixed.** The characterization found them, and R5.10
+records them as they are:
+
+- **Two of the four Learn buttons are not wired.** The master gain's and the
+  transport's buttons have a handler; the intensity's and the scrub's do not
+  (their `onClick` is empty), so pressing them does nothing today. R5.10 moves
+  the words and does not add handlers; the suite records the gap. Wiring them
+  is a behaviour change and belongs to its own phase.
+- **The PM preset does not open an undo transaction.** Picking a preset writes
+  the selected PM arc directly, without `runEdit()`. R5.10 moves the words and
+  does not change the commands; the suite records it. Making the preset
+  undoable is a behaviour change and belongs to its own phase.
+
+**The behaviour is unchanged.** The panels keep their controls, their order and
+their wording: the lists offer the same items with the same ids, the level
+covers the same domain and starts at the same value, the input gain covers the
+same domain and starts at the same value, the grain covers the same domain,
+the PM presets write the same voices, and the buttons say what they said. The
+golden render and the v0.29 fixture say so.
+
+**The contract.** Four suites, written before the move,
+`Source/SelfTestMidiSettings.cpp` (23 checks at the characterization, 28
+after the move), `Source/SelfTestSampleMaterial.cpp` (18 checks, 26),
+`Source/SelfTestLiveInput.cpp` (21 checks, 31) and
+`Source/SelfTestPhaseModulation.cpp` (17 checks, 26).
+
+They drive the real component: they press the buttons, pick from the dropdowns
+the user picks from, inject the hub's messages and read the app's piece. They
+pin:
+
+- the MIDI section: the device row's caption and tooltip, the activity line's
+  first text, the four captions and the four binding labels, the device list's
+  first item, the learn (the button's word, the row's "learning...", and the
+  buttons back to "Learn" after the cancel), the binding's text for a CC and
+  for a note and the cleared binding;
+- the sample material: the level's domain, its start value and its wording,
+  the slot list's eight items and their ids, the pitch list's four items and
+  their ids, the material's three edits, the reverse and the extraction;
+- the live input: the monitor, the capture and the input gain's domain and
+  start value, the live pitch's three items, the reverse's three buffer
+  lengths and the one the box starts on, the two grain sliders' domain and the
+  live one's wording, and the wave page's wording;
+- the phase modulation: the two operator counts and their ids, the six preset
+  items and their ids, the three knobs' domains, the preset files' words, and
+  a preset writing the selected PM arc.
+
+The move added the checks that pin the edges against the app: every role is
+bound to a widget, the roles point at the panels' own widgets, the tooltips are
+the edges' wording, the lists follow the edges' items and ids, the domains
+follow the edges, and each edge's own tables are sound.
+
+**The mechanical check.** The production code does not call a test-only door,
+the bodies are the old ones, and the behaviour is unchanged where it should
+be - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`midi-settings-edge.md`](midi-settings-edge.md),
+[`sample-material-edge.md`](sample-material-edge.md),
+[`live-input-edge.md`](live-input-edge.md) and
+[`phase-modulation-edge.md`](phase-modulation-edge.md).
+
+**Gate.** The suites pass, the rest of the selftest is untouched, the golden
+render and the legacy fixture are unchanged, and the full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1857,7 +1994,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5, R5.6, R5.7, R5.8 and R5.9 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480`, `2cd45f1`, `39e7cbb`, `c84a287`, `9dbd160`, `3148d5d`, `60b7224`, `27c85a6` | app selftest 3,552/3,552, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. R5.7 gives the sieve and the frequency controls descriptions of their own (`Source/SievePanel.h`, `Source/FrequencyInspector.h`) and a shared cell vocabulary (`Source/InspectorCell.h`), so the time grid's divisions, the remainder list's text format and the ambitus's "Custom" item id are each written down once. R5.8 gives the sequence card and the performance transport one description of their own (`Source/SequenceTransport.h`), so the card's cells, the three surfaces' wording, the press rule, the tempo's domain and the page-duration fallback are each written down once. R5.9 gives the channel and the modulation controls descriptions of their own (`Source/ChannelControls.h`, `Source/ModulationControls.h`), so the two cards' cells, the channel list's item ids, the modulation list's items and ids, the target rule and the depth's domain are each written down once. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, the sieve panel's own suite 42/42, the frequency inspector's own suite 29/29, the sequence transport's own suite 45/45, the channel controls' own suite 26/26, the modulation controls' own suite 38/38, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5, R5.6, R5.7, R5.8, R5.9 and R5.10 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480`, `2cd45f1`, `39e7cbb`, `c84a287`, `9dbd160`, `3148d5d`, `60b7224`, `27c85a6`, `1112dc3`, `7ce31c9` | app selftest 3,663/3,663, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. R5.7 gives the sieve and the frequency controls descriptions of their own (`Source/SievePanel.h`, `Source/FrequencyInspector.h`) and a shared cell vocabulary (`Source/InspectorCell.h`), so the time grid's divisions, the remainder list's text format and the ambitus's "Custom" item id are each written down once. R5.8 gives the sequence card and the performance transport one description of their own (`Source/SequenceTransport.h`), so the card's cells, the three surfaces' wording, the press rule, the tempo's domain and the page-duration fallback are each written down once. R5.9 gives the channel and the modulation controls descriptions of their own (`Source/ChannelControls.h`, `Source/ModulationControls.h`), so the two cards' cells, the channel list's item ids, the modulation list's items and ids, the target rule and the depth's domain are each written down once. R5.10 gives the MIDI settings, the sample material, the live input and the phase modulation descriptions of their own (`Source/MidiSettings.h`, `Source/SampleMaterial.h`, `Source/LiveInput.h`, `Source/PhaseModulation.h`), so the four learn rows' captions, the device list's item ids, the slot list's item ids, the pitch lists' items and ids, the level's and the input gain's domains, the operator counts, the six presets and the three knobs' domains are each written down once. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, the sieve panel's own suite 42/42, the frequency inspector's own suite 29/29, the sequence transport's own suite 45/45, the channel controls' own suite 26/26, the modulation controls' own suite 38/38, the MIDI settings' own suite 28/28, the sample material's own suite 26/26, the live input's own suite 31/31, the phase modulation's own suite 26/26, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
 | R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
@@ -5088,3 +5225,162 @@ suite 14/14, the render's own suite 18/18, golden render
 `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged,
 plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS, boundaries
 5 rules / 0 violations (69 source files).
+
+### R5.10 record (2026-11-28)
+
+The MIDI section, the sample panel, the live input and the phase modulation
+panel are written down once.
+
+The characterization commit is `1112dc3`, the move `7ce31c9`.
+
+| Measure | Before | After |
+|---|---|---|
+| the MIDI settings | built inline in `MainComponentControls.cpp` and `MainComponentMidi.cpp` | one description (`Source/MidiSettings.h`) |
+| the sample material | built inline in `MainComponentControls.cpp` | one description (`Source/SampleMaterial.h`) |
+| the live input | built inline in `MainComponentControls.cpp` and `MainComponent.cpp` | one description (`Source/LiveInput.h`) |
+| the phase modulation | built inline in `MainComponentControls.cpp` | one description (`Source/PhaseModulation.h`) |
+| the roles and the widgets | the shell named the widgets itself | the app binds the roles to its widgets (`sampleMaterialControls`, `liveInputControls`, `phaseModulationControls`) |
+| the device list's ids | "index + 2" when the list was written, "item - 2" when it was read | one rule (`itemIdForDeviceIndex`, `deviceIndexForItemId`, `isNoneItem`) |
+| the MIDI section's words | in the widgets' declarations and in `updateMidiLabels()` | the edge's words (`deviceCaption`, `noActivityText`, `learnText`, `cancelText`, `unboundText`, `learningText`, `bindingText`) |
+| the slot list's ids | "index + 1" when the list was written, "item - 1" when it was read | one rule (`itemIdForSlotIndex`, `slotIndexForItemId`) |
+| the sample's pitch list | four items written in the build, "id - 1" when it was read | one rule (`pitchModes`, `pitchItemId`, `pitchModeForItemId`) |
+| the live's pitch list | three items written in the build, "id - 1" when it was read | one rule (`pitchModes`, `pitchItemId`, `pitchModeForItemId`) |
+| the reverse's lengths | "0.5 s", "1 s", "2 s" written in the build, "id == 1 ? 0.5 : id == 3 ? 2.0 : 1.0" when it was read | one rule (`reverseLengths`, `reverseLengthItemId`, `reverseLengthForItemId`) |
+| the level's domain | 0..2 / 0.01 / 0.2, written in the build | one domain (`kLevelMin`, `kLevelMax`, `kLevelInterval`, `kLevelSkew`) |
+| the input gain's domain | 0..1 / 0.01 / 0.8, written in the build | one domain (`kInputGainMin`, `kInputGainMax`, `kInputGainInterval`) |
+| the grain's domain | 5..500 / 1, written in two places | one domain (`kGrainMinMs`, `kGrainMaxMs`, `kGrainIntervalMs`) |
+| the operator counts | "the id is 2 ? 4 : 2", written at three call sites | one rule (`opsCounts`, `opsItemId`, `opsCountForItemId`) |
+| the PM presets | five if-chains that wrote four locals, and the names in the list | one table (`presets`, `presetForItemId`, `isManualItem`) |
+| the PM voice's domains | three ranges written in the build | three domains (`kRatioMin`..., `kIndexMin`..., `kFeedbackMin`...) |
+| the MIDI settings' own suite | - | `Source/SelfTestMidiSettings.cpp`, 28 checks |
+| the sample material's own suite | - | `Source/SelfTestSampleMaterial.cpp`, 26 checks |
+| the live input's own suite | - | `Source/SelfTestLiveInput.cpp`, 31 checks |
+| the phase modulation's own suite | - | `Source/SelfTestPhaseModulation.cpp`, 26 checks |
+| the source files | 69 | 73 (the four suites) |
+
+**The suites came first.** `Source/SelfTestMidiSettings.cpp` (23 checks),
+`Source/SelfTestSampleMaterial.cpp` (18 checks),
+`Source/SelfTestLiveInput.cpp` (21 checks) and
+`Source/SelfTestPhaseModulation.cpp` (17 checks) were written against the old
+code: they press the buttons, pick from the dropdowns the user picks from,
+inject the hub's messages and read the app's piece.
+
+They pin:
+
+- the MIDI section: the device row's caption and tooltip, the activity line's
+  first text, the four captions and the four binding labels, the device list's
+  first item and its ids, the learn (the button's word, the row's
+  "learning...", and the buttons back to "Learn" after the cancel), the
+  binding's text for a CC and for a note, and the cleared binding;
+- the sample material: the level's domain, its start value and its wording,
+  the slot list's eight items and their ids, the pitch list's four items and
+  their ids, the material's three edits, the reverse and the extraction;
+- the live input: the monitor, the capture and the input gain's domain and
+  start value, the live pitch's three items, the reverse's three buffer
+  lengths and the one the box starts on, the two grain sliders' domain and the
+  live one's wording, and the wave page's wording;
+- the phase modulation: the two operator counts and their ids, the six preset
+  items and their ids, the three knobs' domains, the preset files' words, and
+  a preset writing the selected PM arc.
+
+The move added the checks that pin the edges against the app: every role is
+bound to a widget, the roles point at the panels' own widgets, the tooltips are
+the edges' wording, the lists follow the edges' items and ids, the domains
+follow the edges, and each edge's own tables are sound.
+
+**The edges.** The four headers are descriptions - data, no widgets, no
+document, no JUCE:
+
+```cpp
+namespace upic::midi_settings
+{
+    enum class Target { MasterGain = 0, Intensity = 1, Scrub = 2, Transport = 3, count };
+    struct Row { Target target; const char* caption; };
+    const std::vector<Row>& rows();
+    const char* deviceCaption();   const char* deviceTooltip();
+    const char* noActivityText();
+    const char* learnText(); const char* cancelText();
+    const char* unboundText(); const char* learningText();
+    std::string bindingText (bool note, int number, int channel);
+    constexpr int kNoneItemId = 1;
+    int itemIdForDeviceIndex (int index);
+    int deviceIndexForItemId (int itemId);
+    bool isNoneItem (int itemId);
+}
+
+namespace upic::sample_material
+{
+    enum class Control { Slot, LoadSample, Reverse, Level, Pitch, Normalise,
+                         Fade, Reset, Extract, count };
+    const std::vector<Control>& allControls();
+    const char* tooltip (Control control);
+    constexpr double kLevelMin = 0.0, kLevelMax = 2.0;
+    constexpr double kLevelInterval = 0.01, kLevelSkew = 0.2, kDefaultLevel = 1.0;
+    struct PitchMode { const char* name; int mode; };
+    const std::vector<PitchMode>& pitchModes();
+    int pitchItemId (int mode); int pitchModeForItemId (int itemId);
+    int itemIdForSlotIndex (int index); int slotIndexForItemId (int itemId);
+}
+
+namespace upic::live_input
+{
+    enum class Control { Monitor, Capture, InputGain, WaveFromSlot, Pitch,
+                         Grain, Reverse, ReverseLength, count };
+    const std::vector<Control>& allControls();
+    const char* tooltip (Control control);
+    const char* captureText(); const char* stopText();
+    constexpr double kInputGainMin = 0.0, kInputGainMax = 1.0;
+    constexpr double kInputGainInterval = 0.01, kDefaultInputGain = 0.8;
+    constexpr double kGrainMinMs = 5.0, kGrainMaxMs = 500.0, kGrainIntervalMs = 1.0;
+    struct PitchMode { const char* name; int mode; };
+    const std::vector<PitchMode>& pitchModes();
+    struct ReverseLength { const char* name; double seconds; };
+    const std::vector<ReverseLength>& reverseLengths();
+}
+
+namespace upic::phase_modulation
+{
+    enum class Control { Ops, Preset, Ratio, Index, IndexEnv, Feedback,
+                         Import, Export, count };
+    const std::vector<Control>& allControls();
+    const char* tooltip (Control control);
+    constexpr double kRatioMin = 0.1, kRatioMax = 32.0, kRatioSkew = 0.4;
+    constexpr double kIndexMin = 0.0, kIndexMax = 20.0, kIndexSkew = 0.4;
+    constexpr double kFeedbackMin = 0.0, kFeedbackMax = 1.0, kFeedbackSkew = 0.4;
+    struct Ops { const char* name; int count; };
+    const std::vector<Ops>& opsCounts();
+    struct Preset { int itemId; const char* name; double ratio, index;
+                    int indexEnv; double feedback; };
+    const std::vector<Preset>& presets();
+}
+```
+
+**The gaps the characterization found.** Two, both pinned as they are:
+
+- **Two of the four Learn buttons are not wired.** `midiLearnInt.onClick` and
+  `midiLearnScrub.onClick` are never assigned (only the master gain's at the
+  gain row and the transport's at the transport row are), so pressing them does
+  nothing today. The suite presses the two wired buttons and reaches the
+  unwired rows through the hub, and the note records the gap. Wiring them is a
+  behaviour change and belongs to its own phase.
+- **The PM preset does not open an undo transaction.** `pmPresetBox.onChange`
+  writes the selected PM arc directly, without `runEdit()`. R5.10 moves the
+  words and does not change the commands.
+
+The production code does not call a test-only door, the bodies are the old
+ones, and the behaviour is unchanged where it should be - the golden render and
+the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`midi-settings-edge.md`](midi-settings-edge.md),
+[`sample-material-edge.md`](sample-material-edge.md),
+[`live-input-edge.md`](live-input-edge.md) and
+[`phase-modulation-edge.md`](phase-modulation-edge.md).
+
+Gate: app selftest 3,663/3,663, the MIDI settings' own suite 28/28, the sample
+material's own suite 26/26, the live input's own suite 31/31, the phase
+modulation's own suite 26/26, the modulation controls' own suite 38/38, the
+channel controls' own suite 26/26, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS, boundaries 5 rules / 0 violations
+(73 source files).
