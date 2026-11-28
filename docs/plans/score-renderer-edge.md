@@ -131,10 +131,10 @@ edge's, and the checks themselves did not change.
 
 ## What is not covered yet
 
-- **The hit testing is still in the editor** (`arcsNear()`, `pickArc()`,
-  `pickZone()`, `zoneHandleAt()`). The review's R045 ("Extract
-  ScoreHitTester") is the next step, and the mapper is what the two will
-  share.
+- **The hit testing has an edge of its own now** (R045):
+  `Source/ScoreHitTester.h`. It asks with the same mapper this render draws
+  with, so the picture and the grab agree. See
+  [`score-hit-tester-edge.md`](score-hit-tester-edge.md).
 - **The grid and the arcs are not separate painters yet.** The review's
   §24 lists `ScoreGridRenderer` and `ArcPainter`; R5.1 extracts the render
   as a whole, and the sub-painters can be split out of it later without

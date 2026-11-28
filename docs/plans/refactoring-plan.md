@@ -1264,6 +1264,51 @@ the golden render and the v0.29 fixture say so.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.29 R5.3 - the score canvas's hit tester
+
+**What moves.** The answer to "what is under the cursor?" moves out of
+`ScoreEditor` into the new `Source/ScoreHitTester.h`: the arcs near a point
+(`arcsNear()`), the nearest arc (`pickArc()`), the zone under a point
+(`pickZone()`) and the zone's handle under a point (`zoneHandleAt()`). The
+review asks for the hit testing to be a thing of its own (R045, "Extract
+ScoreHitTester") and says what it is for: "`ScoreHitTester` should identify
+arcs, points or handles under a given coordinate" (§24).
+
+The hit tester answers from what it is handed: the mapper (R044), the page
+(the arcs and the zones), the layer (only this layer's arcs are under the
+cursor) and whether a touch pointer has been seen (a finger gets a wider
+grab band). It reads them and writes nothing.
+
+**What stays.** `ScoreEditor` keeps the gesture: it asks the hit tester the
+question and acts on the answer (the selection, the marquee, the zone's
+drag, the erase, the tools). The editor's private `arcsNear()`,
+`pickArc()`, `pickZone()` and `zoneHandleAt()` stay as the editor's way in,
+and now delegate.
+
+**The one change.** None in the behaviour. The bodies are the editor's, body
+for body: the 12-pixel grab band (20 for a touch), the nearest-first
+ordering, the layer rule, the 4-pixel slack on a zone's border, the
+topmost zone first and the eight handles do not change by a character.
+
+**The contract.** `Source/SelfTestScoreHitTest.cpp`, written before the
+move, 34 checks. It reaches the hit testing through the editor's own doors
+(`arcsNearForTest()`, `pickArcForTest()`, `pickZoneForTest()`,
+`zoneHandleAtForTest()`) and, for the last group, through the editor's real
+mouse handling. It pins: the arcs near a point and their nearest-first
+ordering, the nearest arc, the grab band (inside, outside and given), an
+arc hit along its line and not only at its points, the layer rule, the zone
+under a point, the border's slack, the topmost zone, the eight handles and
+none, and the end-to-end click (the Select tool selects the arc under the
+cursor, the Zone tool selects the zone under it).
+
+**The mechanical check.** The production code does not call a test-only
+door, the diff outside the hit testing is empty, and the behaviour is
+unchanged - the golden render and the v0.29 fixture say so.
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1295,7 +1340,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R5 UI decomposition | **R5.1 and R5.2 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62` | app selftest 3,198/3,198, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands, and the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`), so the drawing and the hit testing share one mapping. The render's own suite 18/18, the mapper's own suite 14/14, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R5 UI decomposition | **R5.1, R5.2 and R5.3 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576` | app selftest 3,232/3,232, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
 | R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
@@ -3509,3 +3554,93 @@ Gate: app selftest 3,198/3,198, the mapper's own suite 14/14, the render's
 own suite 18/18, golden render `0x6d7571bdd80e3cd9` unchanged, legacy
 fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval
 strictness 5 SUCCESS, boundaries 5 rules / 0 violations (60 source files).
+
+### R5.3 record (2026-11-28)
+
+What is under the cursor is answered by the hit tester, and the editor
+keeps the gesture.
+
+The characterization commit is `be94fc2`, the move `a563576`.
+
+| Measure | Before | After |
+|---|---|---|
+| the hit testing | four private methods in `ScoreEditor` (`arcsNear`, `pickArc`, `pickZone`, `zoneHandleAt`), about 75 lines | `upic::score_hit_test::ScoreHitTester` in `Source/ScoreHitTester.h` (142 lines, header-only); the editor's methods delegate |
+| the canvas's source | `Source/ScoreEditor.cpp`, 2,136 lines | 2,132 lines |
+| the hit tester's own suite | - | `Source/SelfTestScoreHitTest.cpp`, 34 checks |
+| the source files | 60 | 61 (the suite) |
+
+**The suite came first.** `Source/SelfTestScoreHitTest.cpp` was written
+against the old code: 34 checks that reach the hit testing through the
+editor's own doors (`arcsNearForTest()`, `pickArcForTest()`,
+`pickZoneForTest()`, `zoneHandleAtForTest()`) and, for the last group,
+through the editor's real mouse handling - a synthesised click, the way the
+app's own tests do it.
+
+It pins:
+
+- the arcs near a point, nearest first, and the nearest arc alone;
+- the grab band: 12 pixels for the mouse (20 for a touch), inside, outside
+  and given;
+- an arc is hit along its line, not only at its points;
+- the layer rule: an arc of another layer is not under the cursor;
+- the zone under a point, the border's slack (4 pixels), the topmost zone
+  first;
+- the zone's handles: the four edges (1..4), the four corners (5..8) and
+  none (0);
+- the end-to-end click: the Select tool selects the arc under the cursor and
+  clears the selection on empty space, the Zone tool selects the zone under
+  the cursor.
+
+The probes place the cursor with the editor's own mapping (`timeToX()`,
+`freqToY()`), so they do not hard-code where a time or a pitch is.
+
+**The edge.** `Source/ScoreHitTester.h` is the hit tester's contract:
+
+```cpp
+namespace upic::score_hit_test
+{
+    struct ScoreHitTester
+    {
+        score_coordinates::ScoreCoordinateMapper mapper;
+        const Page* page = nullptr;
+        int layer = 0;
+        bool touchSeen = false;
+
+        std::vector<int> arcsNear (juce::Point<float> pos, float maxD = -1.0f) const;
+        int pickArc (juce::Point<float> pos) const;
+        int pickZone (juce::Point<float> pos) const;
+        int zoneHandleAt (const SieveZone& z, juce::Point<float> pos) const;
+    };
+}
+```
+
+The bodies are the editor's, body for body. The 12-pixel grab band (20 for a
+touch), the nearest-first ordering, the layer rule, the 4-pixel slack on a
+zone's border, the topmost zone first and the eight handles do not change
+by a character.
+
+**The hit tester answers; the editor acts.** The hit tester is a value: the
+editor builds one for every use (`ScoreEditor::hitTester()`), handing it the
+mapper, the page, the layer and the touch's grab band. The editor's
+private `arcsNear()`, `pickArc()`, `pickZone()` and `zoneHandleAt()` stay
+as its way in, and the gesture - the selection, the marquee, the zone's
+drag, the erase, the tools - stays in the editor.
+
+**One mapping, two answers.** The render (R043) draws with the mapper and
+the hit tester (R045) asks with the same mapper, so the picture and the
+grab agree about where a time and a pitch are. That is the review's
+requirement: "Rendering, hit testing and coordinate conversion should
+agree, but they should not be implemented as one operation" (§24).
+
+**The mechanical check.** The production code does not call a test-only
+door, the moved bodies are the editor's body for body, and the behaviour is
+unchanged - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the editor are described in
+[`score-hit-tester-edge.md`](score-hit-tester-edge.md).
+
+Gate: app selftest 3,232/3,232, the hit tester's own suite 34/34, the
+mapper's own suite 14/14, the render's own suite 18/18, golden render
+`0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged,
+plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS, boundaries 5
+rules / 0 violations (61 source files).

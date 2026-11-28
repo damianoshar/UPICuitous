@@ -115,10 +115,6 @@ and the checks themselves did not change.
 
 ## What is not covered yet
 
-- **The hit tester is still in the editor** (`arcsNear()`, `pickArc()`,
-  `pickZone()`, `zoneHandleAt()`). The review's R045 ("Extract
-  ScoreHitTester") is the next step, and the mapper is what it will share
-  with the render.
 - **The view's state is still the editor's fields** (`timeZoom`,
   `timeOffset`, `freqZoom`, `freqOffset`). A `ScoreCamera` (the review's
   §24 file list) would own the zoom and the scroll; until then the editor
