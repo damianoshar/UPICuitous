@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "UpicModel.h"
+#include "ScoreRenderer.h"
 #include <optional>
 #include <algorithm>
 #include <cmath>
@@ -428,7 +429,9 @@ private:
     juce::Point<float> marqueeStart, marqueeCur;
     bool drawingZone = false, scrubbing = false, scrubDragged = false, freezeAfterDrag = false;
     double lastDragMs = 0.0;
-    struct StrokePt { juce::Point<float> pos; float press = 1.0f; };
+    // The stroke in progress. The point is the render's type too (the render
+    // draws the stroke), so it lives in the renderer's header.
+    using StrokePt = upic::score_render::StrokePoint;
     std::vector<StrokePt> strokePts;
     std::optional<juce::Point<float>> lineAnchor;
     juce::Point<float> lastMouse, moveStartPos, zoneStart, zoneCur;
@@ -464,6 +467,11 @@ private:
     float curPress(const juce::MouseEvent& e) const;
 
     juce::Rectangle<float> plotArea() const;
+
+    // The view the renderer draws into: the plot's rectangle and the
+    // mapping between the page's time/pitch and the screen. The editor and
+    // the render share it, so the drawing and the hit testing agree.
+    upic::score_render::View renderView() const;
 
     juce::Rectangle<float> timeStripRect() const;
 
@@ -503,8 +511,6 @@ private:
     juce::Rectangle<float> zoneRect(const upic::SieveZone& z) const;
 
     juce::String toolName() const;
-
-    static double niceStep(double raw);
 
     bool arcInLayer(const upic::Arc& a) const;
 
