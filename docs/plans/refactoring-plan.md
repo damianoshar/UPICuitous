@@ -1167,6 +1167,56 @@ unchanged - the golden render and the v0.29 fixture say so.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.27 R5.1 - the score canvas's render
+
+**What moves.** The canvas's drawing moves out of `ScoreEditor` into the new
+`Source/ScoreRenderer.h` / `Source/ScoreRenderer.cpp`: the frame, the grid
+(the time lines, the pitch lines, the sieve's pitch guides and the zone's
+time grid), the sieve zones, the arcs (the stroke, the dots and the tags),
+the in-progress gesture (the stroke, the line's rubber band, the zone's
+rubber rectangle and the selection marquee), the scrub line, the labels, the
+playhead, the workspace's mark and the hint lines. The review asks for the
+render to be a thing of its own (R043, "Separate ScoreRenderer from
+ScoreEditor") and for the rendering, the hit testing and the coordinate
+conversion to agree without being one operation.
+
+The render draws what it is handed: a `View` (where the plot is and how the
+page's time and pitch map onto the screen) and a `State` (the page, the
+waves, the tuning, the selection, the layers, the flags and the gesture). It
+owns nothing and it changes nothing.
+
+**What stays.** `ScoreEditor` keeps the gesture (the mouse and the touch
+handling, the tools, the quantisers, the commit of a stroke), the selection,
+the model's commands and the wheel's view commands. The editor's public
+mapping (`timeToX()`, `freqToY()`, …) stays, and now delegates to the same
+`View` the render draws with, so the drawing and the hit testing cannot
+drift apart.
+
+**The one change.** None in the behaviour. The bodies are the editor's
+`paint()`, body for body: the colours, the order of the passes (the zones
+under the grid, the arcs over it, the labels above them, the playhead over
+the labels) and the wording of the hint lines do not change by a character.
+The `View` carries the mapping that used to live in the editor's five
+methods; the formulas are the same, body for body.
+
+**The contract.** `Source/SelfTestScoreRender.cpp`, written before the move,
+18 checks. It paints the canvas off-screen into a `juce::Image` and pins the
+picture: the background and the frame, the grid (on and off), the A440 and C
+lines, the sample layer's Ref line, the arc's dot, the layer rule, the
+selected arc's brighter dot, a zone's translucent fill, the playhead (and
+its absence at zero), the workspace's mark, the hints (on and off change the
+image), the render's determinism, and that painting mutates neither the
+model nor the view. The probes read single pixels at positions the editor's
+own public mapping gives them, so they do not hard-code the mapping.
+
+**The mechanical check.** The production code does not call a test-only
+door, the diff outside the render is empty, and the behaviour is unchanged -
+the golden render and the v0.29 fixture say so.
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1198,7 +1248,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R5 UI decomposition | not started | - | - |
+| R5 UI decomposition | **R5.1 shipped** | `bf1ad70`, `e7dd14c` | app selftest 3,184/3,184, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands, the render's own suite 18/18, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
 | R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
@@ -3216,3 +3266,97 @@ Gate: app selftest 3,166/3,166, the library repository's own suite 47/47,
 golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture
 `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness
 5 SUCCESS, boundaries 5 rules / 0 violations (57 source files).
+
+### R5.1 record (2026-11-28)
+
+The score canvas's render is an edge now, and the editor keeps the gesture.
+
+The characterization commit is `bf1ad70`, the move `e7dd14c`.
+
+| Measure | Before | After |
+|---|---|---|
+| the canvas's render | 380 lines in `ScoreEditor::paint()` | 372 lines in `Source/ScoreRenderer.cpp` (the frame, the grid, the zones, the arcs, the gesture, the labels, the playhead and the hints) |
+| the canvas's source | `Source/ScoreEditor.cpp`, 2,477 lines / 98.3 KB | 2,136 lines / 79.8 KB (the render is out) |
+| the coordinate mapping | five methods in `ScoreEditor` (`xToTime`, `timeToX`, `yToFreq`, `freqToY`, `zoneRect`) | `upic::score_render::View` (`Source/ScoreRenderer.h`); the editor's methods delegate to it |
+| the render's own suite | - | `Source/SelfTestScoreRender.cpp`, 18 checks |
+| the source files | 57 | 59 (the suite and the render) |
+
+**The suite came first.** `Source/SelfTestScoreRender.cpp` was written
+against the old code: 18 checks that paint the canvas off-screen into a
+`juce::Image` and read single pixels - the background and the frame, the
+grid on and off, the A440 and C lines, the sample layer's Ref line, the
+arc's dot, the layer rule, the selected arc's brighter dot, a zone's
+translucent fill, the playhead and its absence at zero, the workspace's
+mark, the hints, the determinism and the untouched model.
+
+The probes read the pixels at positions the editor's *own* public mapping
+gives them (`timeToX()`, `freqToY()`), so the suite pins the agreement
+between the drawing and the mapping as well as the colours.
+
+**The edge.** `Source/ScoreRenderer.h` is the render's contract:
+
+```cpp
+namespace upic::score_render
+{
+    struct View   // where the plot is and how time and pitch map onto it
+    {
+        juce::Rectangle<float> plot;
+        double durationSec, pitchLo, pitchHi;
+        double timeZoom, timeOffset, freqZoom, freqOffset;
+
+        double xToTime (float x) const;
+        float timeToX (double t) const;
+        double yToFreq (float y) const;
+        float freqToY (double f) const;
+        juce::Rectangle<float> zoneRect (const SieveZone& z) const;
+    };
+
+    struct State  // what is drawn
+    {
+        View view;
+        const Page* page; const std::vector<Waveform>* waves;
+        const Tuning* tuning; const std::vector<int>* selArcs;
+        const std::vector<int>* sieveR;
+        int layer; bool showGrid, showHints, sieveOn; int sieveM;
+        double timeGrid, stickiness; bool recordPressure;
+        bool workspaceMarked; juce::String workspaceCaption, toolName;
+        bool zoneTool; double curRef; int selectedZone;
+        const std::vector<StrokePoint>* strokePts;
+        bool hasLineAnchor; juce::Point<float> lineAnchor, lastMouse;
+        bool drawingZone; juce::Rectangle<float> zoneRubberRect;
+        bool selectingMarquee; juce::Rectangle<float> marqueeRect, scrubGrip;
+        bool hasPlayhead; double playhead; bool isPlaying, scrubbing;
+    };
+
+    void paint (juce::Graphics& g, const State& s);
+}
+```
+
+The bodies are the editor's `paint()`, body for body. The colours, the
+order of the passes and the wording of the hint lines do not change by a
+character.
+
+**The one view.** The mapping that used to live in the editor's five methods
+is now the `View`, and the editor's methods delegate to it. The drawing and
+the hit testing therefore share one mapping - which is what the review asks
+for ("Rendering, hit testing and coordinate conversion should agree, but
+they should not be implemented as one operation", §24). The review gives
+the mapping a name of its own in R044 ("Introduce ScoreCoordinateMapper");
+until then it lives next to the render that needs it, and R044 moves it.
+
+**The service stays in the editor.** The gesture, the tools, the
+quantisers, the commit of a stroke, the selection and the model's commands
+stay in `ScoreEditor`. They need the editor's state, the model's lock and
+the app's hooks; they are not the picture.
+
+**The mechanical check.** The production code does not call a test-only
+door, the moved bodies are the editor's body for body, and the behaviour is
+unchanged - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the editor are described in
+[`score-renderer-edge.md`](score-renderer-edge.md).
+
+Gate: app selftest 3,184/3,184, the render's own suite 18/18, golden render
+`0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged,
+plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS, boundaries 5
+rules / 0 violations (59 source files).
