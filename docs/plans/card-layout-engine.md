@@ -50,13 +50,15 @@ which order and with which widths. R5.7 gave the same to the sieve card, the
 magnets card, the page card, the pitch card's frequency cell and the
 acceleration card (`Source/SievePanel.h`, `Source/FrequencyInspector.h`),
 and the way a cell is drawn now lives in one vocabulary
-(`Source/InspectorCell.h`) that the three descriptions share. The engine
+(`Source/InspectorCell.h`) that the three descriptions share. R5.8 gives the
+sequence card the same treatment (`Source/SequenceTransport.h`). The engine
 keeps the geometry - the packing of the cells into lines, and its rule that
 the plain controls come first and the knobs after them, so the card's
 reading order is not the description's order. See
 [`material-inspector-edge.md`](material-inspector-edge.md),
-[`sieve-panel-edge.md`](sieve-panel-edge.md) and
-[`frequency-inspector-edge.md`](frequency-inspector-edge.md).
+[`sieve-panel-edge.md`](sieve-panel-edge.md),
+[`frequency-inspector-edge.md`](frequency-inspector-edge.md) and
+[`sequence-transport-edge.md`](sequence-transport-edge.md).
 
 The strip's cell rectangles are engine output too: `layoutStrip()` returns
 per-group cells and per-line segments, and the adapter pushes the segments

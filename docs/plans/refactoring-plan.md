@@ -1611,6 +1611,113 @@ so.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.34 R5.8 - the sequence card and the performance transport
+
+**What moves.** The sequence card's *description* and the transport's *words*
+move into an edge of their own, `Source/SequenceTransport.h`:
+
+- the card's five cells - the sequence selector, Record, Play, Loop and the
+  door to the sequence panel - with their kinds and widths;
+- the roles (`Control`) and the list of every control;
+- the wording: the tooltips and the two button labels (`Rec`/`Stop`,
+  `Play`/`Stop`);
+- the press rule (`recordAction`, `playAction`: a running switch stops the
+  run, a stopped one starts it);
+- the tempo's domain (40..240 BPM, 1 BPM apart, skew 0.5) and its tooltip;
+- the page-duration fallback (30 s).
+
+The review asks for the sequence and the performance controllers to be
+decomposed (§28):
+
+> | Functions | Proposed destination |
+> |---|---|
+> | `showPerformanceView()`, `refreshPerformanceTransport()` | PerformanceController |
+> | `showSequencePanel()`, `sequenceRecordTick()` | SequenceController |
+> | `startSequencePlayback()`, `stopSequencePlayback()` | SequenceTransport |
+
+and, on the panels:
+
+> "Many panel classes already exist. Extend those boundaries instead of
+> creating unnecessary duplicate wrappers." (§28)
+
+R5.8 takes the first step of that table, the same step R5.6 and R5.7 took for
+the inspectors: the *description* and the *words* become an edge, and the
+widgets and the commands stay the shell's. `showPerformanceView()`,
+`showSequencePanel()`, `sequenceRecordTick()`, `startSequencePlayback()` and
+`stopSequencePlayback()` are still `MainComponent`'s: they touch the document,
+the clock and the undo transaction, which are the shell's. The controllers
+themselves are a later phase's business.
+
+**What stays.** The widgets stay the shell's (`MainComponent` owns them), and
+so do the commands: the recorder (`startSequenceRecording()`,
+`stopSequenceRecording()`, `sequenceRecordTick()`), the transport
+(`startSequencePlayback()`, `stopSequencePlayback()`), the model's loop flag
+(`toggleSequenceLoop()`), the panel's Trim, Replace and Clear, and the
+performance view's page, scrub, reverse and tempo switches. The view is still
+a view: it owns no clock and calls back into the app. One take is still one
+labelled undo transaction.
+
+**The one change.** The transport was written down on three surfaces, and
+the copies disagreed:
+
+- the press rule - `if running, stop else start` - was copied at all three
+  call sites (the card, the panel and the view);
+- Record said `Rec` on the card and in the view, `Record` in the panel;
+- the Record tooltip said three different things, the card and the panel
+  spelling out "(page + playhead)" and the view not, and the Loop tooltip
+  said "the performance" on two surfaces and "the recorded performance" on
+  the third;
+- the tempo was two domains: the toolbar's knob offered 40..240 in whole BPM
+  with a 0.5 skew, the view's slider 40..240 in half BPM with no skew;
+- the page-duration fallback was spelled `30.0` in the sequence panel and
+  again in the performance view.
+
+Now there is one tooltip list, one pair of labels, one press rule, one tempo
+domain and one fallback. The three surfaces cannot drift apart again.
+
+**The deliberate change.** The panel's Record button is now labelled `Rec`,
+the same short form as the card and the view; the pinned card button is 52 px
+wide, and one short form keeps all three inside their cells. The view's tempo
+slider now moves in whole BPM with the knob's skew, and the app's knob gained
+the shared tooltip. Everything else keeps its words: the Record tooltip is the
+card's and the panel's old one, and the Loop tooltip is the card's and the
+panel's old one.
+
+**The contract.** One suite, written before the move,
+`Source/SelfTestSequenceTransport.cpp` - 33 checks at the characterization, 45
+after the move.
+
+It drives the real component: it presses the card's buttons, the panel's
+buttons and the view's buttons, and reads the app's state. It pins:
+
+- the card: the selector, Record, Play, Loop and View, their labels, their
+  tooltips and their order;
+- the commands: Record starts the recorder (and creates the sequence when the
+  bank is empty), Record again stops it, Play needs two points, Loop writes
+  the model's flag and View opens the panel;
+- the one recorder and the one transport: a recording started on one surface
+  stops on another, and a replay started on one surface stops on another;
+- the view's own switches: its page, scrub, reverse, loop and tempo are the
+  app's commands, and its tempo reaches the page;
+- the panel's Clear, and the two panels' Close.
+
+The move added the checks that pin the edge against the app: every role is
+bound to a widget, the app's card is the edge's cell list in the edge's
+order, the card's tooltips are the edge's wording, the labels follow the
+edge's rule, the tempo knob and the tempo slider cover the same range in the
+same steps and say the same words, and the edge's own tables are sound (the
+press rule, the two labels, the two constants, the fallback).
+
+**The mechanical check.** The production code does not call a test-only door,
+the bodies are the old ones, and the behaviour is unchanged where it should
+be - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`sequence-transport-edge.md`](sequence-transport-edge.md).
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the golden
+render and the legacy fixture are unchanged, and the full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1642,7 +1749,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5, R5.6 and R5.7 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480`, `2cd45f1`, `39e7cbb`, `c84a287` | app selftest 3,443/3,443, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. R5.7 gives the sieve and the frequency controls descriptions of their own (`Source/SievePanel.h`, `Source/FrequencyInspector.h`) and a shared cell vocabulary (`Source/InspectorCell.h`), so the time grid's divisions, the remainder list's text format and the ambitus's "Custom" item id are each written down once. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, the sieve panel's own suite 42/42, the frequency inspector's own suite 29/29, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5, R5.6, R5.7 and R5.8 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480`, `2cd45f1`, `39e7cbb`, `c84a287`, `9dbd160`, `3148d5d` | app selftest 3,488/3,488, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. R5.7 gives the sieve and the frequency controls descriptions of their own (`Source/SievePanel.h`, `Source/FrequencyInspector.h`) and a shared cell vocabulary (`Source/InspectorCell.h`), so the time grid's divisions, the remainder list's text format and the ambitus's "Custom" item id are each written down once. R5.8 gives the sequence card and the performance transport one description of their own (`Source/SequenceTransport.h`), so the card's cells, the three surfaces' wording, the press rule, the tempo's domain and the page-duration fallback are each written down once. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, the sieve panel's own suite 42/42, the frequency inspector's own suite 29/29, the sequence transport's own suite 45/45, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
 | R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
@@ -4516,3 +4623,155 @@ own suite 34/34, the mapper's own suite 14/14, the render's own suite 18/18,
 golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture
 `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness
 5 SUCCESS, boundaries 5 rules / 0 violations (66 source files).
+
+### R5.8 record (2026-11-28)
+
+The sequence card and the performance transport are written down once.
+
+The characterization commit is `9dbd160`, the move `3148d5d`.
+
+| Measure | Before | After |
+|---|---|---|
+| the sequence card | built inline in `MainComponentLayout.cpp` | one description (`Source/SequenceTransport.h`) |
+| the roles and the widgets | the layout named the widgets itself | the app binds the roles to its widgets (`sequenceControls`) |
+| Record and Play's press rule | the `if running, stop` test at three call sites | one rule (`recordAction`, `playAction`) behind the shell's two toggles |
+| the Record button's label | `Rec` on the card and in the view, `Record` in the panel | one label rule (`recordButtonText`) |
+| the Play button's label | three copies of `playing ? "Stop" : "Play"` | one label rule (`playButtonText`) |
+| the Record tooltip | three wordings | one tooltip (the card's and the panel's old one) |
+| the Loop tooltip | `the performance` on two surfaces, `the recorded performance` on the third | one tooltip (`the performance`) |
+| the tempo's domain | the knob 40..240 / 1 BPM / skew 0.5, the view's slider 40..240 / 0.5 BPM / no skew | one range and one skew (`kMinTempoBpm`, `kMaxTempoBpm`, `kTempoIntervalBpm`, `kTempoSkew`) |
+| the page-duration fallback | `30.0` in the sequence panel and in the performance view | one constant (`kDefaultPageSeconds`) |
+| the sequence transport's own suite | - | `Source/SelfTestSequenceTransport.cpp`, 45 checks |
+| the source files | 66 | 67 (the suite) |
+
+**The suite came first.** `Source/SelfTestSequenceTransport.cpp` (33 checks)
+was written against the old code: it presses the card's buttons, the panel's
+buttons and the view's buttons and reads the app's state.
+
+It pins:
+
+- the card: the selector, Record, Play, Loop and View, their labels, their
+  tooltips and their order;
+- the commands: Record starts the recorder (and creates the sequence when the
+  bank is empty), Record again stops it, Play needs two points, Loop writes
+  the model's flag and View opens the panel;
+- the one recorder and the one transport: a recording started on one surface
+  stops on another, and a replay started on one surface stops on another;
+- the view's own switches: its page, scrub, reverse, loop and tempo are the
+  app's commands, and its tempo reaches the page;
+- the panel's Clear, and the two panels' Close.
+
+The move added the checks that pin the edge against the app: every role is
+bound to a widget, the app's card is the edge's cell list in the edge's order,
+the card's tooltips are the edge's wording, the labels follow the edge's rule,
+the tempo knob and the tempo slider cover the same range in the same steps and
+say the same words, and the edge's own tables are sound.
+
+**The edge.** `Source/SequenceTransport.h` is the sequence transport's
+description:
+
+```cpp
+namespace upic::sequence_transport
+{
+    using Kind = upic::inspector::Kind;
+
+    enum class Control { Sequence, Record, Play, Loop, Open, count };
+
+    struct Cell
+    {
+        Control control;
+        Kind kind;
+        int labelWidth = 0;
+        int width = 0;
+        bool newLine = false;
+    };
+
+    struct Description
+    {
+        const char* name;       // "Sequence"
+        std::vector<Cell> card; // the sequence card's cells
+    };
+
+    const Description& describe();
+    const std::vector<Control>& allControls();
+
+    const char* tooltip (Control control);
+    const char* recordButtonText (bool recording);
+    const char* playButtonText (bool playing);
+
+    enum class Action { Start, Stop };
+    Action recordAction (bool recording);
+    Action playAction (bool playing);
+
+    constexpr double kDefaultPageSeconds = 30.0;
+    constexpr double kMinTempoBpm = 40.0;
+    constexpr double kMaxTempoBpm = 240.0;
+    constexpr double kTempoIntervalBpm = 1.0;
+    constexpr double kTempoSkew = 0.5;
+    const char* tempoTooltip();
+}
+```
+
+The header holds no widget and no document, and it is free of JUCE: the
+description is data, and the data can be checked without a window.
+
+**The bindings.** The app owns the widgets, so the app binds the roles to
+them - once, where the sequence card is built:
+
+```cpp
+bindSequenceControl (st::Control::Record, nullptr, &seqRecBtn);
+bindSequenceControl (st::Control::Sequence, &seqLab, &seqBox);
+```
+
+The layout then builds the card from the edge's cells, with the R5.7 helper:
+
+```cpp
+for (auto& cell : upic::sequence_transport::describe().card)
+    addCell (seq, sequenceControls[(size_t) cell.control],
+             cell.kind, cell.labelWidth, cell.width, cell.newLine);
+```
+
+The tooltips, the labels and the tempo's range come from the edge too, so the
+card, the sequence panel and the performance view read the same words. The
+press rule lives in the edge, and the shell runs it in
+`toggleSequenceRecording()` and `toggleSequencePlayback()` - the three call
+sites now call those two functions.
+
+**The one change.** The transport was written down on three surfaces, and the
+copies disagreed: the press test was copied at every call site, Record said
+`Rec` on two surfaces and `Record` on the third, the Record tooltip had three
+wordings, the Loop tooltip had two, the tempo had two domains and the 30 s
+fallback had two spellings. Nothing made the copies agree. Now there is one
+tooltip list, one pair of labels, one press rule, one tempo domain, one
+tooltip for the tempo and one fallback.
+
+**The deliberate change.** The panel's Record button is now labelled `Rec`,
+the same short form as the card and the view; the card's pinned button is
+52 px wide, so one short form keeps all three inside their cells. The view's
+tempo slider now moves in whole BPM with the knob's skew, and the app's knob
+gained the shared tooltip. Everything else keeps its words: the Record
+tooltip is the card's and the panel's old one, and the Loop tooltip is the
+card's and the panel's old one.
+
+**The behaviour is unchanged.** The card's cells keep their order, their
+widths and their kinds - the edge carries the same numbers the layout had
+(30/110 for the selector, 52, 54, 52 and 54 for the switches) - and the card
+engine still puts the plain controls first, so the card looks the same. The
+recorder, the loop command, the panel's edits and the view's page, scrub,
+reverse and tempo switches are the old commands, body for body.
+
+**The mechanical check.** The production code does not call a test-only door,
+the bodies are the old ones, and the behaviour is unchanged where it should
+be - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`sequence-transport-edge.md`](sequence-transport-edge.md).
+
+Gate: app selftest 3,488/3,488, the sequence transport's own suite 45/45, the
+frequency inspector's own suite 29/29, the sieve panel's own suite 42/42, the
+inspector's own suite 50/50, the transactions' own suite 45/45, the tools'
+own suite 45/45, the hit tester's own suite 34/34, the mapper's own suite
+14/14, the render's own suite 18/18, golden render `0x6d7571bdd80e3cd9`
+unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
+22/22, pluginval strictness 5 SUCCESS, boundaries 5 rules / 0 violations
+(67 source files).
