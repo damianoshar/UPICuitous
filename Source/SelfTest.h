@@ -108,6 +108,8 @@ namespace upic
     void runSievePanelChecks (SelfTest& t);           // R5.7: the sieve panel - the sieve card, the magnets and the sieve's rules
     void runFrequencyInspectorChecks (SelfTest& t);   // R5.7: the frequency inspector - the page card, the spaces and the ambitus
     void runSequenceTransportChecks (SelfTest& t);    // R5.8: the sequence card and the performance transport - one recorder, one transport
+    void runChannelControlsChecks (SelfTest& t);     // R5.9: the channel controls - the card, the channel list and the routing
+    void runModulationControlsChecks (SelfTest& t);  // R5.9: the modulation controls - the card, the lists and the commands
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);

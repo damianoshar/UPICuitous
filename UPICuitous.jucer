@@ -49,6 +49,8 @@
       <FILE id="sSp60" name="SelfTestSievePanel.cpp" compile="1" resource="0" file="Source/SelfTestSievePanel.cpp"/>
       <FILE id="sFi61" name="SelfTestFrequencyInspector.cpp" compile="1" resource="0" file="Source/SelfTestFrequencyInspector.cpp"/>
       <FILE id="sSq65" name="SelfTestSequenceTransport.cpp" compile="1" resource="0" file="Source/SelfTestSequenceTransport.cpp"/>
+      <FILE id="sCh67" name="SelfTestChannelControls.cpp" compile="1" resource="0" file="Source/SelfTestChannelControls.cpp"/>
+      <FILE id="sMo68" name="SelfTestModulationControls.cpp" compile="1" resource="0" file="Source/SelfTestModulationControls.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>

@@ -205,6 +205,10 @@ int upic::runSelfTest()
     upic::runFrequencyInspectorChecks (t);
     // R5.8: the sequence card and the performance transport - one recorder, one transport.
     upic::runSequenceTransportChecks (t);
+    // R5.9: the channel controls - the card, the channel list and the routing.
+    upic::runChannelControlsChecks (t);
+    // R5.9: the modulation controls - the card, the lists and the commands.
+    upic::runModulationControlsChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
