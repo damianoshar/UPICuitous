@@ -98,6 +98,7 @@ namespace upic
     void runPieceCodecChecks (SelfTest& t);       // R4.1: the document's codec - the file format
     void runDocumentIOChecks (SelfTest& t);       // R4.2: the document's file adapter - the read and the write
     void runRecoveryRepositoryChecks (SelfTest& t); // R4.3: the recovery snapshot's storage - the write, the read and the cleanup
+    void runLibraryRepositoryChecks (SelfTest& t);  // R4.4: the user library's storage - the write, the read and the listing
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);

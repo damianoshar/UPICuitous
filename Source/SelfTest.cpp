@@ -185,6 +185,8 @@ int upic::runSelfTest()
     upic::runDocumentIOChecks (t);
     // R4.3: the recovery snapshot's storage - the write, the read and the cleanup.
     upic::runRecoveryRepositoryChecks (t);
+    // R4.4: the user library's storage - the write, the read and the listing.
+    upic::runLibraryRepositoryChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
