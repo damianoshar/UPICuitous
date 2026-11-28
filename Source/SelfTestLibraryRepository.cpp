@@ -1,6 +1,7 @@
 #include <JuceHeader.h>
 #include "SelfTest.h"
 #include "UserLibrary.h"
+#include "LibraryRepository.h"
 
 #include <utility>
 #include <vector>
@@ -17,11 +18,11 @@
 //
 // The review gives the storage a name of its own - the "library repository"
 // (section 34, Persistence/Libraries) - and the reusable assets a format of
-// their own - the "library asset codec" (section 33). Today both live in
-// Source/UserLibrary.h, and the shell builds the path and reads the file.
+// their own - the "library asset codec" (section 33). The format lives in
+// Source/UserLibrary.h; the storage lives in Source/LibraryRepository.h.
 //
-// This suite is the edge's contract, and it comes before the move, as every
-// phase in this wave does. It pins what the storage does today:
+// This suite is the edge's contract, and it came before the move, as every
+// phase in this wave does. It pins what the storage does:
 //
 // - where the library lives and how the kinds map to folders;
 // - how a name becomes a file name;
@@ -32,9 +33,10 @@
 // - the first free library id;
 // - the reveal target's guard.
 //
-// The suite reaches the storage through the shell's own doors
-// (upic::UserLibrary's static methods). The move turns them into the
-// repository's, and the checks themselves do not change.
+// The suite reaches the storage through the repository's own doors
+// (upic::library_repository's functions). Before the move they were the
+// shell's (upic::UserLibrary's static methods); the checks themselves did
+// not change.
 //
 // The library root is redirected to a temp folder for the whole run, so the
 // user's own library is never touched.
@@ -59,17 +61,17 @@ namespace
         bool wasOverridden;
 
         RootGuard()
-            : previous (upic::UserLibrary::rootFolder()),
-              wasOverridden (upic::UserLibrary::rootIsOverriddenForTest())
+            : previous (upic::library_repository::rootFolder()),
+              wasOverridden (upic::library_repository::rootIsOverriddenForTest())
         {
         }
 
         ~RootGuard()
         {
             if (wasOverridden)
-                upic::UserLibrary::setRootForTest (previous);
+                upic::library_repository::setRootForTest (previous);
             else
-                upic::UserLibrary::clearRootForTest();
+                upic::library_repository::clearRootForTest();
         }
     };
 
@@ -158,14 +160,13 @@ namespace
         return file.replaceWithText (juce::JSON::toString (object, true));
     }
 
-    // The shell's read path today: the selected file name becomes a file in
-    // the kind's own folder, and the storage reads it. The move gives the
-    // edge the name directly; this helper is the one line that changes.
+    // The shell's read path: the selected file name becomes a file in the
+    // kind's own folder, and the storage reads it. The edge now takes the
+    // name directly (the shell builds no path).
     bool readByName (upic::UserAssetKind kind, const juce::String& fileName,
                      upic::UserAsset& asset, juce::String& error)
     {
-        const auto file = upic::UserLibrary::folderFor (kind).getChildFile (fileName);
-        return upic::UserLibrary::read (kind, file, asset, error);
+        return upic::library_repository::read (kind, fileName, asset, error);
     }
 
     // A file of the given size, filled with 'x'.
@@ -186,7 +187,7 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
     };
 
     const RootGuard rootGuard;
-    const auto realRoot = upic::UserLibrary::rootFolder();
+    const auto realRoot = upic::library_repository::rootFolder();
 
     // --- where the library lives --------------------------------------------
     {
@@ -199,56 +200,56 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
     }
 
     {
-        check (upic::UserLibrary::folderFor (upic::UserAssetKind::Wave)
+        check (upic::library_repository::folderFor (upic::UserAssetKind::Wave)
                    == realRoot.getChildFile ("waves")
-               && upic::UserLibrary::folderFor (upic::UserAssetKind::Envelope)
+               && upic::library_repository::folderFor (upic::UserAssetKind::Envelope)
                    == realRoot.getChildFile ("envelopes")
-               && upic::UserLibrary::folderFor (upic::UserAssetKind::AmpTable)
+               && upic::library_repository::folderFor (upic::UserAssetKind::AmpTable)
                    == realRoot.getChildFile ("tables")
-               && upic::UserLibrary::folderFor (upic::UserAssetKind::FreqTable)
+               && upic::library_repository::folderFor (upic::UserAssetKind::FreqTable)
                    == realRoot.getChildFile ("tables")
-               && upic::UserLibrary::folderFor (upic::UserAssetKind::Sequence)
+               && upic::library_repository::folderFor (upic::UserAssetKind::Sequence)
                    == realRoot.getChildFile ("sequences"),
                "R4.4 the five kinds live in four folders");
-        check (upic::UserLibrary::folderFor (upic::UserAssetKind::AmpTable)
-                   == upic::UserLibrary::folderFor (upic::UserAssetKind::FreqTable),
+        check (upic::library_repository::folderFor (upic::UserAssetKind::AmpTable)
+                   == upic::library_repository::folderFor (upic::UserAssetKind::FreqTable),
                "R4.4 the two table kinds share one folder");
     }
 
     const auto root = workFolder ("root");
-    upic::UserLibrary::setRootForTest (root);
-    check (upic::UserLibrary::rootIsOverriddenForTest()
-           && upic::UserLibrary::rootFolder() == root,
-           "R4.4 the root can be redirected", upic::UserLibrary::rootFolder().getFullPathName());
-    upic::UserLibrary::clearRootForTest();
-    check (! upic::UserLibrary::rootIsOverriddenForTest()
-           && upic::UserLibrary::rootFolder() == realRoot,
+    upic::library_repository::setRootForTest (root);
+    check (upic::library_repository::rootIsOverriddenForTest()
+           && upic::library_repository::rootFolder() == root,
+           "R4.4 the root can be redirected", upic::library_repository::rootFolder().getFullPathName());
+    upic::library_repository::clearRootForTest();
+    check (! upic::library_repository::rootIsOverriddenForTest()
+           && upic::library_repository::rootFolder() == realRoot,
            "R4.4 the redirect can be cleared");
-    upic::UserLibrary::setRootForTest (root);
+    upic::library_repository::setRootForTest (root);
 
     // --- a name becomes a file name -----------------------------------------
     {
-        check (upic::UserLibrary::slugFor ("My Wave 01!") == "my_wave_01"
-               && upic::UserLibrary::slugFor ("A_B-C") == "a_b-c",
+        check (upic::library_repository::slugFor ("My Wave 01!") == "my_wave_01"
+               && upic::library_repository::slugFor ("A_B-C") == "a_b-c",
                "R4.4 a name becomes a file name",
-               upic::UserLibrary::slugFor ("My Wave 01!"));
-        check (upic::UserLibrary::slugFor ("") == "asset"
-               && upic::UserLibrary::slugFor ("!!!") == "asset"
-               && upic::UserLibrary::slugFor ("Name___") == "name",
+               upic::library_repository::slugFor ("My Wave 01!"));
+        check (upic::library_repository::slugFor ("") == "asset"
+               && upic::library_repository::slugFor ("!!!") == "asset"
+               && upic::library_repository::slugFor ("Name___") == "name",
                "R4.4 a name with nothing usable becomes 'asset'");
-        check (upic::UserLibrary::slugFor (juce::String::repeatedString ("a", 60)).length() == 40,
+        check (upic::library_repository::slugFor (juce::String::repeatedString ("a", 60)).length() == 40,
                "R4.4 a file name is at most 40 characters",
-               juce::String (upic::UserLibrary::slugFor (juce::String::repeatedString ("a", 60)).length()));
+               juce::String (upic::library_repository::slugFor (juce::String::repeatedString ("a", 60)).length()));
     }
 
     // --- the write -----------------------------------------------------------
     {
         juce::String error;
-        const bool ok = upic::UserLibrary::publish (upic::UserAssetKind::Wave, 5, "My Wave",
+        const bool ok = upic::library_repository::publish (upic::UserAssetKind::Wave, 5, "My Wave",
                                                     juce::Colour (0xff123456), wavePayload(), error);
         check (ok && error.isEmpty(), "R4.4 a wave publishes", error);
 
-        const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave)
+        const auto file = upic::library_repository::folderFor (upic::UserAssetKind::Wave)
                               .getChildFile ("my_wave.json");
         check (file.existsAsFile(), "R4.4 the file is named after the asset", file.getFileName());
 
@@ -267,9 +268,9 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
 
     {
         juce::String error;
-        const bool ok = upic::UserLibrary::publish (upic::UserAssetKind::Wave, 6, "My Wave",
+        const bool ok = upic::library_repository::publish (upic::UserAssetKind::Wave, 6, "My Wave",
                                                     juce::Colours::white, wavePayload(), error);
-        const auto folder = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave);
+        const auto folder = upic::library_repository::folderFor (upic::UserAssetKind::Wave);
         check (ok
                && folder.getChildFile ("my_wave.json").existsAsFile()
                && folder.getChildFile ("my_wave-2.json").existsAsFile(),
@@ -278,18 +279,18 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
 
     {
         juce::String error;
-        const bool env = upic::UserLibrary::publish (upic::UserAssetKind::Envelope, 7, "My Envelope",
+        const bool env = upic::library_repository::publish (upic::UserAssetKind::Envelope, 7, "My Envelope",
                                                      juce::Colours::white, envelopePayload(), error);
-        const bool amp = upic::UserLibrary::publish (upic::UserAssetKind::AmpTable, 4, "My Amp",
+        const bool amp = upic::library_repository::publish (upic::UserAssetKind::AmpTable, 4, "My Amp",
                                                      juce::Colours::white, envelopePayload(), error);
-        const bool freq = upic::UserLibrary::publish (upic::UserAssetKind::FreqTable, 0, "Page 1 space 1",
+        const bool freq = upic::library_repository::publish (upic::UserAssetKind::FreqTable, 0, "Page 1 space 1",
                                                       juce::Colours::white, freqTablePayload(), error);
         check (env && amp && freq
-               && upic::UserLibrary::folderFor (upic::UserAssetKind::Envelope)
+               && upic::library_repository::folderFor (upic::UserAssetKind::Envelope)
                       .getChildFile ("my_envelope.json").existsAsFile()
-               && upic::UserLibrary::folderFor (upic::UserAssetKind::AmpTable)
+               && upic::library_repository::folderFor (upic::UserAssetKind::AmpTable)
                       .getChildFile ("my_amp.json").existsAsFile()
-               && upic::UserLibrary::folderFor (upic::UserAssetKind::FreqTable)
+               && upic::library_repository::folderFor (upic::UserAssetKind::FreqTable)
                       .getChildFile ("page_1_space_1.json").existsAsFile(),
                "R4.4 the other kinds publish into their folders", error);
     }
@@ -297,24 +298,24 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
     // --- the refusals of the write ------------------------------------------
     {
         juce::String error;
-        check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1, "   ",
+        check (! upic::library_repository::publish (upic::UserAssetKind::Wave, 1, "   ",
                                              juce::Colours::white, wavePayload(), error)
                && error == "The asset needs a name",
                "R4.4 a publish without a name is refused", error);
 
         error.clear();
-        check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1,
+        check (! upic::library_repository::publish (upic::UserAssetKind::Wave, 1,
                                              juce::String::repeatedString ("a", 129),
                                              juce::Colours::white, wavePayload(), error)
                && error == "The asset's name is too long",
                "R4.4 a name over the limit is refused", error);
 
         error.clear();
-        const bool negative = upic::UserLibrary::publish (upic::UserAssetKind::Wave, -1, "Negative",
+        const bool negative = upic::library_repository::publish (upic::UserAssetKind::Wave, -1, "Negative",
                                                           juce::Colours::white, wavePayload(), error);
         const auto negativeError = error;
         error.clear();
-        const bool tooBig = upic::UserLibrary::publish (upic::UserAssetKind::Wave,
+        const bool tooBig = upic::library_repository::publish (upic::UserAssetKind::Wave,
                                                         upic::limits::kMaxItemId + 1, "Too Big",
                                                         juce::Colours::white, wavePayload(), error);
         check (! negative && ! tooBig
@@ -326,7 +327,7 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
     {
         // The payload is validated before the folder is made: a bad file
         // cannot leave an empty folder behind.
-        const auto folder = upic::UserLibrary::folderFor (upic::UserAssetKind::Sequence);
+        const auto folder = upic::library_repository::folderFor (upic::UserAssetKind::Sequence);
         check (! folder.isDirectory(), "R4.4 the sequence folder starts absent");
 
         juce::String error;
@@ -335,7 +336,7 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
             if (! points->isEmpty())
                 (*points)[0].getDynamicObject()->setProperty ("page", -1);
 
-        check (! upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 1, "Bad Sequence",
+        check (! upic::library_repository::publish (upic::UserAssetKind::Sequence, 1, "Bad Sequence",
                                              juce::Colours::white, bad, error)
                && error == "The sequence holds a malformed point"
                && ! folder.isDirectory(),
@@ -347,27 +348,27 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
         const auto blocked = workFolder ("blocked_root");
         const auto file = blocked.getChildFile ("root file");
         file.replaceWithText ("not a folder");
-        upic::UserLibrary::setRootForTest (file);
+        upic::library_repository::setRootForTest (file);
 
         juce::String error;
-        const bool ok = upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1, "Blocked",
+        const bool ok = upic::library_repository::publish (upic::UserAssetKind::Wave, 1, "Blocked",
                                                     juce::Colours::white, wavePayload(), error);
         check (! ok && error.startsWith ("The library folder could not be created: "),
                "R4.4 a folder that cannot be created is refused", error);
-        upic::UserLibrary::setRootForTest (root);
+        upic::library_repository::setRootForTest (root);
     }
 
     {
         // The temp file cannot be written: the target is never touched, and
         // no asset is left behind. A read-only temp file is the block (a
         // directory would be removed by the write's own cleanup).
-        const auto folder = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave);
+        const auto folder = upic::library_repository::folderFor (upic::UserAssetKind::Wave);
         const auto temp = folder.getChildFile ("blocked_write.json.tmp");
         temp.replaceWithText ("in the way");
         temp.setReadOnly (true);
 
         juce::String error;
-        const bool ok = upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1, "Blocked Write",
+        const bool ok = upic::library_repository::publish (upic::UserAssetKind::Wave, 1, "Blocked Write",
                                                     juce::Colours::white, wavePayload(), error);
         check (! ok && error.startsWith ("The asset could not be written to ")
                && ! folder.getChildFile ("blocked_write.json").exists(),
@@ -438,13 +439,13 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
         // The listing runs before the refusal files below: it counts the
         // folder's refusals, so the folder must hold only the two assets and
         // the one broken file it is meant to report.
-        const auto folder = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave);
+        const auto folder = upic::library_repository::folderFor (upic::UserAssetKind::Wave);
         folder.getChildFile ("broken.json").replaceWithText ("this is not a library asset");
         folder.getChildFile ("notes.txt").replaceWithText ("not a library asset");
 
         int skipped = 0;
         juce::StringArray failures;
-        const auto assets = upic::UserLibrary::list (upic::UserAssetKind::Wave, &skipped, &failures);
+        const auto assets = upic::library_repository::list (upic::UserAssetKind::Wave, &skipped, &failures);
         check (assets.size() == 2 && skipped == 1 && failures.size() == 1
                && failures[0] == "broken.json: The asset file is not a valid library asset",
                "R4.4 the folder's assets are listed, and the broken ones are counted",
@@ -458,12 +459,12 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
         // kind is not a failure.
         int skipped = 0;
         juce::StringArray failures;
-        const auto amps = upic::UserLibrary::list (upic::UserAssetKind::AmpTable, &skipped, &failures);
+        const auto amps = upic::library_repository::list (upic::UserAssetKind::AmpTable, &skipped, &failures);
         check (amps.size() == 1 && skipped == 0 && failures.isEmpty(),
                "R4.4 a valid table of the other kind is not a failure",
                juce::String ((int) amps.size()) + " amps, " + juce::String (skipped) + " skipped");
 
-        const auto freqs = upic::UserLibrary::list (upic::UserAssetKind::FreqTable);
+        const auto freqs = upic::library_repository::list (upic::UserAssetKind::FreqTable);
         check (freqs.size() == 1 && freqs[0].name == "Page 1 space 1",
                "R4.4 the shared folder lists the right kind",
                juce::String ((int) freqs.size()) + " tables");
@@ -477,7 +478,7 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
                && error == "The asset file is gone",
                "R4.4 a missing file is refused", error);
 
-        const auto folder = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave);
+        const auto folder = upic::library_repository::folderFor (upic::UserAssetKind::Wave);
         writeBigFile (folder.getChildFile ("big.json"), 5);
         error.clear();
         check (! readByName (upic::UserAssetKind::Wave, "big.json", asset, error)
@@ -592,28 +593,28 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
     // --- the next library id -------------------------------------------------
     {
         const auto secondRoot = workFolder ("second");
-        upic::UserLibrary::setRootForTest (secondRoot);
+        upic::library_repository::setRootForTest (secondRoot);
 
         int skipped = 0;
         juce::StringArray failures;
-        const auto none = upic::UserLibrary::list (upic::UserAssetKind::Sequence, &skipped, &failures);
+        const auto none = upic::library_repository::list (upic::UserAssetKind::Sequence, &skipped, &failures);
         check (none.empty() && skipped == 0 && failures.isEmpty()
-               && upic::UserLibrary::nextLibraryId (upic::UserAssetKind::Sequence) == 0,
+               && upic::library_repository::nextLibraryId (upic::UserAssetKind::Sequence) == 0,
                "R4.4 an empty library starts at id 0");
 
         juce::String error;
-        check (upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 0, "Seq A",
+        check (upic::library_repository::publish (upic::UserAssetKind::Sequence, 0, "Seq A",
                                            juce::Colours::white, sequencePayload(), error)
-               && upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 2, "Seq B",
+               && upic::library_repository::publish (upic::UserAssetKind::Sequence, 2, "Seq B",
                                               juce::Colours::white, sequencePayload(), error),
                "R4.4 two sequences publish", error);
-        check (upic::UserLibrary::nextLibraryId (upic::UserAssetKind::Sequence) == 1,
+        check (upic::library_repository::nextLibraryId (upic::UserAssetKind::Sequence) == 1,
                "R4.4 the next id is the first free one",
-               juce::String (upic::UserLibrary::nextLibraryId (upic::UserAssetKind::Sequence)));
+               juce::String (upic::library_repository::nextLibraryId (upic::UserAssetKind::Sequence)));
 
-        check (upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 0, "Seq C",
+        check (upic::library_repository::publish (upic::UserAssetKind::Sequence, 0, "Seq C",
                                            juce::Colours::white, sequencePayload(), error)
-               && upic::UserLibrary::nextLibraryId (upic::UserAssetKind::Sequence) == 1,
+               && upic::library_repository::nextLibraryId (upic::UserAssetKind::Sequence) == 1,
                "R4.4 a duplicate id does not move the next id");
     }
 
@@ -622,32 +623,32 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
         // The sequence folder is not there yet in the second root? It is: the
         // publish above made it. Use a fresh root for the missing-folder case.
         const auto emptyRoot = workFolder ("empty");
-        upic::UserLibrary::setRootForTest (emptyRoot);
+        upic::library_repository::setRootForTest (emptyRoot);
         juce::String error;
-        check (! upic::UserLibrary::reveal (upic::UserAssetKind::Sequence, "", error)
+        check (! upic::library_repository::reveal (upic::UserAssetKind::Sequence, "", error)
                && error == "The user library folder does not exist yet"
-               && ! upic::UserLibrary::revealFolder (upic::UserAssetKind::Sequence),
+               && ! upic::library_repository::revealFolder (upic::UserAssetKind::Sequence),
                "R4.4 a reveal of a folder that is not there is refused", error);
-        upic::UserLibrary::setRootForTest (root);
+        upic::library_repository::setRootForTest (root);
     }
 
     {
         juce::File target;
         juce::String error;
-        check (! upic::UserLibrary::revealTarget (upic::UserAssetKind::Wave, "", target, error)
+        check (! upic::library_repository::revealTarget (upic::UserAssetKind::Wave, "", target, error)
                && error == "No library file is selected",
                "R4.4 an empty reveal selection is refused", error);
 
         error.clear();
-        const bool sub = upic::UserLibrary::revealTarget (upic::UserAssetKind::Wave,
+        const bool sub = upic::library_repository::revealTarget (upic::UserAssetKind::Wave,
                                                           "sub/inside.json", target, error);
         const auto subError = error;
         error.clear();
-        const bool outside = upic::UserLibrary::revealTarget (upic::UserAssetKind::Wave,
+        const bool outside = upic::library_repository::revealTarget (upic::UserAssetKind::Wave,
                                                               "..\\outside.json", target, error);
         const auto outsideError = error;
         error.clear();
-        const bool absolute = upic::UserLibrary::revealTarget (upic::UserAssetKind::Wave,
+        const bool absolute = upic::library_repository::revealTarget (upic::UserAssetKind::Wave,
                                                                "C:\\outside.json", target, error);
         check (! sub && ! outside && ! absolute
                && subError == "The library file name must not contain a path"
@@ -656,19 +657,19 @@ void upic::runLibraryRepositoryChecks (SelfTest& t)
                "R4.4 a reveal name with a path is refused", error);
 
         error.clear();
-        check (! upic::UserLibrary::revealTarget (upic::UserAssetKind::Wave,
+        check (! upic::library_repository::revealTarget (upic::UserAssetKind::Wave,
                                                   "gone.json", target, error)
                && error == "The selected library file no longer exists",
                "R4.4 a reveal of a file that is gone is refused", error);
 
         error.clear();
-        const bool found = upic::UserLibrary::revealTarget (upic::UserAssetKind::Wave,
+        const bool found = upic::library_repository::revealTarget (upic::UserAssetKind::Wave,
                                                             "my_wave.json", target, error);
         check (found && error.isEmpty()
-               && target == upic::UserLibrary::folderFor (upic::UserAssetKind::Wave)
+               && target == upic::library_repository::folderFor (upic::UserAssetKind::Wave)
                               .getChildFile ("my_wave.json")
                && target.getParentDirectory()
-                   == upic::UserLibrary::folderFor (upic::UserAssetKind::Wave),
+                   == upic::library_repository::folderFor (upic::UserAssetKind::Wave),
                "R4.4 a plain name resolves inside the kind's own folder", error);
     }
 }

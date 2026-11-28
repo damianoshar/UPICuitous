@@ -2,6 +2,7 @@
 #include "MainComponent.h"
 #include "SelfTest.h"
 #include "AllocCounter.h"
+#include "LibraryRepository.h"
 #include "ArcCodec.h"
 #include "ArcGeometry.h"
 #include "GraphicalCurve.h"
@@ -9,6 +10,8 @@
 #include "PerformanceCodec.h"
 #include "SieveCodec.h"
 #include "WaveformCodec.h"
+
+#include <set>
 
 //==============================================================================
 // The model: the pitch transformations, the frequency spaces, the staircase,
@@ -4628,9 +4631,9 @@ void upic::runWP10WaveChecks (upic::SelfTest& t)
                              .getChildFile ("upic_wp10_wave_selftest");
         root.deleteRecursively();
         root.createDirectory();
-        const bool hadRoot = upic::UserLibrary::rootIsOverriddenForTest();
-        const auto previousRoot = upic::UserLibrary::rootFolder();
-        upic::UserLibrary::setRootForTest (root);
+        const bool hadRoot = upic::library_repository::rootIsOverriddenForTest();
+        const auto previousRoot = upic::library_repository::rootFolder();
+        upic::library_repository::setRootForTest (root);
 
         auto payloadWith = [] (int n)
         {
@@ -4646,35 +4649,35 @@ void upic::runWP10WaveChecks (upic::SelfTest& t)
         };
 
         juce::String error;
-        check (upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1, "Long",
+        check (upic::library_repository::publish (upic::UserAssetKind::Wave, 1, "Long",
                                            juce::Colours::white,
                                            payloadWith (upic::kMaxWaveSize), error),
                "WP10 the library accepts a 4096-sample wavetable", error);
         error.clear();
-        check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1, "Too Long",
+        check (! upic::library_repository::publish (upic::UserAssetKind::Wave, 1, "Too Long",
                                              juce::Colours::white,
                                              payloadWith (upic::kMaxWaveSize + 1), error)
                && error.contains ("4096"),
                "WP10 the library refuses a 4097-sample wavetable", error);
         error.clear();
-        check (upic::UserLibrary::publish (upic::UserAssetKind::Wave, 2, "Short",
+        check (upic::library_repository::publish (upic::UserAssetKind::Wave, 2, "Short",
                                            juce::Colours::white, payloadWith (2), error),
                "WP10 the library accepts a two-sample wavetable", error);
         error.clear();
-        check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, 3, "One",
+        check (! upic::library_repository::publish (upic::UserAssetKind::Wave, 3, "One",
                                              juce::Colours::white, payloadWith (1), error)
                && error.contains ("samples"),
                "WP10 the library refuses a one-sample wavetable", error);
-        const int stored = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave)
+        const int stored = upic::library_repository::folderFor (upic::UserAssetKind::Wave)
                               .findChildFiles (juce::File::findFiles, false, "*.json").size();
         check (stored == 2,
                "WP10 the library holds the two accepted wavetables",
                juce::String (stored));
 
         if (hadRoot)
-            upic::UserLibrary::setRootForTest (previousRoot);
+            upic::library_repository::setRootForTest (previousRoot);
         else
-            upic::UserLibrary::clearRootForTest();
+            upic::library_repository::clearRootForTest();
         root.deleteRecursively();
     }
 }
@@ -4784,9 +4787,9 @@ void upic::runWP10PageChecks (upic::SelfTest& t)
                              .getChildFile ("upic_wp10_page_selftest");
         root.deleteRecursively();
         root.createDirectory();
-        const bool hadRoot = upic::UserLibrary::rootIsOverriddenForTest();
-        const auto previousRoot = upic::UserLibrary::rootFolder();
-        upic::UserLibrary::setRootForTest (root);
+        const bool hadRoot = upic::library_repository::rootIsOverriddenForTest();
+        const auto previousRoot = upic::library_repository::rootFolder();
+        upic::library_repository::setRootForTest (root);
 
         auto sequenceWith = [] (double lastPos)
         {
@@ -4807,21 +4810,21 @@ void upic::runWP10PageChecks (upic::SelfTest& t)
         };
 
         juce::String error;
-        check (upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 1, "Long",
+        check (upic::library_repository::publish (upic::UserAssetKind::Sequence, 1, "Long",
                                            juce::Colours::white,
                                            sequenceWith (3500.0), error),
                "WP10 the library accepts a sequence that reaches the hour", error);
         error.clear();
-        check (! upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 2, "Too Long",
+        check (! upic::library_repository::publish (upic::UserAssetKind::Sequence, 2, "Too Long",
                                              juce::Colours::white,
                                              sequenceWith (upic::kMaxPageSeconds + 1.0), error)
                && error.contains ("malformed"),
                "WP10 the library refuses a sequence past the hour", error);
 
         if (hadRoot)
-            upic::UserLibrary::setRootForTest (previousRoot);
+            upic::library_repository::setRootForTest (previousRoot);
         else
-            upic::UserLibrary::clearRootForTest();
+            upic::library_repository::clearRootForTest();
         root.deleteRecursively();
     }
 }

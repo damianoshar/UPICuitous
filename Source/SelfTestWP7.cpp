@@ -17,6 +17,7 @@
 #include "MainComponent.h"
 #include "SampleAnalysis.h"
 #include "UserLibrary.h"
+#include "LibraryRepository.h"
 #include "Ids.h"
 #include "EnvelopeCodec.h"
 #include "FreqSpaceCodec.h"
@@ -59,7 +60,7 @@ namespace
         const auto folder = wp7Parent().getChildFile (name);
         folder.deleteRecursively();
         folder.createDirectory();
-        upic::UserLibrary::setRootForTest (folder);
+        upic::library_repository::setRootForTest (folder);
     }
 
 #if JUCE_WINDOWS
@@ -289,7 +290,7 @@ namespace
     // The file a published asset gets (the first one for that name).
     juce::String firstNameFile (upic::UserAssetKind kind, const juce::String& name)
     {
-        for (const auto& a : upic::UserLibrary::list (kind))
+        for (const auto& a : upic::library_repository::list (kind))
             if (a.name == name) return a.fileName;
         return {};
     }
@@ -298,7 +299,7 @@ namespace
     bool selectUser (int count, SelectFn select, NameFn fileName,
                      const juce::String& name)
     {
-        const auto wanted = upic::UserLibrary::slugFor (name) + ".json";
+        const auto wanted = upic::library_repository::slugFor (name) + ".json";
         for (int i = 0; i < count; ++i)
         {
             select (i);
@@ -328,38 +329,38 @@ void upic::runWP7Checks (upic::SelfTest& t)
             useLibraryRoot ("format");
 
             juce::String error;
-            check (upic::UserLibrary::publish (upic::UserAssetKind::Wave, 5,
+            check (upic::library_repository::publish (upic::UserAssetKind::Wave, 5,
                                                "Round Wave", juce::Colours::orange,
                                                wavePayload (5, "Round Wave"), error),
                    "wp7 library: a wavetable publishes", error);
 
-            check (upic::UserLibrary::publish (upic::UserAssetKind::Envelope, 7,
+            check (upic::library_repository::publish (upic::UserAssetKind::Envelope, 7,
                                                "Round Env", juce::Colours::cyan,
                                                envelopePayload (7, "Round Env"), error),
                    "wp7 library: an envelope publishes", error);
 
-            check (upic::UserLibrary::publish (upic::UserAssetKind::AmpTable, 4,
+            check (upic::library_repository::publish (upic::UserAssetKind::AmpTable, 4,
                                                "Round Amp", juce::Colours::green,
                                                amplitudePayload (4, "Round Amp"), error),
                    "wp7 library: an amplitude table publishes", error);
 
-            check (upic::UserLibrary::publish (upic::UserAssetKind::FreqTable, 0,
+            check (upic::library_repository::publish (upic::UserAssetKind::FreqTable, 0,
                                                "Round Freq", juce::Colours::blue,
                                                frequencyPayload (1, 0), error),
                    "wp7 library: a frequency table publishes", error);
 
-            check (upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 5,
+            check (upic::library_repository::publish (upic::UserAssetKind::Sequence, 5,
                                                "Round Seq", juce::Colours::purple,
                                                sequencePayload (5, "Round Seq"), error),
                    "wp7 library: a sequence publishes", error);
 
             // Every kind reads back with its payload intact.
             {
-                const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave)
+                const auto file = upic::library_repository::folderFor (upic::UserAssetKind::Wave)
                                       .getChildFile (firstNameFile (upic::UserAssetKind::Wave,
                                                                     "Round Wave"));
                 upic::UserAsset asset;
-                const bool ok = upic::UserLibrary::read (upic::UserAssetKind::Wave, file,
+                const bool ok = upic::library_repository::read (upic::UserAssetKind::Wave, file,
                                                          asset, error);
                 const auto w = upic::waveformFromVar (asset.payload, 0);
                 bool sameSamples = ok && w.samples.size() == (size_t) upic::kWaveSize;
@@ -376,11 +377,11 @@ void upic::runWP7Checks (upic::SelfTest& t)
             }
 
             {
-                const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::Envelope)
+                const auto file = upic::library_repository::folderFor (upic::UserAssetKind::Envelope)
                                       .getChildFile (firstNameFile (upic::UserAssetKind::Envelope,
                                                                     "Round Env"));
                 upic::UserAsset asset;
-                const bool ok = upic::UserLibrary::read (upic::UserAssetKind::Envelope,
+                const bool ok = upic::library_repository::read (upic::UserAssetKind::Envelope,
                                                          file, asset, error);
                 const auto e = upic::envelopeFromVar (asset.payload, 0);
                 check (ok && asset.id == 7 && e.points.size() == 3
@@ -389,11 +390,11 @@ void upic::runWP7Checks (upic::SelfTest& t)
             }
 
             {
-                const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::AmpTable)
+                const auto file = upic::library_repository::folderFor (upic::UserAssetKind::AmpTable)
                                       .getChildFile (firstNameFile (upic::UserAssetKind::AmpTable,
                                                                     "Round Amp"));
                 upic::UserAsset asset;
-                const bool ok = upic::UserLibrary::read (upic::UserAssetKind::AmpTable,
+                const bool ok = upic::library_repository::read (upic::UserAssetKind::AmpTable,
                                                          file, asset, error);
                 const auto a = upic::envelopeFromVar (asset.payload, 0);
                 check (ok && asset.id == 4 && a.points.size() >= 3,
@@ -401,11 +402,11 @@ void upic::runWP7Checks (upic::SelfTest& t)
             }
 
             {
-                const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::FreqTable)
+                const auto file = upic::library_repository::folderFor (upic::UserAssetKind::FreqTable)
                                       .getChildFile (firstNameFile (upic::UserAssetKind::FreqTable,
                                                                     "Round Freq"));
                 upic::UserAsset asset;
-                const bool ok = upic::UserLibrary::read (upic::UserAssetKind::FreqTable,
+                const bool ok = upic::library_repository::read (upic::UserAssetKind::FreqTable,
                                                          file, asset, error);
                 const auto d = upic::freqSpaceDefFromVar (asset.payload);
                 check (ok && d.editable && d.points.size() == 3
@@ -416,11 +417,11 @@ void upic::runWP7Checks (upic::SelfTest& t)
             }
 
             {
-                const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::Sequence)
+                const auto file = upic::library_repository::folderFor (upic::UserAssetKind::Sequence)
                                       .getChildFile (firstNameFile (upic::UserAssetKind::Sequence,
                                                                     "Round Seq"));
                 upic::UserAsset asset;
-                const bool ok = upic::UserLibrary::read (upic::UserAssetKind::Sequence,
+                const bool ok = upic::library_repository::read (upic::UserAssetKind::Sequence,
                                                          file, asset, error);
                 const auto s = upic::performanceSequenceFromVar (asset.payload, 0);
                 check (ok && s.points.size() == 3 && s.points[2].page == 1,
@@ -434,16 +435,16 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 empty.id = 6;
                 empty.name = "Empty Seq";
                 empty.loop = false;
-                check (upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 6,
+                check (upic::library_repository::publish (upic::UserAssetKind::Sequence, 6,
                                                    empty.name, juce::Colours::purple,
                                                    upic::performanceSequenceToVar (empty), error),
                        "wp7 library: an empty sequence publishes", error);
-                const auto file = upic::UserLibrary::folderFor (
+                const auto file = upic::library_repository::folderFor (
                                       upic::UserAssetKind::Sequence)
                                       .getChildFile (firstNameFile (
                                           upic::UserAssetKind::Sequence, "Empty Seq"));
                 upic::UserAsset asset;
-                const bool ok = upic::UserLibrary::read (upic::UserAssetKind::Sequence,
+                const bool ok = upic::library_repository::read (upic::UserAssetKind::Sequence,
                                                          file, asset, error);
                 const auto s = upic::performanceSequenceFromVar (asset.payload, 0);
                 check (ok && s.points.empty() && s.name == "Empty Seq" && ! s.loop,
@@ -453,7 +454,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
             // The exact six-property schema (kind, id, version, name, colour,
             // payload). A future property is refused instead of being copied.
             {
-                const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave)
+                const auto file = upic::library_repository::folderFor (upic::UserAssetKind::Wave)
                                       .getChildFile (firstNameFile (upic::UserAssetKind::Wave,
                                                                     "Round Wave"));
                 const auto parsed = juce::JSON::parse (file.loadFileAsString());
@@ -467,7 +468,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
             // the other as a valid asset rather than as a broken file.
             {
                 int skipped = 0;
-                const auto amps = upic::UserLibrary::list (upic::UserAssetKind::AmpTable,
+                const auto amps = upic::library_repository::list (upic::UserAssetKind::AmpTable,
                                                            &skipped);
                 check (amps.size() == 1 && skipped == 0,
                        "wp7 library: a table listing accepts the other table kind",
@@ -484,7 +485,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
             useLibraryRoot ("refusals");
 
             juce::String error;
-            const auto folder = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave);
+            const auto folder = upic::library_repository::folderFor (upic::UserAssetKind::Wave);
             folder.createDirectory();
 
             auto writeRaw = [&folder] (const juce::String& name, const juce::String& text)
@@ -494,7 +495,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
             auto readWave = [&folder] (const juce::String& name, upic::UserAsset& asset,
                                        juce::String& err)
             {
-                return upic::UserLibrary::read (upic::UserAssetKind::Wave,
+                return upic::library_repository::read (upic::UserAssetKind::Wave,
                                                 folder.getChildFile (name), asset, err);
             };
 
@@ -510,7 +511,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
             {
                 int skipped = 0;
                 juce::StringArray failures;
-                const auto listed = upic::UserLibrary::list (upic::UserAssetKind::Wave,
+                const auto listed = upic::library_repository::list (upic::UserAssetKind::Wave,
                                                              &skipped, &failures);
                 check (listed.empty() && skipped == 1 && failures.size() == 1
                        && failures[0].contains ("malformed.json"),
@@ -571,7 +572,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                     shortArray.add (0.0);
                     obj->setProperty ("samples", shortArray);
                 }
-                check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1,
+                check (! upic::library_repository::publish (upic::UserAssetKind::Wave, 1,
                                                      "Short", juce::Colours::white,
                                                      payload, error)
                        && error.containsIgnoreCase ("samples"),
@@ -588,19 +589,19 @@ void upic::runWP7Checks (upic::SelfTest& t)
                     if (samples != nullptr && ! samples->isEmpty())
                     {
                         samples->getReference (0) = 1.00005;
-                        check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1,
+                        check (! upic::library_repository::publish (upic::UserAssetKind::Wave, 1,
                                                             "Out Of Range", juce::Colours::white,
                                                             payload, error)
                                && error.containsIgnoreCase ("-1..1"),
                                "wp7 refusals: a wavetable value above 1 is refused", error);
                         samples->getReference (0) = -1.00005;
-                        check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1,
+                        check (! upic::library_repository::publish (upic::UserAssetKind::Wave, 1,
                                                             "Out Of Range", juce::Colours::white,
                                                             payload, error)
                                && error.containsIgnoreCase ("-1..1"),
                                "wp7 refusals: a wavetable value below -1 is refused", error);
                         samples->getReference (0) = 1.0;
-                        check (upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1,
+                        check (upic::library_repository::publish (upic::UserAssetKind::Wave, 1,
                                                            "Exact Range", juce::Colours::white,
                                                            payload, error),
                                "wp7 refusals: the exact wavetable boundary is accepted", error);
@@ -625,7 +626,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                     addPoint (0.1, 1.0);
                     obj->setProperty ("points", points);
                 }
-                check (! upic::UserLibrary::publish (upic::UserAssetKind::Envelope, 1,
+                check (! upic::library_repository::publish (upic::UserAssetKind::Envelope, 1,
                                                      "Unsorted", juce::Colours::white,
                                                      payload, error)
                        && error.containsIgnoreCase ("sorted"),
@@ -648,7 +649,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                     points.add (juce::var (p));
                     obj->setProperty ("points", points);
                 }
-                check (! upic::UserLibrary::publish (upic::UserAssetKind::FreqTable, 0,
+                check (! upic::library_repository::publish (upic::UserAssetKind::FreqTable, 0,
                                                      "Zero Hz", juce::Colours::white,
                                                      payload, error),
                        "wp7 refusals: a frequency table outside the range is refused", error);
@@ -672,7 +673,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                     addPoint (0.5);
                     obj->setProperty ("points", points);
                 }
-                check (! upic::UserLibrary::publish (upic::UserAssetKind::Sequence, 1,
+                check (! upic::library_repository::publish (upic::UserAssetKind::Sequence, 1,
                                                      "Backwards", juce::Colours::white,
                                                      payload, error)
                        && error.containsIgnoreCase ("sorted"),
@@ -680,15 +681,15 @@ void upic::runWP7Checks (upic::SelfTest& t)
             }
 
             // The publish field checks.
-            check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1, "  ",
+            check (! upic::library_repository::publish (upic::UserAssetKind::Wave, 1, "  ",
                                                  juce::Colours::white,
                                                  wavePayload (1, "No Name"), error),
                    "wp7 refusals: an empty name is refused", error);
-            check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, -1, "Negative",
+            check (! upic::library_repository::publish (upic::UserAssetKind::Wave, -1, "Negative",
                                                  juce::Colours::white,
                                                  wavePayload (1, "Negative"), error),
                    "wp7 refusals: a negative id is refused", error);
-            check (! upic::UserLibrary::publish (upic::UserAssetKind::Wave,
+            check (! upic::library_repository::publish (upic::UserAssetKind::Wave,
                                                  upic::limits::kMaxItemId + 1, "Too Big",
                                                  juce::Colours::white,
                                                  wavePayload (1, "Too Big"), error),
@@ -710,13 +711,13 @@ void upic::runWP7Checks (upic::SelfTest& t)
 
             // The wrong kind in the wrong folder.
             {
-                check (upic::UserLibrary::publish (upic::UserAssetKind::Wave, 1,
+                check (upic::library_repository::publish (upic::UserAssetKind::Wave, 1,
                                                    "Kind Test", juce::Colours::white,
                                                    wavePayload (1, "Kind Test"), error),
                        "wp7 refusals: the kind fixture publishes", error);
                 const auto file = folder.getChildFile (
                     firstNameFile (upic::UserAssetKind::Wave, "Kind Test"));
-                check (! upic::UserLibrary::read (upic::UserAssetKind::Envelope, file,
+                check (! upic::library_repository::read (upic::UserAssetKind::Envelope, file,
                                                   asset, error)
                        && error.containsIgnoreCase ("envelope"),
                        "wp7 refusals: a wave file is refused as an envelope", error);
@@ -734,21 +735,21 @@ void upic::runWP7Checks (upic::SelfTest& t)
                                          upic::UserAssetKind::FreqTable,
                                          upic::UserAssetKind::Sequence })
                 {
-                    const auto folder = upic::UserLibrary::folderFor (kind);
+                    const auto folder = upic::library_repository::folderFor (kind);
                     folder.createDirectory();
                     const auto file = folder.getChildFile ("plain.json");
                     file.replaceWithText ("{}");
                     juce::File target;
                     juce::String reason;
                     allResolved = allResolved
-                        && upic::UserLibrary::revealTarget (
+                        && upic::library_repository::revealTarget (
                             kind, file.getFileName(), target, reason)
                         && target == file;
 
                     allRefused = allRefused
-                        && ! upic::UserLibrary::reveal (kind, "../outside.json")
-                        && ! upic::UserLibrary::reveal (kind, "sub/inside.json")
-                        && ! upic::UserLibrary::reveal (kind, "C:\\outside.json");
+                        && ! upic::library_repository::reveal (kind, "../outside.json")
+                        && ! upic::library_repository::reveal (kind, "sub/inside.json")
+                        && ! upic::library_repository::reveal (kind, "C:\\outside.json");
                 }
                 check (allResolved,
                        "wp7 reveal: a plain asset name resolves inside its own folder");
@@ -1645,7 +1646,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
 
                 // The file records its source destination.
                 {
-                    const auto file = upic::UserLibrary::folderFor (
+                    const auto file = upic::library_repository::folderFor (
                                           upic::UserAssetKind::FreqTable)
                                           .getChildFile (firstNameFile (
                                               upic::UserAssetKind::FreqTable,
@@ -1662,14 +1663,14 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 // library's frequency-table bank. The id never becomes a
                 // model id (the import lands in the captured destination).
                 {
-                    const auto file = upic::UserLibrary::folderFor (
+                    const auto file = upic::library_repository::folderFor (
                                           upic::UserAssetKind::FreqTable)
                                           .getChildFile (firstNameFile (
                                               upic::UserAssetKind::FreqTable,
                                               "Page 1 space 2"));
                     const auto parsed = juce::JSON::parse (file.loadFileAsString());
                     check ((int) parsed.getProperty ("id", -1) == 0
-                           && upic::UserLibrary::nextLibraryId (
+                           && upic::library_repository::nextLibraryId (
                                   upic::UserAssetKind::FreqTable) == 1,
                            "wp7 freq: the published table takes the first free library id",
                            juce::String ((int) parsed.getProperty ("id", -1)));
@@ -1825,7 +1826,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                     empty.id = 9;
                     empty.name = "Empty Import";
                     empty.loop = false;
-                    check (upic::UserLibrary::publish (
+                    check (upic::library_repository::publish (
                                upic::UserAssetKind::Sequence, empty.id,
                                empty.name, juce::Colours::purple,
                                upic::performanceSequenceToVar (empty), error),
@@ -1858,7 +1859,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 badPage.id = 20;
                 badPage.name = "Bad Page";
                 badPage.points = { { 0.0, 1, 0.0 } };
-                check (upic::UserLibrary::publish (
+                check (upic::library_repository::publish (
                            upic::UserAssetKind::Sequence, badPage.id,
                            badPage.name, juce::Colours::purple,
                            upic::performanceSequenceToVar (badPage), error),
@@ -1868,7 +1869,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
                 badPosition.id = 21;
                 badPosition.name = "Bad Position";
                 badPosition.points = { { 0.0, 0, 99.0 } };
-                check (upic::UserLibrary::publish (
+                check (upic::library_repository::publish (
                            upic::UserAssetKind::Sequence, badPosition.id,
                            badPosition.name, juce::Colours::purple,
                            upic::performanceSequenceToVar (badPosition), error),
@@ -1994,7 +1995,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
             const int waves = mc.waveformCountForTest();
             const int envs = mc.envelopeCountForTest();
 
-            upic::UserLibrary::rootFolder().deleteRecursively();
+            upic::library_repository::rootFolder().deleteRecursively();
 
             check (juce::JSON::toString (mc.pieceToVar(), false) == before
                    && mc.waveformCountForTest() == waves
@@ -2710,7 +2711,7 @@ void upic::runWP7Checks (upic::SelfTest& t)
         t.check (false, "wp7: no exception", "unknown exception");
     }
 
-    upic::UserLibrary::clearRootForTest();
+    upic::library_repository::clearRootForTest();
 
     wp7Parent().deleteRecursively();
 }

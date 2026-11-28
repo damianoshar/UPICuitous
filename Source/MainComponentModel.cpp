@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "UserLibrary.h"
+#include "LibraryRepository.h"
 #include "FreqSpaceCodec.h"
 #include "PerformanceCodec.h"
 #include "GraphicalCurve.h"
@@ -112,7 +113,7 @@ void MainComponent::refreshUserLibraryBoxes (upic::UserAssetKind kind)
 {
     int skipped = 0;
     juce::StringArray failures;
-    const auto assets = upic::UserLibrary::list (kind, &skipped, &failures);
+    const auto assets = upic::library_repository::list (kind, &skipped, &failures);
     std::vector<LibraryManager::Item> items;
     items.reserve (assets.size());
     for (const auto& a : assets)
@@ -1156,7 +1157,7 @@ bool MainComponent::libraryPublishWave()
     }
 
     juce::String error;
-    if (! upic::UserLibrary::publish (upic::UserAssetKind::Wave, wave.id,
+    if (! upic::library_repository::publish (upic::UserAssetKind::Wave, wave.id,
                                       wave.name, wave.colour, upic::waveformToVar (wave), error))
     {
         flash (error);
@@ -1184,9 +1185,9 @@ bool MainComponent::libraryImportWave()
 
     upic::UserAsset asset;
     juce::String error;
-    const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::Wave)
+    const auto file = upic::library_repository::folderFor (upic::UserAssetKind::Wave)
                         .getChildFile (fileName);
-    if (! upic::UserLibrary::read (upic::UserAssetKind::Wave, file, asset, error))
+    if (! upic::library_repository::read (upic::UserAssetKind::Wave, file, asset, error))
     {
         flash ("The library asset was refused: " + error);
         return false;
@@ -1229,9 +1230,9 @@ bool MainComponent::libraryRevealWave()
 {
     const auto fileName = waveLib.source() == LibraryManager::Source::User
                             ? waveLib.selectedFileName() : juce::String();
-    upic::UserLibrary::folderFor (upic::UserAssetKind::Wave).createDirectory();
+    upic::library_repository::folderFor (upic::UserAssetKind::Wave).createDirectory();
     juce::String error;
-    if (! upic::UserLibrary::reveal (upic::UserAssetKind::Wave, fileName, error))
+    if (! upic::library_repository::reveal (upic::UserAssetKind::Wave, fileName, error))
     {
         flash ("The user library could not reveal that wavetable: " + error);
         return false;
@@ -1256,7 +1257,7 @@ bool MainComponent::libraryPublishEnvelope()
     }
 
     juce::String error;
-    if (! upic::UserLibrary::publish (upic::UserAssetKind::Envelope, envelope.id,
+    if (! upic::library_repository::publish (upic::UserAssetKind::Envelope, envelope.id,
                                       envelope.name, envelope.colour, upic::envelopeToVar (envelope), error))
     {
         flash (error);
@@ -1284,9 +1285,9 @@ bool MainComponent::libraryImportEnvelope()
 
     upic::UserAsset asset;
     juce::String error;
-    const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::Envelope)
+    const auto file = upic::library_repository::folderFor (upic::UserAssetKind::Envelope)
                         .getChildFile (fileName);
-    if (! upic::UserLibrary::read (upic::UserAssetKind::Envelope, file, asset, error))
+    if (! upic::library_repository::read (upic::UserAssetKind::Envelope, file, asset, error))
     {
         flash ("The library asset was refused: " + error);
         return false;
@@ -1327,9 +1328,9 @@ bool MainComponent::libraryRevealEnvelope()
 {
     const auto fileName = envLib.source() == LibraryManager::Source::User
                             ? envLib.selectedFileName() : juce::String();
-    upic::UserLibrary::folderFor (upic::UserAssetKind::Envelope).createDirectory();
+    upic::library_repository::folderFor (upic::UserAssetKind::Envelope).createDirectory();
     juce::String error;
-    if (! upic::UserLibrary::reveal (upic::UserAssetKind::Envelope, fileName, error))
+    if (! upic::library_repository::reveal (upic::UserAssetKind::Envelope, fileName, error))
     {
         flash ("The user library could not reveal that envelope: " + error);
         return false;
@@ -1358,7 +1359,7 @@ bool MainComponent::libraryPublishAmpTable()
     }
 
     juce::String error;
-    if (! upic::UserLibrary::publish (upic::UserAssetKind::AmpTable, table.id,
+    if (! upic::library_repository::publish (upic::UserAssetKind::AmpTable, table.id,
                                       table.name, table.colour, upic::envelopeToVar (table), error))
     {
         flash (error);
@@ -1386,9 +1387,9 @@ bool MainComponent::libraryImportAmpTable()
 
     upic::UserAsset asset;
     juce::String error;
-    const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::AmpTable)
+    const auto file = upic::library_repository::folderFor (upic::UserAssetKind::AmpTable)
                         .getChildFile (fileName);
-    if (! upic::UserLibrary::read (upic::UserAssetKind::AmpTable, file, asset, error))
+    if (! upic::library_repository::read (upic::UserAssetKind::AmpTable, file, asset, error))
     {
         flash ("The library asset was refused: " + error);
         return false;
@@ -1430,9 +1431,9 @@ bool MainComponent::libraryRevealAmpTable()
 {
     const auto fileName = ampTableEd.library.source() == LibraryManager::Source::User
                             ? ampTableEd.library.selectedFileName() : juce::String();
-    upic::UserLibrary::folderFor (upic::UserAssetKind::AmpTable).createDirectory();
+    upic::library_repository::folderFor (upic::UserAssetKind::AmpTable).createDirectory();
     juce::String error;
-    if (! upic::UserLibrary::reveal (upic::UserAssetKind::AmpTable, fileName, error))
+    if (! upic::library_repository::reveal (upic::UserAssetKind::AmpTable, fileName, error))
     {
         flash ("The user library could not reveal that amplitude table: " + error);
         return false;
@@ -1474,7 +1475,7 @@ bool MainComponent::libraryPublishFreqTable()
     // id of its own: the first free one in the library's frequency-table
     // bank. The id never becomes a model id (the import lands in the
     // editor's captured destination).
-    const auto libraryId = upic::UserLibrary::nextLibraryId (
+    const auto libraryId = upic::library_repository::nextLibraryId (
         upic::UserAssetKind::FreqTable);
     if (libraryId < 0)
     {
@@ -1483,7 +1484,7 @@ bool MainComponent::libraryPublishFreqTable()
     }
 
     juce::String error;
-    if (! upic::UserLibrary::publish (upic::UserAssetKind::FreqTable, libraryId,
+    if (! upic::library_repository::publish (upic::UserAssetKind::FreqTable, libraryId,
                                       name, juce::Colour (0xff5ac8fa),
                                       payload, error))
     {
@@ -1518,9 +1519,9 @@ bool MainComponent::libraryImportFreqTable()
 
     upic::UserAsset asset;
     juce::String error;
-    const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::FreqTable)
+    const auto file = upic::library_repository::folderFor (upic::UserAssetKind::FreqTable)
                         .getChildFile (fileName);
-    if (! upic::UserLibrary::read (upic::UserAssetKind::FreqTable, file, asset, error))
+    if (! upic::library_repository::read (upic::UserAssetKind::FreqTable, file, asset, error))
     {
         flash ("The library asset was refused: " + error);
         return false;
@@ -1576,9 +1577,9 @@ bool MainComponent::libraryRevealFreqTable()
 {
     const auto fileName = freqTableEd.library.source() == LibraryManager::Source::User
                             ? freqTableEd.library.selectedFileName() : juce::String();
-    upic::UserLibrary::folderFor (upic::UserAssetKind::FreqTable).createDirectory();
+    upic::library_repository::folderFor (upic::UserAssetKind::FreqTable).createDirectory();
     juce::String error;
-    if (! upic::UserLibrary::reveal (upic::UserAssetKind::FreqTable, fileName, error))
+    if (! upic::library_repository::reveal (upic::UserAssetKind::FreqTable, fileName, error))
     {
         flash ("The user library could not reveal that frequency table: " + error);
         return false;
@@ -1605,7 +1606,7 @@ bool MainComponent::libraryPublishSequence()
     }
 
     juce::String error;
-    if (! upic::UserLibrary::publish (upic::UserAssetKind::Sequence, sequence.id,
+    if (! upic::library_repository::publish (upic::UserAssetKind::Sequence, sequence.id,
                                       sequence.name, juce::Colour (0xffa07fd8),
                                       upic::performanceSequenceToVar (sequence), error))
     {
@@ -1634,9 +1635,9 @@ bool MainComponent::libraryImportSequence()
 
     upic::UserAsset asset;
     juce::String error;
-    const auto file = upic::UserLibrary::folderFor (upic::UserAssetKind::Sequence)
+    const auto file = upic::library_repository::folderFor (upic::UserAssetKind::Sequence)
                         .getChildFile (fileName);
-    if (! upic::UserLibrary::read (upic::UserAssetKind::Sequence, file, asset, error))
+    if (! upic::library_repository::read (upic::UserAssetKind::Sequence, file, asset, error))
     {
         flash ("The library asset was refused: " + error);
         return false;
@@ -1714,9 +1715,9 @@ bool MainComponent::libraryRevealSequence()
 {
     const auto fileName = seqPanel.library.source() == LibraryManager::Source::User
                             ? seqPanel.library.selectedFileName() : juce::String();
-    upic::UserLibrary::folderFor (upic::UserAssetKind::Sequence).createDirectory();
+    upic::library_repository::folderFor (upic::UserAssetKind::Sequence).createDirectory();
     juce::String error;
-    if (! upic::UserLibrary::reveal (upic::UserAssetKind::Sequence, fileName, error))
+    if (! upic::library_repository::reveal (upic::UserAssetKind::Sequence, fileName, error))
     {
         flash ("The user library could not reveal that sequence: " + error);
         return false;
