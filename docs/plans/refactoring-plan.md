@@ -118,7 +118,7 @@ move.
 | **R1 Low-risk extraction** | Take the pure geometry out of `MainComponent` | **Extract the card layout engine** out of `resized()` into `CardLayoutEngine` (pure, no JUCE components) | R039, R040, R054, R055, R010, R056, R089 | `resized()` applies a result instead of computing it; the layout characterization suite passes unchanged. |
 | **R2 Domain boundaries** | Make the composition model testable without a GUI | The domain's numeric core loses JUCE (R2.1), then `Arc`'s codec edge and its geometry are split out | R012–R021, R084 | Domain headers depend on no GUI header; the domain tests run headless. |
 | **R3 Document and commands** | One authoritative owner, one transaction per edit | `DocumentSession` façade over the existing piece model, then undo/selection behind it | R005–R010, R047, R030 | One model command = one labelled undo transaction; the revision counter advances per command. |
-| **R4 Persistence** | Loading is transactional and validated | `PieceCodec` / validation split out of `loadFromVar()`; a failed load leaves the active piece untouched | R059–R067, R090 | A malformed document fails with diagnostics and changes nothing; the v0.29 fixture still renders byte-identically. |
+| **R4 Persistence** | Loading is transactional and validated | `PieceCodec` / validation split out of `loadFromVar()`; the file adapter split out of `loadFile()`/`savePieceToFile()`; a failed load leaves the active piece untouched | R059–R067, R090 | A malformed document fails with diagnostics and changes nothing; the v0.29 fixture still renders byte-identically. |
 | **R5 UI decomposition** | Rendering, hit-testing and interaction are separate | `ScoreRenderer` + `ScoreHitTester` + a coordinate mapper, out of `ScoreEditor` | R043–R053, R058, R059 | A hit test can be run without painting; the UI checks pass unchanged. |
 | **R6 Real-time audio** | The callback is an orchestrator | `TransportStateMachine`, then `SnapshotPublisher`, then `PreviewRouter`, then `AudioRuntime` | R021–R038 | The callback still allocates nothing, rejects stale events, and the golden render is unchanged. |
 | **R7 Plugin and platform** | The plugin outlives its editor | Plugin processor owns the session; the editor attaches | R075–R079 | The plugin processes with no editor open; smoke 22/22 and pluginval stay green. |
@@ -969,7 +969,7 @@ in the app lives (`PageCodec.h`, `ArcCodec.h` and their neighbours).
 swap under the model lock, the selection, the controls, the engine, the
 snapshot publication, the messages and the unsaved flag. And `loadFile()`
 keeps the file adapter (the size cap, the JSON parse and the guard
-around the parse). The load is transactional today and stays so: the
+around the parse). (R4.2 moved that half into an edge of its own - §6.24.) The load is transactional today and stays so: the
 document is read into temporaries first, and the active piece is touched
 only when the document really is a piece.
 
@@ -1013,6 +1013,66 @@ render and the v0.29 fixture say so.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.24 R4.2 - the document's file adapter
+
+**What moves.** The document's file adapter moves out of the shell into the
+new `Source/DocumentRepository.h`: the reader (the size cap, the read, the
+JSON parse and the guard around the parse) and the writer (the JSON build,
+the measurement, the refusal and the write). The review asks for the file
+picking and the document's I/O to be separate (R064), and the adapter is
+step 1 of the review's loading pipeline (§32) - "Read document: file
+adapter and size limits".
+
+The edge reads a document from a picked source and writes a piece to a
+picked destination, and it owns the size limits and the words of the
+refusals that belong to the file. The piece's *format* is the codec's
+(R4.1) and the *commit* is the shell's, so the pipeline is the review's:
+read (the edge), decode, migrate and validate (the codec), commit (the
+shell).
+
+**What stays.** The shell keeps the file picking (the chooser), the commit
+(`loadFromVar()` and `commitPieceModel()`) and the app-state wording: "Not
+a UPIC piece (the JSON is broken) - the current piece was kept", "This
+file is not a UPIC piece - the current piece was kept" and "Saved X". The
+edge says what happened; the shell words it for the user.
+
+**The one change.** None in the behaviour. The duplication is gone: the
+"Piece too large to save (X, the limit is Y) - shorten the capture or the
+sample, or export the audio to a WAV instead" message was written twice -
+once in the window's worker and once in the synchronous saver - and it is
+the edge's now, written once. One unreachable branch goes with the move:
+the load's "Piece too large (max N MB)" could never be reached, because
+the file layer refuses the same file first, with "The file is too large:
+X". The silent case stays silent: a file whose *text* is over the cap (the
+text of a file can be bigger than the file) keeps the piece and says
+nothing, as it did.
+
+**The failures.** The review asks for structured load errors rather than a
+single success flag (§32). The plan defers the type migration (§2), so the
+results carry the JUCE types the edge already uses: `DocumentReadFailure`
+names what went wrong (no file, missing, too large, the text too large,
+broken JSON, unreadable), and `DocumentReadResult` and
+`DocumentWriteResult` carry the document or the reason. The wording of the
+messages does not change by a character.
+
+**The contract.** `Source/SelfTestDocumentIO.cpp`, written before the move.
+It pins what the adapter does today: the writer's refusal and its
+message, the write and what it says, the round trip, the failed write and
+the file that was there, the reader's refusals and their messages, and the
+load's sentences and the piece that is kept. The writer is reached through
+the shell's own door and the reader through the file layer's; the move
+turns the reader's door into the edge's, and the load's sentences - which
+live in the chooser's callback, where no test can reach them - get their
+door with the move (the R3.5 precedent).
+
+**The mechanical check.** The production code does not call a test-only
+door, the diff outside the adapter's two halves is empty, and the
+behaviour is unchanged - the golden render and the v0.29 fixture say so.
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1043,7 +1103,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R4 Persistence | **R4.1 shipped** | `479d99b`, `6691a55` | app selftest 3,076/3,076, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R4 Persistence | **R4.1 + R4.2 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2` | app selftest 3,098/3,098, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
@@ -2827,3 +2887,93 @@ Gate: app selftest 3,076/3,076, the codec's own suite 82/82, golden
 render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975`
 unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS,
 boundaries 5 rules / 0 violations (54 source files).
+
+### R4.2 record (2026-11-28)
+
+The document's file adapter is an edge now, and the shell keeps the picking
+and the wording.
+
+The characterization commit is `808dd88`, the move `f2e6fe2`.
+
+| Measure | Before | After |
+|---|---|---|
+| the document's file adapter | 105 lines in `MainComponentPiece.cpp`, inside the chooser's callback, the saver and the window's worker | 209 lines in `Source/DocumentRepository.h` (the reader, the writer and the failures) |
+| the load's file half | inside `MainComponent::loadFile()`'s callback | `upic::readDocument (url, maxBytes)` |
+| the write | twice (the window's worker and `savePieceToURL()`) | once: `upic::writeDocument (url, model, maxBytes)` |
+| the "too large to save" message | written twice | written once, in the edge |
+| the size in words | `humanPieceSize()` and a copy of it | `upic::humanPieceSize (bytes)` |
+| the load's failures | a `bool` and two local strings | `upic::DocumentReadFailure` and `upic::DocumentReadResult` |
+| the shell's load | the chooser's callback | `MainComponent::loadFromURL (url)` (80 lines: the wording and the commit) |
+| the adapter's own suite | - | `Source/SelfTestDocumentIO.cpp`, 22 checks |
+| the source files | 54 | 55 (the suite) |
+
+**The suite came first.** `Source/SelfTestDocumentIO.cpp` was written
+against the old code: 17 checks that pin what the adapter refuses, what it
+writes, what it says and what it leaves alone. The writer was driven
+through the shell's own door (`MainComponent::savePieceToFile`) and the
+reader through the file layer's (`upic::readPickedFile`).
+
+**The door.** The load's sentences - "Not a UPIC piece (the JSON is
+broken) - the current piece was kept" and "This file is not a UPIC piece -
+the current piece was kept" - lived in the chooser's callback, where no
+test could reach them: the read had no door. The move gives it one
+(`MainComponent::loadFromURLForTest`), the R3.5 precedent - the doors come
+with the move - and five more checks pin the sentences and the piece that
+is kept.
+
+**The edge.** `Source/DocumentRepository.h` is the file adapter:
+
+```cpp
+enum class DocumentReadFailure
+{
+    none, noFile, missing, tooLarge, tooLargeText, brokenJson, unreadable
+};
+
+struct DocumentReadResult
+{
+    bool ok = false;
+    juce::var document;
+    DocumentReadFailure failure = DocumentReadFailure::none;
+    juce::String error;
+};
+
+struct DocumentWriteResult
+{
+    bool ok = false;
+    juce::String error;
+    juce::int64 bytes = 0;
+};
+
+DocumentReadResult readDocument (const juce::URL& url, juce::int64 maxBytes);
+DocumentWriteResult writeDocument (const juce::URL& url, const PieceModel& model,
+                                   juce::int64 maxBytes);
+```
+
+The reader hands the *document* over: it does not know whether the
+document is a piece. That is the codec's business (`Source/PieceCodec.h`),
+and the commit is the shell's. The pipeline is the review's: read (the
+edge), decode, migrate and validate (the codec), commit (the shell).
+
+**The wording stays in the shell.** "The current piece was kept" and "Saved
+X" are the app's state, not the file's, so they are the shell's. The edge
+says what happened - `brokenJson`, `tooLarge`, `missing` - and the shell
+words it.
+
+**The one change.** None in the behaviour. The duplication is gone (the
+"too large to save" message was written twice), and one unreachable branch
+went with the move: the load's "Piece too large (max N MB)" could never be
+reached, because the file layer refuses the same file first. The silent
+case stays silent: a file whose text is over the cap keeps the piece and
+says nothing, as it did.
+
+**The mechanical check.** The production code does not call a test-only
+door, the diff outside the adapter's two halves is empty, and the
+behaviour is unchanged - the golden render and the v0.29 fixture say so.
+
+The boundary, the failures and the two details of the old code are
+described in [`document-io-edge.md`](document-io-edge.md).
+
+Gate: app selftest 3,098/3,098, the adapter's own suite 22/22, golden
+render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975`
+unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS,
+boundaries 5 rules / 0 violations (55 source files).

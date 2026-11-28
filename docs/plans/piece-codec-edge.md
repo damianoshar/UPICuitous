@@ -63,7 +63,8 @@ The *commit* is the shell's work and stays there:
 - the messages and the unsaved flag.
 
 `loadFile()` keeps the file adapter too: the size cap, the JSON parse and
-the guard around the parse.
+the guard around the parse. (R4.2 moved that half into an edge of its own
+- see [`document-io-edge.md`](document-io-edge.md).)
 
 The load stays transactional, and the transaction is now the codec's
 contract: a document that is not a piece is refused, and the caller's
@@ -171,7 +172,9 @@ One thing came out of writing it:
   it (§2).
 - **The document's file reading is still in the shell** (`loadFile()` reads
   the file and parses the JSON). The *format* is the codec's; the file is
-  the shell's, and the split is deliberate for now.
+  the shell's, and the split is deliberate for now. (R4.2 moved the file
+  half into an edge of its own - see
+  [`document-io-edge.md`](document-io-edge.md).)
 - **There is no headless domain target yet.** The suite is JUCE-free in its
   own code, but it runs inside the app's selftest binary, which is a JUCE
   application. The review's R089 - a domain-only target that links no GUI -
