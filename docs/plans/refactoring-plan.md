@@ -1718,6 +1718,114 @@ The boundary, the API and what stays in the shell are described in
 **Gate.** The suite passes, the rest of the selftest is untouched, the golden
 render and the legacy fixture are unchanged, and the full gate is green.
 
+### 6.35 R5.9 - the channel controls and the modulation controls
+
+**What moves.** Two more *descriptions* leave the shell and move into edges of
+their own:
+
+- `Source/ChannelControls.h` - the channel card (the selector and the button
+  that opens the mixer), the wording of both controls, the mixer's button
+  text and the channel list's item ids (Main is 1, the channel at the bank's
+  index i is i + 2);
+- `Source/ModulationControls.h` - the modulation card (the modulator, its
+  target and the depth), the wording of the three controls, the modulator
+  list's items and ids (None is 1, the arc with the id n is n + 1), the
+  target list's items and ids (Pitch is 1, Amp is 2), the depth's domain
+  (0..1 in steps of 0.001) and the depth the card shows when there is no arc
+  to show a depth for (0.5).
+
+The review asks for the channel and the modulation controls to be decomposed
+(§28):
+
+> | Functions | Proposed destination |
+> |---|---|
+> | `showChannelPanel()`, `refreshChannelBox()` | ChannelController |
+> | `refreshModBox()` | ModulationInspector |
+
+and, on the panels:
+
+> "Many panel classes already exist. Extend those boundaries instead of
+> creating unnecessary duplicate wrappers." (§28)
+
+R5.9 takes the first step of that table, the same step R5.6, R5.7 and R5.8
+took for the inspectors: the *description* and the *words* become an edge, and
+the widgets and the commands stay the shell's. `showChannelPanel()`,
+`refreshChannelBox()`, `refreshModBox()` and `setModOnSelection()` are still
+`MainComponent`'s: they touch the document, the undo transaction and the
+mixer's own panel, which are the shell's. The controllers themselves are a
+later phase's business.
+
+**What stays.** The widgets stay the shell's (`MainComponent` owns them), and
+so do the commands: the routing (`setChannelOnSelection()`), the assignment
+(`setModOnSelection()`), the cycle check (`modWouldCycle()`), the mixer's
+panel (`ChannelPanel`) and the card's own captions ("Ch", "Mod", "Tgt",
+"Depth"). One route is still one labelled undo transaction.
+
+**The one change.** The modulation card's two dropdowns read the same way and
+write the same command, and that reading was copied at both call sites:
+
+```cpp
+setModOnSelection (i <= 1 ? -1 : i - 1,
+                   arcModTgtBox.getSelectedId() == 2 ? 1 : 0,
+                   arcModSlider.getValue());
+```
+
+Now the two call sites call one method, `applyModulationControls()`, and the
+item ids, the target and the depth are read through the edge's rules. The
+channel list's ids were written down twice as well - "index + 2" when the list
+was written and "item - 2" when it was read - and both are the edge's rule
+now. The mix button's text ("Mix...") was in the widget's declaration and is
+the edge's word now.
+
+**The behaviour is unchanged.** The cards' cells keep their order, their
+widths and their kinds - the edge carries the same numbers the layout had
+(26/100 for the channel selector, 62 for the mix button; 30/100, 26/66 and
+36/110 for the modulator, the target and the depth) - and the card engine
+still puts the plain controls first, so the cards look the same. The lists
+offer the same items with the same ids, the depth covers the same domain, and
+the routing and the assignment are the old commands, body for body.
+
+**The contract.** Two suites, written before the move,
+`Source/SelfTestChannelControls.cpp` (19 checks at the characterization, 26
+after the move) and `Source/SelfTestModulationControls.cpp` (22 checks at the
+characterization, 38 after the move).
+
+They drive the real component: they press the card's buttons, pick from the
+card's dropdowns and read the app's state. They pin:
+
+- the cards: the channel card's selector and mix button, the modulation
+  card's modulator, target and depth, their captions and their tooltips;
+- the channel list: Main first, then the mixer's own channels, and the item
+  ids that go with them;
+- the routing: picking a channel routes the selected arcs to it, picking Main
+  brings them back, each route is one undo step, and one undo takes the arcs
+  back to the channel;
+- the mixer: the button opens the panel and the panel closes;
+- the modulation lists: None and the page's arcs, Pitch and Amp, and their
+  item ids;
+- the depth: its domain, and the value it falls back to;
+- the modulation commands: picking a modulator assigns it, picking a target
+  writes it, picking None clears it, the slider writes the depth, a cycle is
+  refused, and each of those is one undo step.
+
+The move added the checks that pin the edges against the app: every role is
+bound to a widget, the app's cards are the edges' cell lists in the edges'
+order, the cards' tooltips are the edges' wording, the app's lists follow the
+edges' ids and names, the depth slider covers the edge's domain, and each
+edge's own tables are sound (the two id rules, the target rule, the depth
+domain, the names).
+
+**The mechanical check.** The production code does not call a test-only door,
+the bodies are the old ones, and the behaviour is unchanged where it should
+be - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`channel-controls-edge.md`](channel-controls-edge.md) and
+[`modulation-controls-edge.md`](modulation-controls-edge.md).
+
+**Gate.** The suites pass, the rest of the selftest is untouched, the golden
+render and the legacy fixture are unchanged, and the full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1749,7 +1857,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5, R5.6, R5.7 and R5.8 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480`, `2cd45f1`, `39e7cbb`, `c84a287`, `9dbd160`, `3148d5d` | app selftest 3,488/3,488, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. R5.7 gives the sieve and the frequency controls descriptions of their own (`Source/SievePanel.h`, `Source/FrequencyInspector.h`) and a shared cell vocabulary (`Source/InspectorCell.h`), so the time grid's divisions, the remainder list's text format and the ambitus's "Custom" item id are each written down once. R5.8 gives the sequence card and the performance transport one description of their own (`Source/SequenceTransport.h`), so the card's cells, the three surfaces' wording, the press rule, the tempo's domain and the page-duration fallback are each written down once. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, the sieve panel's own suite 42/42, the frequency inspector's own suite 29/29, the sequence transport's own suite 45/45, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5, R5.6, R5.7, R5.8 and R5.9 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480`, `2cd45f1`, `39e7cbb`, `c84a287`, `9dbd160`, `3148d5d`, `60b7224`, `27c85a6` | app selftest 3,552/3,552, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. R5.7 gives the sieve and the frequency controls descriptions of their own (`Source/SievePanel.h`, `Source/FrequencyInspector.h`) and a shared cell vocabulary (`Source/InspectorCell.h`), so the time grid's divisions, the remainder list's text format and the ambitus's "Custom" item id are each written down once. R5.8 gives the sequence card and the performance transport one description of their own (`Source/SequenceTransport.h`), so the card's cells, the three surfaces' wording, the press rule, the tempo's domain and the page-duration fallback are each written down once. R5.9 gives the channel and the modulation controls descriptions of their own (`Source/ChannelControls.h`, `Source/ModulationControls.h`), so the two cards' cells, the channel list's item ids, the modulation list's items and ids, the target rule and the depth's domain are each written down once. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, the sieve panel's own suite 42/42, the frequency inspector's own suite 29/29, the sequence transport's own suite 45/45, the channel controls' own suite 26/26, the modulation controls' own suite 38/38, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
 | R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
@@ -4775,3 +4883,208 @@ own suite 45/45, the hit tester's own suite 34/34, the mapper's own suite
 unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke
 22/22, pluginval strictness 5 SUCCESS, boundaries 5 rules / 0 violations
 (67 source files).
+
+### R5.9 record (2026-11-28)
+
+The channel card and the modulation card are written down once.
+
+The characterization commit is `60b7224`, the move `27c85a6`.
+
+| Measure | Before | After |
+|---|---|---|
+| the channel card | built inline in `MainComponentLayout.cpp` | one description (`Source/ChannelControls.h`) |
+| the modulation card | built inline in `MainComponentLayout.cpp` | one description (`Source/ModulationControls.h`) |
+| the roles and the widgets | the layout named the widgets itself | the app binds the roles to its widgets (`channelControls`, `modulationControls`) |
+| the channel list's ids | "index + 2" when the list was written, "item - 2" when it was read | one rule (`itemIdForChannelIndex`, `channelIndexForItemId`, `isMainItem`) |
+| the mixer's button text | in the widget's declaration | the edge's word (`openButtonText`) |
+| the modulation dropdowns' dispatch | the same three lines copied at both call sites | one method (`applyModulationControls`) |
+| the modulator list's items and ids | "Arc " + id and id + 1, written in two places | one rule (`arcName`, `itemIdForArc`, `arcForItemId`, `isNoneItem`) |
+| the target list's items and ids | "Pitch"/"Amp" and 1/2, written in two places | one rule (`targetName`, `itemIdForTarget`, `targetForItemId`) |
+| the depth's domain | 0..1 in steps of 0.001, written in two places | one domain (`kMinDepth`, `kMaxDepth`, `kDepthInterval`) |
+| the depth's fallback | `0.5` in the refresh | one constant (`kDefaultDepth`) |
+| the channel controls' own suite | - | `Source/SelfTestChannelControls.cpp`, 26 checks |
+| the modulation controls' own suite | - | `Source/SelfTestModulationControls.cpp`, 38 checks |
+| the source files | 67 | 69 (the two suites) |
+
+**The suites came first.** `Source/SelfTestChannelControls.cpp` (19 checks)
+and `Source/SelfTestModulationControls.cpp` (22 checks) were written against
+the old code: they press the card's buttons, pick from the card's dropdowns
+and read the app's state.
+
+They pin:
+
+- the cards: the channel card's selector and mix button, the modulation
+  card's modulator, target and depth, their captions and their tooltips;
+- the channel list: Main first, then the mixer's own channels, and the item
+  ids that go with them;
+- the routing: picking a channel routes the selected arcs to it, picking Main
+  brings them back, each route is one undo step, and one undo takes the arcs
+  back to the channel;
+- the mixer: the button opens the panel and the panel closes;
+- the modulation lists: None and the page's arcs, Pitch and Amp, and their
+  item ids;
+- the depth: its domain, and the value it falls back to;
+- the modulation commands: picking a modulator assigns it, picking a target
+  writes it, picking None clears it, the slider writes the depth, a cycle is
+  refused, and each of those is one undo step.
+
+The move added the checks that pin the edges against the app: every role is
+bound to a widget, the app's cards are the edges' cell lists in the edges'
+order, the cards' tooltips are the edges' wording, the app's lists follow the
+edges' ids and names, the depth slider covers the edge's domain, and each
+edge's own tables are sound.
+
+**The edges.** `Source/ChannelControls.h` is the channel card's description:
+
+```cpp
+namespace upic::channel_controls
+{
+    using Kind = upic::inspector::Kind;
+
+    enum class Control { Channel, Open, count };
+
+    struct Cell
+    {
+        Control control;
+        Kind kind;
+        int labelWidth = 0;
+        int width = 0;
+        bool newLine = false;
+    };
+
+    struct Description
+    {
+        const char* name;       // "Channel"
+        std::vector<Cell> card; // the channel card's cells
+    };
+
+    const Description& describe();
+    const std::vector<Control>& allControls();
+
+    const char* tooltip (Control control);
+    const char* openButtonText();   // "Mix..."
+
+    constexpr int kMainItemId = 1;
+    const char* mainName();         // "Main"
+    int itemIdForChannelIndex (int index);
+    bool isMainItem (int itemId);
+    int channelIndexForItemId (int itemId);
+}
+```
+
+`Source/ModulationControls.h` is the modulation card's description:
+
+```cpp
+namespace upic::modulation_controls
+{
+    using Kind = upic::inspector::Kind;
+
+    enum class Control { Modulator, Target, Depth, count };
+
+    struct Cell
+    {
+        Control control;
+        Kind kind;
+        int labelWidth = 0;
+        int width = 0;
+        bool newLine = false;
+    };
+
+    struct Description
+    {
+        const char* name;       // "Modulation"
+        std::vector<Cell> card; // the modulation card's cells
+    };
+
+    const Description& describe();
+    const std::vector<Control>& allControls();
+
+    const char* tooltip (Control control);
+
+    constexpr int kNoneItemId = 1;
+    const char* noneName();          // "None"
+    std::string arcName (int arcId); // "Arc 7"
+    int itemIdForArc (int arcId);
+    bool isNoneItem (int itemId);
+    int arcForItemId (int itemId);
+
+    constexpr int kPitchTarget = 0, kAmpTarget = 1;
+    constexpr int kPitchItemId = 1, kAmpItemId = 2;
+    const char* targetName (int target);
+    int itemIdForTarget (int target);
+    int targetForItemId (int itemId);
+
+    constexpr double kMinDepth = 0.0, kMaxDepth = 1.0, kDepthInterval = 0.001;
+    constexpr double kDefaultDepth = 0.5;
+}
+```
+
+Both headers hold no widget and no document, and they are free of JUCE: the
+descriptions are data, and the data can be checked without a window.
+
+**The bindings.** The app owns the widgets, so the app binds the roles to
+them - once, where the cards are built:
+
+```cpp
+namespace cc = upic::channel_controls;
+bindChannelControl (cc::Control::Channel, &channelLab, &channelBox);
+bindChannelControl (cc::Control::Open, nullptr, &channelBtn);
+
+namespace moc = upic::modulation_controls;
+bindModulationControl (moc::Control::Modulator, &arcModLab, &arcModBox);
+bindModulationControl (moc::Control::Target, &arcModTgtLab, &arcModTgtBox);
+bindModulationControl (moc::Control::Depth, &arcModDepthLab, &arcModSlider);
+```
+
+The layout then builds the cards from the edges' cells, with the R5.7 helper:
+
+```cpp
+for (auto& cell : upic::channel_controls::describe().card)
+    addCell (ch, channelControls[(size_t) cell.control],
+             cell.kind, cell.labelWidth, cell.width, cell.newLine);
+```
+
+The lists' items, their ids, the depth's domain and the wording come from the
+edges too, so the cards, the lists and the commands cannot disagree.
+
+**The one change.** The modulation card's two dropdowns read the same way and
+write the same command, and that reading was copied at both call sites:
+
+```cpp
+setModOnSelection (i <= 1 ? -1 : i - 1,
+                   arcModTgtBox.getSelectedId() == 2 ? 1 : 0,
+                   arcModSlider.getValue());
+```
+
+Now the two call sites call one method, `applyModulationControls()`, and the
+item ids, the target and the depth are read through the edge's rules. The
+channel list's ids were written down twice as well - "index + 2" when the
+list was written and "item - 2" when it was read - and both are the edge's
+rule now. The mix button's text ("Mix...") was in the widget's declaration and
+is the edge's word now.
+
+**The behaviour is unchanged.** The cards' cells keep their order, their
+widths and their kinds - the edge carries the same numbers the layout had
+(26/100 for the channel selector, 62 for the mix button; 30/100, 26/66 and
+36/110 for the modulator, the target and the depth) - and the card engine
+still puts the plain controls first, so the cards look the same. The lists
+offer the same items with the same ids, the depth covers the same domain, and
+the routing and the assignment are the old commands, body for body.
+
+**The mechanical check.** The production code does not call a test-only door,
+the bodies are the old ones, and the behaviour is unchanged where it should
+be - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`channel-controls-edge.md`](channel-controls-edge.md) and
+[`modulation-controls-edge.md`](modulation-controls-edge.md).
+
+Gate: app selftest 3,552/3,552, the modulation controls' own suite 38/38, the
+channel controls' own suite 26/26, the sequence transport's own suite 45/45,
+the frequency inspector's own suite 29/29, the sieve panel's own suite 42/42,
+the inspector's own suite 50/50, the transactions' own suite 45/45, the
+tools' own suite 45/45, the hit tester's own suite 34/34, the mapper's own
+suite 14/14, the render's own suite 18/18, golden render
+`0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged,
+plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS, boundaries
+5 rules / 0 violations (69 source files).
