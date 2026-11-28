@@ -1118,6 +1118,55 @@ behaviour is unchanged - the golden render and the v0.29 fixture say so.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.26 R4.4 - the user library's repository
+
+**What moves.** The storage of the user library moves out of
+`Source/UserLibrary.h` into the new `Source/LibraryRepository.h`: where the
+library lives (and the selftest's redirect), the kind-to-folder mapping, the
+name-to-file-name slug, the publish (the collision counter and the atomic
+temp-and-rename write), the read (the 4 MB cap, the parse and the envelope
+validation), the listing, the first free library id and the reveal target.
+The review gives the storage a name - the "library repository" (§34,
+Persistence/Libraries) - and the reusable assets a format of their own - the
+"library asset codec" (§33).
+
+The asset's *format* stays in `Source/UserLibrary.h`: the kinds, the
+envelope (`UserLibrary::assetToVar` / `assetFromVar`) and the payload
+validation. The shell keeps the service: which asset is selected, the bank's
+caps, the undo transaction and the words the user is told.
+
+**What stays.** The shell keeps the five publish/import/reveal triples, the
+`refreshUserLibraryBoxes()` refresh, the import's new local id, the bank
+limits and the undo transaction. The edge says what happened; the shell
+words it: `"The library asset was refused: " + error`, `"Published \"X\" to
+the user library"` and `"The user library could not reveal that X: " +
+error`.
+
+**The one change.** None in the behaviour. The bodies are the old
+`UserLibrary` methods, body for body: the six-property envelope, the 4 MB
+asset cap, the atomic write, the `-2`…`-999` collision counter, the order of
+the checks and the wording of every refusal do not change by a character.
+The new `read (kind, fileName, …)` overload is the old shell line - the
+selected name becomes a file in the kind's own folder - moved inside the
+edge; it still does not guard the name (the listing produced it), while the
+reveal path still does.
+
+**The contract.** `Source/SelfTestLibraryRepository.cpp`, written before the
+move, 47 checks. It pins where the library lives, the four folders and the
+shared table folder, the slug rules, the envelope and the atomic write, the
+publish refusals, the read refusals, the listing (the skipped files and the
+other table kind), the first free id, and the reveal target's guard. It
+reaches the storage through the old static methods; the move turns them
+into the repository's, and the checks themselves do not change.
+
+**The mechanical check.** The production code does not call a test-only
+door, the diff outside the storage's methods is empty, and the behaviour is
+unchanged - the golden render and the v0.29 fixture say so.
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1148,7 +1197,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R4 Persistence | **R4.1 + R4.2 + R4.3 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619` | app selftest 3,119/3,119, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
@@ -3082,3 +3131,88 @@ Gate: app selftest 3,119/3,119, the repository's own suite 21/21, golden
 render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975`
 unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS,
 boundaries 5 rules / 0 violations (56 source files).
+
+### R4.4 record (2026-11-28)
+
+The user library's storage is an edge now, and the shell keeps the service.
+
+The characterization commit is `27b4305`, the move `ac0b707`.
+
+| Measure | Before | After |
+|---|---|---|
+| the library's storage | the storage methods of `UserLibrary`, in `Source/UserLibrary.h` (813 lines) | 366 lines in `Source/LibraryRepository.h` (the folder, the write, the read, the listing, the first free id and the reveal) |
+| the asset's format | the envelope and the validation inside the same class | `Source/UserLibrary.h` (534 lines): the kinds, `assetToVar` / `assetFromVar` and `payloadIsValid` |
+| where the library lives | `UserLibrary::rootFolder()` | `upic::library_repository::rootFolder()` |
+| the write | `UserLibrary::publish()` | `upic::library_repository::publish()` |
+| the read | `UserLibrary::read (kind, file, …)` | `upic::library_repository::read (kind, file, …)` and `read (kind, fileName, …)` |
+| the listing | `UserLibrary::list()` | `upic::library_repository::list()` |
+| the first free id | `UserLibrary::nextLibraryId()` | `upic::library_repository::nextLibraryId()` |
+| the reveal | `UserLibrary::reveal*()` | `upic::library_repository::reveal*()` |
+| the service | the five publish/import/reveal triples in the shell | unchanged - the shell's |
+| the repository's own suite | - | `Source/SelfTestLibraryRepository.cpp`, 47 checks |
+| the source files | 56 | 57 (the suite) |
+
+**The suite came first.** `Source/SelfTestLibraryRepository.cpp` was
+written against the old code, through `UserLibrary`'s static methods: 47
+checks that pin where the library lives, the four folders and the shared
+table folder, the slug rules, the envelope and the atomic write, the
+publish refusals, the read refusals, the listing (the skipped files and the
+other table kind), the first free id, and the reveal target's guard.
+
+**The edge.** `Source/LibraryRepository.h` is the storage:
+
+```cpp
+juce::File rootFolder();
+juce::File folderFor (UserAssetKind kind);
+juce::String slugFor (const juce::String& name);
+
+bool publish (UserAssetKind kind, int id, const juce::String& name,
+              juce::Colour colour, const juce::var& payload,
+              juce::String& error);
+bool read (UserAssetKind kind, const juce::File& file,
+           UserAsset& out, juce::String& error);
+bool read (UserAssetKind kind, const juce::String& fileName,
+           UserAsset& out, juce::String& error);
+std::vector<UserAsset> list (UserAssetKind kind, int* skipped = nullptr,
+                             juce::StringArray* failures = nullptr);
+int nextLibraryId (UserAssetKind kind);
+bool revealTarget (UserAssetKind kind, const juce::String& fileName,
+                   juce::File& target, juce::String& error);
+bool reveal (UserAssetKind kind, const juce::String& fileName,
+             juce::String& error);
+bool revealFolder (UserAssetKind kind);
+```
+
+The bodies are the old `UserLibrary` methods, body for body. The
+six-property envelope, the 4 MB asset cap, the atomic temp-and-rename
+write, the `-2`…`-999` collision counter, the order of the checks and the
+wording of every refusal do not change by a character.
+
+**The codec stays.** `Source/UserLibrary.h` keeps the asset's format: the
+kinds, `userAssetKindName()`, `userAssetFolderName()`, `UserAsset`, the new
+envelope `UserLibrary::assetToVar()` / `assetFromVar()`, and the payload
+validation with all of its refusals. The envelope's property names and
+order are the old file's.
+
+**The service stays in the shell.** The five publish/import/reveal triples
+in `Source/MainComponentModel.cpp` keep the selection, the bank limits, the
+undo transaction, the destination-bound frequency tables and the words. The
+edge says what happened; the shell words it.
+
+**The one asymmetry, kept.** The import's read takes the file name from the
+manager's list, so the old shell built the path without a guard; the reveal
+takes a typed name, so it guards. R4.4 moves the path-building into the
+edge's `read (kind, fileName, …)` and keeps the asymmetry body for body. It
+is recorded in the edge's header and in the architecture note.
+
+**The mechanical check.** The production code does not call a test-only
+door, the moved bodies are the old methods body for body, and the behaviour
+is unchanged - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`library-repository-edge.md`](library-repository-edge.md).
+
+Gate: app selftest 3,166/3,166, the library repository's own suite 47/47,
+golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture
+`8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness
+5 SUCCESS, boundaries 5 rules / 0 violations (57 source files).

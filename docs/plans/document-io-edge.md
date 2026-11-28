@@ -160,8 +160,9 @@ door with the move (the R3.5 precedent: the doors come with the move).
   ("Extract RecoveryService") and it was left out of this phase on
   purpose. (R4.3 moved the storage into an edge of its own - see
   [`recovery-repository-edge.md`](recovery-repository-edge.md).)
-- **The user library's and the tuning import's file reads are still in the
-  shell.** They are other formats (the library assets, the Scala tuning),
-  and the review gives them their own edges (R066, R067).
+- **The tuning import's file read is still in the shell.** It is another
+  format (the Scala tuning), and the review gives it its own edge (R067).
+  (R4.4 moved the user library's storage into an edge of its own - see
+  [`library-repository-edge.md`](library-repository-edge.md).)
 - **The document's data still holds JUCE values** - that is the rest of
   the review's R020, and the plan defers it (§2).
