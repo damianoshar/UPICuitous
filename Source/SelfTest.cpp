@@ -209,6 +209,14 @@ int upic::runSelfTest()
     upic::runChannelControlsChecks (t);
     // R5.9: the modulation controls - the card, the lists and the commands.
     upic::runModulationControlsChecks (t);
+    // R5.10: the MIDI settings - the device, the learn rows and the bindings.
+    upic::runMidiSettingsChecks (t);
+    // R5.10: the sample material panel - the slot, the level and the pitch mode.
+    upic::runSampleMaterialChecks (t);
+    // R5.10: the live input panel - the input, the pitch, the reverse and the grain.
+    upic::runLiveInputChecks (t);
+    // R5.10: the phase modulation panel - the ops, the presets and the voice.
+    upic::runPhaseModulationChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

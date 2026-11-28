@@ -51,6 +51,10 @@
       <FILE id="sSq65" name="SelfTestSequenceTransport.cpp" compile="1" resource="0" file="Source/SelfTestSequenceTransport.cpp"/>
       <FILE id="sCh67" name="SelfTestChannelControls.cpp" compile="1" resource="0" file="Source/SelfTestChannelControls.cpp"/>
       <FILE id="sMo68" name="SelfTestModulationControls.cpp" compile="1" resource="0" file="Source/SelfTestModulationControls.cpp"/>
+      <FILE id="sMs69" name="SelfTestMidiSettings.cpp" compile="1" resource="0" file="Source/SelfTestMidiSettings.cpp"/>
+      <FILE id="sSm70" name="SelfTestSampleMaterial.cpp" compile="1" resource="0" file="Source/SelfTestSampleMaterial.cpp"/>
+      <FILE id="sLi71" name="SelfTestLiveInput.cpp" compile="1" resource="0" file="Source/SelfTestLiveInput.cpp"/>
+      <FILE id="sPm72" name="SelfTestPhaseModulation.cpp" compile="1" resource="0" file="Source/SelfTestPhaseModulation.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>

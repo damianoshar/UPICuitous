@@ -110,6 +110,10 @@ namespace upic
     void runSequenceTransportChecks (SelfTest& t);    // R5.8: the sequence card and the performance transport - one recorder, one transport
     void runChannelControlsChecks (SelfTest& t);     // R5.9: the channel controls - the card, the channel list and the routing
     void runModulationControlsChecks (SelfTest& t);  // R5.9: the modulation controls - the card, the lists and the commands
+    void runMidiSettingsChecks (SelfTest& t);         // R5.10: the MIDI settings - the device, the learn rows and the bindings
+    void runSampleMaterialChecks (SelfTest& t);       // R5.10: the sample material panel - the slot, the level and the pitch mode
+    void runLiveInputChecks (SelfTest& t);            // R5.10: the live input panel - the input, the pitch, the reverse and the grain
+    void runPhaseModulationChecks (SelfTest& t);      // R5.10: the phase modulation panel - the ops, the presets and the voice
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);
