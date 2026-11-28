@@ -2,6 +2,7 @@
 #include "SelfTest.h"
 #include "MainComponent.h"
 #include "OverlayCard.h"
+#include "CardTheme.h"
 
 //==============================================================================
 // R5.12 (the review's R055): the card's look.
@@ -128,6 +129,20 @@ void upic::runCardThemeChecks (upic::SelfTest& t)
         check (difference.isEmpty(),
                "R5.12 " + name + " paints the card's frame",
                difference.isEmpty() ? juce::String ("the corner matches") : difference);
+
+        // --- the theme's frame is the shell's frame (R5.12) ------------------
+        const auto themed = frameReference (card, 1280, 800,
+                                            juce::Colour (upic::card_theme::kBackdrop),
+                                            juce::Colour (upic::card_theme::kFill),
+                                            juce::Colour (upic::card_theme::kBorder),
+                                            upic::card_theme::kRadius,
+                                            upic::card_theme::kBorderWidth);
+        const auto themedDifference = firstDifference (img, themed, card.getX(),
+                                                       card.getY(), corner);
+        check (themedDifference.isEmpty(),
+               "R5.12 the theme's frame is " + name + "'s frame",
+               themedDifference.isEmpty() ? juce::String ("the corner matches")
+                                          : themedDifference);
     };
 
     {
@@ -169,4 +184,13 @@ void upic::runCardThemeChecks (upic::SelfTest& t)
         oneFrame = oneFrame && h == frameHashes.front();
     check (oneFrame, "R5.12 the eight shells paint the same frame",
            juce::String ((int) frameHashes.size()) + " shells");
+
+    // --- the theme holds the frame the card has always had ------------------
+    check (upic::card_theme::kBackdrop == 0xcc000000u
+           && upic::card_theme::kFill == 0xff1e1e26u
+           && upic::card_theme::kBorder == 0xff34343fu
+           && upic::card_theme::kRadius == 6.0f
+           && upic::card_theme::kBorderWidth == 1.0f,
+           "R5.12 the theme holds the frame the shells have always painted",
+           juce::String (upic::card_theme::kRadius) + " px radius");
 }

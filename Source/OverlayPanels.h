@@ -13,6 +13,7 @@
 //==============================================================================
 #include <JuceHeader.h>
 #include "OverlayCard.h"
+#include "CardTheme.h"
 
 //------------------------------------------------------------------------------//
 // The backdrop + card that the audio and the MIDI/OSC settings use. The
@@ -34,12 +35,14 @@ struct AudioOverlay : juce::Component
 
     void paint(juce::Graphics& g) override
     {
-        g.fillAll(juce::Colour(0xcc000000));
+        // R5.12: the card's frame is the theme's frame.
+        g.fillAll(juce::Colour(upic::card_theme::kBackdrop));
         auto card = cardRect();
-        g.setColour(juce::Colour(0xff1e1e26));
-        g.fillRoundedRectangle(card.toFloat(), 6.0f);
-        g.setColour(juce::Colour(0xff34343f));
-        g.drawRoundedRectangle(card.toFloat().reduced(0.5f), 6.0f, 1.0f);
+        g.setColour(juce::Colour(upic::card_theme::kFill));
+        g.fillRoundedRectangle(card.toFloat(), upic::card_theme::kRadius);
+        g.setColour(juce::Colour(upic::card_theme::kBorder));
+        g.drawRoundedRectangle(card.toFloat().reduced(upic::card_theme::kBorderInset),
+                               upic::card_theme::kRadius, upic::card_theme::kBorderWidth);
         g.setFont(juce::Font(juce::FontOptions(14.0f, juce::Font::bold)));
         g.setColour(juce::Colour(0xffc8c8d0));
         g.drawText(title, card.reduced(12, 0).removeFromTop(titleH),
@@ -83,12 +86,14 @@ struct ClearOverlay : juce::Component
 
     void paint(juce::Graphics& g) override
     {
-        g.fillAll(juce::Colour(0xcc000000));
+        // R5.12: the card's frame is the theme's frame.
+        g.fillAll(juce::Colour(upic::card_theme::kBackdrop));
         auto card = cardRect();
-        g.setColour(juce::Colour(0xff1e1e26));
-        g.fillRoundedRectangle(card.toFloat(), 6.0f);
-        g.setColour(juce::Colour(0xff34343f));
-        g.drawRoundedRectangle(card.toFloat().reduced(0.5f), 6.0f, 1.0f);
+        g.setColour(juce::Colour(upic::card_theme::kFill));
+        g.fillRoundedRectangle(card.toFloat(), upic::card_theme::kRadius);
+        g.setColour(juce::Colour(upic::card_theme::kBorder));
+        g.drawRoundedRectangle(card.toFloat().reduced(upic::card_theme::kBorderInset),
+                               upic::card_theme::kRadius, upic::card_theme::kBorderWidth);
         auto inner = card.reduced(16, 0);
         g.setFont(juce::Font(juce::FontOptions(15.0f, juce::Font::bold)));
         g.setColour(juce::Colour(0xffe0a040));
