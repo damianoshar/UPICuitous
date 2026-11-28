@@ -154,6 +154,10 @@ public:
     static constexpr int convertMenuItem = 61;
     static constexpr int convertMenuBase = 300;
 
+    // R5.4: the scrub target's band, so the selftest can put the pointer on
+    // it (the band is narrow and it moves with the canvas's height).
+    juce::Rectangle<float> timeStripHitRectForTest() const;
+
     // v1.33: the selftest drives the zone drag directly (a synthesised
     // mouse event needs a real MouseInputSource).
     juce::Rectangle<float> zoneRectForTest (int id) const;

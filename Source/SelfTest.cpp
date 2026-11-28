@@ -193,6 +193,8 @@ int upic::runSelfTest()
     upic::runCoordinateMapperChecks (t);
     // R5.3: the hit tester - the arcs near a point, the zone under it and its handles.
     upic::runScoreHitTestChecks (t);
+    // R5.4: the editing tools - the stroke, the line, the sine, the erase, the selection, the marquee, the move and the zone.
+    upic::runEditingToolChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

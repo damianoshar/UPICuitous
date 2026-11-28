@@ -102,6 +102,7 @@ namespace upic
     void runScoreRenderChecks (SelfTest& t);        // R5.1: the score canvas's render - the frame, the grid, the arcs and the playhead
     void runCoordinateMapperChecks (SelfTest& t);   // R5.2: the coordinate mapper - the time axis, the pitch axis and the zoom
     void runScoreHitTestChecks (SelfTest& t);       // R5.3: the hit tester - the arcs near a point, the zone under it and its handles
+    void runEditingToolChecks (SelfTest& t);         // R5.4: the editing tools - the stroke, the line, the sine, the erase, the selection, the marquee, the move and the zone
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);

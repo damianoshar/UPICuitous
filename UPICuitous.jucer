@@ -43,6 +43,7 @@
       <FILE id="sSr49" name="SelfTestScoreRender.cpp" compile="1" resource="0" file="Source/SelfTestScoreRender.cpp"/>
       <FILE id="sCm50" name="SelfTestCoordinateMapper.cpp" compile="1" resource="0" file="Source/SelfTestCoordinateMapper.cpp"/>
       <FILE id="sSh53" name="SelfTestScoreHitTest.cpp" compile="1" resource="0" file="Source/SelfTestScoreHitTest.cpp"/>
+      <FILE id="sEt55" name="SelfTestEditingTools.cpp" compile="1" resource="0" file="Source/SelfTestEditingTools.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>

@@ -105,6 +105,11 @@ void ScoreEditor::selectAll()
 int ScoreEditor::getSelectedZone() const
 { return selectedZone; }
 
+juce::Rectangle<float> ScoreEditor::timeStripHitRectForTest() const
+{
+    return timeStripHitRect();
+}
+
 juce::Rectangle<float> ScoreEditor::zoneRectForTest(int id) const
 {
         if (page == nullptr) return {};
