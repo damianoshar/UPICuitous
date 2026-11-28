@@ -195,6 +195,8 @@ int upic::runSelfTest()
     upic::runScoreHitTestChecks (t);
     // R5.4: the editing tools - the stroke, the line, the sine, the erase, the selection, the marquee, the move and the zone.
     upic::runEditingToolChecks (t);
+    // R5.5: the gesture transactions - one command per gesture, one change per command.
+    upic::runGestureTransactionChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
