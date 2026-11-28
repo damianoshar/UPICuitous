@@ -199,6 +199,10 @@ int upic::runSelfTest()
     upic::runGestureTransactionChecks (t);
     // R5.6: the material inspector - the tabs, the hint and the material card.
     upic::runMaterialInspectorChecks (t);
+    // R5.7: the sieve panel - the sieve card, the magnets and the sieve's rules.
+    upic::runSievePanelChecks (t);
+    // R5.7: the frequency inspector - the page card, the spaces and the ambitus.
+    upic::runFrequencyInspectorChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
