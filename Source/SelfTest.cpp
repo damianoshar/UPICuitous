@@ -217,6 +217,8 @@ int upic::runSelfTest()
     upic::runLiveInputChecks (t);
     // R5.10: the phase modulation panel - the ops, the presets and the voice.
     upic::runPhaseModulationChecks (t);
+    // R5.11: the overlay card shell - the card's rectangle and the backdrop.
+    upic::runOverlayCardChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

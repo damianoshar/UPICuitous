@@ -55,6 +55,7 @@
       <FILE id="sSm70" name="SelfTestSampleMaterial.cpp" compile="1" resource="0" file="Source/SelfTestSampleMaterial.cpp"/>
       <FILE id="sLi71" name="SelfTestLiveInput.cpp" compile="1" resource="0" file="Source/SelfTestLiveInput.cpp"/>
       <FILE id="sPm72" name="SelfTestPhaseModulation.cpp" compile="1" resource="0" file="Source/SelfTestPhaseModulation.cpp"/>
+      <FILE id="sOc73" name="SelfTestOverlayCard.cpp" compile="1" resource="0" file="Source/SelfTestOverlayCard.cpp"/>
       <FILE id="sTm13" name="SelfTestMidi.cpp" compile="1" resource="0" file="Source/SelfTestMidi.cpp"/>
       <FILE id="sTd14" name="SelfTestModel.cpp" compile="1" resource="0" file="Source/SelfTestModel.cpp"/>
       <FILE id="sTs15" name="SelfTestSnapshot.cpp" compile="1" resource="0" file="Source/SelfTestSnapshot.cpp"/>
