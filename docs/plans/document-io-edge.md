@@ -158,7 +158,8 @@ door with the move (the R3.5 precedent: the doors come with the move).
 - **The recovery snapshot's I/O is still in the shell**
   (`Source/MainComponentRecovery.cpp`). It is the review's R065
   ("Extract RecoveryService") and it was left out of this phase on
-  purpose.
+  purpose. (R4.3 moved the storage into an edge of its own - see
+  [`recovery-repository-edge.md`](recovery-repository-edge.md).)
 - **The user library's and the tuning import's file reads are still in the
   shell.** They are other formats (the library assets, the Scala tuning),
   and the review gives them their own edges (R066, R067).

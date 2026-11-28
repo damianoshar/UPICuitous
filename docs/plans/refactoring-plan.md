@@ -118,7 +118,7 @@ move.
 | **R1 Low-risk extraction** | Take the pure geometry out of `MainComponent` | **Extract the card layout engine** out of `resized()` into `CardLayoutEngine` (pure, no JUCE components) | R039, R040, R054, R055, R010, R056, R089 | `resized()` applies a result instead of computing it; the layout characterization suite passes unchanged. |
 | **R2 Domain boundaries** | Make the composition model testable without a GUI | The domain's numeric core loses JUCE (R2.1), then `Arc`'s codec edge and its geometry are split out | R012–R021, R084 | Domain headers depend on no GUI header; the domain tests run headless. |
 | **R3 Document and commands** | One authoritative owner, one transaction per edit | `DocumentSession` façade over the existing piece model, then undo/selection behind it | R005–R010, R047, R030 | One model command = one labelled undo transaction; the revision counter advances per command. |
-| **R4 Persistence** | Loading is transactional and validated | `PieceCodec` / validation split out of `loadFromVar()`; the file adapter split out of `loadFile()`/`savePieceToFile()`; a failed load leaves the active piece untouched | R059–R067, R090 | A malformed document fails with diagnostics and changes nothing; the v0.29 fixture still renders byte-identically. |
+| **R4 Persistence** | Loading is transactional and validated | `PieceCodec` / validation split out of `loadFromVar()`; the file adapter split out of `loadFile()`/`savePieceToFile()`; the recovery snapshot's storage split out of the shell; a failed load leaves the active piece untouched | R059–R067, R090 | A malformed document fails with diagnostics and changes nothing; the v0.29 fixture still renders byte-identically. |
 | **R5 UI decomposition** | Rendering, hit-testing and interaction are separate | `ScoreRenderer` + `ScoreHitTester` + a coordinate mapper, out of `ScoreEditor` | R043–R053, R058, R059 | A hit test can be run without painting; the UI checks pass unchanged. |
 | **R6 Real-time audio** | The callback is an orchestrator | `TransportStateMachine`, then `SnapshotPublisher`, then `PreviewRouter`, then `AudioRuntime` | R021–R038 | The callback still allocates nothing, rejects stale events, and the golden render is unchanged. |
 | **R7 Plugin and platform** | The plugin outlives its editor | Plugin processor owns the session; the editor attaches | R075–R079 | The plugin processes with no editor open; smoke 22/22 and pluginval stay green. |
@@ -1073,6 +1073,51 @@ behaviour is unchanged - the golden render and the v0.29 fixture say so.
 golden render and the legacy fixture are unchanged, and the full gate is
 green.
 
+### 6.25 R4.3 - the recovery snapshot's repository
+
+**What moves.** The storage of the crash-recovery snapshot moves out of the
+shell into the new `Source/RecoveryRepository.h`: where the snapshots live,
+the write (the piece JSON without the audio, the sidecars whose names carry
+the hash of the audio, the removal of the sidecars that are not used any
+more), the read (the piece JSON, the audio put back where the loader wants
+it) and the cleanup. The review gives that responsibility a name - the
+"recovery repository" (§33, the table of the storage responsibilities) -
+and asks for the recovery to be a service of its own (R065, "Extract
+RecoveryService").
+
+The edge is the storage; the service is the shell's. The snapshot is still
+written by `maybeWriteRecoverySnapshot()` (the 30 s interval, the epoch,
+the unsaved check) and still offered by `offerRecovery()` (the dialog, the
+recover and the discard); what moves is what the shell does to the disk.
+
+**What stays.** The service and the words: "The recovery snapshot could not
+be written: X", "Recovered the piece from the last session" and "The
+recovery snapshot could not be opened". The edge says what happened; the
+shell words it for the user.
+
+**The one change.** None in the behaviour. The bodies are the shell's
+methods, body for body: the property names, the 8 MB piece cap, the
+`kMaxPieceBytes` audio cap, the hash (FNV-1a), the sidecar names, the order
+of the checks and the wording of every refusal do not change by a
+character.
+
+**The contract.** `Source/SelfTestRecoveryRepository.cpp`, written before
+the move. It pins where the snapshots live, the shape of a snapshot (the
+piece file, the sidecar's name, the piece JSON that points at it), the
+sidecars that are not used any more, the round trip, the cleanup and every
+refusal with its words. The suite reached the storage through the shell's
+static methods; the move turns them into the edge's, and the checks
+themselves do not change (the R3.5 precedent: the doors come with the
+move).
+
+**The mechanical check.** The production code does not call a test-only
+door, the diff outside the storage's four methods is empty, and the
+behaviour is unchanged - the golden render and the v0.29 fixture say so.
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the
+golden render and the legacy fixture are unchanged, and the full gate is
+green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -1103,7 +1148,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R1 Low-risk extraction | **R1.3 shipped** | `1ba66d2`, `713dabd`, `84bc261` | app selftest 1,993/1,993, R0.1 unchanged, R1.2 71/71, R1.3 76/76, seven- and four-viewport digests identical, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R4 Persistence | **R4.1 + R4.2 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2` | app selftest 3,098/3,098, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R4 Persistence | **R4.1 + R4.2 + R4.3 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619` | app selftest 3,119/3,119, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R5 UI decomposition | not started | - | - |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
@@ -2977,3 +3022,63 @@ Gate: app selftest 3,098/3,098, the adapter's own suite 22/22, golden
 render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975`
 unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS,
 boundaries 5 rules / 0 violations (55 source files).
+
+### R4.3 record (2026-11-28)
+
+The recovery snapshot's storage is an edge now, and the shell keeps the
+service.
+
+The characterization commit is `d9762fb`, the move `04b9619`.
+
+| Measure | Before | After |
+|---|---|---|
+| the snapshot's storage | 206 lines in `MainComponentRecovery.cpp`, four static methods of the shell | 262 lines in `Source/RecoveryRepository.h` (the folder, the write, the read and the cleanup) |
+| where the snapshots live | `MainComponent::recoveryDirectory()` | `upic::recoveryDirectory()` |
+| the write | `MainComponent::writeRecoverySnapshot()` | `upic::writeRecoverySnapshot (dir, model, error)` |
+| the read | `MainComponent::readRecoverySnapshot()` | `upic::readRecoverySnapshot (dir, pieceOut, error)` |
+| the cleanup | `MainComponent::deleteRecoverySnapshot()` | `upic::deleteRecoverySnapshot (dir)` |
+| the service | `maybeWriteRecoverySnapshot()` and `offerRecovery()` in the shell | unchanged - the shell's |
+| the repository's own suite | - | `Source/SelfTestRecoveryRepository.cpp`, 21 checks |
+| the source files | 55 | 56 (the suite) |
+
+**The suite came first.** `Source/SelfTestRecoveryRepository.cpp` was
+written against the old code, through the shell's four static methods: 21
+checks that pin where the snapshots live, the shape of a snapshot, the
+sidecars that are not used any more, the round trip, the cleanup and every
+refusal with its words.
+
+**The edge.** `Source/RecoveryRepository.h` is the storage:
+
+```cpp
+juce::File recoveryDirectory();
+
+bool writeRecoverySnapshot (const juce::File& dir, const PieceModel& model,
+                            juce::String& error);
+bool readRecoverySnapshot (const juce::File& dir, juce::var& pieceOut,
+                           juce::String& error);
+void deleteRecoverySnapshot (const juce::File& dir);
+```
+
+The bodies are the shell's methods, body for body. The property names, the
+8 MB piece cap, the `kMaxPieceBytes` audio cap, the hash (FNV-1a), the
+sidecar names, the order of the checks and the wording of every refusal do
+not change by a character.
+
+**The service stays in the shell.** When the snapshot is written (the 30 s
+interval, the epoch, the unsaved check) and how it is offered (the dialog,
+the recover and the discard) are the app's behaviour, not the storage's.
+The review's R065 asks for that service to be a thing of its own too; R4.3
+extracts the repository (§33's storage responsibility) and leaves the
+service where it can still be reached by the window.
+
+**The mechanical check.** The production code does not call a test-only
+door, the moved bodies are the shell's body for body, and the behaviour is
+unchanged - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`recovery-repository-edge.md`](recovery-repository-edge.md).
+
+Gate: app selftest 3,119/3,119, the repository's own suite 21/21, golden
+render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975`
+unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS,
+boundaries 5 rules / 0 violations (56 source files).
