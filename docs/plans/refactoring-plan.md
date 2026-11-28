@@ -2058,6 +2058,84 @@ The boundary, the API and what stays in the shell are described in
 **Gate.** The suite passes, the rest of the selftest is untouched, the golden
 render and the legacy fixture are unchanged, and the full gate is green.
 
+### 6.38 R5.12 - the card's look
+
+**What moves.** The frame the eight card shells draw leaves the shells and
+moves into a theme edge of its own:
+
+- `Source/CardTheme.h` - the backdrop behind the card (`0xcc000000`), the
+  card's own surface (`0xff1e1e26`), the card's border (`0xff34343f`), the
+  border's width (1 px), the corner radius (6 px) and the border's inset (half
+  the border's width).
+
+The review's R055 asks for the LookAndFeel and the theme registry to be
+extracted, and R5.11 left the colours behind with the note that they were the
+theme's business. R5.12 pays that note: the first step of the theme registry
+is the frame every overlay-based panel draws.
+
+Eight shells wrote the frame again:
+
+```cpp
+g.fillAll (juce::Colour (0xcc000000));
+auto card = cardRect();
+g.setColour (juce::Colour (0xff1e1e26));
+g.fillRoundedRectangle (card.toFloat(), 6.0f);
+g.setColour (juce::Colour (0xff34343f));
+g.drawRoundedRectangle (card.toFloat().reduced (0.5f), 6.0f, 1.0f);
+```
+
+Nothing made the eight copies agree, and a new shell would have had to copy the
+frame a ninth time.
+
+**What stays.** The widgets stay the shell's, and so do the card's contents:
+the panels' lists, their plots, their rows, their text and their titles are
+each shell's own. The rest of the app's colours stay too - the lists'
+background (`0xff14141a`), the plots' grid (`0xff2a2a36`), the selected row,
+the row text, the dim text and the titles - they move with the rest of the
+theme registry, not with the card's frame.
+
+**The same value can be two roles.** `0xff1e1e26` is the card's surface here
+and the score canvas's plot fill there; `0xff34343f` is the card's border here
+and a button's colour there. R5.12 moved the *card frame's* role, and the
+other roles keep their own literals until the theme registry says otherwise.
+
+**The arithmetic is copied, not improved.** The old rule drew the border on
+`card.toFloat().reduced (0.5f)` with a one-pixel pen, so the line covered the
+card's outermost pixel exactly. The edge says the same thing once
+(`kBorderInset` is `kBorderWidth * 0.5f`), and the shells ask for it by name.
+
+**The behaviour is unchanged.** The cards look the same, and the golden render
+and the v0.29 fixture say so.
+
+**The contract.** One suite, written before the move,
+`Source/SelfTestCardTheme.cpp` (17 checks at the characterization, 26 after the
+move).
+
+It paints each shell off-screen and reads the pixels - no window, no device and
+no message loop. It pins:
+
+- the backdrop every shell paints behind the card (`0xcc000000`);
+- the frame every shell paints: the card's surface, its border and its radius,
+  read from a twelve-pixel block at the card's corner (the block holds the
+  whole six-pixel corner and no title) and compared with the frame the suite
+  draws itself;
+- the eight corners being pixel for pixel the same.
+
+The move added the checks that pin the edge against the app: every shell's
+frame is the theme's frame, and the theme holds the frame the shells have
+always painted. The suite has teeth - a seven-pixel radius instead of the six
+makes all eight frame checks fail, at the corner's arc.
+
+**The mechanical check.** The production code does not call a test-only door,
+the bodies are the old ones, and the behaviour is unchanged where it should
+be - the golden render and the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`card-theme-edge.md`](card-theme-edge.md).
+
+**Gate.** The suite passes, the rest of the selftest is untouched, the golden
+render and the legacy fixture are unchanged, and the full gate is green.
+
 ## 7. Deliberately not doing (yet)
 
 Taken from the review's own §62 "patterns to avoid", plus the adaptations in
@@ -2089,7 +2167,7 @@ Taken from the review's own §62 "patterns to avoid", plus the adaptations in
 | R2 Domain boundaries | **R2.1 + R2.2 + R2.3 + R2.4 + R2.5 + R2.6 + R2.7 + R2.8 + R2.9 + R2.10 + R2.11 + R2.12 + R2.13 shipped** | `ea83dac`, `d58120d`, `bb23e1c`, `bb0d88c`, `f3aa455`, `f44c399`, `9ff1c1c`, `829f977`, `856fa7a`, `54f07c5`, `806b0de`, `2fdf7d1`, `43fc917`, `b90c295`, `2300f93`, `b44e1c1`, `46aeb11`, `6f29d51`, `d927503`, `f581985`, `1cd17b5`, `395f121`, `fce238c` | app selftest 2,706/2,706, the domain's numeric core, the arc, the arc's geometry and the page are JUCE-free and checked by the gate, the domain's own suite 61/61, the arc's own suite 87/87, the geometry's own suite 58/58, the page's own suite 73/73, the group's own suite 43/43, the envelope's own suite 31/31, the wave's own suite 29/29, the channel's own suite 54/54, the sample slot's own suite 71/71, the tuning's own suite 46/46, the sieve zone's own suite 65/65, the performance sequence's own suite 48/48, the frequency space definition's own suite 47/47, every domain header's file format at the codec edge, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R3 Document and commands | **R3.5 shipped** | `27f2a62`, `4f8be2a`, `15c77b8`, `63f3576`, `9b4e6f7`, `ab32a05`, `9142a17`, `0432be3` | app selftest 2,993/2,993, the document's revision, the epoch, the unsaved flag, the undo history, the selection and the command dispatcher have one owner - the document session, the session's own suite 30/30, the history's own suite 59/59, the selection's own suite 27/27, the command's own suite 29/29 and the edits' own suite 140/140 - every user edit that changes the piece is one labelled undo transaction and the revision advances once per edit, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R4 Persistence | **R4.1 + R4.2 + R4.3 + R4.4 shipped** | `479d99b`, `6691a55`, `808dd88`, `f2e6fe2`, `d9762fb`, `04b9619`, `27b4305`, `ac0b707` | app selftest 3,166/3,166, the document's file format lives at the codec edge (`Source/PieceCodec.h`) - the decode, the migration, the validation and the repairs - and the shell keeps the commit, the codec's own suite 82/82, a refused document leaves the piece alone, the document's file adapter lives at an edge of its own (`Source/DocumentRepository.h`) - the read, the write and the size limits - and the shell keeps the picking and the wording, the adapter's own suite 22/22, the recovery snapshot's storage lives at an edge of its own (`Source/RecoveryRepository.h`) - the folder, the write, the read and the cleanup - and the shell keeps the service and the words, the repository's own suite 21/21, the user library's storage lives at an edge of its own (`Source/LibraryRepository.h`) - the folder, the atomic write, the validated read, the listing and the reveal - while the asset's format stays in `Source/UserLibrary.h` and the shell keeps the service, the library repository's own suite 47/47, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
-| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5, R5.6, R5.7, R5.8, R5.9, R5.10 and R5.11 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480`, `2cd45f1`, `39e7cbb`, `c84a287`, `9dbd160`, `3148d5d`, `60b7224`, `27c85a6`, `1112dc3`, `7ce31c9`, `cb6595c`, `14a2c83` | app selftest 3,701/3,701, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. R5.7 gives the sieve and the frequency controls descriptions of their own (`Source/SievePanel.h`, `Source/FrequencyInspector.h`) and a shared cell vocabulary (`Source/InspectorCell.h`), so the time grid's divisions, the remainder list's text format and the ambitus's "Custom" item id are each written down once. R5.8 gives the sequence card and the performance transport one description of their own (`Source/SequenceTransport.h`), so the card's cells, the three surfaces' wording, the press rule, the tempo's domain and the page-duration fallback are each written down once. R5.9 gives the channel and the modulation controls descriptions of their own (`Source/ChannelControls.h`, `Source/ModulationControls.h`), so the two cards' cells, the channel list's item ids, the modulation list's items and ids, the target rule and the depth's domain are each written down once. R5.10 gives the MIDI settings, the sample material, the live input and the phase modulation descriptions of their own (`Source/MidiSettings.h`, `Source/SampleMaterial.h`, `Source/LiveInput.h`, `Source/PhaseModulation.h`), so the four learn rows' captions, the device list's item ids, the slot list's item ids, the pitch lists' items and ids, the level's and the input gain's domains, the operator counts, the six presets and the three knobs' domains are each written down once. R5.11 gives the overlay card shell one description (`Source/OverlayCard.h`), so the eight shells' card rectangle, their card's maximum size and the content's padding are each written down once. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, the sieve panel's own suite 42/42, the frequency inspector's own suite 29/29, the sequence transport's own suite 45/45, the channel controls' own suite 26/26, the modulation controls' own suite 38/38, the MIDI settings' own suite 28/28, the sample material's own suite 26/26, the live input's own suite 31/31, the phase modulation's own suite 26/26, the overlay card's own suite 38/38, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
+| R5 UI decomposition | **R5.1, R5.2, R5.3, R5.4, R5.5, R5.6, R5.7, R5.8, R5.9, R5.10, R5.11 and R5.12 shipped** | `bf1ad70`, `e7dd14c`, `c2437c2`, `3b23d62`, `be94fc2`, `a563576`, `a3b3eb0`, `1d6ad4d`, `40f93dd`, `caaf6cd`, `4793e09`, `c960480`, `2cd45f1`, `39e7cbb`, `c84a287`, `9dbd160`, `3148d5d`, `60b7224`, `27c85a6`, `1112dc3`, `7ce31c9`, `cb6595c`, `14a2c83`, `4ba1c49`, `53f3ca0` | app selftest 3,727/3,727, the score canvas's render lives at an edge of its own (`Source/ScoreRenderer.h`) - the frame, the grid, the zones, the arcs, the gesture and the playhead - while the editor keeps the gesture, the selection and the commands; the canvas's coordinates live at an edge of their own (`Source/ScoreCoordinateMapper.h`) and the hit testing at another (`Source/ScoreHitTester.h`), so the drawing and the hit testing share one mapping; each drawing mode has its own controller (`Source/ScoreEditingTools.h`), so the mouse handlers no longer accumulate a condition per mode; each gesture has an explicit transaction (`Source/ScoreGestureTransaction.h`), so it ends in a command or in nothing - never in a dangling command; and the material inspector's contents live in one description (`Source/MaterialInspector.h`), so the material card and the visibility rules can no longer disagree. R5.7 gives the sieve and the frequency controls descriptions of their own (`Source/SievePanel.h`, `Source/FrequencyInspector.h`) and a shared cell vocabulary (`Source/InspectorCell.h`), so the time grid's divisions, the remainder list's text format and the ambitus's "Custom" item id are each written down once. R5.8 gives the sequence card and the performance transport one description of their own (`Source/SequenceTransport.h`), so the card's cells, the three surfaces' wording, the press rule, the tempo's domain and the page-duration fallback are each written down once. R5.9 gives the channel and the modulation controls descriptions of their own (`Source/ChannelControls.h`, `Source/ModulationControls.h`), so the two cards' cells, the channel list's item ids, the modulation list's items and ids, the target rule and the depth's domain are each written down once. R5.10 gives the MIDI settings, the sample material, the live input and the phase modulation descriptions of their own (`Source/MidiSettings.h`, `Source/SampleMaterial.h`, `Source/LiveInput.h`, `Source/PhaseModulation.h`), so the four learn rows' captions, the device list's item ids, the slot list's item ids, the pitch lists' items and ids, the level's and the input gain's domains, the operator counts, the six presets and the three knobs' domains are each written down once. R5.11 gives the overlay card shell one description (`Source/OverlayCard.h`), so the eight shells' card rectangle, their card's maximum size and the content's padding are each written down once. R5.12 gives the card shell one look (`Source/CardTheme.h`), so the eight shells' backdrop, card, border and corner radius are each written down once. The render's own suite 18/18, the mapper's own suite 14/14, the hit tester's own suite 34/34, the tools' own suite 45/45, the transactions' own suite 45/45, the inspector's own suite 50/50, the sieve panel's own suite 42/42, the frequency inspector's own suite 29/29, the sequence transport's own suite 45/45, the channel controls' own suite 26/26, the modulation controls' own suite 38/38, the MIDI settings' own suite 28/28, the sample material's own suite 26/26, the live input's own suite 31/31, the phase modulation's own suite 26/26, the overlay card's own suite 38/38, the card theme's own suite 26/26, golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
 | R6 Real-time audio | not started | - | - |
 | R7 Plugin and platform | not started | - | - |
 | R8 Build and tests | **R8.1 shipped** | `3c3293f` | dependency boundaries 5 rules / 20 self-tests over five JUCE-free groups, the gate fails on a forbidden include, on a source the `.jucer` does not know and on a source missing from the plugin's list, app selftest 2,706/2,706, legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS. |
@@ -5567,3 +5645,78 @@ modulation controls' own suite 38/38, the channel controls' own suite 26/26,
 golden render `0x6d7571bdd80e3cd9` unchanged, legacy fixture `8BF28ABA7975`
 unchanged, plugin 0.38.0, smoke 22/22, pluginval strictness 5 SUCCESS,
 boundaries 5 rules / 0 violations (74 source files).
+
+### R5.12 record (2026-11-28)
+
+The card shell is drawn with one look.
+
+The characterization commit is `4ba1c49`, the move `53f3ca0`.
+
+| Measure | Before | After |
+|---|---|---|
+| the card's frame | five literals written in eight shells | one description (`Source/CardTheme.h`) |
+| the backdrop | `fillAll (0xcc000000)` in eight shells | one value (`kBackdrop`) |
+| the card's surface | `0xff1e1e26` in eight shells | one value (`kFill`) |
+| the card's border | `0xff34343f` and a one-pixel pen in eight shells | one value and one width (`kBorder`, `kBorderWidth`) |
+| the corner radius | `6.0f` in sixteen places (the fill and the stroke) | one radius (`kRadius`) |
+| the border's inset | `reduced (0.5f)` in eight shells | one inset (`kBorderInset`) |
+| the card theme's own suite | - | `Source/SelfTestCardTheme.cpp`, 26 checks |
+| the source files | 74 | 75 (the suite) |
+
+**The suite came first.** `Source/SelfTestCardTheme.cpp` (17 checks) was
+written against the old code: it paints each shell off-screen and reads the
+pixels. No window, no device and no message loop are needed.
+
+It pins:
+
+- the backdrop every shell paints behind the card (`0xcc000000`);
+- the frame every shell paints - the card's surface, its border and its radius
+  - read from a twelve-pixel block at the card's corner and compared with the
+  frame the suite draws itself;
+- the eight corners being pixel for pixel the same.
+
+The move added the checks that pin the edge against the app: every shell's
+frame is the theme's frame, and the theme holds the frame the shells have
+always painted.
+
+**The suite has teeth.** A seven-pixel radius instead of the six makes all
+eight frame checks fail, at the corner's arc - the block holds the whole
+corner, so a change of the radius cannot pass unnoticed.
+
+**The edge.** The header is a description - five values, no widgets, no
+document, no JUCE:
+
+```cpp
+namespace upic::card_theme
+{
+    constexpr std::uint32_t kBackdrop = 0xcc000000;
+    constexpr std::uint32_t kFill = 0xff1e1e26;
+    constexpr std::uint32_t kBorder = 0xff34343f;
+    constexpr float kBorderWidth = 1.0f;
+    constexpr float kRadius = 6.0f;
+    constexpr float kBorderInset = kBorderWidth * 0.5f;
+}
+```
+
+The colours are ARGB values in the edge and `juce::Colour` in the shell: the
+edge does not decide the value type, the shell does. The plan defers replacing
+the value types (the plan's section 2), and a theme is not domain data
+anyway.
+
+**The same value can be two roles.** `0xff1e1e26` is the card's surface here
+and the score canvas's plot fill there; `0xff34343f` is the card's border here
+and a button's colour there. R5.12 moved the *card frame's* role, and the
+other roles keep their own literals until the theme registry says otherwise.
+
+The production code does not call a test-only door, the bodies are the old
+ones, and the behaviour is unchanged where it should be - the golden render and
+the v0.29 fixture say so.
+
+The boundary, the API and what stays in the shell are described in
+[`card-theme-edge.md`](card-theme-edge.md).
+
+Gate: app selftest 3,727/3,727, the card theme's own suite 26/26, the overlay
+card's own suite 38/38, the modulation controls' own suite 38/38, the channel
+controls' own suite 26/26, golden render `0x6d7571bdd80e3cd9` unchanged,
+legacy fixture `8BF28ABA7975` unchanged, plugin 0.38.0, smoke 22/22, pluginval
+strictness 5 SUCCESS, boundaries 5 rules / 0 violations (75 source files).
