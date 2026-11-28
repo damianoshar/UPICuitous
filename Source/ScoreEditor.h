@@ -2,13 +2,30 @@
 #include <JuceHeader.h>
 #include "UpicModel.h"
 #include "ScoreCoordinateMapper.h"
+#include "ScoreEditingTool.h"
 #include "ScoreHitTester.h"
 #include "ScoreRenderer.h"
 #include <optional>
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <memory>
 #include <vector>
+
+// R5.4: the editing tools are the canvas's controllers (the review's R046).
+// They are declared here so that the canvas can befriend them; their bodies
+// are in Source/ScoreEditingTools.h.
+namespace upic
+{
+    namespace score_tools
+    {
+        class FreehandTool;
+        class LineTool;
+        class SelectTool;
+        class EraseTool;
+        class ZoneTool;
+    }
+}
 
 //==============================================================================
 // Score page canvas: X = time (0..page.duration), Y = pitch log (20Hz..12kHz).
@@ -36,6 +53,10 @@ public:
     enum Tool { Draw = 0, Line, SineStroke, Select, Erase, Zone };
 
     ScoreEditor();
+
+    // R5.4: the editing tools are held by pointer, so the destructor is
+    // defined in the .cpp (where the tools' bodies are).
+    ~ScoreEditor();
 
     // v1.33: dragging a zone - moving it, or resizing it by an edge or a
     // corner. The Zone tool used to let you draw a zone and delete it, but
@@ -406,6 +427,15 @@ public:
     void setPlaying(bool p);
 
 private:
+    // R5.4: the editing tools are the canvas's controllers - they act on the
+    // gesture state below and call the canvas's commands, so they are
+    // friends.
+    friend class upic::score_tools::FreehandTool;
+    friend class upic::score_tools::LineTool;
+    friend class upic::score_tools::SelectTool;
+    friend class upic::score_tools::EraseTool;
+    friend class upic::score_tools::ZoneTool;
+
     upic::Page* page = nullptr;
     std::vector<upic::Waveform>* waves = nullptr;
     double* playheadSec = nullptr;
@@ -446,6 +476,22 @@ private:
     juce::Point<float> marqueeStart, marqueeCur;
     bool drawingZone = false, scrubbing = false, scrubDragged = false, freezeAfterDrag = false;
     double lastDragMs = 0.0;
+
+    // R5.4: the editing tools. The canvas asks the active tool; the tool
+    // that began the gesture owns it until the pointer is released.
+    std::unique_ptr<upic::score_tools::EditingTool> freehandTool;   // Draw and SineStroke
+    std::unique_ptr<upic::score_tools::EditingTool> lineTool;
+    std::unique_ptr<upic::score_tools::EditingTool> selectTool;
+    std::unique_ptr<upic::score_tools::EditingTool> eraseTool;
+    std::unique_ptr<upic::score_tools::EditingTool> zoneTool;
+    upic::score_tools::EditingTool* gestureTool = nullptr;
+
+    upic::score_tools::EditingTool* activeTool() const;
+    upic::score_tools::PointerInput pointerInput (const juce::MouseEvent& e) const;
+
+    // The right button's command: the arc's context menu. Every tool but
+    // the Zone tool opens it (the Zone tool has its own menu).
+    void beginArcMenu (juce::Point<float> pos);
     // The stroke in progress. The point is the render's type too (the render
     // draws the stroke), so it lives in the renderer's header.
     using StrokePt = upic::score_render::StrokePoint;

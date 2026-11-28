@@ -109,6 +109,8 @@
       <FILE id="sRnd50" name="ScoreRenderer.h" compile="0" resource="0" file="Source/ScoreRenderer.h"/>
       <FILE id="mdScm52" name="ScoreCoordinateMapper.h" compile="0" resource="0" file="Source/ScoreCoordinateMapper.h"/>
       <FILE id="mdSht54" name="ScoreHitTester.h" compile="0" resource="0" file="Source/ScoreHitTester.h"/>
+      <FILE id="mdEdt56" name="ScoreEditingTool.h" compile="0" resource="0" file="Source/ScoreEditingTool.h"/>
+      <FILE id="mdEdt57" name="ScoreEditingTools.h" compile="0" resource="0" file="Source/ScoreEditingTools.h"/>
       <FILE id="sVbr01" name="ScoreViewBar.h" compile="0" resource="0"
             file="Source/ScoreViewBar.h"/>
       <FILE id="kNOb01" name="Knob.h" compile="0" resource="0"

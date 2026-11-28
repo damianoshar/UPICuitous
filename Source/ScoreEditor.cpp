@@ -1,5 +1,9 @@
 #include "ScoreEditor.h"
 
+// R5.4: the editing tools - the canvas's controllers. Their bodies are in
+// the header, and the header needs the canvas's own definition.
+#include "ScoreEditingTools.h"
+
 //==============================================================================
 // The ScoreEditor implementation. It used to live inside the class in the
 // header; moving it here keeps the header (and every translation unit that
@@ -9,7 +13,41 @@
 ScoreEditor::ScoreEditor()
 {
         setWantsKeyboardFocus(true);
-    }
+
+        // R5.4: the canvas's tools - one per drawing mode.
+        freehandTool = std::make_unique<upic::score_tools::FreehandTool> (*this);
+        lineTool     = std::make_unique<upic::score_tools::LineTool> (*this);
+        selectTool   = std::make_unique<upic::score_tools::SelectTool> (*this);
+        eraseTool    = std::make_unique<upic::score_tools::EraseTool> (*this);
+        zoneTool     = std::make_unique<upic::score_tools::ZoneTool> (*this);
+}
+
+ScoreEditor::~ScoreEditor() = default;
+
+upic::score_tools::EditingTool* ScoreEditor::activeTool() const
+{
+        switch (tool)
+        {
+            case Draw: case SineStroke: return freehandTool.get();
+            case Line:                   return lineTool.get();
+            case Select:                 return selectTool.get();
+            case Erase:                  return eraseTool.get();
+            case Zone:                   return zoneTool.get();
+        }
+        return nullptr;
+}
+
+upic::score_tools::PointerInput ScoreEditor::pointerInput (const juce::MouseEvent& e) const
+{
+        upic::score_tools::PointerInput in;
+        in.position     = e.position;
+        in.downPosition = e.getMouseDownPosition().toFloat();
+        in.pressure     = curPress (e);
+        in.mods         = e.mods;
+        in.pointerId    = e.source.getIndex();
+        in.isTouch      = e.source.isTouch();
+        return in;
+}
 
 void ScoreEditor::bind(upic::Page* p, std::vector<upic::Waveform>* w, double* playhead, std::function<void()> changed)
 {
@@ -224,10 +262,11 @@ void ScoreEditor::setLayer(int m)
         if (layer == m) return;
         layer = m;
         selArcs.clear();
-        drawing = false; movingArc = false; drawingZone = false; scrubbing = false;
-        moveStartMap.clear();
-        lineAnchor.reset();
-        strokePts.clear();
+        // R5.4: the gesture in progress is abandoned - the tool that began
+        // it gives it up.
+        if (gestureTool != nullptr) gestureTool->cancel();
+        gestureTool = nullptr;
+        scrubbing = false;
         if (onSelect) onSelect(-1);
         repaint();
     }
@@ -779,6 +818,24 @@ void ScoreEditor::paint(juce::Graphics& g)
 void ScoreEditor::resized()
 { repaint(); }
 
+void ScoreEditor::beginArcMenu (juce::Point<float> pos)
+{
+        const int id = pickArc (pos);
+        if (id >= 0)
+        {
+                setSelectedArc (id);
+                if (onSelect) onSelect (id);
+                repaint();
+                showArcMenu (id);
+        }
+        else
+        {
+                selArcs.clear();
+                repaint();
+                if (onSelect) onSelect (-1);
+        }
+}
+
 void ScoreEditor::mouseDown(const juce::MouseEvent& e)
 {
         if (!page) return;
@@ -827,125 +884,11 @@ void ScoreEditor::mouseDown(const juce::MouseEvent& e)
             return;
         }
 
-        if (tool == Zone)
-        {
-            if (e.mods.isRightButtonDown())
-            {
-                const int zid = pickZone(e.position);
-                selectedZone = zid;
-                repaint();
-                if (zid >= 0) showZoneMenu(zid);
-                return;
-            }
-            const int zid = pickZone(e.position);
-            if (zid >= 0) // an existing zone: select it, and let it be moved
-            {
-                selectedZone = zid;
-                selArcs.clear();
-                beginZoneDrag (e.position);
-                repaint();
-                return;
-            }
-            drawingZone = true;
-            zoneStart = e.position;
-            zoneCur = e.position;
-            repaint();
-            return;
-        }
-
-        if (e.mods.isRightButtonDown())
-        {
-            const int id = pickArc(e.position);
-            if (id >= 0)
-            {
-                setSelectedArc(id);
-                if (onSelect) onSelect(id);
-                repaint();
-                showArcMenu(id);
-            }
-            else
-            {
-                selArcs.clear();
-                repaint();
-                if (onSelect) onSelect(-1);
-            }
-            return;
-        }
-
-        if (tool == Select)
-        {
-            const bool ctrl  = e.mods.isCtrlDown() || e.mods.isCommandDown();
-            const bool shift = e.mods.isShiftDown();
-            const int hit = pickArc(e.position);
-
-            if (hit >= 0)
-            {
-                if (ctrl)
-                {
-                    if (isSel(hit))
-                        selArcs.erase(std::remove(selArcs.begin(), selArcs.end(), hit), selArcs.end());
-                    else selArcs.push_back(hit);
-                    if (onSelect) onSelect(selArcs.empty() ? -1 : selArcs.front());
-                }
-                else if (shift)
-                {
-                    if (! isSel(hit)) selArcs.push_back(hit);
-                    if (onSelect) onSelect(hit);
-                }
-                else
-                {
-                    if (! isSel(hit)) { selArcs.clear(); selArcs.push_back(hit); if (onSelect) onSelect(hit); }
-                }
-            }
-            else
-            {
-                marqueeAdditive = shift;
-                marqueeStart = marqueeCur = e.position;
-                selectingMarquee = true;
-                if (! shift) { selArcs.clear(); if (onSelect) onSelect(-1); }
-        }
-            // start a move only when pressing ON a selected arc
-            const int hit2 = pickArc(e.position);
-            if (hit2 >= 0 && isSel(hit2))
-            {
-                movingArc = true;
-                moveStartPos = e.position;
-                // v1.33.4 (L15, part 2): the whole drag is one undo step -
-                // the pointer moves do not push anything.
-                if (onEditStart) onEditStart ("Move the arc");
-                const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
-                moveStartMap.clear();
-                for (auto& a : page->arcs)
-                    if (isSel(a.id)) moveStartMap[a.id] = a.points;
-                if (onArcEditingChanged != nullptr) onArcEditingChanged(true);
-            }
-            return;
-        }
-
-        if (tool == Erase)
-        {
-            int id = pickArc(e.position);
-            if (id >= 0) { selArcs = { id }; deleteSelected(); }
-            return;
-        }
-        if (tool == Draw || tool == SineStroke)
-        {
-            drawing = true;
-            strokePts.clear();
-            strokePts.push_back({ e.position, curPress(e) });
-            // v1.33.4 (L15, part 2): the undo transaction
-            if (onEditStart) onEditStart ("Draw");
-            if (onArcEditingChanged != nullptr) onArcEditingChanged(true);
-        }
-        else if (tool == Line)
-        {
-            lineAnchor = e.position;
-            // v1.33.4 (L15, part 2): the undo transaction
-            if (onEditStart) onEditStart ("Draw a line");
-            if (onArcEditingChanged != nullptr) onArcEditingChanged(true);
-            lastMouse = e.position;
-            repaint();
-        }
+        // R5.4: the tool decides what a press means. The tool that takes the
+        // gesture owns it until the pointer is released (the bodies are in
+        // Source/ScoreEditingTools.h).
+        gestureTool = activeTool();
+        if (gestureTool != nullptr) gestureTool->begin (pointerInput (e));
     }
 
 void ScoreEditor::mouseDrag(const juce::MouseEvent& e)
@@ -972,102 +915,13 @@ void ScoreEditor::mouseDrag(const juce::MouseEvent& e)
             return;
         }
 
-        if (drawingZone)
-        {
-            zoneCur = e.position;
-            repaint();
-            return;
-        }
-
-        // v1.33: dragging a zone - moving it, or resizing it by an edge or
-        // a corner. The zone keeps its shape in pitch (the move is a ratio,
-        // like an arc's move) and its sieve and time grid.
-        if (draggingZone)
-        {
-            dragZoneTo (e.position);
-            repaint();
-            return;
-        }
-
-        if (selectingMarquee)
-        {
-            marqueeCur = e.position;
-            auto rect = marqueeRect();
-            // arcs that have any point inside the marquee
-            std::vector<int> hits;
-            if (page) for (auto& a : page->arcs)
-            {
-                if (! arcInLayer(a)) continue;
-                for (auto& pt : a.points)
-                {
-                    juce::Point<float> pp(timeToX(pt.t), freqToY(pt.freq));
-                    if (rect.contains(pp)) { hits.push_back(a.id); break; }
-                }
-            }
-            if (marqueeAdditive)
-            {
-                for (int id : hits) if (std::find(selArcs.begin(), selArcs.end(), id) == selArcs.end()) selArcs.push_back(id);
-            }
-            else
-            {
-                selArcs = hits;
-            }
-            if (onSelect) onSelect(selArcs.empty() ? -1 : selArcs.front());
-            repaint();
-            return;
-        }
-
-        if (movingArc)
-        {
-            const juce::ScopedLock modelSl (modelLock != nullptr ? *modelLock : dummyLock);
-            // F6: Alt = fine movement. It is the same path with a quarter
-            // of the sensitivity - not a second code path.
-            const float fine = e.mods.isAltDown() ? 0.25f : 1.0f;
-            const float dx = (e.position.x - moveStartPos.x) * fine;
-            const float dy = (e.position.y - moveStartPos.y) * fine;
-            double dt = xToTime(moveStartPos.x + dx) - xToTime(moveStartPos.x);
-            // freq ratio from end/start pixel positions (log view correct)
-            const double f0 = juce::jmax(1.0, yToFreq(moveStartPos.y));
-            const double f1 = juce::jmax(1.0, yToFreq(moveStartPos.y + dy));
-            const double ratio = f1 / f0;
-            for (auto& a : page->arcs)
-            {
-                auto it = moveStartMap.find(a.id);
-                if (it == moveStartMap.end()) continue;
-                a.points = it->second;
-                for (auto& p : a.points)
-                {
-                    p.t = juce::jlimit(0.0, page->durationSec, p.t + dt);
-                    p.freq = juce::jlimit(upic::kMinFreq, upic::kMaxFreq, p.freq * ratio);
-                }
-                std::stable_sort(a.points.begin(), a.points.end(), [](auto& x, auto& y){ return x.t < y.t; });
-            }
-            // v1.33.4 (M22): the arc moved in the model - mark it, so the
-            // audio thread sees the moved arc while the drag is still going
-            // (the full onChange is too heavy for every mouse move)
-            if (onModelEdited) onModelEdited();
-            repaint();
-            return;
-        }
-
-        if (drawing)
-        {
-            // resample: only push if moved 4px in time
-            if (strokePts.empty() || std::abs(e.position.x - strokePts.back().pos.x) > 3.0f
-                                    || std::abs(e.position.y - strokePts.back().pos.y) > 3.0f)
-            {
-                auto r = plotArea();
-                juce::Point<float> cl{ juce::jlimit(r.getX(), r.getRight(), e.position.x), juce::jlimit(r.getY(), r.getBottom(), e.position.y) };
-                strokePts.push_back({ cl, curPress(e) });
-                repaint();
-            }
-        }
-        else repaint(); // rubber band
+        // R5.4: the tool that began the gesture follows the pointer.
+        if (gestureTool != nullptr) gestureTool->update (pointerInput (e));
     }
 
 void ScoreEditor::mouseUp(const juce::MouseEvent& e)
 {
-        if (!page) { drawing = false; movingArc = false; lineAnchor.reset(); drawingZone = false; scrubbing = false; touches.clear(); pinchMode = false; return; }
+        if (!page) { cancelInteraction(); touches.clear(); pinchMode = false; gestureTool = nullptr; return; }
 
         if (e.source.isTouch())
         {
@@ -1104,67 +958,9 @@ void ScoreEditor::mouseUp(const juce::MouseEvent& e)
             return;
         }
 
-        if (drawingZone)
-        {
-            drawingZone = false;
-            auto rect = zoneScreenRect();
-            if (rect.getWidth() >= 8.0f && rect.getHeight() >= 8.0f)
-                addZone(xToTime(zoneStart.x), xToTime(zoneCur.x),
-                        yToFreq(zoneStart.y), yToFreq(zoneCur.y));
-            repaint();
-            return;
-        }
-
-        // v1.33: the zone drag is over - the model changed, so publish it
-        if (draggingZone)
-        {
-            draggingZone = false;
-            zoneHandle = 0;
-            notify();
-            // v1.33.4 (L15, part 2): the transaction ends here
-            if (onEditEnd) onEditEnd();
-            repaint();
-            return;
-        }
-
-        if (selectingMarquee)
-        {
-            selectingMarquee = false;
-            // tiny drag = click on empty: keep the (already cleared) selection
-            if ((marqueeCur - marqueeStart).getDistanceFromOrigin() < 4.0f && ! marqueeAdditive)
-                selArcs.clear();
-            if (onSelect) onSelect(selArcs.empty() ? -1 : selArcs.front());
-            repaint();
-            return;
-        }
-
-        if (movingArc) {
-            movingArc = false; moveStartMap.clear(); if (onArcEditingChanged != nullptr) onArcEditingChanged(false); notify(); repaint(); if (onEditEnd) onEditEnd(); return;
-        }
-
-        if (tool == Line && lineAnchor)
-        {
-            if (onArcEditingChanged != nullptr) onArcEditingChanged(false);
-            commitLine(*lineAnchor, e.position, curPress(e));
-            lineAnchor.reset();
-            // v1.33.4 (L15, part 2): the transaction ends after the line is
-            // committed, so the app can see that something really changed.
-            if (onEditEnd) onEditEnd();
-            return;
-        }
-        if (drawing)
-        {
-            drawing = false;
-            if (onArcEditingChanged != nullptr) onArcEditingChanged(false);
-            strokePts.push_back({ e.position, curPress(e) });
-            commitStroke();
-            strokePts.clear();
-            // v1.33.4 (L15, part 2): the transaction ends after the stroke is
-            // committed, so the app can see that something really changed.
-            if (onEditEnd) onEditEnd();
-            repaint();
-        }
-        lineAnchor.reset();
+        // R5.4: the tool that began the gesture finishes it.
+        if (gestureTool != nullptr) gestureTool->end (pointerInput (e));
+        gestureTool = nullptr;
     }
 
 bool ScoreEditor::keyPressed(const juce::KeyPress& k)
@@ -1340,12 +1136,12 @@ void ScoreEditor::cancelInteraction()
                 if (it != moveStartMap.end()) a.points = it->second;
             }
         }
-        moveStartMap.clear();
-        movingArc = false;
-        drawing = false;    strokePts.clear();
-        drawingZone = false;
+
+        // R5.4: the tool that began the gesture gives it up (it clears its
+        // own state); the canvas keeps the model and the commands.
+        if (gestureTool != nullptr) gestureTool->cancel();
+        gestureTool = nullptr;
         scrubbing = false;
-        lineAnchor.reset();
     }
 
 void ScoreEditor::beginPinch()
