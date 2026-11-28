@@ -197,6 +197,8 @@ int upic::runSelfTest()
     upic::runEditingToolChecks (t);
     // R5.5: the gesture transactions - one command per gesture, one change per command.
     upic::runGestureTransactionChecks (t);
+    // R5.6: the material inspector - the tabs, the hint and the material card.
+    upic::runMaterialInspectorChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);

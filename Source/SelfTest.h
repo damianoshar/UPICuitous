@@ -104,6 +104,7 @@ namespace upic
     void runScoreHitTestChecks (SelfTest& t);       // R5.3: the hit tester - the arcs near a point, the zone under it and its handles
     void runEditingToolChecks (SelfTest& t);         // R5.4: the editing tools - the stroke, the line, the sine, the erase, the selection, the marquee, the move and the zone
     void runGestureTransactionChecks (SelfTest& t);  // R5.5: the gesture transactions - one command per gesture, one change per command
+    void runMaterialInspectorChecks (SelfTest& t);    // R5.6: the material inspector - the tabs, the hint and the material card
     void runLibraryModelChecks (SelfTest& t); // F2/F3: the banks and their commands
     void runWP7Checks (SelfTest& t);          // WP7: the user library and extraction
     void runExportChecks (SelfTest& t);
