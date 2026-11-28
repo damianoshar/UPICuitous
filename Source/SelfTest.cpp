@@ -203,6 +203,8 @@ int upic::runSelfTest()
     upic::runSievePanelChecks (t);
     // R5.7: the frequency inspector - the page card, the spaces and the ambitus.
     upic::runFrequencyInspectorChecks (t);
+    // R5.8: the sequence card and the performance transport - one recorder, one transport.
+    upic::runSequenceTransportChecks (t);
     upic::runLibraryModelChecks (t);
     upic::runWP7Checks (t);
     upic::runExportChecks (t);
