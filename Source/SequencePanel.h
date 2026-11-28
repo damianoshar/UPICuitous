@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "LibraryManager.h"
 #include "UpicModel.h"
+#include "SequenceTransport.h"
 
 //==============================================================================
 // WP4: the performance-sequence panel.
@@ -46,10 +47,14 @@ public:
 
         recBtn.setClickingTogglesState (true);
         loopBtn.setClickingTogglesState (true);
-        recBtn.setTooltip ("Record the performance (page + playhead against time)");
-        playBtn.setTooltip ("Replay the recorded performance");
+        // The transport's wording is the sequence transport's own (R5.8):
+        // the card, the panel and the view say the same thing, so the three
+        // cannot drift apart again.
+        namespace st = upic::sequence_transport;
+        recBtn.setTooltip (st::tooltip (st::Control::Record));
+        playBtn.setTooltip (st::tooltip (st::Control::Play));
         clearBtn.setTooltip ("Erase the recorded points");
-        loopBtn.setTooltip ("Loop the performance");
+        loopBtn.setTooltip (st::tooltip (st::Control::Loop));
         trimBtn.setTooltip ("Drop the points after the selected one");
         replaceBtn.setTooltip ("Re-record from the selected point, keeping what came before");
         closeBtn.setTooltip ("Close the sequence panel");
@@ -82,8 +87,8 @@ public:
         if (sel != lastSel) selectedPoint = -1;
         lastSel = sel;
         recBtn.setToggleState (recording, juce::dontSendNotification);
-        recBtn.setButtonText (recording ? "Stop" : "Record");
-        playBtn.setButtonText (playing ? "Stop" : "Play");
+        recBtn.setButtonText (upic::sequence_transport::recordButtonText (recording));
+        playBtn.setButtonText (upic::sequence_transport::playButtonText (playing));
         loopBtn.setToggleState (sel >= 0 && seqs[(size_t) sel].loop,
                                 juce::dontSendNotification);
         const bool on = sel >= 0 && ! recording;
@@ -320,7 +325,7 @@ private:
     {
         if (page >= 0 && page < (int) durations.size() && durations[(size_t) page] > 0.0)
             return durations[(size_t) page];
-        return 30.0;
+        return upic::sequence_transport::kDefaultPageSeconds;
     }
 
     float xFor (const upic::PerformancePoint& p, double len) const
@@ -372,7 +377,7 @@ private:
     bool dragging = false;
     std::vector<upic::PerformancePoint> dragPoints;
 
-    juce::TextButton recBtn { "Record" }, playBtn { "Play" },
+    juce::TextButton recBtn { "Rec" }, playBtn { "Play" },
                      clearBtn { "Clear" }, loopBtn { "Loop" },
                      trimBtn { "Trim" }, replaceBtn { "Replace" },
                      closeBtn { "Close" };

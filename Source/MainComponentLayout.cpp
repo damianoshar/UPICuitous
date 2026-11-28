@@ -1017,9 +1017,19 @@ void MainComponent::resized()
     // --- end WP6.4 ---
 
     // WP4: the performance sequences.
-    groups.push_back ({ "seq", { FI(&seqLab, 30, &seqBox, 110),
-                                  F(&seqRecBtn, 52), F(&seqPlayBtn, 54),
-                                  F(&seqLoopBtn, 52), F(&seqEditBtn, 54) } });
+    //
+    // R5.8: the card is the sequence transport's description
+    // (Source/SequenceTransport.h) - the edge says which cells the card
+    // holds and how they are drawn, so the card and the edge cannot
+    // disagree.
+    {
+        FlowGroup seq { "seq", {} };
+        const auto& transport = upic::sequence_transport::describe();
+        for (auto& cell : transport.card)
+            addCell (seq, sequenceControls[(size_t) cell.control],
+                     cell.kind, cell.labelWidth, cell.width, cell.newLine);
+        groups.push_back (seq);
+    }
 
     // v1.34.3: the tools card is the Generator; its caption is the title,
     // so the "Gen" label above the dropdown is gone.

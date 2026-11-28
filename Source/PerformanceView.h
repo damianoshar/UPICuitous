@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <vector>
+#include "SequenceTransport.h"
 
 //==============================================================================
 // WP8: the performance view.
@@ -107,8 +108,11 @@ public:
         tempoSlider.setName ("perfTempoSlider");
         tempoSlider.setSliderStyle (juce::Slider::LinearHorizontal);
         tempoSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 18);
-        tempoSlider.setRange (40.0, 240.0, 0.5);
-        tempoSlider.setTooltip ("The page's tempo in beats per minute");
+        tempoSlider.setRange (upic::sequence_transport::kMinTempoBpm,
+                              upic::sequence_transport::kMaxTempoBpm,
+                              upic::sequence_transport::kTempoIntervalBpm);
+        tempoSlider.setSkewFactor (upic::sequence_transport::kTempoSkew);
+        tempoSlider.setTooltip (upic::sequence_transport::tempoTooltip());
         tempoSlider.onValueChange = [this]
         {
             if (onTempoChange) onTempoChange (tempoSlider.getValue());
@@ -120,9 +124,11 @@ public:
         recBtn.setName ("perfRecBtn");
         playSeqBtn.setName ("perfPlayBtn");
         loopSeqBtn.setName ("perfLoopSeqBtn");
-        recBtn.setTooltip ("Record the movement through the score");
-        playSeqBtn.setTooltip ("Replay the recorded performance");
-        loopSeqBtn.setTooltip ("Loop the recorded performance");
+        // The sequence transport's wording (R5.8): the view and the card say
+        // the same thing.
+        recBtn.setTooltip (upic::sequence_transport::tooltip (upic::sequence_transport::Control::Record));
+        playSeqBtn.setTooltip (upic::sequence_transport::tooltip (upic::sequence_transport::Control::Play));
+        loopSeqBtn.setTooltip (upic::sequence_transport::tooltip (upic::sequence_transport::Control::Loop));
         loopSeqBtn.setClickingTogglesState (true);
         for (auto* b : { &recBtn, &playSeqBtn, &loopSeqBtn })
         {
@@ -315,9 +321,9 @@ public:
         if (std::abs (tempoSlider.getValue() - tempoBpm) > 1e-6)
             tempoSlider.setValue (tempoBpm, juce::dontSendNotification);
 
-        const auto recText = recording ? juce::String ("Stop") : juce::String ("Rec");
+        const auto recText = juce::String (upic::sequence_transport::recordButtonText (recording));
         if (recBtn.getButtonText() != recText) recBtn.setButtonText (recText);
-        const auto playText = seqPlaying ? juce::String ("Stop") : juce::String ("Play");
+        const auto playText = juce::String (upic::sequence_transport::playButtonText (seqPlaying));
         if (playSeqBtn.getButtonText() != playText) playSeqBtn.setButtonText (playText);
 
         repaint();
@@ -616,7 +622,8 @@ private:
     {
         const int page = juce::jlimit (0, pages - 1, p.page);
         const double dur = (page < (int) pageDurations.size() && pageDurations[(size_t) page] > 0.0)
-                             ? pageDurations[(size_t) page] : 30.0;
+                             ? pageDurations[(size_t) page]
+                             : upic::sequence_transport::kDefaultPageSeconds;
         const float laneBottom = plot.getBottom() - (float) page * laneH;
         const double f = juce::jlimit (0.0, 1.0, p.pos / dur);
         return laneBottom - (float) f * laneH;

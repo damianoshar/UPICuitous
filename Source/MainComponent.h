@@ -36,6 +36,7 @@
 #include "MaterialInspector.h"   // R5.6: the material inspector's description
 #include "SievePanel.h"          // R5.7: the sieve panel's description
 #include "FrequencyInspector.h"  // R5.7: the frequency inspector's description
+#include "SequenceTransport.h"   // R5.8: the sequence card and the transport's words
 
 //==============================================================================
 // WP7: the audio preview routes.
@@ -1436,6 +1437,23 @@ public:
         return frequencyControls[(size_t) role].label;
     }
 
+    // R5.8: the sequence card's bindings - the roles the edge names and the
+    // widgets the app gave them. The suite pins the two against each other.
+    int sequenceControlCountForTest() const
+    {
+        return (int) (sizeof (sequenceControls) / sizeof (sequenceControls[0]));
+    }
+    juce::Component* sequenceControlForTest (int role) const
+    {
+        if (role < 0 || role >= sequenceControlCountForTest()) return nullptr;
+        return sequenceControls[(size_t) role].control;
+    }
+    juce::Component* sequenceControlLabelForTest (int role) const
+    {
+        if (role < 0 || role >= sequenceControlCountForTest()) return nullptr;
+        return sequenceControls[(size_t) role].label;
+    }
+
     // --- R1.2: the panels below the toolbar ------------------------------
     // The bottom half of the window, for the characterization suite that
     // runs before its geometry moves out of resized().
@@ -2732,6 +2750,9 @@ private:
     ControlBinding frequencyControls[(size_t) upic::frequency_inspector::Control::count];
     void bindFrequencyControl (upic::frequency_inspector::Control role,
                                juce::Component* label, juce::Component* widget);
+    ControlBinding sequenceControls[(size_t) upic::sequence_transport::Control::count];
+    void bindSequenceControl (upic::sequence_transport::Control role,
+                              juce::Component* label, juce::Component* widget);
 
     // v1.21 (wave 19): the arc list - the score's inventory on the right,
     // with the per-arc controls (the Rev box and the mode dropdown). It is a
@@ -2956,8 +2977,10 @@ private:
     int  sequenceIndexOfId (int id) const;
     void startSequenceRecording();
     void stopSequenceRecording();
+    void toggleSequenceRecording();
     void startSequencePlayback();
     void stopSequencePlayback();
+    void toggleSequencePlayback();
     void sequenceRecordTick();
     void toggleSequenceLoop();
     void sequenceAppendRecorderPoint (double t, int page, double pos);

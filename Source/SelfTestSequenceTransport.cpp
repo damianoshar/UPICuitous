@@ -135,6 +135,41 @@ void upic::runSequenceTransportChecks (upic::SelfTest& t)
         t.check (ok, name, detail);
     };
 
+    namespace st = upic::sequence_transport;
+
+    // --- the edge ------------------------------------------------------------
+    // The description is data, so it is checked without a window first.
+    check (juce::String (st::describe().name) == "Sequence"
+           && st::describe().card.size() == (size_t) st::Control::count,
+           "R5.8 the edge describes the sequence card",
+           juce::String ((int) st::describe().card.size()) + " cells");
+
+    check (st::allControls().size() == (size_t) st::Control::count,
+           "R5.8 the edge names every role once",
+           juce::String ((int) st::allControls().size()) + " roles");
+
+    check (std::abs (st::kMinTempoBpm - 40.0) < 1e-12
+           && std::abs (st::kMaxTempoBpm - 240.0) < 1e-12
+           && std::abs (st::kTempoIntervalBpm - 1.0) < 1e-12
+           && std::abs (st::kTempoSkew - 0.5) < 1e-12,
+           "R5.8 the tempo's domain is one domain");
+
+    check (std::abs (st::kDefaultPageSeconds - 30.0) < 1e-12,
+           "R5.8 the page-duration fallback is one number",
+           juce::String (st::kDefaultPageSeconds, 1));
+
+    check (juce::String (st::recordButtonText (false)) == "Rec"
+           && juce::String (st::recordButtonText (true)) == "Stop"
+           && juce::String (st::playButtonText (false)) == "Play"
+           && juce::String (st::playButtonText (true)) == "Stop",
+           "R5.8 the transport's labels name its state");
+
+    check (st::recordAction (false) == st::Action::Start
+           && st::recordAction (true) == st::Action::Stop
+           && st::playAction (false) == st::Action::Start
+           && st::playAction (true) == st::Action::Stop,
+           "R5.8 one press starts a stopped run and stops a running one");
+
     auto mcHolder = std::make_unique<MainComponent>();
     auto& mc = *mcHolder;
     mc.setSize (1280, 800);
@@ -162,6 +197,49 @@ void upic::runSequenceTransportChecks (upic::SelfTest& t)
                   "seqLoopBtn|Button, seqEditBtn|Button",
            "R5.8 the sequence card holds the selector and the four switches",
            cardText (cardCells (mc, "seq")));
+
+    // --- the edge and the app's widgets are the same card -------------------
+    bool allBound = mc.sequenceControlCountForTest() == (int) st::Control::count;
+    bool sameWidgets = true;
+    for (int role = 0; role < mc.sequenceControlCountForTest(); ++role)
+    {
+        auto* w = mc.sequenceControlForTest (role);
+        if (w == nullptr) { allBound = false; continue; }
+        switch ((st::Control) role)
+        {
+            case st::Control::Sequence: sameWidgets = sameWidgets && w == seqBox; break;
+            case st::Control::Record:   sameWidgets = sameWidgets && w == seqRecBtn; break;
+            case st::Control::Play:     sameWidgets = sameWidgets && w == seqPlayBtn; break;
+            case st::Control::Loop:     sameWidgets = sameWidgets && w == seqLoopBtn; break;
+            case st::Control::Open:     sameWidgets = sameWidgets && w == seqEditBtn; break;
+            default: break;
+        }
+    }
+    check (allBound, "R5.8 every sequence role is bound to a widget",
+           juce::String (mc.sequenceControlCountForTest()) + " roles");
+    check (sameWidgets
+           && mc.sequenceControlLabelForTest ((int) st::Control::Sequence) == seqLab,
+           "R5.8 the roles are the card's own controls");
+
+    juce::String fromEdge;
+    for (auto& cell : st::describe().card)
+    {
+        auto* w = mc.sequenceControlForTest ((int) cell.control);
+        if (w == nullptr) continue;
+        if (fromEdge.isNotEmpty()) fromEdge += ", ";
+        fromEdge += w->getName() + "|" + kindOf (w);
+    }
+    check (cardText (cardCells (mc, "seq")) == fromEdge,
+           "R5.8 the card is the edge's cell list, in the edge's order",
+           fromEdge);
+
+    bool wordsMatch = true;
+    for (int role = 0; role < mc.sequenceControlCountForTest(); ++role)
+        if (juce::String (st::tooltip ((st::Control) role))
+            != tooltipOf (mc.sequenceControlForTest (role)))
+            wordsMatch = false;
+    check (wordsMatch, "R5.8 the card's tooltips are the edge's wording",
+           tooltipOf (seqBox));
 
     check (seqRecBtn->getButtonText() == "Rec"
            && seqPlayBtn->getButtonText() == "Play"
@@ -197,15 +275,15 @@ void upic::runSequenceTransportChecks (upic::SelfTest& t)
         || sqLoopBtn == nullptr || sqCloseBtn == nullptr)
         return;
 
-    check (sqRecBtn->getButtonText() == "Record"
-           && sqPlayBtn->getButtonText() == "Play",
-           "R5.8 the panel's recorder says Record and Play",
+    check (sqRecBtn->getButtonText() == st::recordButtonText (false)
+           && sqPlayBtn->getButtonText() == st::playButtonText (false),
+           "R5.8 the panel's recorder says Rec and Play",
            sqRecBtn->getButtonText() + " / " + sqPlayBtn->getButtonText());
 
-    check (tooltipIs (sqRecBtn, "Record the performance (page + playhead against time)")
-           && tooltipIs (sqPlayBtn, "Replay the recorded performance")
-           && tooltipIs (sqLoopBtn, "Loop the performance"),
-           "R5.8 the panel's recorder says what it does",
+    check (tooltipOf (sqRecBtn) == juce::String (st::tooltip (st::Control::Record))
+           && tooltipOf (sqPlayBtn) == juce::String (st::tooltip (st::Control::Play))
+           && tooltipOf (sqLoopBtn) == juce::String (st::tooltip (st::Control::Loop)),
+           "R5.8 the panel's recorder says the edge's words",
            tooltipOf (sqRecBtn));
 
     // --- one recorder: the card starts it, the panel stops it ---------------
@@ -213,7 +291,8 @@ void upic::runSequenceTransportChecks (upic::SelfTest& t)
     check (mc.seqRecordingForTest() && mc.seqCountForTest() == 1,
            "R5.8 the card's Record starts the recorder",
            juce::String (mc.seqCountForTest()) + " sequences");
-    check (seqRecBtn->getButtonText() == "Stop" && sqRecBtn->getButtonText() == "Stop",
+    check (seqRecBtn->getButtonText() == st::recordButtonText (true)
+           && sqRecBtn->getButtonText() == st::recordButtonText (true),
            "R5.8 Record becomes Stop on the card and in the panel",
            seqRecBtn->getButtonText() + " / " + sqRecBtn->getButtonText());
 
@@ -223,7 +302,8 @@ void upic::runSequenceTransportChecks (upic::SelfTest& t)
     sqRecBtn->onClick();
     check (! mc.seqRecordingForTest(),
            "R5.8 the panel's Stop ends what the card started");
-    check (seqRecBtn->getButtonText() == "Rec" && sqRecBtn->getButtonText() == "Record",
+    check (seqRecBtn->getButtonText() == st::recordButtonText (false)
+           && sqRecBtn->getButtonText() == st::recordButtonText (false),
            "R5.8 Stop becomes Record again",
            seqRecBtn->getButtonText() + " / " + sqRecBtn->getButtonText());
 
@@ -231,14 +311,16 @@ void upic::runSequenceTransportChecks (upic::SelfTest& t)
     seqPlayBtn->onClick();
     check (mc.seqPlayActiveForTest(),
            "R5.8 the card's Play arms the sequence transport");
-    check (seqPlayBtn->getButtonText() == "Stop" && sqPlayBtn->getButtonText() == "Stop",
+    check (seqPlayBtn->getButtonText() == st::playButtonText (true)
+           && sqPlayBtn->getButtonText() == st::playButtonText (true),
            "R5.8 Play becomes Stop on the card and in the panel",
            seqPlayBtn->getButtonText() + " / " + sqPlayBtn->getButtonText());
 
     sqPlayBtn->onClick();
     check (! mc.seqPlayActiveForTest(),
            "R5.8 the panel's Stop ends what the card started");
-    check (seqPlayBtn->getButtonText() == "Play" && sqPlayBtn->getButtonText() == "Play",
+    check (seqPlayBtn->getButtonText() == st::playButtonText (false)
+           && sqPlayBtn->getButtonText() == st::playButtonText (false),
            "R5.8 Stop becomes Play again",
            seqPlayBtn->getButtonText() + " / " + sqPlayBtn->getButtonText());
 
@@ -286,10 +368,10 @@ void upic::runSequenceTransportChecks (upic::SelfTest& t)
         || perfPageBox == nullptr || perfTempo == nullptr || perfCloseBtn == nullptr)
         return;
 
-    check (tooltipIs (perfRecBtn, "Record the movement through the score")
-           && tooltipIs (perfPlayBtn, "Replay the recorded performance")
-           && tooltipIs (perfLoopBtn, "Loop the recorded performance"),
-           "R5.8 the view's recorder says what it does",
+    check (tooltipOf (perfRecBtn) == juce::String (st::tooltip (st::Control::Record))
+           && tooltipOf (perfPlayBtn) == juce::String (st::tooltip (st::Control::Play))
+           && tooltipOf (perfLoopBtn) == juce::String (st::tooltip (st::Control::Loop)),
+           "R5.8 the view's recorder says the edge's words",
            tooltipOf (perfRecBtn));
 
     // --- one recorder again: the view starts it, the card stops it ----------
@@ -320,11 +402,27 @@ void upic::runSequenceTransportChecks (upic::SelfTest& t)
            mc.seqLoopAtForTest (0) ? "on" : "off");
 
     // --- the view's tempo is the page's tempo ------------------------------
-    check (std::abs (perfTempo->getMinimum() - 40.0) < 1e-9
-           && std::abs (perfTempo->getMaximum() - 240.0) < 1e-9,
-           "R5.8 the view's tempo covers 40..240 BPM",
+    check (std::abs (perfTempo->getMinimum() - st::kMinTempoBpm) < 1e-9
+           && std::abs (perfTempo->getMaximum() - st::kMaxTempoBpm) < 1e-9,
+           "R5.8 the view's tempo covers the edge's range",
            juce::String (perfTempo->getMinimum(), 1) + " - "
              + juce::String (perfTempo->getMaximum(), 1));
+
+    check (tooltipOf (perfTempo) == juce::String (st::tempoTooltip()),
+           "R5.8 the tempo says the edge's words",
+           tooltipOf (perfTempo));
+
+    auto* tempoKnob = dynamic_cast<upic::Knob*> (findByName (mc, "tempoSlider"));
+    check (tempoKnob != nullptr
+           && std::abs (tempoKnob->getMinimum() - st::kMinTempoBpm) < 1e-9
+           && std::abs (tempoKnob->getMaximum() - st::kMaxTempoBpm) < 1e-9
+           && std::abs (tempoKnob->getInterval() - st::kTempoIntervalBpm) < 1e-9
+           && std::abs (perfTempo->getInterval() - tempoKnob->getInterval()) < 1e-9
+           && tooltipOf (tempoKnob).startsWith (juce::String (st::tempoTooltip())),
+           "R5.8 the tempo knob and the tempo slider are one control",
+           tempoKnob != nullptr ? juce::String (tempoKnob->getInterval(), 2) + " / "
+                                    + juce::String (perfTempo->getInterval(), 2)
+                                : juce::String ("no knob"));
 
     mc.perfSetTempoForTest (90.0);
     check (std::abs (mc.pageTempoForTest() - 90.0) < 1e-6,

@@ -169,6 +169,14 @@ void MainComponent::bindFrequencyControl (upic::frequency_inspector::Control rol
     binding.control = widget;
 }
 
+void MainComponent::bindSequenceControl (upic::sequence_transport::Control role,
+                                         juce::Component* label, juce::Component* widget)
+{
+    auto& binding = sequenceControls[(size_t) role];
+    binding.label = label;
+    binding.control = widget;
+}
+
 void MainComponent::buildSieveControls()
 {
     // R5.7: the sieve panel's own edge (Source/SievePanel.h) says which
@@ -565,6 +573,12 @@ void MainComponent::buildFrequencyControls()
     groupPanel.onClose = [this]{ closeGroupPanel(); };
 
     // WP4: the performance sequences.
+    //
+    // R5.8: the sequence transport's own edge (Source/SequenceTransport.h)
+    // says what the card holds, what its switches say and what a Record or
+    // Play press means. The app binds the roles to its widgets here, and the
+    // layout asks the edge what to draw.
+    namespace st = upic::sequence_transport;
     addAndMakeVisible (seqLab);
     addAndMakeVisible (seqBox);
     for (auto* b : { &seqRecBtn, &seqPlayBtn, &seqLoopBtn, &seqEditBtn })
@@ -576,11 +590,11 @@ void MainComponent::buildFrequencyControls()
     seqRecBtn.setName ("seqRecBtn");   seqPlayBtn.setName ("seqPlayBtn");
     seqLoopBtn.setName ("seqLoopBtn"); seqEditBtn.setName ("seqEditBtn");
     seqLoopBtn.setClickingTogglesState (true);
-    seqBox.setTooltip ("The performance sequence");
-    seqRecBtn.setTooltip ("Record the movement through the score (page + playhead)");
-    seqPlayBtn.setTooltip ("Replay the recorded performance");
-    seqLoopBtn.setTooltip ("Loop the performance");
-    seqEditBtn.setTooltip ("Open the sequence panel");
+    seqBox.setTooltip (st::tooltip (st::Control::Sequence));
+    seqRecBtn.setTooltip (st::tooltip (st::Control::Record));
+    seqPlayBtn.setTooltip (st::tooltip (st::Control::Play));
+    seqLoopBtn.setTooltip (st::tooltip (st::Control::Loop));
+    seqEditBtn.setTooltip (st::tooltip (st::Control::Open));
     seqBox.onChange = [this]
     {
         if (refreshingControls) return; // a refresh is not a command
@@ -588,16 +602,18 @@ void MainComponent::buildFrequencyControls()
         if (i >= 0 && i < (int) sequences.size()) document.selection().sequence = sequences[(size_t) i].id;
         refreshSequencePanel();
     };
-    seqRecBtn.onClick = [this]
-    {
-        if (seqRecording) stopSequenceRecording(); else startSequenceRecording();
-    };
-    seqPlayBtn.onClick = [this]
-    {
-        if (seqPlayActive.load()) stopSequencePlayback(); else startSequencePlayback();
-    };
+    seqRecBtn.onClick = [this]{ toggleSequenceRecording(); };
+    seqPlayBtn.onClick = [this]{ toggleSequencePlayback(); };
     seqLoopBtn.onClick = [this]{ toggleSequenceLoop(); };
     seqEditBtn.onClick = [this]{ showSequencePanel(); };
+
+    // the roles meet the app's widgets here
+    bindSequenceControl (st::Control::Sequence, &seqLab, &seqBox);
+    bindSequenceControl (st::Control::Record, nullptr, &seqRecBtn);
+    bindSequenceControl (st::Control::Play, nullptr, &seqPlayBtn);
+    bindSequenceControl (st::Control::Loop, nullptr, &seqLoopBtn);
+    bindSequenceControl (st::Control::Open, nullptr, &seqEditBtn);
+
     addChildComponent (seqPanel);
     seqPanel.onClose = [this]{ closeSequencePanel(); };
 
@@ -1423,14 +1439,8 @@ void MainComponent::showPerformanceView()
         editGroupLevels (i, gain, transpose);
     };
     perfView.onGroupLevelsEnd = [this] (int) { editGroupLevelsEnd(); };
-    perfView.onSequenceRecord = [this]
-    {
-        if (seqRecording) stopSequenceRecording(); else startSequenceRecording();
-    };
-    perfView.onSequencePlay = [this]
-    {
-        if (seqPlayActive.load()) stopSequencePlayback(); else startSequencePlayback();
-    };
+    perfView.onSequenceRecord = [this] { toggleSequenceRecording(); };
+    perfView.onSequencePlay = [this] { toggleSequencePlayback(); };
     perfView.onSequenceLoop = [this] { toggleSequenceLoop(); };
     perfView.onClose = [this] { closePerformanceView(); };
 
@@ -1517,8 +1527,8 @@ void MainComponent::refreshSequencePanel()
 
     seqLoopBtn.setToggleState (idx >= 0 && sequences[(size_t) idx].loop,
                                juce::dontSendNotification);
-    seqRecBtn.setButtonText (seqRecording ? "Stop" : "Rec");
-    seqPlayBtn.setButtonText (seqPlayActive.load() ? "Stop" : "Play");
+    seqRecBtn.setButtonText (upic::sequence_transport::recordButtonText (seqRecording));
+    seqPlayBtn.setButtonText (upic::sequence_transport::playButtonText (seqPlayActive.load()));
 
     std::vector<double> durations;
     for (auto& p : pages) durations.push_back (p.durationSec);
@@ -1528,14 +1538,8 @@ void MainComponent::refreshSequencePanel()
 
 void MainComponent::showSequencePanel()
 {
-    seqPanel.onRecordToggle = [this]
-    {
-        if (seqRecording) stopSequenceRecording(); else startSequenceRecording();
-    };
-    seqPanel.onPlayToggle = [this]
-    {
-        if (seqPlayActive.load()) stopSequencePlayback(); else startSequencePlayback();
-    };
+    seqPanel.onRecordToggle = [this] { toggleSequenceRecording(); };
+    seqPanel.onPlayToggle = [this] { toggleSequencePlayback(); };
     seqPanel.onClear = [this]
     {
         const int i = sequenceIndexOfId (document.selection().sequence);
@@ -1794,6 +1798,27 @@ void MainComponent::stopSequencePlayback()
     seqClock.store (0.0, std::memory_order_relaxed);
     stopPlayback();
     refreshSequencePanel();
+}
+
+void MainComponent::toggleSequenceRecording()
+{
+    // R5.8: the edge says what a Record press means; the shell runs the
+    // command. The card, the panel and the view all come through here.
+    if (upic::sequence_transport::recordAction (seqRecording)
+        == upic::sequence_transport::Action::Stop)
+        stopSequenceRecording();
+    else
+        startSequenceRecording();
+}
+
+void MainComponent::toggleSequencePlayback()
+{
+    // R5.8: the same rule for Play - one transport, one switch.
+    if (upic::sequence_transport::playAction (seqPlayActive.load())
+        == upic::sequence_transport::Action::Stop)
+        stopSequencePlayback();
+    else
+        startSequencePlayback();
 }
 
 void MainComponent::toggleSequenceLoop()
@@ -2435,9 +2460,14 @@ void MainComponent::buildMaterialTabs()
         }
         pushVoice();
     };
-    tempoSlider.setNormalisableRange (juce::NormalisableRange<double> (40.0, 240.0, 1.0, 0.5));
+    tempoSlider.setNormalisableRange
+        (juce::NormalisableRange<double> (upic::sequence_transport::kMinTempoBpm,
+                                          upic::sequence_transport::kMaxTempoBpm,
+                                          upic::sequence_transport::kTempoIntervalBpm,
+                                          upic::sequence_transport::kTempoSkew));
     tempoSlider.setValue (120.0);
     tempoSlider.setName ("tempoSlider");
+    tempoSlider.setTooltip (upic::sequence_transport::tempoTooltip());
     tempoSlider.onValueChange = [this]
     {
         {
